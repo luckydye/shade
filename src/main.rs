@@ -211,6 +211,8 @@ pub fn main() {
         // Check if we have CLI arguments for image processing
         let args: Vec<String> = std::env::args().collect();
 
+        println!("{:?}", args);
+
         if args.len() > 1 && args.iter().any(|arg| arg.starts_with('-')) {
             // CLI mode - try to parse as image processing arguments
             match CliConfig::from_args() {
@@ -223,10 +225,6 @@ pub fn main() {
                     if config.verbose {
                         config.print_pipeline_info();
                     }
-
-                    println!("CLI image processing not yet fully implemented.");
-                    println!("The pipeline has been configured and validated successfully.");
-                    println!("For now, running example Mandelbrot generation instead.");
 
                     let path = config.output_path.to_string_lossy().to_string();
                     pollster::block_on(run(Some(path)));

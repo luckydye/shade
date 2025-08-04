@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use wgpu::{Device, Queue, Texture, TextureView, ComputePipeline};
 
 /// Represents different types of image processing operations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeType {
     // Input/Output nodes
     ImageInput,
@@ -185,7 +185,126 @@ impl ImagePipeline {
     pub fn init_gpu(&mut self, device: Device, queue: Queue) {
         self.device = Some(device);
         self.queue = Some(queue);
-        // TODO: Initialize compute pipelines for each node type
+
+        // Store device reference to avoid borrow checker issues
+        if let Some(device) = &self.device {
+            let pipelines = Self::create_compute_pipelines(device);
+            self.pipelines = pipelines;
+        }
+    }
+
+    fn create_compute_pipelines(device: &Device) -> HashMap<NodeType, ComputePipeline> {
+        let mut pipelines = HashMap::new();
+        // Create bind group layout for image processing shaders
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Image Processing Bind Group Layout"),
+            entries: &[
+                // Input texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Output texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Parameters uniform buffer
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Image Processing Pipeline Layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        // Initialize pipelines for each node type that needs GPU processing
+        let node_types_to_initialize = [
+            NodeType::Brightness,
+            NodeType::Contrast,
+            NodeType::Saturation,
+            NodeType::Hue,
+            NodeType::Gamma,
+            NodeType::Levels,
+            NodeType::ColorBalance,
+            NodeType::Blur,
+            NodeType::Sharpen,
+            NodeType::Noise,
+            NodeType::Scale,
+            NodeType::Rotate,
+            NodeType::Crop,
+            NodeType::Mix,
+            NodeType::Mask,
+            NodeType::Invert,
+        ];
+
+        for node_type in &node_types_to_initialize {
+            if let Some(shader_source) = Self::get_shader_source_for_node_type(node_type) {
+                let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some(&format!("{:?} Shader", node_type)),
+                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                });
+
+                let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(&format!("{:?} Pipeline", node_type)),
+                    layout: Some(&pipeline_layout),
+                    module: &shader_module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+
+                pipelines.insert(*node_type, pipeline);
+            }
+        }
+
+        pipelines
+    }
+
+    fn get_shader_source_for_node_type(node_type: &NodeType) -> Option<&'static str> {
+        match node_type {
+            NodeType::Brightness => Some(include_str!("shaders/brightness.wgsl")),
+            NodeType::Contrast => Some(include_str!("shaders/contrast.wgsl")),
+            NodeType::Saturation => Some(include_str!("shaders/saturation.wgsl")),
+            NodeType::Hue => Some(include_str!("shaders/hue.wgsl")),
+            NodeType::Gamma => Some(include_str!("shaders/gamma.wgsl")),
+            NodeType::Levels => Some(include_str!("shaders/levels.wgsl")),
+            NodeType::ColorBalance => Some(include_str!("shaders/color_balance.wgsl")),
+            NodeType::Blur => Some(include_str!("shaders/blur.wgsl")),
+            NodeType::Sharpen => Some(include_str!("shaders/sharpen.wgsl")),
+            NodeType::Noise => Some(include_str!("shaders/noise.wgsl")),
+            NodeType::Scale => Some(include_str!("shaders/scale.wgsl")),
+            NodeType::Rotate => Some(include_str!("shaders/rotate.wgsl")),
+            NodeType::Crop => Some(include_str!("shaders/crop.wgsl")),
+            NodeType::Mix => Some(include_str!("shaders/mix.wgsl")),
+            NodeType::Mask => Some(include_str!("shaders/mask.wgsl")),
+            NodeType::Invert => Some(include_str!("shaders/invert.wgsl")),
+            // ImageInput and ImageOutput don't need compute shaders
+            NodeType::ImageInput | NodeType::ImageOutput => None,
+        }
     }
 
     /// Add a new node to the pipeline
