@@ -15,16 +15,26 @@
 //! repeated-compute for code that is more thoroughly commented.
 
 mod utils;
+mod shade;
+mod cli;
 
 #[cfg(not(target_arch = "wasm32"))]
 use utils::output_image_native;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
 
+use shade::PipelineBuilder;
+use cli::CliConfig;
+
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
 async fn run(_path: Option<String>) {
     let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4];
+
+    // Create example image processing pipeline
+    let mut image_pipeline = PipelineBuilder::new()
+        .basic_color_grading()
+        .build();
 
     let instance = wgpu::Instance::default();
     let adapter = instance
@@ -153,6 +163,36 @@ async fn run(_path: Option<String>) {
     log::info!("GPU data copied to local.");
     output_staging_buffer.unmap();
 
+    // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
+    let instance2 = wgpu::Instance::default();
+    let adapter2 = instance2
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+        .unwrap();
+    let (device2, queue2) = adapter2
+        .request_device(&wgpu::DeviceDescriptor {
+            label: None,
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::downlevel_defaults(),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            trace: wgpu::Trace::Off,
+        })
+        .await
+        .unwrap();
+
+    image_pipeline.init_gpu(device2, queue2);
+
+    // Process the image through the pipeline
+    match image_pipeline.process(texture_data.clone(), (TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32)).await {
+        Ok(processed_data) => {
+            texture_data = processed_data;
+            log::info!("Image processed through pipeline");
+        }
+        Err(e) => {
+            log::error!("Pipeline processing failed: {}", e);
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     output_image_native(texture_data.to_vec(), TEXTURE_DIMS, _path.unwrap());
     #[cfg(target_arch = "wasm32")]
@@ -168,10 +208,42 @@ pub fn main() {
             .format_timestamp_nanos()
             .init();
 
-        let path = std::env::args()
-            .nth(2)
-            .unwrap_or_else(|| "#please_don't_git_push_me.png".to_string());
-        pollster::block_on(run(Some(path)));
+        // Check if we have CLI arguments for image processing
+        let args: Vec<String> = std::env::args().collect();
+
+        if args.len() > 1 && args.iter().any(|arg| arg.starts_with('-')) {
+            // CLI mode - try to parse as image processing arguments
+            match CliConfig::from_args() {
+                Ok(config) => {
+                    if let Err(e) = cli::validate_config(&config) {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+
+                    if config.verbose {
+                        config.print_pipeline_info();
+                    }
+
+                    println!("CLI image processing not yet fully implemented.");
+                    println!("The pipeline has been configured and validated successfully.");
+                    println!("For now, running example Mandelbrot generation instead.");
+
+                    let path = config.output_path.to_string_lossy().to_string();
+                    pollster::block_on(run(Some(path)));
+                }
+                Err(e) => {
+                    eprintln!("Error parsing arguments: {}", e);
+                    cli::print_examples();
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            // Example mode (original functionality)
+            let path = args.get(1)
+                .cloned()
+                .unwrap_or_else(|| "#please_don't_git_push_me.png".to_string());
+            pollster::block_on(run(Some(path)));
+        }
     }
     #[cfg(target_arch = "wasm32")]
     {
