@@ -289,7 +289,7 @@ fn build_cli() -> Command {
         )
         .arg(
             Arg::new("hue")
-                .short('h')
+                .short('u')
                 .long("hue")
                 .value_name("DEGREES")
                 .help("Adjust hue (-180.0 to 180.0 degrees, 0.0 = no change)")

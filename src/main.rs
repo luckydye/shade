@@ -31,10 +31,21 @@ const TEXTURE_DIMS: (usize, usize) = (512, 512);
 async fn run(_path: Option<String>) {
     let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4];
 
-    // Create example image processing pipeline
+    // Create example image processing pipeline with more visible effects
     let mut image_pipeline = PipelineBuilder::new()
         .basic_color_grading()
         .build();
+
+    // Test with more dramatic effects to verify processing is working
+    if let Some(brightness_node) = image_pipeline.nodes.values_mut().find(|n| matches!(n.node_type, shade::NodeType::Brightness)) {
+        brightness_node.params = shade::NodeParams::Brightness { value: 0.3 }; // Increase brightness significantly
+    }
+    if let Some(contrast_node) = image_pipeline.nodes.values_mut().find(|n| matches!(n.node_type, shade::NodeType::Contrast)) {
+        contrast_node.params = shade::NodeParams::Contrast { value: 2.0 }; // Double the contrast
+    }
+    if let Some(saturation_node) = image_pipeline.nodes.values_mut().find(|n| matches!(n.node_type, shade::NodeType::Saturation)) {
+        saturation_node.params = shade::NodeParams::Saturation { value: 1.5 }; // Boost saturation
+    }
 
     let instance = wgpu::Instance::default();
     let adapter = instance

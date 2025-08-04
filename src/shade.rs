@@ -5,7 +5,7 @@
 //! or DaVinci Resolve's node graph.
 
 use std::collections::HashMap;
-use wgpu::{Device, Queue, Texture, TextureView, ComputePipeline};
+use wgpu::{Device, Queue, Texture, TextureView, ComputePipeline, util::DeviceExt};
 
 /// Represents different types of image processing operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -465,25 +465,332 @@ impl ImagePipeline {
     }
 
     /// Process the entire pipeline
-    pub async fn process(&mut self, input_data: Vec<u8>, _dimensions: (u32, u32)) -> Result<Vec<u8>, String> {
+    pub async fn process(&mut self, input_data: Vec<u8>, dimensions: (u32, u32)) -> Result<Vec<u8>, String> {
         let execution_order = self.get_execution_order()?;
 
-        // TODO: Implement actual GPU processing
-        // For now, return the input data unchanged
-        log::info!("Processing pipeline with {} nodes", execution_order.len());
-        for &node_id in &execution_order {
-            if let Some(node) = self.nodes.get(&node_id) {
-                if node.enabled {
-                    log::info!("Processing node: {} ({})", node.name, node.id);
-                    // TODO: Execute node-specific compute shader
+        if let (Some(device), Some(queue)) = (self.device.as_ref(), self.queue.as_ref()) {
+            // Create input texture and upload data
+            let mut current_data = input_data.clone();
 
-                    // For now, just log the parameters
-                    log::info!("Node params: {:?}", node.params);
+            log::info!("Processing pipeline with {} nodes", execution_order.len());
+
+            for &node_id in &execution_order {
+                if let Some(node) = self.nodes.get(&node_id) {
+                    if node.enabled {
+                        log::info!("Processing node: {} ({})", node.name, node.id);
+
+                        // Skip ImageInput and ImageOutput nodes as they don't need GPU processing
+                        if matches!(node.node_type, NodeType::ImageInput | NodeType::ImageOutput) {
+                            continue;
+                        }
+
+                        // Process the node if we have a pipeline for it
+                        if let Some(pipeline) = self.pipelines.get(&node.node_type) {
+                            current_data = self.process_node(
+                                device,
+                                queue,
+                                pipeline,
+                                &node.node_type,
+                                &node.params,
+                                current_data,
+                                dimensions
+                            ).await?;
+                        } else {
+                            log::warn!("No pipeline found for node type: {:?}", node.node_type);
+                        }
+                    }
                 }
             }
+
+            Ok(current_data)
+        } else {
+            Err("GPU resources not initialized".to_string())
+        }
+    }
+
+    async fn process_node(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        pipeline: &ComputePipeline,
+        _node_type: &NodeType,
+        params: &NodeParams,
+        input_data: Vec<u8>,
+        dimensions: (u32, u32)
+    ) -> Result<Vec<u8>, String> {
+        let (width, height) = dimensions;
+
+        // Create input texture
+        let input_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Input Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Create output texture
+        let output_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Output Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Upload input data to texture
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &input_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &input_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // Create and upload parameter buffer
+        let param_data = self.serialize_params(params)?;
+        let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Parameter Buffer"),
+            contents: &param_data,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        // Create bind group layout (we need to recreate this for each call)
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Processing Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Processing Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&input_texture.create_view(&wgpu::TextureViewDescriptor::default())),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&output_texture.create_view(&wgpu::TextureViewDescriptor::default())),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: param_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Create staging buffer for reading back result
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: (4 * width * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // Execute compute shader
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Processing Command Encoder"),
+        });
+
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Processing Compute Pass"),
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+
+            // Dispatch with 8x8 workgroup size
+            let workgroup_size = 8;
+            let dispatch_x = (width + workgroup_size - 1) / workgroup_size;
+            let dispatch_y = (height + workgroup_size - 1) / workgroup_size;
+            compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
 
-        Ok(input_data)
+        // Copy result to staging buffer
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &output_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        queue.submit(Some(encoder.finish()));
+
+        // Read back result
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = flume::bounded(1);
+        buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+        device.poll(wgpu::PollType::Wait).unwrap();
+        receiver.recv_async().await.unwrap().map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
+
+        let data = buffer_slice.get_mapped_range();
+        let result = data.to_vec();
+        drop(data);
+        staging_buffer.unmap();
+
+        Ok(result)
+    }
+
+    fn serialize_params(&self, params: &NodeParams) -> Result<Vec<u8>, String> {
+        let mut buffer = Vec::new();
+
+        match params {
+            NodeParams::Brightness { value } => {
+                buffer.extend_from_slice(&value.to_le_bytes());
+                // Pad to 16 bytes (uniform buffer alignment)
+                buffer.resize(16, 0);
+            },
+            NodeParams::Contrast { value } => {
+                buffer.extend_from_slice(&value.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Saturation { value } => {
+                buffer.extend_from_slice(&value.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Hue { value } => {
+                buffer.extend_from_slice(&value.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Gamma { value } => {
+                buffer.extend_from_slice(&value.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Levels { input_black, input_white, output_black, output_white } => {
+                buffer.extend_from_slice(&input_black.to_le_bytes());
+                buffer.extend_from_slice(&input_white.to_le_bytes());
+                buffer.extend_from_slice(&output_black.to_le_bytes());
+                buffer.extend_from_slice(&output_white.to_le_bytes());
+            },
+            NodeParams::ColorBalance { shadows, midtones, highlights } => {
+                // Pack as 3 vec3s with padding
+                for &val in shadows {
+                    buffer.extend_from_slice(&val.to_le_bytes());
+                }
+                buffer.extend_from_slice(&0.0f32.to_le_bytes()); // padding
+                for &val in midtones {
+                    buffer.extend_from_slice(&val.to_le_bytes());
+                }
+                buffer.extend_from_slice(&0.0f32.to_le_bytes()); // padding
+                for &val in highlights {
+                    buffer.extend_from_slice(&val.to_le_bytes());
+                }
+                buffer.extend_from_slice(&0.0f32.to_le_bytes()); // padding
+            },
+            NodeParams::Blur { radius } => {
+                buffer.extend_from_slice(&radius.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Sharpen { amount } => {
+                buffer.extend_from_slice(&amount.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Noise { amount, seed } => {
+                buffer.extend_from_slice(&amount.to_le_bytes());
+                buffer.extend_from_slice(&(*seed as f32).to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Scale { factor } => {
+                buffer.extend_from_slice(&factor.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Rotate { angle } => {
+                buffer.extend_from_slice(&angle.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::Crop { x, y, width, height } => {
+                buffer.extend_from_slice(&(*x as f32).to_le_bytes());
+                buffer.extend_from_slice(&(*y as f32).to_le_bytes());
+                buffer.extend_from_slice(&(*width as f32).to_le_bytes());
+                buffer.extend_from_slice(&(*height as f32).to_le_bytes());
+            },
+            NodeParams::Mix { factor } => {
+                buffer.extend_from_slice(&factor.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+            NodeParams::None => {
+                // Just add a dummy float for shaders that don't need parameters
+                buffer.extend_from_slice(&0.0f32.to_le_bytes());
+                buffer.resize(16, 0);
+            },
+        }
+
+        Ok(buffer)
     }
 
     /// Get node by ID
