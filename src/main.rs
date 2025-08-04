@@ -14,17 +14,17 @@
 //! A lot of things aren't explained here via comments. See hello-compute and
 //! repeated-compute for code that is more thoroughly commented.
 
-mod utils;
-mod shade;
 mod cli;
+mod shade;
+mod utils;
 
-#[cfg(not(target_arch = "wasm32"))]
-use utils::output_image_native;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
+#[cfg(not(target_arch = "wasm32"))]
+use utils::output_image_native;
 
-use shade::PipelineBuilder;
 use cli::CliConfig;
+use shade::PipelineBuilder;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -32,18 +32,28 @@ async fn run(_path: Option<String>) {
     let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4];
 
     // Create example image processing pipeline with more visible effects
-    let mut image_pipeline = PipelineBuilder::new()
-        .basic_color_grading()
-        .build();
+    let mut image_pipeline = PipelineBuilder::new().basic_color_grading().build();
 
     // Test with more dramatic effects to verify processing is working
-    if let Some(brightness_node) = image_pipeline.nodes.values_mut().find(|n| matches!(n.node_type, shade::NodeType::Brightness)) {
+    if let Some(brightness_node) = image_pipeline
+        .nodes
+        .values_mut()
+        .find(|n| matches!(n.node_type, shade::NodeType::Brightness))
+    {
         brightness_node.params = shade::NodeParams::Brightness { value: 0.3 }; // Increase brightness significantly
     }
-    if let Some(contrast_node) = image_pipeline.nodes.values_mut().find(|n| matches!(n.node_type, shade::NodeType::Contrast)) {
+    if let Some(contrast_node) = image_pipeline
+        .nodes
+        .values_mut()
+        .find(|n| matches!(n.node_type, shade::NodeType::Contrast))
+    {
         contrast_node.params = shade::NodeParams::Contrast { value: 2.0 }; // Double the contrast
     }
-    if let Some(saturation_node) = image_pipeline.nodes.values_mut().find(|n| matches!(n.node_type, shade::NodeType::Saturation)) {
+    if let Some(saturation_node) = image_pipeline
+        .nodes
+        .values_mut()
+        .find(|n| matches!(n.node_type, shade::NodeType::Saturation))
+    {
         saturation_node.params = shade::NodeParams::Saturation { value: 1.5 }; // Boost saturation
     }
 
@@ -194,7 +204,13 @@ async fn run(_path: Option<String>) {
     image_pipeline.init_gpu(device2, queue2);
 
     // Process the image through the pipeline
-    match image_pipeline.process(texture_data.clone(), (TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32)).await {
+    match image_pipeline
+        .process(
+            texture_data.clone(),
+            (TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32),
+        )
+        .await
+    {
         Ok(processed_data) => {
             texture_data = processed_data;
             log::info!("Image processed through pipeline");
@@ -224,34 +240,34 @@ pub fn main() {
 
         println!("{:?}", args);
 
-        if args.len() > 1 && args.iter().any(|arg| arg.starts_with('-')) {
-            // CLI mode - try to parse as image processing arguments
-            match CliConfig::from_args() {
-                Ok(config) => {
-                    if let Err(e) = cli::validate_config(&config) {
-                        eprintln!("Error: {}", e);
-                        std::process::exit(1);
-                    }
-
-                    if config.verbose {
-                        config.print_pipeline_info();
-                    }
-
-                    let path = config.output_path.to_string_lossy().to_string();
-                    pollster::block_on(run(Some(path)));
-                }
-                Err(e) => {
-                    eprintln!("Error parsing arguments: {}", e);
-                    cli::print_examples();
-                    std::process::exit(1);
-                }
-            }
-        } else {
+        if args.iter().any(|arg| arg.eq("--example")) {
             // Example mode (original functionality)
-            let path = args.get(1)
+            let path = args
+                .get(1)
                 .cloned()
                 .unwrap_or_else(|| "#please_don't_git_push_me.png".to_string());
             pollster::block_on(run(Some(path)));
+        }
+
+        match CliConfig::from_args() {
+            Ok(config) => {
+                if let Err(e) = cli::validate_config(&config) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+
+                if config.verbose {
+                    config.print_pipeline_info();
+                }
+
+                let path = config.output_path.to_string_lossy().to_string();
+                pollster::block_on(run(Some(path)));
+            }
+            Err(e) => {
+                eprintln!("Error parsing arguments: {}", e);
+                cli::print_examples();
+                std::process::exit(1);
+            }
         }
     }
     #[cfg(target_arch = "wasm32")]

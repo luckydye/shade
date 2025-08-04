@@ -3,9 +3,9 @@
 //! This module provides a user-friendly CLI for creating and executing
 //! image processing pipelines with various color grading and filter operations.
 
-use clap::{Arg, Command, ArgMatches, value_parser};
+use crate::shade::{ImagePipeline, NodeParams, NodeType, PipelineBuilder};
+use clap::{Arg, ArgMatches, Command, value_parser};
 use std::path::PathBuf;
-use crate::shade::{ImagePipeline, PipelineBuilder, NodeType, NodeParams};
 
 /// CLI configuration structure
 pub struct CliConfig {
@@ -39,11 +39,13 @@ impl CliConfig {
 
     /// Create CLI configuration from parsed matches
     fn from_matches(matches: ArgMatches) -> Result<Self, String> {
-        let input_path = matches.get_one::<PathBuf>("input")
+        let input_path = matches
+            .get_one::<PathBuf>("input")
             .ok_or("Input file is required")?
             .clone();
 
-        let output_path = matches.get_one::<PathBuf>("output")
+        let output_path = matches
+            .get_one::<PathBuf>("output")
             .ok_or("Output file is required")?
             .clone();
 
@@ -84,7 +86,13 @@ impl CliConfig {
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Brightness { value: brightness });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect brightness node");
             last_node_id = node_id;
         }
@@ -94,7 +102,13 @@ impl CliConfig {
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Contrast { value: contrast });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect contrast node");
             last_node_id = node_id;
         }
@@ -104,7 +118,13 @@ impl CliConfig {
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Saturation { value: saturation });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect saturation node");
             last_node_id = node_id;
         }
@@ -114,7 +134,13 @@ impl CliConfig {
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Hue { value: hue });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect hue node");
             last_node_id = node_id;
         }
@@ -124,7 +150,13 @@ impl CliConfig {
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Gamma { value: gamma });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect gamma node");
             last_node_id = node_id;
         }
@@ -132,9 +164,17 @@ impl CliConfig {
         if let Some(blur_radius) = self.pipeline_config.blur_radius {
             let node_id = pipeline.add_node("Blur".to_string(), NodeType::Blur);
             if let Some(node) = pipeline.get_node_mut(node_id) {
-                node.set_params(NodeParams::Blur { radius: blur_radius });
+                node.set_params(NodeParams::Blur {
+                    radius: blur_radius,
+                });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect blur node");
             last_node_id = node_id;
         }
@@ -142,9 +182,17 @@ impl CliConfig {
         if let Some(sharpen_amount) = self.pipeline_config.sharpen_amount {
             let node_id = pipeline.add_node("Sharpen".to_string(), NodeType::Sharpen);
             if let Some(node) = pipeline.get_node_mut(node_id) {
-                node.set_params(NodeParams::Sharpen { amount: sharpen_amount });
+                node.set_params(NodeParams::Sharpen {
+                    amount: sharpen_amount,
+                });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect sharpen node");
             last_node_id = node_id;
         }
@@ -152,9 +200,18 @@ impl CliConfig {
         if let Some(noise_amount) = self.pipeline_config.noise_amount {
             let node_id = pipeline.add_node("Noise".to_string(), NodeType::Noise);
             if let Some(node) = pipeline.get_node_mut(node_id) {
-                node.set_params(NodeParams::Noise { amount: noise_amount, seed: 42 });
+                node.set_params(NodeParams::Noise {
+                    amount: noise_amount,
+                    seed: 42,
+                });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect noise node");
             last_node_id = node_id;
         }
@@ -162,9 +219,17 @@ impl CliConfig {
         if let Some(scale_factor) = self.pipeline_config.scale_factor {
             let node_id = pipeline.add_node("Scale".to_string(), NodeType::Scale);
             if let Some(node) = pipeline.get_node_mut(node_id) {
-                node.set_params(NodeParams::Scale { factor: scale_factor });
+                node.set_params(NodeParams::Scale {
+                    factor: scale_factor,
+                });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect scale node");
             last_node_id = node_id;
         }
@@ -172,16 +237,30 @@ impl CliConfig {
         if let Some(rotate_angle) = self.pipeline_config.rotate_angle {
             let node_id = pipeline.add_node("Rotate".to_string(), NodeType::Rotate);
             if let Some(node) = pipeline.get_node_mut(node_id) {
-                node.set_params(NodeParams::Rotate { angle: rotate_angle });
+                node.set_params(NodeParams::Rotate {
+                    angle: rotate_angle,
+                });
             }
-            pipeline.connect_nodes(last_node_id, "image".to_string(), node_id, "image".to_string())
+            pipeline
+                .connect_nodes(
+                    last_node_id,
+                    "image".to_string(),
+                    node_id,
+                    "image".to_string(),
+                )
                 .expect("Failed to connect rotate node");
             last_node_id = node_id;
         }
 
         // Add output node
         let output_id = pipeline.add_node("Output".to_string(), NodeType::ImageOutput);
-        pipeline.connect_nodes(last_node_id, "image".to_string(), output_id, "image".to_string())
+        pipeline
+            .connect_nodes(
+                last_node_id,
+                "image".to_string(),
+                output_id,
+                "image".to_string(),
+            )
             .expect("Failed to connect output node");
 
         pipeline
@@ -252,7 +331,7 @@ fn build_cli() -> Command {
                 .value_name("FILE")
                 .help("Input image file")
                 .required(true)
-                .value_parser(value_parser!(PathBuf))
+                .value_parser(value_parser!(PathBuf)),
         )
         .arg(
             Arg::new("output")
@@ -261,7 +340,7 @@ fn build_cli() -> Command {
                 .value_name("FILE")
                 .help("Output image file")
                 .required(true)
-                .value_parser(value_parser!(PathBuf))
+                .value_parser(value_parser!(PathBuf)),
         )
         .arg(
             Arg::new("brightness")
@@ -269,7 +348,7 @@ fn build_cli() -> Command {
                 .long("brightness")
                 .value_name("VALUE")
                 .help("Adjust brightness (-1.0 to 1.0, 0.0 = no change)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("contrast")
@@ -277,7 +356,7 @@ fn build_cli() -> Command {
                 .long("contrast")
                 .value_name("VALUE")
                 .help("Adjust contrast (0.0 to 2.0, 1.0 = no change)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("saturation")
@@ -285,7 +364,7 @@ fn build_cli() -> Command {
                 .long("saturation")
                 .value_name("VALUE")
                 .help("Adjust saturation (0.0 to 2.0, 1.0 = no change)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("hue")
@@ -293,7 +372,7 @@ fn build_cli() -> Command {
                 .long("hue")
                 .value_name("DEGREES")
                 .help("Adjust hue (-180.0 to 180.0 degrees, 0.0 = no change)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("gamma")
@@ -301,56 +380,56 @@ fn build_cli() -> Command {
                 .long("gamma")
                 .value_name("VALUE")
                 .help("Adjust gamma (0.1 to 3.0, 1.0 = no change)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("blur")
                 .long("blur")
                 .value_name("RADIUS")
                 .help("Apply blur filter (radius in pixels)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("sharpen")
                 .long("sharpen")
                 .value_name("AMOUNT")
                 .help("Apply sharpen filter (0.0 to 2.0)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("noise")
                 .long("noise")
                 .value_name("AMOUNT")
                 .help("Add noise (0.0 to 1.0)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("scale")
                 .long("scale")
                 .value_name("FACTOR")
                 .help("Scale image (0.1 to 5.0)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("rotate")
                 .long("rotate")
                 .value_name("DEGREES")
                 .help("Rotate image (degrees)")
-                .value_parser(value_parser!(f32))
+                .value_parser(value_parser!(f32)),
         )
         .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
                 .help("Enable verbose output")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .after_help(
             "EXAMPLES:\n    \
             shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1\n    \
             shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8\n    \
             shade -i image.jpg -o blurred.jpg --blur 2.5\n    \
-            shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9"
+            shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9",
         )
 }
 
@@ -381,7 +460,10 @@ pub fn print_examples() {
 pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     // Check input file exists
     if !config.input_path.exists() {
-        return Err(format!("Input file does not exist: {}", config.input_path.display()));
+        return Err(format!(
+            "Input file does not exist: {}",
+            config.input_path.display()
+        ));
     }
 
     // Check input file extension
@@ -397,7 +479,10 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     // Check output directory exists
     if let Some(parent) = config.output_path.parent() {
         if !parent.exists() {
-            return Err(format!("Output directory does not exist: {}", parent.display()));
+            return Err(format!(
+                "Output directory does not exist: {}",
+                parent.display()
+            ));
         }
     }
 

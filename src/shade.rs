@@ -5,7 +5,7 @@
 //! or DaVinci Resolve's node graph.
 
 use std::collections::HashMap;
-use wgpu::{Device, Queue, Texture, TextureView, ComputePipeline, util::DeviceExt};
+use wgpu::{ComputePipeline, Device, Queue, Texture, TextureView, util::DeviceExt};
 
 /// Represents different types of image processing operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,29 +42,57 @@ pub enum NodeType {
 /// Parameters for different node types
 #[derive(Debug, Clone)]
 pub enum NodeParams {
-    Brightness { value: f32 },
-    Contrast { value: f32 },
-    Saturation { value: f32 },
-    Hue { value: f32 },
-    Gamma { value: f32 },
+    Brightness {
+        value: f32,
+    },
+    Contrast {
+        value: f32,
+    },
+    Saturation {
+        value: f32,
+    },
+    Hue {
+        value: f32,
+    },
+    Gamma {
+        value: f32,
+    },
     Levels {
         input_black: f32,
         input_white: f32,
         output_black: f32,
-        output_white: f32
+        output_white: f32,
     },
     ColorBalance {
         shadows: [f32; 3],    // RGB
         midtones: [f32; 3],   // RGB
-        highlights: [f32; 3]  // RGB
+        highlights: [f32; 3], // RGB
     },
-    Blur { radius: f32 },
-    Sharpen { amount: f32 },
-    Noise { amount: f32, seed: u32 },
-    Scale { factor: f32 },
-    Rotate { angle: f32 },
-    Crop { x: u32, y: u32, width: u32, height: u32 },
-    Mix { factor: f32 },
+    Blur {
+        radius: f32,
+    },
+    Sharpen {
+        amount: f32,
+    },
+    Noise {
+        amount: f32,
+        seed: u32,
+    },
+    Scale {
+        factor: f32,
+    },
+    Rotate {
+        angle: f32,
+    },
+    Crop {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+    Mix {
+        factor: f32,
+    },
     None,
 }
 
@@ -94,7 +122,10 @@ impl ProcessingNode {
         let (inputs, outputs) = match node_type {
             NodeType::ImageInput => (vec![], vec!["image".to_string()]),
             NodeType::ImageOutput => (vec!["image".to_string()], vec![]),
-            NodeType::Mix => (vec!["image1".to_string(), "image2".to_string()], vec!["image".to_string()]),
+            NodeType::Mix => (
+                vec!["image1".to_string(), "image2".to_string()],
+                vec!["image".to_string()],
+            ),
             _ => (vec!["image".to_string()], vec!["image".to_string()]),
         };
 
@@ -120,7 +151,7 @@ impl ProcessingNode {
                 input_black: 0.0,
                 input_white: 1.0,
                 output_black: 0.0,
-                output_white: 1.0
+                output_white: 1.0,
             },
             NodeType::ColorBalance => NodeParams::ColorBalance {
                 shadows: [1.0, 1.0, 1.0],
@@ -129,10 +160,18 @@ impl ProcessingNode {
             },
             NodeType::Blur => NodeParams::Blur { radius: 1.0 },
             NodeType::Sharpen => NodeParams::Sharpen { amount: 1.0 },
-            NodeType::Noise => NodeParams::Noise { amount: 0.1, seed: 42 },
+            NodeType::Noise => NodeParams::Noise {
+                amount: 0.1,
+                seed: 42,
+            },
             NodeType::Scale => NodeParams::Scale { factor: 1.0 },
             NodeType::Rotate => NodeParams::Rotate { angle: 0.0 },
-            NodeType::Crop => NodeParams::Crop { x: 0, y: 0, width: 512, height: 512 },
+            NodeType::Crop => NodeParams::Crop {
+                x: 0,
+                y: 0,
+                width: 512,
+                height: 512,
+            },
             NodeType::Mix => NodeParams::Mix { factor: 0.5 },
             _ => NodeParams::None,
         }
@@ -332,9 +371,8 @@ impl ImagePipeline {
         }
 
         // Remove all connections involving this node
-        self.connections.retain(|conn| {
-            conn.from_node != node_id && conn.to_node != node_id
-        });
+        self.connections
+            .retain(|conn| conn.from_node != node_id && conn.to_node != node_id);
 
         // Clear input/output references if necessary
         if self.input_node_id == Some(node_id) {
@@ -354,7 +392,7 @@ impl ImagePipeline {
         from_node: usize,
         from_output: String,
         to_node: usize,
-        to_input: String
+        to_input: String,
     ) -> Result<(), String> {
         // Validate nodes exist
         if !self.nodes.contains_key(&from_node) {
@@ -369,10 +407,16 @@ impl ImagePipeline {
         let to_node_ref = &self.nodes[&to_node];
 
         if !from_node_ref.outputs.contains(&from_output) {
-            return Err(format!("Output '{}' does not exist on node {}", from_output, from_node));
+            return Err(format!(
+                "Output '{}' does not exist on node {}",
+                from_output, from_node
+            ));
         }
         if !to_node_ref.inputs.contains(&to_input) {
-            return Err(format!("Input '{}' does not exist on node {}", to_input, to_node));
+            return Err(format!(
+                "Input '{}' does not exist on node {}",
+                to_input, to_node
+            ));
         }
 
         // Check for cycles (basic check)
@@ -381,9 +425,8 @@ impl ImagePipeline {
         }
 
         // Remove existing connection to the same input
-        self.connections.retain(|conn| {
-            !(conn.to_node == to_node && conn.to_input == to_input)
-        });
+        self.connections
+            .retain(|conn| !(conn.to_node == to_node && conn.to_input == to_input));
 
         // Add new connection
         self.connections.push(Connection {
@@ -465,7 +508,11 @@ impl ImagePipeline {
     }
 
     /// Process the entire pipeline
-    pub async fn process(&mut self, input_data: Vec<u8>, dimensions: (u32, u32)) -> Result<Vec<u8>, String> {
+    pub async fn process(
+        &mut self,
+        input_data: Vec<u8>,
+        dimensions: (u32, u32),
+    ) -> Result<Vec<u8>, String> {
         let execution_order = self.get_execution_order()?;
 
         if let (Some(device), Some(queue)) = (self.device.as_ref(), self.queue.as_ref()) {
@@ -486,15 +533,17 @@ impl ImagePipeline {
 
                         // Process the node if we have a pipeline for it
                         if let Some(pipeline) = self.pipelines.get(&node.node_type) {
-                            current_data = self.process_node(
-                                device,
-                                queue,
-                                pipeline,
-                                &node.node_type,
-                                &node.params,
-                                current_data,
-                                dimensions
-                            ).await?;
+                            current_data = self
+                                .process_node(
+                                    device,
+                                    queue,
+                                    pipeline,
+                                    &node.node_type,
+                                    &node.params,
+                                    current_data,
+                                    dimensions,
+                                )
+                                .await?;
                         } else {
                             log::warn!("No pipeline found for node type: {:?}", node.node_type);
                         }
@@ -516,7 +565,7 @@ impl ImagePipeline {
         _node_type: &NodeType,
         params: &NodeParams,
         input_data: Vec<u8>,
-        dimensions: (u32, u32)
+        dimensions: (u32, u32),
     ) -> Result<Vec<u8>, String> {
         let (width, height) = dimensions;
 
@@ -625,11 +674,15 @@ impl ImagePipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&input_texture.create_view(&wgpu::TextureViewDescriptor::default())),
+                    resource: wgpu::BindingResource::TextureView(
+                        &input_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&output_texture.create_view(&wgpu::TextureViewDescriptor::default())),
+                    resource: wgpu::BindingResource::TextureView(
+                        &output_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -696,7 +749,11 @@ impl ImagePipeline {
         let (sender, receiver) = flume::bounded(1);
         buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
         device.poll(wgpu::PollType::Wait).unwrap();
-        receiver.recv_async().await.unwrap().map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
+        receiver
+            .recv_async()
+            .await
+            .unwrap()
+            .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
 
         let data = buffer_slice.get_mapped_range();
         let result = data.to_vec();
@@ -714,30 +771,39 @@ impl ImagePipeline {
                 buffer.extend_from_slice(&value.to_le_bytes());
                 // Pad to 16 bytes (uniform buffer alignment)
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Contrast { value } => {
                 buffer.extend_from_slice(&value.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Saturation { value } => {
                 buffer.extend_from_slice(&value.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Hue { value } => {
                 buffer.extend_from_slice(&value.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Gamma { value } => {
                 buffer.extend_from_slice(&value.to_le_bytes());
                 buffer.resize(16, 0);
-            },
-            NodeParams::Levels { input_black, input_white, output_black, output_white } => {
+            }
+            NodeParams::Levels {
+                input_black,
+                input_white,
+                output_black,
+                output_white,
+            } => {
                 buffer.extend_from_slice(&input_black.to_le_bytes());
                 buffer.extend_from_slice(&input_white.to_le_bytes());
                 buffer.extend_from_slice(&output_black.to_le_bytes());
                 buffer.extend_from_slice(&output_white.to_le_bytes());
-            },
-            NodeParams::ColorBalance { shadows, midtones, highlights } => {
+            }
+            NodeParams::ColorBalance {
+                shadows,
+                midtones,
+                highlights,
+            } => {
                 // Pack as 3 vec3s with padding
                 for &val in shadows {
                     buffer.extend_from_slice(&val.to_le_bytes());
@@ -751,43 +817,48 @@ impl ImagePipeline {
                     buffer.extend_from_slice(&val.to_le_bytes());
                 }
                 buffer.extend_from_slice(&0.0f32.to_le_bytes()); // padding
-            },
+            }
             NodeParams::Blur { radius } => {
                 buffer.extend_from_slice(&radius.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Sharpen { amount } => {
                 buffer.extend_from_slice(&amount.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Noise { amount, seed } => {
                 buffer.extend_from_slice(&amount.to_le_bytes());
                 buffer.extend_from_slice(&(*seed as f32).to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Scale { factor } => {
                 buffer.extend_from_slice(&factor.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::Rotate { angle } => {
                 buffer.extend_from_slice(&angle.to_le_bytes());
                 buffer.resize(16, 0);
-            },
-            NodeParams::Crop { x, y, width, height } => {
+            }
+            NodeParams::Crop {
+                x,
+                y,
+                width,
+                height,
+            } => {
                 buffer.extend_from_slice(&(*x as f32).to_le_bytes());
                 buffer.extend_from_slice(&(*y as f32).to_le_bytes());
                 buffer.extend_from_slice(&(*width as f32).to_le_bytes());
                 buffer.extend_from_slice(&(*height as f32).to_le_bytes());
-            },
+            }
             NodeParams::Mix { factor } => {
                 buffer.extend_from_slice(&factor.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
             NodeParams::None => {
                 // Just add a dummy float for shaders that don't need parameters
                 buffer.extend_from_slice(&0.0f32.to_le_bytes());
                 buffer.resize(16, 0);
-            },
+            }
         }
 
         Ok(buffer)
@@ -854,17 +925,55 @@ impl PipelineBuilder {
 
     /// Create a basic color grading pipeline
     pub fn basic_color_grading(mut self) -> Self {
-        let input_id = self.pipeline.add_node("Input".to_string(), NodeType::ImageInput);
-        let brightness_id = self.pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
-        let contrast_id = self.pipeline.add_node("Contrast".to_string(), NodeType::Contrast);
-        let saturation_id = self.pipeline.add_node("Saturation".to_string(), NodeType::Saturation);
-        let output_id = self.pipeline.add_node("Output".to_string(), NodeType::ImageOutput);
+        let input_id = self
+            .pipeline
+            .add_node("Input".to_string(), NodeType::ImageInput);
+        let brightness_id = self
+            .pipeline
+            .add_node("Brightness".to_string(), NodeType::Brightness);
+        let contrast_id = self
+            .pipeline
+            .add_node("Contrast".to_string(), NodeType::Contrast);
+        let saturation_id = self
+            .pipeline
+            .add_node("Saturation".to_string(), NodeType::Saturation);
+        let output_id = self
+            .pipeline
+            .add_node("Output".to_string(), NodeType::ImageOutput);
 
         // Connect nodes in sequence
-        self.pipeline.connect_nodes(input_id, "image".to_string(), brightness_id, "image".to_string()).unwrap();
-        self.pipeline.connect_nodes(brightness_id, "image".to_string(), contrast_id, "image".to_string()).unwrap();
-        self.pipeline.connect_nodes(contrast_id, "image".to_string(), saturation_id, "image".to_string()).unwrap();
-        self.pipeline.connect_nodes(saturation_id, "image".to_string(), output_id, "image".to_string()).unwrap();
+        self.pipeline
+            .connect_nodes(
+                input_id,
+                "image".to_string(),
+                brightness_id,
+                "image".to_string(),
+            )
+            .unwrap();
+        self.pipeline
+            .connect_nodes(
+                brightness_id,
+                "image".to_string(),
+                contrast_id,
+                "image".to_string(),
+            )
+            .unwrap();
+        self.pipeline
+            .connect_nodes(
+                contrast_id,
+                "image".to_string(),
+                saturation_id,
+                "image".to_string(),
+            )
+            .unwrap();
+        self.pipeline
+            .connect_nodes(
+                saturation_id,
+                "image".to_string(),
+                output_id,
+                "image".to_string(),
+            )
+            .unwrap();
 
         self
     }
@@ -921,7 +1030,7 @@ mod tests {
             input_id,
             "image".to_string(),
             output_id,
-            "image".to_string()
+            "image".to_string(),
         );
 
         assert!(result.is_ok());
@@ -935,8 +1044,22 @@ mod tests {
         let brightness_id = pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
         let output_id = pipeline.add_node("Output".to_string(), NodeType::ImageOutput);
 
-        pipeline.connect_nodes(input_id, "image".to_string(), brightness_id, "image".to_string()).unwrap();
-        pipeline.connect_nodes(brightness_id, "image".to_string(), output_id, "image".to_string()).unwrap();
+        pipeline
+            .connect_nodes(
+                input_id,
+                "image".to_string(),
+                brightness_id,
+                "image".to_string(),
+            )
+            .unwrap();
+        pipeline
+            .connect_nodes(
+                brightness_id,
+                "image".to_string(),
+                output_id,
+                "image".to_string(),
+            )
+            .unwrap();
 
         let order = pipeline.get_execution_order().unwrap();
         assert_eq!(order.len(), 3);
@@ -946,9 +1069,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_builder() {
-        let pipeline = PipelineBuilder::new()
-            .basic_color_grading()
-            .build();
+        let pipeline = PipelineBuilder::new().basic_color_grading().build();
 
         assert_eq!(pipeline.nodes.len(), 5);
         assert!(pipeline.input_node_id.is_some());
