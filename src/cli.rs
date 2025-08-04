@@ -3,14 +3,15 @@
 //! This module provides a user-friendly CLI for creating and executing
 //! image processing pipelines with various color grading and filter operations.
 
-use crate::shade::{ImagePipeline, NodeParams, NodeType, PipelineBuilder};
+use crate::shade::{ImagePipeline, NodeParams, NodeType};
 use clap::{Arg, ArgMatches, Command, value_parser};
 use std::path::PathBuf;
 
 /// CLI configuration structure
 pub struct CliConfig {
-    pub input_path: PathBuf,
-    pub output_path: PathBuf,
+    pub example: Option<PathBuf>,
+    pub input_path: Option<PathBuf>,
+    pub output_path: Option<PathBuf>,
     pub pipeline_config: PipelineConfig,
     pub verbose: bool,
 }
@@ -33,21 +34,14 @@ pub struct PipelineConfig {
 impl CliConfig {
     /// Parse command line arguments and create CLI configuration
     pub fn from_args() -> Result<Self, String> {
-        let matches = build_cli().get_matches();
-        Self::from_matches(matches)
+        Self::from_matches(build_cli().get_matches())
     }
 
     /// Create CLI configuration from parsed matches
     fn from_matches(matches: ArgMatches) -> Result<Self, String> {
-        let input_path = matches
-            .get_one::<PathBuf>("input")
-            .ok_or("Input file is required")?
-            .clone();
-
-        let output_path = matches
-            .get_one::<PathBuf>("output")
-            .ok_or("Output file is required")?
-            .clone();
+        let example = matches.get_one::<PathBuf>("example").cloned();
+        let input_path = matches.get_one::<PathBuf>("input").cloned();
+        let output_path = matches.get_one::<PathBuf>("output").cloned();
 
         let pipeline_config = PipelineConfig {
             brightness: matches.get_one::<f32>("brightness").copied(),
@@ -65,6 +59,7 @@ impl CliConfig {
         let verbose = matches.get_flag("verbose");
 
         Ok(CliConfig {
+            example,
             input_path,
             output_path,
             pipeline_config,
@@ -269,8 +264,8 @@ impl CliConfig {
     /// Print pipeline information
     pub fn print_pipeline_info(&self) {
         println!("Image Processing Pipeline Configuration:");
-        println!("Input:  {}", self.input_path.display());
-        println!("Output: {}", self.output_path.display());
+        println!("Input:  {}", self.input_path.clone().unwrap().display());
+        println!("Output: {}", self.output_path.clone().unwrap().display());
         println!();
 
         let mut operations = Vec::new();
@@ -325,12 +320,21 @@ fn build_cli() -> Command {
         .author("Your Name <your.email@example.com>")
         .about("GPU-accelerated image processing and color grading tool")
         .arg(
+            Arg::new("example")
+                .short('e')
+                .long("example")
+                .value_name("FILE")
+                .help("Output image file")
+                .required(false)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
             Arg::new("input")
                 .short('i')
                 .long("input")
                 .value_name("FILE")
                 .help("Input image file")
-                .required(true)
+                .required(false)
                 .value_parser(value_parser!(PathBuf)),
         )
         .arg(
@@ -339,7 +343,7 @@ fn build_cli() -> Command {
                 .long("output")
                 .value_name("FILE")
                 .help("Output image file")
-                .required(true)
+                .required(false)
                 .value_parser(value_parser!(PathBuf)),
         )
         .arg(
@@ -459,15 +463,15 @@ pub fn print_examples() {
 /// Validate CLI configuration
 pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     // Check input file exists
-    if !config.input_path.exists() {
+    if !config.input_path.clone().unwrap().exists() {
         return Err(format!(
             "Input file does not exist: {}",
-            config.input_path.display()
+            config.input_path.clone().unwrap().display()
         ));
     }
 
     // Check input file extension
-    if let Some(ext) = config.input_path.extension() {
+    if let Some(ext) = config.input_path.clone().unwrap().extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
         if !["jpg", "jpeg", "png", "bmp", "tiff", "webp"].contains(&ext_str.as_str()) {
             return Err(format!("Unsupported input format: {}", ext_str));
@@ -477,7 +481,7 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     }
 
     // Check output directory exists
-    if let Some(parent) = config.output_path.parent() {
+    if let Some(parent) = config.output_path.clone().unwrap().parent() {
         if !parent.exists() {
             return Err(format!(
                 "Output directory does not exist: {}",
@@ -566,8 +570,8 @@ mod tests {
         let matches = build_cli().try_get_matches_from(args).unwrap();
         let config = CliConfig::from_matches(matches).unwrap();
 
-        assert_eq!(config.input_path, PathBuf::from("input.jpg"));
-        assert_eq!(config.output_path, PathBuf::from("output.jpg"));
+        assert_eq!(config.input_path.clone().unwrap(), PathBuf::from("input.jpg"));
+        assert_eq!(config.output_path.clone().unwrap(), PathBuf::from("output.jpg"));
         assert_eq!(config.pipeline_config.brightness, Some(0.2));
         assert_eq!(config.pipeline_config.contrast, Some(1.1));
     }
@@ -575,8 +579,8 @@ mod tests {
     #[test]
     fn test_pipeline_building() {
         let config = CliConfig {
-            input_path: PathBuf::from("input.jpg"),
-            output_path: PathBuf::from("output.jpg"),
+            input_path: Some(PathBuf::from("input.jpg")),
+            output_path: Some(PathBuf::from("output.jpg")),
             pipeline_config: PipelineConfig {
                 brightness: Some(0.2),
                 contrast: Some(1.1),
