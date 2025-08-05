@@ -52,7 +52,7 @@ impl CliConfig {
             Some("8") => OutputPrecision::Bit8,
             Some("16") => OutputPrecision::Bit16,
             Some("32") | Some("float32") => OutputPrecision::Float32,
-            _ => OutputPrecision::Float32, // Default to highest precision
+            _ => OutputPrecision::Bit16,
         };
 
         let pipeline_config = PipelineConfig {
