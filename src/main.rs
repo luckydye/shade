@@ -1,19 +1,3 @@
-//! This example demonstrates the basic usage of storage textures for the purpose of
-//! creating a digital image of the Mandelbrot set
-//! (<https://en.wikipedia.org/wiki/Mandelbrot_set>).
-//!
-//! Storage textures work like normal textures but they operate similar to storage buffers
-//! in that they can be written to. The issue is that as it stands, write-only is the
-//! only valid access mode for storage textures in WGSL and although there is a WGPU feature
-//! to allow for read-write access, this is unfortunately a native-only feature and thus
-//! we won't be using it here. If we needed a reference texture, we would need to add a
-//! second texture to act as a reference and attach that as well. Luckily, we don't need
-//! to read anything in our shader except the dimensions of our texture, which we can
-//! easily get via `textureDimensions`.
-//!
-//! A lot of things aren't explained here via comments. See hello-compute and
-//! repeated-compute for code that is more thoroughly commented.
-
 mod cli;
 mod shade;
 mod utils;
@@ -21,14 +5,14 @@ mod utils;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
 #[cfg(not(target_arch = "wasm32"))]
-use utils::output_image_native;
+use utils::{output_image_native_with_precision, OutputPrecision};
 
 use cli::CliConfig;
 use shade::{PipelineBuilder, TexturePrecision};
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
-async fn example_image(path: Option<String>) {
+async fn example_image(path: Option<String>, output_precision: OutputPrecision) {
   // Use 32-bit float precision for the example
   let precision = TexturePrecision::Float32;
   let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * precision.bytes_per_pixel() as usize];
@@ -66,9 +50,15 @@ async fn example_image(path: Option<String>) {
       view_formats: &[],
   });
   let storage_texture_view = storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
+  // Calculate padded buffer size for proper alignment
+  let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+  let align = wgpu::MAP_ALIGNMENT as usize;
+  let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+  let buffer_size = padded_bytes_per_row * TEXTURE_DIMS.1;
+
   let output_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
       label: None,
-      size: size_of_val(&texture_data[..]) as u64,
+      size: buffer_size as u64,
       usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
       mapped_at_creation: false,
   });
@@ -135,7 +125,7 @@ async fn example_image(path: Option<String>) {
           layout: wgpu::TexelCopyBufferLayout {
               offset: 0,
               // This needs to be padded to 256. Using bytes per pixel based on precision
-              bytes_per_row: Some((TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize) as u32),
+              bytes_per_row: Some(padded_bytes_per_row as u32),
               rows_per_image: Some(TEXTURE_DIMS.1 as u32),
           },
       },
@@ -155,13 +145,25 @@ async fn example_image(path: Option<String>) {
   log::info!("Output buffer mapped");
   {
       let view = buffer_slice.get_mapped_range();
-      texture_data.copy_from_slice(&view[..]);
+      // Copy data accounting for row padding
+      let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+      let align = wgpu::MAP_ALIGNMENT as usize;
+      let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+
+      for row in 0..TEXTURE_DIMS.1 {
+          let src_start = row * padded_bytes_per_row;
+          let src_end = src_start + unpadded_bytes_per_row;
+          let dst_start = row * unpadded_bytes_per_row;
+          let dst_end = dst_start + unpadded_bytes_per_row;
+
+          texture_data[dst_start..dst_end].copy_from_slice(&view[src_start..src_end]);
+      }
   }
   log::info!("GPU data copied to local.");
   output_staging_buffer.unmap();
 
   #[cfg(not(target_arch = "wasm32"))]
-  output_image_native(texture_data.to_vec(), TEXTURE_DIMS, path.unwrap());
+  output_image_native_with_precision(texture_data.to_vec(), TEXTURE_DIMS, path.unwrap(), output_precision);
   #[cfg(target_arch = "wasm32")]
   output_image_wasm(texture_data.to_vec(), TEXTURE_DIMS);
   log::info!("Done.")
@@ -312,7 +314,7 @@ async fn run(config: &CliConfig) {
     // Output using actual dimensions
     if let Some(output_path) = &config.output_path {
         #[cfg(not(target_arch = "wasm32"))]
-        output_image_native(texture_data.to_vec(), actual_dims, output_path.to_string_lossy().to_string());
+        output_image_native_with_precision(texture_data.to_vec(), actual_dims, output_path.to_string_lossy().to_string(), config.output_precision);
     }
     #[cfg(target_arch = "wasm32")]
     output_image_wasm(texture_data.to_vec(), actual_dims);
@@ -333,7 +335,7 @@ pub fn main() {
                     // Generate an example image
                     let p = config.example.clone().unwrap();
                     let path = Some(p.as_os_str().to_string_lossy().to_string());
-                    pollster::block_on(example_image(path));
+                    pollster::block_on(example_image(path, config.output_precision));
                 } else {
                     if let Err(e) = cli::validate_config(&config) {
                         eprintln!("Error: {}", e);

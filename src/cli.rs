@@ -4,6 +4,7 @@
 //! image processing pipelines with various color grading and filter operations.
 
 use crate::shade::{ImagePipeline, NodeParams, NodeType};
+use crate::utils::OutputPrecision;
 use clap::{Arg, ArgMatches, Command, value_parser};
 use std::path::PathBuf;
 
@@ -12,6 +13,7 @@ pub struct CliConfig {
     pub example: Option<PathBuf>,
     pub input_path: Option<PathBuf>,
     pub output_path: Option<PathBuf>,
+    pub output_precision: OutputPrecision,
     pub pipeline_config: PipelineConfig,
     pub verbose: bool,
 }
@@ -43,6 +45,13 @@ impl CliConfig {
         let input_path = matches.get_one::<PathBuf>("input").cloned();
         let output_path = matches.get_one::<PathBuf>("output").or(matches.get_one::<PathBuf>("input")).cloned();
 
+        let output_precision = match matches.get_one::<String>("precision").map(|s| s.as_str()) {
+            Some("8") => OutputPrecision::Bit8,
+            Some("16") => OutputPrecision::Bit16,
+            Some("32") | Some("float32") => OutputPrecision::Float32,
+            _ => OutputPrecision::Float32, // Default to highest precision
+        };
+
         let pipeline_config = PipelineConfig {
             brightness: matches.get_one::<f32>("brightness").copied(),
             contrast: matches.get_one::<f32>("contrast").copied(),
@@ -62,6 +71,7 @@ impl CliConfig {
             example,
             input_path,
             output_path,
+            output_precision,
             pipeline_config,
             verbose,
         })
@@ -422,6 +432,14 @@ fn build_cli() -> Command {
                 .value_parser(value_parser!(f32)),
         )
         .arg(
+            Arg::new("precision")
+                .short('p')
+                .long("precision")
+                .value_name("BITS")
+                .help("Output precision: 8, 16, 32/float32 (default: 32)")
+                .value_parser(value_parser!(String)),
+        )
+        .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
@@ -433,7 +451,9 @@ fn build_cli() -> Command {
             shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1\n    \
             shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8\n    \
             shade -i image.jpg -o blurred.jpg --blur 2.5\n    \
-            shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9",
+            shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9\n    \
+            shade --example mandelbrot.raw --precision 32  # Output 32-bit float data\n    \
+            shade -i input.jpg -o output.png --precision 16  # Output 16-bit PNG",
         )
 }
 
