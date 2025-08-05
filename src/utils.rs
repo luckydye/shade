@@ -4,6 +4,9 @@ use std::io::Write;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
 #[cfg(target_arch = "wasm32")]
 fn get_content_div() -> web_sys::Element {
     web_sys::window()
@@ -74,7 +77,12 @@ pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), pa
 /// - For `OutputPrecision::Bit8` and `Bit16`: Use `.png` extension
 /// - For `OutputPrecision::Float32`: Use `.raw` or `.f32` extension (raw binary data)
 #[cfg(not(target_arch = "wasm32"))]
-pub fn output_image_native_with_precision(image_data: Vec<u8>, texture_dims: (usize, usize), path: String, precision: OutputPrecision) {
+pub fn output_image_native_with_precision(
+    image_data: Vec<u8>,
+    texture_dims: (usize, usize),
+    path: String,
+    precision: OutputPrecision,
+) {
     let pixels = texture_dims.0 * texture_dims.1;
 
     if image_data.len() == pixels * 16 {
@@ -162,7 +170,6 @@ pub fn output_image_native_with_precision(image_data: Vec<u8>, texture_dims: (us
         file.write_all(&png_data[..]).unwrap();
         log::info!("16-bit PNG file written to disc as \"{path}\".");
         return;
-
     } else if image_data.len() == pixels * 8 {
         match precision {
             OutputPrecision::Float32 => {
@@ -258,7 +265,6 @@ pub fn output_image_native_with_precision(image_data: Vec<u8>, texture_dims: (us
         file.write_all(&png_data[..]).unwrap();
         log::info!("16-bit PNG file written to disc as \"{path}\".");
         return;
-
     } else {
         // 8-bit data
         match precision {
@@ -333,6 +339,63 @@ pub fn output_image_native_with_precision(image_data: Vec<u8>, texture_dims: (us
     }
 }
 
+/// Attempts to load an OpenEXR image file
+///
+/// Returns a tuple of (image_data, dimensions) where image_data is in f32 RGBA format
+/// and dimensions is (width, height).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_openexr_image(
+    path: &str,
+) -> Result<(Vec<u8>, (usize, usize)), Box<dyn std::error::Error>> {
+    use exr::prelude::*;
+
+    log::info!("Attempting to load OpenEXR file: {}", path);
+
+    // Read the OpenEXR file
+    let image = read_first_rgba_layer_from_file(
+        path,
+        // Specify how to load the pixels
+        |resolution, _| {
+            // Create a buffer to hold RGBA f32 data
+            vec![vec![(0.0, 0.0, 0.0, 1.0); resolution.width()]; resolution.height()]
+        },
+        // Specify how to handle each pixel
+        |pixel_vector, position, (r, g, b, a): (f32, f32, f32, f32)| {
+            pixel_vector[position.y()][position.x()] = (r, g, b, a);
+        },
+    )?;
+
+    let width = image.layer_data.size.width();
+    let height = image.layer_data.size.height();
+    let pixel_data = image.layer_data.channel_data.pixels;
+
+    log::info!("Successfully loaded OpenEXR: {}x{}", width, height);
+
+    // Convert to flat byte array in f32 format
+    let mut image_data = Vec::with_capacity(width * height * 16); // 4 channels * 4 bytes per f32
+
+    for row in pixel_data {
+        for (r, g, b, a) in row {
+            image_data.extend_from_slice(&r.to_le_bytes());
+            image_data.extend_from_slice(&g.to_le_bytes());
+            image_data.extend_from_slice(&b.to_le_bytes());
+            image_data.extend_from_slice(&a.to_le_bytes());
+        }
+    }
+
+    Ok((image_data, (width, height)))
+}
+
+/// Helper function to check if a file is an OpenEXR file based on extension
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_openexr_file(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_lowercase() == "exr")
+        .unwrap_or(false)
+}
+
 /// Effectively a version of `output_image_native` but meant for web browser contexts.
 ///
 /// This is achieved via in `img` element on the page. If the target image element does
@@ -355,9 +418,9 @@ pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
             let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
 
             // Use better gamma correction for higher quality conversion
-            u8_data.push((r.clamp(0.0, 1.0).powf(1.0/2.2) * 255.0) as u8);
-            u8_data.push((g.clamp(0.0, 1.0).powf(1.0/2.2) * 255.0) as u8);
-            u8_data.push((b.clamp(0.0, 1.0).powf(1.0/2.2) * 255.0) as u8);
+            u8_data.push((r.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8);
+            u8_data.push((g.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8);
+            u8_data.push((b.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8);
             u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
         }
         u8_data
@@ -371,9 +434,9 @@ pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
             let a = half::f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
 
             // Use better gamma correction for higher quality conversion
-            u8_data.push((r.clamp(0.0, 1.0).powf(1.0/2.2) * 255.0) as u8);
-            u8_data.push((g.clamp(0.0, 1.0).powf(1.0/2.2) * 255.0) as u8);
-            u8_data.push((b.clamp(0.0, 1.0).powf(1.0/2.2) * 255.0) as u8);
+            u8_data.push((r.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8);
+            u8_data.push((g.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8);
+            u8_data.push((b.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8);
             u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
         }
         u8_data
@@ -447,7 +510,9 @@ pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
     // The canvas is currently the image we ultimately want. We can create a data url from it now.
     let data_url = canvas.to_data_url().unwrap();
     image_element.set_src(&data_url);
-    log::info!("Copied image from staging canvas to image element (note: displayed as 8-bit due to canvas limitations, but native output preserves higher precision).");
+    log::info!(
+        "Copied image from staging canvas to image element (note: displayed as 8-bit due to canvas limitations, but native output preserves higher precision)."
+    );
 
     if document.get_element_by_id("image-for-you-text").is_none() {
         log::info!("\"Image for you\" text not found; creating.");
@@ -493,126 +558,4 @@ fn create_output_image_element(document: &web_sys::Document) -> web_sys::HtmlIma
     content_div.replace_children_with_node_1(&new_image);
     log::info!("Created new output target image: {:?}", &new_image);
     new_image
-}
-
-// #[cfg(not(target_arch = "wasm32"))]
-// /// If the environment variable `WGPU_ADAPTER_NAME` is set, this function will attempt to
-// /// initialize the adapter with that name. If it is not set, it will attempt to initialize
-// /// the adapter which supports the required features.
-// pub(crate) async fn get_adapter_with_capabilities_or_from_env(
-//     instance: &wgpu::Instance,
-//     required_features: &wgpu::Features,
-//     required_downlevel_capabilities: &wgpu::DownlevelCapabilities,
-//     surface: &Option<&wgpu::Surface<'_>>,
-// ) -> wgpu::Adapter {
-//     use wgpu::Backends;
-//     if std::env::var("WGPU_ADAPTER_NAME").is_ok() {
-//         let adapter = wgpu::util::initialize_adapter_from_env_or_default(instance, *surface)
-//             .await
-//             .expect("No suitable GPU adapters found on the system!");
-
-//         let adapter_info = adapter.get_info();
-//         log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
-
-//         let adapter_features = adapter.features();
-//         assert!(
-//             adapter_features.contains(*required_features),
-//             "Adapter does not support required features for this example: {:?}",
-//             *required_features - adapter_features
-//         );
-
-//         let downlevel_capabilities = adapter.get_downlevel_capabilities();
-//         assert!(
-//             downlevel_capabilities.shader_model >= required_downlevel_capabilities.shader_model,
-//             "Adapter does not support the minimum shader model required to run this example: {:?}",
-//             required_downlevel_capabilities.shader_model
-//         );
-//         assert!(
-//                 downlevel_capabilities
-//                     .flags
-//                     .contains(required_downlevel_capabilities.flags),
-//                 "Adapter does not support the downlevel capabilities required to run this example: {:?}",
-//                 required_downlevel_capabilities.flags - downlevel_capabilities.flags
-//             );
-//         adapter
-//     } else {
-//         let adapters = instance.enumerate_adapters(Backends::all());
-
-//         let mut chosen_adapter = None;
-//         for adapter in adapters {
-//             if let Some(surface) = surface {
-//                 if !adapter.is_surface_supported(surface) {
-//                     continue;
-//                 }
-//             }
-
-//             let required_features = *required_features;
-//             let adapter_features = adapter.features();
-//             if !adapter_features.contains(required_features) {
-//                 continue;
-//             } else {
-//                 chosen_adapter = Some(adapter);
-//                 break;
-//             }
-//         }
-
-//         chosen_adapter.expect("No suitable GPU adapters found on the system!")
-//     }
-// }
-
-// #[cfg(target_arch = "wasm32")]
-// pub(crate) async fn get_adapter_with_capabilities_or_from_env(
-//     instance: &wgpu::Instance,
-//     required_features: &wgpu::Features,
-//     required_downlevel_capabilities: &wgpu::DownlevelCapabilities,
-//     surface: &Option<&wgpu::Surface<'_>>,
-// ) -> wgpu::Adapter {
-//     let adapter = wgpu::util::initialize_adapter_from_env_or_default(instance, *surface)
-//         .await
-//         .expect("No suitable GPU adapters found on the system!");
-
-//     let adapter_info = adapter.get_info();
-//     log::info!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
-
-//     let adapter_features = adapter.features();
-//     assert!(
-//         adapter_features.contains(*required_features),
-//         "Adapter does not support required features for this example: {:?}",
-//         *required_features - adapter_features
-//     );
-
-//     let downlevel_capabilities = adapter.get_downlevel_capabilities();
-//     assert!(
-//         downlevel_capabilities.shader_model >= required_downlevel_capabilities.shader_model,
-//         "Adapter does not support the minimum shader model required to run this example: {:?}",
-//         required_downlevel_capabilities.shader_model
-//     );
-//     assert!(
-//         downlevel_capabilities
-//             .flags
-//             .contains(required_downlevel_capabilities.flags),
-//         "Adapter does not support the downlevel capabilities required to run this example: {:?}",
-//         required_downlevel_capabilities.flags - downlevel_capabilities.flags
-//     );
-//     adapter
-// }
-
-/// A custom timer that only starts counting after the first call to get its time value.
-/// Useful because some examples have animations that would otherwise get started at initialization
-/// leading to random CI fails.
-#[derive(Default)]
-pub struct AnimationTimer {
-    // start_time: Option<Instant>,
-}
-
-impl AnimationTimer {
-    // pub fn time(&mut self) -> f32 {
-    //     match self.start_time {
-    //         None => {
-    //             self.start_time = Some(Instant::now());
-    //             0.0
-    //         }
-    //         Some(ref instant) => instant.elapsed().as_secs_f32(),
-    //     }
-    // }
 }

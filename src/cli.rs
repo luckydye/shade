@@ -43,7 +43,10 @@ impl CliConfig {
     fn from_matches(matches: ArgMatches) -> Result<Self, String> {
         let example = matches.get_one::<PathBuf>("example").cloned();
         let input_path = matches.get_one::<PathBuf>("input").cloned();
-        let output_path = matches.get_one::<PathBuf>("output").or(matches.get_one::<PathBuf>("input")).cloned();
+        let output_path = matches
+            .get_one::<PathBuf>("output")
+            .or(matches.get_one::<PathBuf>("input"))
+            .cloned();
 
         let output_precision = match matches.get_one::<String>("precision").map(|s| s.as_str()) {
             Some("8") => OutputPrecision::Bit8,
@@ -448,12 +451,21 @@ fn build_cli() -> Command {
         )
         .after_help(
             "EXAMPLES:\n    \
-            shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1\n    \
-            shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8\n    \
+            Basic image processing:\n      \
+            shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1\n      \
+            shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8\n      \
             shade -i image.jpg -o blurred.jpg --blur 2.5\n    \
+            \n    \
+            Complex processing:\n      \
             shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9\n    \
-            shade --example mandelbrot.raw --precision 32  # Output 32-bit float data\n    \
-            shade -i input.jpg -o output.png --precision 16  # Output 16-bit PNG",
+            \n    \
+            OpenEXR HDR processing:\n      \
+            shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files\n      \
+            shade -i hdr.exr -o display.png --gamma 2.2 --precision 16\n    \
+            \n    \
+            Output precision:\n      \
+            shade --example mandelbrot.raw --precision 32  # 32-bit float data\n      \
+            shade -i input.jpg -o output.png --precision 16  # 16-bit PNG",
         )
 }
 
@@ -478,6 +490,14 @@ pub fn print_examples() {
     println!("Geometric transformations:");
     println!("  shade -i input.jpg -o output.jpg --scale 1.5 --rotate 15");
     println!();
+    println!("OpenEXR HDR processing:");
+    println!("  shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files");
+    println!("  shade -i hdr.exr -o display.png --gamma 2.2 --precision 16");
+    println!();
+    println!("Output precision control:");
+    println!("  shade --example mandelbrot.raw --precision 32  # 32-bit float data");
+    println!("  shade -i input.jpg -o output.png --precision 16  # 16-bit PNG");
+    println!();
 }
 
 /// Validate CLI configuration
@@ -493,7 +513,7 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     // Check input file extension
     if let Some(ext) = config.input_path.clone().unwrap().extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
-        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp"].contains(&ext_str.as_str()) {
+        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"].contains(&ext_str.as_str()) {
             return Err(format!("Unsupported input format: {}", ext_str));
         }
     } else {
@@ -580,8 +600,14 @@ mod tests {
         let matches = build_cli().try_get_matches_from(args).unwrap();
         let config = CliConfig::from_matches(matches).unwrap();
 
-        assert_eq!(config.input_path.clone().unwrap(), PathBuf::from("input.jpg"));
-        assert_eq!(config.output_path.clone().unwrap(), PathBuf::from("output.jpg"));
+        assert_eq!(
+            config.input_path.clone().unwrap(),
+            PathBuf::from("input.jpg")
+        );
+        assert_eq!(
+            config.output_path.clone().unwrap(),
+            PathBuf::from("output.jpg")
+        );
         assert_eq!(config.pipeline_config.brightness, Some(0.2));
         assert_eq!(config.pipeline_config.contrast, Some(1.1));
     }
