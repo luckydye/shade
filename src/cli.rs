@@ -41,7 +41,7 @@ impl CliConfig {
     fn from_matches(matches: ArgMatches) -> Result<Self, String> {
         let example = matches.get_one::<PathBuf>("example").cloned();
         let input_path = matches.get_one::<PathBuf>("input").cloned();
-        let output_path = matches.get_one::<PathBuf>("output").cloned();
+        let output_path = matches.get_one::<PathBuf>("output").or(matches.get_one::<PathBuf>("input")).cloned();
 
         let pipeline_config = PipelineConfig {
             brightness: matches.get_one::<f32>("brightness").copied(),
@@ -480,16 +480,6 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
         return Err("Input file has no extension".to_string());
     }
 
-    // Check output directory exists
-    if let Some(parent) = config.output_path.clone().unwrap().parent() {
-        if !parent.exists() {
-            return Err(format!(
-                "Output directory does not exist: {}",
-                parent.display()
-            ));
-        }
-    }
-
     // Validate parameter ranges
     if let Some(brightness) = config.pipeline_config.brightness {
         if brightness < -1.0 || brightness > 1.0 {
@@ -579,6 +569,7 @@ mod tests {
     #[test]
     fn test_pipeline_building() {
         let config = CliConfig {
+            example: None,
             input_path: Some(PathBuf::from("input.jpg")),
             output_path: Some(PathBuf::from("output.jpg")),
             pipeline_config: PipelineConfig {

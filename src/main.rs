@@ -165,8 +165,44 @@ async fn example_image(path: Option<String>) {
   log::info!("Done.")
 }
 
-async fn run(path: Option<String>) {
-    let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4];
+async fn run(config: &CliConfig) {
+    // Load input image if provided
+    let (mut texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use image::io::Reader as ImageReader;
+
+            match ImageReader::open(input_path) {
+                Ok(img_reader) => {
+                    match img_reader.decode() {
+                        Ok(img) => {
+                            let rgba_img = img.to_rgba8();
+                            let (width, height) = rgba_img.dimensions();
+                            let data = rgba_img.into_raw();
+                            log::info!("Loaded input image: {}x{}", width, height);
+                            (data, (width as usize, height as usize))
+                        }
+                        Err(e) => {
+                            log::error!("Failed to decode image: {}", e);
+                            (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to open image file: {}", e);
+                    (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // For WASM, we'll use default texture for now
+            (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+        }
+    } else {
+        // No input image provided, use default texture
+        (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+    };
 
     // Create example image processing pipeline with more visible effects
     let mut image_pipeline = PipelineBuilder::new().basic_color_grading().build();
@@ -213,11 +249,11 @@ async fn run(path: Option<String>) {
 
     image_pipeline.init_gpu(device2, queue2);
 
-    // Process the image through the pipeline
+    // Process the image through the pipeline using actual dimensions
     match image_pipeline
         .process(
             texture_data.clone(),
-            (TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32),
+            (actual_dims.0 as u32, actual_dims.1 as u32),
         )
         .await
     {
@@ -230,10 +266,13 @@ async fn run(path: Option<String>) {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    output_image_native(texture_data.to_vec(), TEXTURE_DIMS, path.unwrap());
+    // Output using actual dimensions
+    if let Some(output_path) = &config.output_path {
+        #[cfg(not(target_arch = "wasm32"))]
+        output_image_native(texture_data.to_vec(), actual_dims, output_path.to_string_lossy().to_string());
+    }
     #[cfg(target_arch = "wasm32")]
-    output_image_wasm(texture_data.to_vec(), TEXTURE_DIMS);
+    output_image_wasm(texture_data.to_vec(), actual_dims);
     log::info!("Done.")
 }
 
@@ -262,8 +301,7 @@ pub fn main() {
                         config.print_pipeline_info();
                     }
 
-                    let path = config.output_path.clone().unwrap().to_string_lossy().to_string();
-                    pollster::block_on(run(Some(path)));
+                    pollster::block_on(run(&config));
                 }
             }
             Err(e) => {
