@@ -24,12 +24,14 @@ use crate::utils::output_image_wasm;
 use utils::output_image_native;
 
 use cli::CliConfig;
-use shade::PipelineBuilder;
+use shade::{PipelineBuilder, TexturePrecision};
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
 async fn example_image(path: Option<String>) {
-  let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4];
+  // Use 32-bit float precision for the example
+  let precision = TexturePrecision::Float32;
+  let mut texture_data = vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * precision.bytes_per_pixel() as usize];
 
   let instance = wgpu::Instance::default();
   let adapter = instance
@@ -59,7 +61,7 @@ async fn example_image(path: Option<String>) {
       mip_level_count: 1,
       sample_count: 1,
       dimension: wgpu::TextureDimension::D2,
-      format: wgpu::TextureFormat::Rgba8Unorm,
+      format: precision.texture_format(),
       usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
       view_formats: &[],
   });
@@ -78,7 +80,7 @@ async fn example_image(path: Option<String>) {
           visibility: wgpu::ShaderStages::COMPUTE,
           ty: wgpu::BindingType::StorageTexture {
               access: wgpu::StorageTextureAccess::WriteOnly,
-              format: wgpu::TextureFormat::Rgba8Unorm,
+              format: precision.texture_format(),
               view_dimension: wgpu::TextureViewDimension::D2,
           },
           count: None,
@@ -132,8 +134,8 @@ async fn example_image(path: Option<String>) {
           buffer: &output_staging_buffer,
           layout: wgpu::TexelCopyBufferLayout {
               offset: 0,
-              // This needs to be padded to 256.
-              bytes_per_row: Some((TEXTURE_DIMS.0 * 4) as u32),
+              // This needs to be padded to 256. Using bytes per pixel based on precision
+              bytes_per_row: Some((TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize) as u32),
               rows_per_image: Some(TEXTURE_DIMS.1 as u32),
           },
       },
@@ -166,6 +168,37 @@ async fn example_image(path: Option<String>) {
 }
 
 async fn run(config: &CliConfig) {
+    // Choose texture precision (can be made configurable via CLI later)
+    let precision = TexturePrecision::Float32; // Use 32-bit for maximum quality
+    let _bytes_per_pixel = precision.bytes_per_pixel() as usize;
+
+    // Helper function to convert 8-bit RGBA to float format
+    let convert_to_float = |data: &[u8], precision: TexturePrecision| -> Vec<u8> {
+        let mut float_data = Vec::with_capacity(data.len() * precision.bytes_per_pixel() as usize / 4);
+        for chunk in data.chunks(4) {
+            let r = chunk[0] as f32 / 255.0;
+            let g = chunk[1] as f32 / 255.0;
+            let b = chunk[2] as f32 / 255.0;
+            let a = chunk[3] as f32 / 255.0;
+
+            match precision {
+                TexturePrecision::Float32 => {
+                    float_data.extend_from_slice(&r.to_le_bytes());
+                    float_data.extend_from_slice(&g.to_le_bytes());
+                    float_data.extend_from_slice(&b.to_le_bytes());
+                    float_data.extend_from_slice(&a.to_le_bytes());
+                }
+                TexturePrecision::Float16 => {
+                    float_data.extend_from_slice(&half::f16::from_f32(r).to_le_bytes());
+                    float_data.extend_from_slice(&half::f16::from_f32(g).to_le_bytes());
+                    float_data.extend_from_slice(&half::f16::from_f32(b).to_le_bytes());
+                    float_data.extend_from_slice(&half::f16::from_f32(a).to_le_bytes());
+                }
+            }
+        }
+        float_data
+    };
+
     // Load input image if provided
     let (mut texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
         #[cfg(not(target_arch = "wasm32"))]
@@ -180,32 +213,42 @@ async fn run(config: &CliConfig) {
                             let (width, height) = rgba_img.dimensions();
                             let data = rgba_img.into_raw();
                             log::info!("Loaded input image: {}x{}", width, height);
-                            (data, (width as usize, height as usize))
+                            // Convert 8-bit RGBA to chosen float precision
+                            let float_data = convert_to_float(&data, precision);
+                            (float_data, (width as usize, height as usize))
                         }
                         Err(e) => {
                             log::error!("Failed to decode image: {}", e);
-                            (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+                            let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1)).flat_map(|_| [0u8, 0u8, 0u8, 255u8]).collect::<Vec<u8>>();
+                            let float_data = convert_to_float(&default_data, precision);
+                            (float_data, TEXTURE_DIMS)
                         }
                     }
                 }
                 Err(e) => {
                     log::error!("Failed to open image file: {}", e);
-                    (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+                    let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1)).flat_map(|_| [0u8, 0u8, 0u8, 255u8]).collect::<Vec<u8>>();
+                    let float_data = convert_to_float(&default_data, precision);
+                    (float_data, TEXTURE_DIMS)
                 }
             }
         }
         #[cfg(target_arch = "wasm32")]
         {
             // For WASM, we'll use default texture for now
-            (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+            let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1)).flat_map(|_| [0u8, 0u8, 0u8, 255u8]).collect::<Vec<u8>>();
+            let float_data = convert_to_float(&default_data, precision);
+            (float_data, TEXTURE_DIMS)
         }
     } else {
         // No input image provided, use default texture
-        (vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * 4], TEXTURE_DIMS)
+        let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1)).flat_map(|_| [0u8, 0u8, 0u8, 255u8]).collect::<Vec<u8>>();
+        let float_data = convert_to_float(&default_data, precision);
+        (float_data, TEXTURE_DIMS)
     };
 
     // Create example image processing pipeline with more visible effects
-    let mut image_pipeline = PipelineBuilder::new().basic_color_grading().build();
+    let mut image_pipeline = PipelineBuilder::with_precision(precision).basic_color_grading().build();
 
     // Test with more dramatic effects to verify processing is working
     if let Some(brightness_node) = image_pipeline

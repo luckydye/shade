@@ -2,7 +2,7 @@ const MAX_ITERATIONS: u32 = 50u;
 
 @group(0)
 @binding(0)
-var texture: texture_storage_2d<rgba8unorm, write>;
+var texture: texture_storage_2d<rgba32float, write>;
 
 @compute
 @workgroup_size(1)

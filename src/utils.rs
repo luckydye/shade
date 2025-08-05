@@ -20,10 +20,49 @@ pub fn add_web_nothing_to_see_msg() {
     );
 }
 
-/// Outputs a vector of RGBA bytes as a png image with the given dimensions on the given path.
+/// Outputs a vector of RGBA bytes (8-bit, 16-bit float, or 32-bit float) as a png image with the given dimensions on the given path.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), path: String) {
-    let mut png_data = Vec::<u8>::with_capacity(image_data.len());
+    // Determine format and convert to 8-bit if needed
+    let pixels = texture_dims.0 * texture_dims.1;
+    let converted_data = if image_data.len() == pixels * 16 {
+        // 32-bit float data (16 bytes per pixel: 4 channels * 4 bytes per float)
+        let mut u8_data = Vec::with_capacity(pixels * 4);
+        for chunk in image_data.chunks(16) {
+            // Convert each f32 component back to u8
+            let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+            let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+            let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
+
+            u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
+        }
+        u8_data
+    } else if image_data.len() == pixels * 8 {
+        // 16-bit float data (8 bytes per pixel: 4 channels * 2 bytes per f16)
+        let mut u8_data = Vec::with_capacity(pixels * 4);
+        for chunk in image_data.chunks(8) {
+            // Convert each f16 component back to u8
+            let r = half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+            let g = half::f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
+            let b = half::f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
+            let a = half::f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
+
+            u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
+        }
+        u8_data
+    } else {
+        // Already 8-bit data
+        image_data
+    };
+
+    let mut png_data = Vec::<u8>::with_capacity(converted_data.len());
     let mut encoder = png::Encoder::new(
         std::io::Cursor::new(&mut png_data),
         texture_dims.0 as u32,
@@ -31,7 +70,7 @@ pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), pa
     );
     encoder.set_color(png::ColorType::Rgba);
     let mut png_writer = encoder.write_header().unwrap();
-    png_writer.write_image_data(&image_data[..]).unwrap();
+    png_writer.write_image_data(&converted_data[..]).unwrap();
     png_writer.finish().unwrap();
     log::info!("PNG file encoded in memory.");
 
@@ -49,6 +88,45 @@ pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), pa
 /// order to create a data URL.
 #[cfg(target_arch = "wasm32")]
 pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
+    // Determine format and convert to 8-bit if needed
+    let pixels = texture_dims.0 * texture_dims.1;
+    let converted_data = if image_data.len() == pixels * 16 {
+        // 32-bit float data (16 bytes per pixel: 4 channels * 4 bytes per float)
+        let mut u8_data = Vec::with_capacity(pixels * 4);
+        for chunk in image_data.chunks(16) {
+            // Convert each f32 component back to u8
+            let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+            let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+            let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
+
+            u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
+        }
+        u8_data
+    } else if image_data.len() == pixels * 8 {
+        // 16-bit float data (8 bytes per pixel: 4 channels * 2 bytes per f16)
+        let mut u8_data = Vec::with_capacity(pixels * 4);
+        for chunk in image_data.chunks(8) {
+            // Convert each f16 component back to u8
+            let r = half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+            let g = half::f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
+            let b = half::f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
+            let a = half::f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
+
+            u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+            u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
+        }
+        u8_data
+    } else {
+        // Already 8-bit data
+        image_data
+    };
+
     let document = web_sys::window().unwrap().document().unwrap();
     let content_div = get_content_div();
 
@@ -86,7 +164,7 @@ pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .unwrap();
     let image_data = web_sys::ImageData::new_with_u8_clamped_array(
-        wasm_bindgen::Clamped(&image_data),
+        wasm_bindgen::Clamped(&converted_data),
         texture_dims.0 as u32,
     )
     .unwrap();

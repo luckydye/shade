@@ -1833,6 +1833,7 @@ dependencies = [
  "console_log",
  "env_logger",
  "flume",
+ "half",
  "image",
  "log",
  "png",

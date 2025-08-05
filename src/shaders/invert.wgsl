@@ -7,7 +7,7 @@ struct Params {
 var input_texture: texture_2d<f32>;
 
 @group(0) @binding(1)
-var output_texture: texture_storage_2d<rgba8unorm, write>;
+var output_texture: texture_storage_2d<rgba32float, write>;
 
 @group(0) @binding(2)
 var<uniform> params: Params;

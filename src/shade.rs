@@ -4,17 +4,49 @@
 //! that mimics node-based compositing software like Blender's shader editor
 //! or DaVinci Resolve's node graph.
 
+use flume;
 use std::collections::HashMap;
-use wgpu::{ComputePipeline, Device, Queue, Texture, TextureView, util::DeviceExt};
+use wgpu::util::DeviceExt;
+use wgpu::{ComputePipeline, Device, Queue, Texture, TextureView};
 
-/// Represents different types of image processing operations
+// Define texture precision options for better quality control
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TexturePrecision {
+    Float16, // 16-bit float (8 bytes per pixel) - good compatibility
+    Float32, // 32-bit float (16 bytes per pixel) - maximum quality
+}
+
+impl TexturePrecision {
+    pub fn texture_format(&self) -> wgpu::TextureFormat {
+        match self {
+            TexturePrecision::Float16 => wgpu::TextureFormat::Rgba16Float,
+            TexturePrecision::Float32 => wgpu::TextureFormat::Rgba32Float,
+        }
+    }
+
+    pub fn bytes_per_pixel(&self) -> u32 {
+        match self {
+            TexturePrecision::Float16 => 8,  // 4 channels * 2 bytes per f16
+            TexturePrecision::Float32 => 16, // 4 channels * 4 bytes per f32
+        }
+    }
+
+    pub fn shader_format(&self) -> &'static str {
+        match self {
+            TexturePrecision::Float16 => "rgba16float",
+            TexturePrecision::Float32 => "rgba32float",
+        }
+    }
+}
+
+// Define the types of processing nodes available
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeType {
     // Input/Output nodes
     ImageInput,
     ImageOutput,
 
-    // Color grading nodes
+    // Color adjustments
     Brightness,
     Contrast,
     Saturation,
@@ -33,7 +65,7 @@ pub enum NodeType {
     Rotate,
     Crop,
 
-    // Utility nodes
+    // Compositing
     Mix,
     Mask,
     Invert,
@@ -195,8 +227,9 @@ pub struct ImagePipeline {
     pub input_node_id: Option<usize>,
     pub output_node_id: Option<usize>,
     next_node_id: usize,
+    pub precision: TexturePrecision,
 
-    // GPU resources
+    // GPU resources (optional, set when initialized)
     device: Option<Device>,
     queue: Option<Queue>,
     pipelines: HashMap<NodeType, ComputePipeline>,
@@ -206,12 +239,17 @@ pub struct ImagePipeline {
 
 impl ImagePipeline {
     pub fn new() -> Self {
-        Self {
+        Self::with_precision(TexturePrecision::Float32)
+    }
+
+    pub fn with_precision(precision: TexturePrecision) -> Self {
+        ImagePipeline {
             nodes: HashMap::new(),
             connections: Vec::new(),
             input_node_id: None,
             output_node_id: None,
             next_node_id: 0,
+            precision,
             device: None,
             queue: None,
             pipelines: HashMap::new(),
@@ -227,12 +265,11 @@ impl ImagePipeline {
 
         // Store device reference to avoid borrow checker issues
         if let Some(device) = &self.device {
-            let pipelines = Self::create_compute_pipelines(device);
-            self.pipelines = pipelines;
+            self.pipelines = self.create_compute_pipelines(device);
         }
     }
 
-    fn create_compute_pipelines(device: &Device) -> HashMap<NodeType, ComputePipeline> {
+    fn create_compute_pipelines(&self, device: &Device) -> HashMap<NodeType, ComputePipeline> {
         let mut pipelines = HashMap::new();
         // Create bind group layout for image processing shaders
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -255,7 +292,7 @@ impl ImagePipeline {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        format: self.precision.texture_format(),
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
@@ -301,7 +338,7 @@ impl ImagePipeline {
         ];
 
         for node_type in &node_types_to_initialize {
-            if let Some(shader_source) = Self::get_shader_source_for_node_type(node_type) {
+            if let Some(shader_source) = self.get_shader_source_for_node_type(node_type) {
                 let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some(&format!("{:?} Shader", node_type)),
                     source: wgpu::ShaderSource::Wgsl(shader_source.into()),
@@ -323,8 +360,8 @@ impl ImagePipeline {
         pipelines
     }
 
-    fn get_shader_source_for_node_type(node_type: &NodeType) -> Option<&'static str> {
-        match node_type {
+    fn get_shader_source_for_node_type(&self, node_type: &NodeType) -> Option<String> {
+        let base_shader = match node_type {
             NodeType::Brightness => Some(include_str!("shaders/brightness.wgsl")),
             NodeType::Contrast => Some(include_str!("shaders/contrast.wgsl")),
             NodeType::Saturation => Some(include_str!("shaders/saturation.wgsl")),
@@ -341,9 +378,12 @@ impl ImagePipeline {
             NodeType::Mix => Some(include_str!("shaders/mix.wgsl")),
             NodeType::Mask => Some(include_str!("shaders/mask.wgsl")),
             NodeType::Invert => Some(include_str!("shaders/invert.wgsl")),
-            // ImageInput and ImageOutput don't need compute shaders
-            NodeType::ImageInput | NodeType::ImageOutput => None,
-        }
+            _ => None,
+        }?;
+
+        // Replace the hardcoded texture format with the dynamic one
+        let shader_with_format = base_shader.replace("rgba32float", self.precision.shader_format());
+        Some(shader_with_format)
     }
 
     /// Add a new node to the pipeline
@@ -580,7 +620,7 @@ impl ImagePipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: self.precision.texture_format(),
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -596,7 +636,7 @@ impl ImagePipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: self.precision.texture_format(),
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
@@ -612,7 +652,7 @@ impl ImagePipeline {
             &input_data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * width),
+                bytes_per_row: Some(self.precision.bytes_per_pixel() * width),
                 rows_per_image: Some(height),
             },
             wgpu::Extent3d {
@@ -649,7 +689,7 @@ impl ImagePipeline {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        format: self.precision.texture_format(),
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
@@ -694,7 +734,7 @@ impl ImagePipeline {
         // Create staging buffer for reading back result
         let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging Buffer"),
-            size: (4 * width * height) as u64,
+            size: (width * height * self.precision.bytes_per_pixel()) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -731,7 +771,7 @@ impl ImagePipeline {
                 buffer: &staging_buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(4 * width),
+                    bytes_per_row: Some(width * self.precision.bytes_per_pixel()),
                     rows_per_image: Some(height),
                 },
             },
@@ -918,8 +958,14 @@ pub struct PipelineBuilder {
 
 impl PipelineBuilder {
     pub fn new() -> Self {
-        Self {
+        PipelineBuilder {
             pipeline: ImagePipeline::new(),
+        }
+    }
+
+    pub fn with_precision(precision: TexturePrecision) -> Self {
+        PipelineBuilder {
+            pipeline: ImagePipeline::with_precision(precision),
         }
     }
 
