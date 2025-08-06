@@ -10,7 +10,7 @@ use utils::{
 };
 
 use cli::CliConfig;
-use shade::{PipelineBuilder, TexturePrecision};
+use shade::TexturePrecision;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -182,10 +182,14 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
     log::info!("Done.")
 }
 
-async fn run(config: &CliConfig) {
+struct LoadedImage {
+    texture_data: Vec<u8>,
+    actual_dims: (usize, usize),
+}
+
+async fn load_image(config: &CliConfig) -> LoadedImage {
     // Choose texture precision (can be made configurable via CLI later)
     let precision = TexturePrecision::Float32; // Use 32-bit for maximum quality
-    let _bytes_per_pixel = precision.bytes_per_pixel() as usize;
 
     // Helper function to convert 8-bit RGBA to float format
     let convert_to_float = |data: &[u8], precision: TexturePrecision| -> Vec<u8> {
@@ -326,41 +330,26 @@ async fn run(config: &CliConfig) {
         (float_data, TEXTURE_DIMS)
     };
 
-    // Create example image processing pipeline with more visible effects
-    let mut image_pipeline = PipelineBuilder::with_precision(precision)
-        .basic_color_grading()
-        .build();
+    LoadedImage {
+        actual_dims: actual_dims,
+        texture_data: texture_data,
+    }
+}
 
-    // Test with more dramatic effects to verify processing is working
-    if let Some(brightness_node) = image_pipeline
-        .nodes
-        .values_mut()
-        .find(|n| matches!(n.node_type, shade::NodeType::Brightness))
-    {
-        brightness_node.params = shade::NodeParams::Brightness { value: 0.3 }; // Increase brightness significantly
-    }
-    if let Some(contrast_node) = image_pipeline
-        .nodes
-        .values_mut()
-        .find(|n| matches!(n.node_type, shade::NodeType::Contrast))
-    {
-        contrast_node.params = shade::NodeParams::Contrast { value: 2.0 }; // Double the contrast
-    }
-    if let Some(saturation_node) = image_pipeline
-        .nodes
-        .values_mut()
-        .find(|n| matches!(n.node_type, shade::NodeType::Saturation))
-    {
-        saturation_node.params = shade::NodeParams::Saturation { value: 1.5 }; // Boost saturation
-    }
+async fn run(config: &CliConfig) {
+    let loaded_image = load_image(config).await;
+    let mut image_pipeline = config.build_pipeline();
+
+    let mut texture_data = loaded_image.texture_data;
+    let actual_dims = loaded_image.actual_dims;
 
     // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
-    let instance2 = wgpu::Instance::default();
-    let adapter2 = instance2
+    let instance = wgpu::Instance::default();
+    let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await
         .unwrap();
-    let (device2, queue2) = adapter2
+    let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: None,
             required_features: wgpu::Features::empty(),
@@ -371,7 +360,7 @@ async fn run(config: &CliConfig) {
         .await
         .unwrap();
 
-    image_pipeline.init_gpu(device2, queue2);
+    image_pipeline.init_gpu(device, queue);
 
     // Process the image through the pipeline using actual dimensions
     match image_pipeline
