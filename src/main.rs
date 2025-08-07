@@ -53,7 +53,7 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
   };
 
   // Load input image if provided
-  let (mut texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
+  let (texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
     #[cfg(not(target_arch = "wasm32"))]
     {
       let input_path_str = input_path.to_string_lossy();

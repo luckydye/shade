@@ -238,6 +238,13 @@ pub struct ImagePipeline {
 }
 
 impl ImagePipeline {
+  /// Calculate aligned bytes per row for texture operations
+  fn aligned_bytes_per_row(&self, width: u32) -> u32 {
+    let unpadded_bytes_per_row = width * self.precision.bytes_per_pixel();
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    (unpadded_bytes_per_row + align - 1) / align * align
+  }
+
   pub fn new() -> Self {
     Self::with_precision(TexturePrecision::Float32)
   }
@@ -740,10 +747,11 @@ impl ImagePipeline {
       ],
     });
 
-    // Create staging buffer for reading back result
+    // Create staging buffer for reading back result with aligned row size
+    let aligned_bytes_per_row = self.aligned_bytes_per_row(width);
     let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
       label: Some("Staging Buffer"),
-      size: (width * height * self.precision.bytes_per_pixel()) as u64,
+      size: (aligned_bytes_per_row * height) as u64,
       usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
       mapped_at_creation: false,
     });
@@ -780,7 +788,7 @@ impl ImagePipeline {
         buffer: &staging_buffer,
         layout: wgpu::TexelCopyBufferLayout {
           offset: 0,
-          bytes_per_row: Some(width * self.precision.bytes_per_pixel()),
+          bytes_per_row: Some(self.aligned_bytes_per_row(width)),
           rows_per_image: Some(height),
         },
       },
@@ -805,7 +813,18 @@ impl ImagePipeline {
       .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
 
     let data = buffer_slice.get_mapped_range();
-    let result = data.to_vec();
+
+    // Handle row padding when copying data back
+    let unpadded_bytes_per_row = width * self.precision.bytes_per_pixel();
+    let aligned_bytes_per_row = self.aligned_bytes_per_row(width);
+    let mut result = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+
+    for row in 0..height {
+      let src_start = (row * aligned_bytes_per_row) as usize;
+      let src_end = src_start + unpadded_bytes_per_row as usize;
+      result.extend_from_slice(&data[src_start..src_end]);
+    }
+
     drop(data);
     staging_buffer.unmap();
 
