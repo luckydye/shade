@@ -48,12 +48,13 @@ impl CliConfig {
             .or(matches.get_one::<PathBuf>("input"))
             .cloned();
 
-        let output_precision = match matches.get_one::<String>("precision").map(|s| s.as_str()) {
-            Some("8") => OutputPrecision::Bit8,
-            Some("16") => OutputPrecision::Bit16,
-            Some("32") | Some("float32") => OutputPrecision::Float32,
-            _ => OutputPrecision::Bit16,
-        };
+        let output_precision =
+            match matches.get_one::<String>("precision").map(|s| s.as_str()) {
+                Some("8") => OutputPrecision::Bit8,
+                Some("16") => OutputPrecision::Bit16,
+                Some("32") | Some("float32") => OutputPrecision::Float32,
+                _ => OutputPrecision::Bit16,
+            };
 
         let pipeline_config = PipelineConfig {
             brightness: matches.get_one::<f32>("brightness").copied(),
@@ -90,7 +91,8 @@ impl CliConfig {
 
         // Add processing nodes based on configuration
         if let Some(brightness) = self.pipeline_config.brightness {
-            let node_id = pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
+            let node_id =
+                pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Brightness { value: brightness });
             }
@@ -122,7 +124,8 @@ impl CliConfig {
         }
 
         if let Some(saturation) = self.pipeline_config.saturation {
-            let node_id = pipeline.add_node("Saturation".to_string(), NodeType::Saturation);
+            let node_id =
+                pipeline.add_node("Saturation".to_string(), NodeType::Saturation);
             if let Some(node) = pipeline.get_node_mut(node_id) {
                 node.set_params(NodeParams::Saturation { value: saturation });
             }
@@ -513,7 +516,9 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     // Check input file extension
     if let Some(ext) = config.input_path.clone().unwrap().extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
-        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"].contains(&ext_str.as_str()) {
+        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"]
+            .contains(&ext_str.as_str())
+        {
             return Err(format!("Unsupported input format: {}", ext_str));
         }
     } else {

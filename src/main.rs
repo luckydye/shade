@@ -6,7 +6,8 @@ mod utils;
 use crate::utils::output_image_wasm;
 #[cfg(not(target_arch = "wasm32"))]
 use utils::{
-    OutputPrecision, is_openexr_file, load_openexr_image, output_image_native_with_precision,
+    OutputPrecision, is_openexr_file, load_openexr_image,
+    output_image_native_with_precision,
 };
 
 use cli::CliConfig;
@@ -52,7 +53,8 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let storage_texture_view = storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let storage_texture_view =
+        storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
     // Calculate padded buffer size for proper alignment
     let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
     let align = wgpu::MAP_ALIGNMENT as usize;
@@ -66,19 +68,20 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
         mapped_at_creation: false,
     });
 
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::StorageTexture {
-                access: wgpu::StorageTextureAccess::WriteOnly,
-                format: precision.texture_format(),
-                view_dimension: wgpu::TextureViewDimension::D2,
-            },
-            count: None,
-        }],
-    });
+    let bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: precision.texture_format(),
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            }],
+        });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &bind_group_layout,
@@ -88,11 +91,12 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
         }],
     });
 
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
-    });
+    let pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: None,
         layout: Some(&pipeline_layout),
@@ -108,10 +112,11 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
     let mut command_encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     {
-        let mut compute_pass = command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: None,
-            timestamp_writes: None,
-        });
+        let mut compute_pass =
+            command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
         compute_pass.set_bind_group(0, &bind_group, &[]);
         compute_pass.set_pipeline(&pipeline);
         compute_pass.dispatch_workgroups(TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32, 1);
@@ -149,7 +154,8 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
     {
         let view = buffer_slice.get_mapped_range();
         // Copy data accounting for row padding
-        let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+        let unpadded_bytes_per_row =
+            TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
         let align = wgpu::MAP_ALIGNMENT as usize;
         let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
 
@@ -253,14 +259,18 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
                                         chunk[12], chunk[13], chunk[14], chunk[15],
                                     ]);
 
-                                    f16_data
-                                        .extend_from_slice(&half::f16::from_f32(r).to_le_bytes());
-                                    f16_data
-                                        .extend_from_slice(&half::f16::from_f32(g).to_le_bytes());
-                                    f16_data
-                                        .extend_from_slice(&half::f16::from_f32(b).to_le_bytes());
-                                    f16_data
-                                        .extend_from_slice(&half::f16::from_f32(a).to_le_bytes());
+                                    f16_data.extend_from_slice(
+                                        &half::f16::from_f32(r).to_le_bytes(),
+                                    );
+                                    f16_data.extend_from_slice(
+                                        &half::f16::from_f32(g).to_le_bytes(),
+                                    );
+                                    f16_data.extend_from_slice(
+                                        &half::f16::from_f32(b).to_le_bytes(),
+                                    );
+                                    f16_data.extend_from_slice(
+                                        &half::f16::from_f32(a).to_le_bytes(),
+                                    );
                                 }
                                 (f16_data, (width, height))
                             }
@@ -296,7 +306,8 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
                                 let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
                                     .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
                                     .collect::<Vec<u8>>();
-                                let float_data = convert_to_float(&default_data, precision);
+                                let float_data =
+                                    convert_to_float(&default_data, precision);
                                 (float_data, TEXTURE_DIMS)
                             }
                         }
@@ -437,7 +448,8 @@ pub fn main() {
     #[cfg(target_arch = "wasm32")]
     {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-        console_log::init_with_level(log::Level::Info).expect("could not initialize logger");
+        console_log::init_with_level(log::Level::Info)
+            .expect("could not initialize logger");
         wasm_bindgen_futures::spawn_local(run(None));
     }
 }

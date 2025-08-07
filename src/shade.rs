@@ -26,7 +26,7 @@ impl TexturePrecision {
 
     pub fn bytes_per_pixel(&self) -> u32 {
         match self {
-            TexturePrecision::Float16 => 8,  // 4 channels * 2 bytes per f16
+            TexturePrecision::Float16 => 8, // 4 channels * 2 bytes per f16
             TexturePrecision::Float32 => 16, // 4 channels * 4 bytes per f32
         }
     }
@@ -269,53 +269,60 @@ impl ImagePipeline {
         }
     }
 
-    fn create_compute_pipelines(&self, device: &Device) -> HashMap<NodeType, ComputePipeline> {
+    fn create_compute_pipelines(
+        &self,
+        device: &Device,
+    ) -> HashMap<NodeType, ComputePipeline> {
         let mut pipelines = HashMap::new();
         // Create bind group layout for image processing shaders
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Image Processing Bind Group Layout"),
-            entries: &[
-                // Input texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Image Processing Bind Group Layout"),
+                entries: &[
+                    // Input texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: false,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Output texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: self.precision.texture_format(),
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                    // Output texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: self.precision.texture_format(),
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Parameters uniform buffer
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    // Parameters uniform buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Image Processing Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Image Processing Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         // Initialize pipelines for each node type that needs GPU processing
         let node_types_to_initialize = [
@@ -339,19 +346,21 @@ impl ImagePipeline {
 
         for node_type in &node_types_to_initialize {
             if let Some(shader_source) = self.get_shader_source_for_node_type(node_type) {
-                let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some(&format!("{:?} Shader", node_type)),
-                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-                });
+                let shader_module =
+                    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some(&format!("{:?} Shader", node_type)),
+                        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                    });
 
-                let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some(&format!("{:?} Pipeline", node_type)),
-                    layout: Some(&pipeline_layout),
-                    module: &shader_module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                });
+                let pipeline =
+                    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                        label: Some(&format!("{:?} Pipeline", node_type)),
+                        layout: Some(&pipeline_layout),
+                        module: &shader_module,
+                        entry_point: Some("main"),
+                        compilation_options: Default::default(),
+                        cache: None,
+                    });
 
                 pipelines.insert(*node_type, pipeline);
             }
@@ -382,7 +391,8 @@ impl ImagePipeline {
         }?;
 
         // Replace the hardcoded texture format with the dynamic one
-        let shader_with_format = base_shader.replace("rgba32float", self.precision.shader_format());
+        let shader_with_format =
+            base_shader.replace("rgba32float", self.precision.shader_format());
         Some(shader_with_format)
     }
 
@@ -567,7 +577,10 @@ impl ImagePipeline {
                         log::info!("Processing node: {} ({})", node.name, node.id);
 
                         // Skip ImageInput and ImageOutput nodes as they don't need GPU processing
-                        if matches!(node.node_type, NodeType::ImageInput | NodeType::ImageOutput) {
+                        if matches!(
+                            node.node_type,
+                            NodeType::ImageInput | NodeType::ImageOutput
+                        ) {
                             continue;
                         }
 
@@ -585,7 +598,10 @@ impl ImagePipeline {
                                 )
                                 .await?;
                         } else {
-                            log::warn!("No pipeline found for node type: {:?}", node.node_type);
+                            log::warn!(
+                                "No pipeline found for node type: {:?}",
+                                node.node_type
+                            );
                         }
                     }
                 }
@@ -671,41 +687,44 @@ impl ImagePipeline {
         });
 
         // Create bind group layout (we need to recreate this for each call)
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Processing Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Processing Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: false,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: self.precision.texture_format(),
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: self.precision.texture_format(),
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
         // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -715,13 +734,15 @@ impl ImagePipeline {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &input_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                        &input_texture
+                            .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
-                        &output_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                        &output_texture
+                            .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
@@ -740,15 +761,17 @@ impl ImagePipeline {
         });
 
         // Execute compute shader
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Processing Command Encoder"),
-        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Processing Command Encoder"),
+            });
 
         {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Processing Compute Pass"),
-                timestamp_writes: None,
-            });
+            let mut compute_pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Processing Compute Pass"),
+                    timestamp_writes: None,
+                });
             compute_pass.set_pipeline(pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
@@ -1087,7 +1110,8 @@ mod tests {
     fn test_execution_order() {
         let mut pipeline = ImagePipeline::new();
         let input_id = pipeline.add_node("Input".to_string(), NodeType::ImageInput);
-        let brightness_id = pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
+        let brightness_id =
+            pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
         let output_id = pipeline.add_node("Output".to_string(), NodeType::ImageOutput);
 
         pipeline

@@ -54,8 +54,17 @@ pub enum OutputPrecision {
 /// This function automatically detects the input data format and outputs a 16-bit PNG
 /// for better precision than standard 8-bit PNGs while maintaining compatibility.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), path: String) {
-    output_image_native_with_precision(image_data, texture_dims, path, OutputPrecision::Bit16);
+pub fn output_image_native(
+    image_data: Vec<u8>,
+    texture_dims: (usize, usize),
+    path: String,
+) {
+    output_image_native_with_precision(
+        image_data,
+        texture_dims,
+        path,
+        OutputPrecision::Bit16,
+    );
 }
 
 /// Outputs image data with the specified precision format.
@@ -100,8 +109,10 @@ pub fn output_image_native_with_precision(
                 for chunk in image_data.chunks(16) {
                     let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                     let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
-                    let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
-                    let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
+                    let b =
+                        f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+                    let a =
+                        f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
 
                     u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
                     u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
@@ -189,7 +200,9 @@ pub fn output_image_native_with_precision(
 
                 let mut file = std::fs::File::create(&path).unwrap();
                 file.write_all(&f32_data[..]).unwrap();
-                log::info!("Raw 32-bit float data (converted from 16-bit) written to \"{path}\".");
+                log::info!(
+                    "Raw 32-bit float data (converted from 16-bit) written to \"{path}\"."
+                );
                 return;
             }
             OutputPrecision::Bit8 => {
@@ -285,7 +298,9 @@ pub fn output_image_native_with_precision(
 
                 let mut file = std::fs::File::create(&path).unwrap();
                 file.write_all(&f32_data[..]).unwrap();
-                log::info!("Raw 32-bit float data (converted from 8-bit) written to \"{path}\".");
+                log::info!(
+                    "Raw 32-bit float data (converted from 8-bit) written to \"{path}\"."
+                );
             }
             OutputPrecision::Bit16 => {
                 // Convert 8-bit to 16-bit PNG
@@ -448,7 +463,8 @@ pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
     let document = web_sys::window().unwrap().document().unwrap();
     let content_div = get_content_div();
 
-    let canvas = if let Some(found_canvas) = document.get_element_by_id("staging-canvas") {
+    let canvas = if let Some(found_canvas) = document.get_element_by_id("staging-canvas")
+    {
         match found_canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
             Ok(canvas_as_canvas) => canvas_as_canvas,
             Err(e) => {
@@ -467,7 +483,8 @@ pub fn output_image_wasm(image_data: Vec<u8>, texture_dims: (usize, usize)) {
     };
     // Having the size attributes the right size is so important, we should always do it
     // just to be safe. Also, what if we might want the image size to be able to change?
-    let image_dimension_strings = (texture_dims.0.to_string(), texture_dims.1.to_string());
+    let image_dimension_strings =
+        (texture_dims.0.to_string(), texture_dims.1.to_string());
     canvas
         .set_attribute("width", image_dimension_strings.0.as_str())
         .unwrap();
@@ -547,7 +564,9 @@ fn create_staging_canvas(document: &web_sys::Document) -> web_sys::HtmlCanvasEle
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_output_image_element(document: &web_sys::Document) -> web_sys::HtmlImageElement {
+fn create_output_image_element(
+    document: &web_sys::Document,
+) -> web_sys::HtmlImageElement {
     let content_div = get_content_div();
     let new_image = document
         .create_element("img")
