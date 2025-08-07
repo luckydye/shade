@@ -24,14 +24,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Apply brightness adjustment
     let adjusted_color = vec4<f32>(
-        input_color.r + params.value,
-        input_color.g + params.value,
-        input_color.b + params.value,
+        input_color.r * (1.0 + params.value),
+        input_color.g * (1.0 + params.value),
+        input_color.b * (1.0 + params.value),
         input_color.a
     );
 
-    // Only clamp negative values to preserve HDR highlights
-    let final_color = max(adjusted_color, vec4<f32>(0.0, 0.0, 0.0, adjusted_color.a));
-
-    textureStore(output_texture, coords, final_color);
+    textureStore(output_texture, coords, adjusted_color);
 }

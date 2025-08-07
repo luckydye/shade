@@ -195,14 +195,25 @@ pub fn load_openexr_image(
   Ok((image_data, (width, height)))
 }
 
-/// Helper function to check if a file is an OpenEXR file based on extension
+/// Helper function to check if a file is an OpenEXR file based on file header
 #[cfg(not(target_arch = "wasm32"))]
 pub fn is_openexr_file(path: &str) -> bool {
-  Path::new(path)
-    .extension()
-    .and_then(|ext| ext.to_str())
-    .map(|ext| ext.to_lowercase() == "exr")
-    .unwrap_or(false)
+  use std::fs::File;
+  use std::io::Read;
+
+  // OpenEXR files start with a 4-byte magic number: 0x762f3101
+  let expected_header = [0x76, 0x2f, 0x31, 0x01];
+
+  let mut file = match File::open(path) {
+    Ok(file) => file,
+    Err(_) => return false,
+  };
+
+  let mut header = [0u8; 4];
+  match file.read_exact(&mut header) {
+    Ok(_) => header == expected_header,
+    Err(_) => false,
+  }
 }
 
 /// Writes an OpenEXR image file from f32 RGBA data
