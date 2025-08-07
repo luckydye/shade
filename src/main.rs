@@ -15,177 +15,6 @@ use shade::TexturePrecision;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
-async fn example_image(path: Option<String>, output_precision: OutputPrecision) {
-  // Use 32-bit float precision for the example
-  let precision = TexturePrecision::Float32;
-  let mut texture_data =
-    vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * precision.bytes_per_pixel() as usize];
-
-  let instance = wgpu::Instance::default();
-  let adapter = instance
-    .request_adapter(&wgpu::RequestAdapterOptions::default())
-    .await
-    .unwrap();
-  let (device, queue) = adapter
-    .request_device(&wgpu::DeviceDescriptor {
-      label: None,
-      required_features: wgpu::Features::empty(),
-      required_limits: wgpu::Limits::downlevel_defaults(),
-      memory_hints: wgpu::MemoryHints::MemoryUsage,
-      trace: wgpu::Trace::Off,
-    })
-    .await
-    .unwrap();
-
-  let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
-
-  let storage_texture = device.create_texture(&wgpu::TextureDescriptor {
-    label: None,
-    size: wgpu::Extent3d {
-      width: TEXTURE_DIMS.0 as u32,
-      height: TEXTURE_DIMS.1 as u32,
-      depth_or_array_layers: 1,
-    },
-    mip_level_count: 1,
-    sample_count: 1,
-    dimension: wgpu::TextureDimension::D2,
-    format: precision.texture_format(),
-    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-    view_formats: &[],
-  });
-  let storage_texture_view =
-    storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
-  // Calculate padded buffer size for proper alignment
-  let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
-  let align = wgpu::MAP_ALIGNMENT as usize;
-  let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
-  let buffer_size = padded_bytes_per_row * TEXTURE_DIMS.1;
-
-  let output_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-    label: None,
-    size: buffer_size as u64,
-    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-    mapped_at_creation: false,
-  });
-
-  let bind_group_layout =
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-      label: None,
-      entries: &[wgpu::BindGroupLayoutEntry {
-        binding: 0,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::StorageTexture {
-          access: wgpu::StorageTextureAccess::WriteOnly,
-          format: precision.texture_format(),
-          view_dimension: wgpu::TextureViewDimension::D2,
-        },
-        count: None,
-      }],
-    });
-  let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-    label: None,
-    layout: &bind_group_layout,
-    entries: &[wgpu::BindGroupEntry {
-      binding: 0,
-      resource: wgpu::BindingResource::TextureView(&storage_texture_view),
-    }],
-  });
-
-  let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-    label: None,
-    bind_group_layouts: &[&bind_group_layout],
-    push_constant_ranges: &[],
-  });
-  let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-    label: None,
-    layout: Some(&pipeline_layout),
-    module: &shader,
-    entry_point: Some("main"),
-    compilation_options: Default::default(),
-    cache: None,
-  });
-
-  log::info!("Wgpu context set up.");
-  //----------------------------------------
-
-  let mut command_encoder =
-    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-  {
-    let mut compute_pass =
-      command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: None,
-        timestamp_writes: None,
-      });
-    compute_pass.set_bind_group(0, &bind_group, &[]);
-    compute_pass.set_pipeline(&pipeline);
-    compute_pass.dispatch_workgroups(TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32, 1);
-  }
-  command_encoder.copy_texture_to_buffer(
-    wgpu::TexelCopyTextureInfo {
-      texture: &storage_texture,
-      mip_level: 0,
-      origin: wgpu::Origin3d::ZERO,
-      aspect: wgpu::TextureAspect::All,
-    },
-    wgpu::TexelCopyBufferInfo {
-      buffer: &output_staging_buffer,
-      layout: wgpu::TexelCopyBufferLayout {
-        offset: 0,
-        // This needs to be padded to 256. Using bytes per pixel based on precision
-        bytes_per_row: Some(padded_bytes_per_row as u32),
-        rows_per_image: Some(TEXTURE_DIMS.1 as u32),
-      },
-    },
-    wgpu::Extent3d {
-      width: TEXTURE_DIMS.0 as u32,
-      height: TEXTURE_DIMS.1 as u32,
-      depth_or_array_layers: 1,
-    },
-  );
-  queue.submit(Some(command_encoder.finish()));
-
-  let buffer_slice = output_staging_buffer.slice(..);
-  let (sender, receiver) = flume::bounded(1);
-  buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
-  device.poll(wgpu::PollType::wait()).unwrap();
-  receiver.recv_async().await.unwrap().unwrap();
-  log::info!("Output buffer mapped");
-  {
-    let view = buffer_slice.get_mapped_range();
-    // Copy data accounting for row padding
-    let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
-    let align = wgpu::MAP_ALIGNMENT as usize;
-    let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
-
-    for row in 0..TEXTURE_DIMS.1 {
-      let src_start = row * padded_bytes_per_row;
-      let src_end = src_start + unpadded_bytes_per_row;
-      let dst_start = row * unpadded_bytes_per_row;
-      let dst_end = dst_start + unpadded_bytes_per_row;
-
-      texture_data[dst_start..dst_end].copy_from_slice(&view[src_start..src_end]);
-    }
-  }
-  log::info!("GPU data copied to local.");
-  output_staging_buffer.unmap();
-
-  #[cfg(not(target_arch = "wasm32"))]
-  {
-    let output_path = path.unwrap();
-
-    // Use standard image output for other formats
-    output_image_native_with_precision(
-      texture_data.to_vec(),
-      TEXTURE_DIMS,
-      output_path,
-      output_precision,
-    );
-  }
-  #[cfg(target_arch = "wasm32")]
-  output_image_wasm(texture_data.to_vec(), TEXTURE_DIMS);
-  log::info!("Done.")
-}
-
 struct LoadedImage {
   texture_data: Vec<u8>,
   actual_dims: (usize, usize),
@@ -407,18 +236,18 @@ pub fn main() {
           let p = config.example.clone().unwrap();
           let path = Some(p.as_os_str().to_string_lossy().to_string());
           pollster::block_on(example_image(path, config.output_precision));
-        } else {
-          if let Err(e) = cli::validate_config(&config) {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-          }
-
-          if config.verbose {
-            config.print_pipeline_info();
-          }
-
-          pollster::block_on(run(&config));
         }
+
+        if let Err(e) = cli::validate_config(&config) {
+          eprintln!("Error: {}", e);
+          std::process::exit(1);
+        }
+
+        if config.verbose {
+          config.print_pipeline_info();
+        }
+
+        pollster::block_on(run(&config));
       }
       Err(e) => {
         eprintln!("Error parsing arguments: {}", e);
@@ -433,4 +262,175 @@ pub fn main() {
     console_log::init_with_level(log::Level::Info).expect("could not initialize logger");
     wasm_bindgen_futures::spawn_local(run(None));
   }
+}
+
+async fn example_image(path: Option<String>, output_precision: OutputPrecision) {
+  // Use 32-bit float precision for the example
+  let precision = TexturePrecision::Float32;
+  let mut texture_data =
+    vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * precision.bytes_per_pixel() as usize];
+
+  let instance = wgpu::Instance::default();
+  let adapter = instance
+    .request_adapter(&wgpu::RequestAdapterOptions::default())
+    .await
+    .unwrap();
+  let (device, queue) = adapter
+    .request_device(&wgpu::DeviceDescriptor {
+      label: None,
+      required_features: wgpu::Features::empty(),
+      required_limits: wgpu::Limits::downlevel_defaults(),
+      memory_hints: wgpu::MemoryHints::MemoryUsage,
+      trace: wgpu::Trace::Off,
+    })
+    .await
+    .unwrap();
+
+  let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/example.wgsl"));
+
+  let storage_texture = device.create_texture(&wgpu::TextureDescriptor {
+    label: None,
+    size: wgpu::Extent3d {
+      width: TEXTURE_DIMS.0 as u32,
+      height: TEXTURE_DIMS.1 as u32,
+      depth_or_array_layers: 1,
+    },
+    mip_level_count: 1,
+    sample_count: 1,
+    dimension: wgpu::TextureDimension::D2,
+    format: precision.texture_format(),
+    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+    view_formats: &[],
+  });
+  let storage_texture_view =
+    storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
+  // Calculate padded buffer size for proper alignment
+  let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+  let align = wgpu::MAP_ALIGNMENT as usize;
+  let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+  let buffer_size = padded_bytes_per_row * TEXTURE_DIMS.1;
+
+  let output_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    label: None,
+    size: buffer_size as u64,
+    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+    mapped_at_creation: false,
+  });
+
+  let bind_group_layout =
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+      label: None,
+      entries: &[wgpu::BindGroupLayoutEntry {
+        binding: 0,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::StorageTexture {
+          access: wgpu::StorageTextureAccess::WriteOnly,
+          format: precision.texture_format(),
+          view_dimension: wgpu::TextureViewDimension::D2,
+        },
+        count: None,
+      }],
+    });
+  let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    label: None,
+    layout: &bind_group_layout,
+    entries: &[wgpu::BindGroupEntry {
+      binding: 0,
+      resource: wgpu::BindingResource::TextureView(&storage_texture_view),
+    }],
+  });
+
+  let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+    label: None,
+    bind_group_layouts: &[&bind_group_layout],
+    push_constant_ranges: &[],
+  });
+  let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    label: None,
+    layout: Some(&pipeline_layout),
+    module: &shader,
+    entry_point: Some("main"),
+    compilation_options: Default::default(),
+    cache: None,
+  });
+
+  log::info!("Wgpu context set up.");
+  //----------------------------------------
+
+  let mut command_encoder =
+    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+  {
+    let mut compute_pass =
+      command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        label: None,
+        timestamp_writes: None,
+      });
+    compute_pass.set_bind_group(0, &bind_group, &[]);
+    compute_pass.set_pipeline(&pipeline);
+    compute_pass.dispatch_workgroups(TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32, 1);
+  }
+  command_encoder.copy_texture_to_buffer(
+    wgpu::TexelCopyTextureInfo {
+      texture: &storage_texture,
+      mip_level: 0,
+      origin: wgpu::Origin3d::ZERO,
+      aspect: wgpu::TextureAspect::All,
+    },
+    wgpu::TexelCopyBufferInfo {
+      buffer: &output_staging_buffer,
+      layout: wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        // This needs to be padded to 256. Using bytes per pixel based on precision
+        bytes_per_row: Some(padded_bytes_per_row as u32),
+        rows_per_image: Some(TEXTURE_DIMS.1 as u32),
+      },
+    },
+    wgpu::Extent3d {
+      width: TEXTURE_DIMS.0 as u32,
+      height: TEXTURE_DIMS.1 as u32,
+      depth_or_array_layers: 1,
+    },
+  );
+  queue.submit(Some(command_encoder.finish()));
+
+  let buffer_slice = output_staging_buffer.slice(..);
+  let (sender, receiver) = flume::bounded(1);
+  buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+  device.poll(wgpu::PollType::wait()).unwrap();
+  receiver.recv_async().await.unwrap().unwrap();
+  log::info!("Output buffer mapped");
+  {
+    let view = buffer_slice.get_mapped_range();
+    // Copy data accounting for row padding
+    let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+    let align = wgpu::MAP_ALIGNMENT as usize;
+    let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+
+    for row in 0..TEXTURE_DIMS.1 {
+      let src_start = row * padded_bytes_per_row;
+      let src_end = src_start + unpadded_bytes_per_row;
+      let dst_start = row * unpadded_bytes_per_row;
+      let dst_end = dst_start + unpadded_bytes_per_row;
+
+      texture_data[dst_start..dst_end].copy_from_slice(&view[src_start..src_end]);
+    }
+  }
+  log::info!("GPU data copied to local.");
+  output_staging_buffer.unmap();
+
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let output_path = path.unwrap();
+
+    // Use standard image output for other formats
+    output_image_native_with_precision(
+      texture_data.to_vec(),
+      TEXTURE_DIMS,
+      output_path,
+      output_precision,
+    );
+  }
+  #[cfg(target_arch = "wasm32")]
+  output_image_wasm(texture_data.to_vec(), TEXTURE_DIMS);
+  log::info!("Done.")
 }
