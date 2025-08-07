@@ -8,6 +8,33 @@ use crate::shade::{ImagePipeline, NodeParams, NodeType};
 use clap::{Arg, ArgMatches, Command, value_parser};
 use std::path::PathBuf;
 
+/// Represents a pipeline operation with its order and parameters
+#[derive(Debug, Clone)]
+pub struct PipelineOperation {
+  pub op_type: OperationType,
+  pub index: usize,
+}
+
+/// Types of operations that can be performed in the pipeline
+#[derive(Debug, Clone)]
+pub enum OperationType {
+  Brightness(f32),
+  Contrast(f32),
+  Saturation(f32),
+  Hue(f32),
+  Gamma(f32),
+  WhiteBalance {
+    auto_adjust: bool,
+    temperature: Option<f32>,
+    tint: Option<f32>,
+  },
+  Blur(f32),
+  Sharpen(f32),
+  Noise(f32),
+  Scale(f32),
+  Rotate(f32),
+}
+
 /// CLI configuration structure
 pub struct CliConfig {
   pub example: Option<PathBuf>,
@@ -20,6 +47,8 @@ pub struct CliConfig {
 /// Pipeline configuration from CLI arguments
 #[derive(Debug)]
 pub struct PipelineConfig {
+  pub operations: Vec<PipelineOperation>,
+  // Keep these for backwards compatibility and validation
   pub brightness: Option<f32>,
   pub contrast: Option<f32>,
   pub saturation: Option<f32>,
@@ -38,6 +67,7 @@ pub struct PipelineConfig {
 impl Default for PipelineConfig {
   fn default() -> Self {
     Self {
+      operations: Vec::new(),
       brightness: None,
       contrast: None,
       saturation: None,
@@ -58,7 +88,8 @@ impl Default for PipelineConfig {
 impl CliConfig {
   /// Parse command line arguments and create CLI configuration
   pub fn from_args() -> Result<Self, String> {
-    Self::from_matches(build_cli().get_matches())
+    let cli = build_cli();
+    Self::from_matches(cli.get_matches())
   }
 
   /// Create CLI configuration from parsed matches
@@ -70,7 +101,161 @@ impl CliConfig {
       .or(matches.get_one::<PathBuf>("input"))
       .cloned();
 
+    let mut operations = Vec::new();
+
+    // Collect operations with their indices
+    if let Some(value) = matches.get_one::<f32>("brightness") {
+      if let Some(indices) = matches.indices_of("brightness") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Brightness(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("contrast") {
+      if let Some(indices) = matches.indices_of("contrast") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Contrast(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("saturation") {
+      if let Some(indices) = matches.indices_of("saturation") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Saturation(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("hue") {
+      if let Some(indices) = matches.indices_of("hue") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Hue(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("gamma") {
+      if let Some(indices) = matches.indices_of("gamma") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Gamma(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    // Handle white balance - check for any white balance related arguments
+    let auto_wb = matches.get_flag("auto-white-balance");
+    let wb_temp = matches.get_one::<f32>("wb-temperature").copied();
+    let wb_tint = matches.get_one::<f32>("wb-tint").copied();
+
+    if auto_wb || wb_temp.is_some() || wb_tint.is_some() {
+      // Find the earliest index among white balance arguments
+      let mut wb_index = usize::MAX;
+
+      if auto_wb {
+        if let Some(indices) = matches.indices_of("auto-white-balance") {
+          wb_index = wb_index.min(indices.min().unwrap_or(usize::MAX));
+        }
+      }
+      if wb_temp.is_some() {
+        if let Some(indices) = matches.indices_of("wb-temperature") {
+          wb_index = wb_index.min(indices.min().unwrap_or(usize::MAX));
+        }
+      }
+      if wb_tint.is_some() {
+        if let Some(indices) = matches.indices_of("wb-tint") {
+          wb_index = wb_index.min(indices.min().unwrap_or(usize::MAX));
+        }
+      }
+
+      if wb_index != usize::MAX {
+        operations.push(PipelineOperation {
+          op_type: OperationType::WhiteBalance {
+            auto_adjust: auto_wb,
+            temperature: wb_temp,
+            tint: wb_tint,
+          },
+          index: wb_index,
+        });
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("blur") {
+      if let Some(indices) = matches.indices_of("blur") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Blur(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("sharpen") {
+      if let Some(indices) = matches.indices_of("sharpen") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Sharpen(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("noise") {
+      if let Some(indices) = matches.indices_of("noise") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Noise(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("scale") {
+      if let Some(indices) = matches.indices_of("scale") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Scale(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    if let Some(value) = matches.get_one::<f32>("rotate") {
+      if let Some(indices) = matches.indices_of("rotate") {
+        for index in indices {
+          operations.push(PipelineOperation {
+            op_type: OperationType::Rotate(*value),
+            index,
+          });
+        }
+      }
+    }
+
+    // Sort operations by their original index
+    operations.sort_by_key(|op| op.index);
+
     let pipeline_config = PipelineConfig {
+      operations,
       brightness: matches.get_one::<f32>("brightness").copied(),
       contrast: matches.get_one::<f32>("contrast").copied(),
       saturation: matches.get_one::<f32>("saturation").copied(),
@@ -105,205 +290,199 @@ impl CliConfig {
     let input_id = pipeline.add_node("Input".to_string(), NodeType::ImageInput);
     let mut last_node_id = input_id;
 
-    // Add processing nodes based on configuration
-    if let Some(brightness) = self.pipeline_config.brightness {
-      let node_id = pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Brightness { value: brightness });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect brightness node");
-      last_node_id = node_id;
-    }
+    // Add processing nodes in the order they were specified on command line
+    for operation in &self.pipeline_config.operations {
+      match &operation.op_type {
+        OperationType::Brightness(value) => {
+          let node_id = pipeline.add_node("Brightness".to_string(), NodeType::Brightness);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Brightness { value: *value });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect brightness node");
+          last_node_id = node_id;
+        }
 
-    if let Some(contrast) = self.pipeline_config.contrast {
-      let node_id = pipeline.add_node("Contrast".to_string(), NodeType::Contrast);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Contrast { value: contrast });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect contrast node");
-      last_node_id = node_id;
-    }
+        OperationType::Contrast(value) => {
+          let node_id = pipeline.add_node("Contrast".to_string(), NodeType::Contrast);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Contrast { value: *value });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect contrast node");
+          last_node_id = node_id;
+        }
 
-    if let Some(saturation) = self.pipeline_config.saturation {
-      let node_id = pipeline.add_node("Saturation".to_string(), NodeType::Saturation);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Saturation { value: saturation });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect saturation node");
-      last_node_id = node_id;
-    }
+        OperationType::Saturation(value) => {
+          let node_id = pipeline.add_node("Saturation".to_string(), NodeType::Saturation);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Saturation { value: *value });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect saturation node");
+          last_node_id = node_id;
+        }
 
-    if let Some(hue) = self.pipeline_config.hue {
-      let node_id = pipeline.add_node("Hue".to_string(), NodeType::Hue);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Hue { value: hue });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect hue node");
-      last_node_id = node_id;
-    }
+        OperationType::Hue(value) => {
+          let node_id = pipeline.add_node("Hue".to_string(), NodeType::Hue);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Hue { value: *value });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect hue node");
+          last_node_id = node_id;
+        }
 
-    if let Some(gamma) = self.pipeline_config.gamma {
-      let node_id = pipeline.add_node("Gamma".to_string(), NodeType::Gamma);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Gamma { value: gamma });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect gamma node");
-      last_node_id = node_id;
-    }
+        OperationType::Gamma(value) => {
+          let node_id = pipeline.add_node("Gamma".to_string(), NodeType::Gamma);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Gamma { value: *value });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect gamma node");
+          last_node_id = node_id;
+        }
 
-    // Add white balance node if any white balance options are set
-    if self.pipeline_config.auto_white_balance
-      || self.pipeline_config.white_balance_temperature.is_some()
-      || self.pipeline_config.white_balance_tint.is_some()
-    {
-      let node_id = pipeline.add_node("WhiteBalance".to_string(), NodeType::WhiteBalance);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        let temperature = self
-          .pipeline_config
-          .white_balance_temperature
-          .unwrap_or(0.0);
-        let tint = self.pipeline_config.white_balance_tint.unwrap_or(0.0);
-        node.set_params(NodeParams::WhiteBalance {
-          auto_adjust: self.pipeline_config.auto_white_balance,
+        OperationType::WhiteBalance {
+          auto_adjust,
           temperature,
           tint,
-        });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect white balance node");
-      last_node_id = node_id;
-    }
+        } => {
+          let node_id =
+            pipeline.add_node("WhiteBalance".to_string(), NodeType::WhiteBalance);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            let temp = temperature.unwrap_or(0.0);
+            let tint_val = tint.unwrap_or(0.0);
+            node.set_params(NodeParams::WhiteBalance {
+              auto_adjust: *auto_adjust,
+              temperature: temp,
+              tint: tint_val,
+            });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect white balance node");
+          last_node_id = node_id;
+        }
 
-    if let Some(blur_radius) = self.pipeline_config.blur_radius {
-      let node_id = pipeline.add_node("Blur".to_string(), NodeType::Blur);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Blur {
-          radius: blur_radius,
-        });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect blur node");
-      last_node_id = node_id;
-    }
+        OperationType::Blur(radius) => {
+          let node_id = pipeline.add_node("Blur".to_string(), NodeType::Blur);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Blur { radius: *radius });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect blur node");
+          last_node_id = node_id;
+        }
 
-    if let Some(sharpen_amount) = self.pipeline_config.sharpen_amount {
-      let node_id = pipeline.add_node("Sharpen".to_string(), NodeType::Sharpen);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Sharpen {
-          amount: sharpen_amount,
-        });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect sharpen node");
-      last_node_id = node_id;
-    }
+        OperationType::Sharpen(amount) => {
+          let node_id = pipeline.add_node("Sharpen".to_string(), NodeType::Sharpen);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Sharpen { amount: *amount });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect sharpen node");
+          last_node_id = node_id;
+        }
 
-    if let Some(noise_amount) = self.pipeline_config.noise_amount {
-      let node_id = pipeline.add_node("Noise".to_string(), NodeType::Noise);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Noise {
-          amount: noise_amount,
-          seed: 42,
-        });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect noise node");
-      last_node_id = node_id;
-    }
+        OperationType::Noise(amount) => {
+          let node_id = pipeline.add_node("Noise".to_string(), NodeType::Noise);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Noise {
+              amount: *amount,
+              seed: 42,
+            });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect noise node");
+          last_node_id = node_id;
+        }
 
-    if let Some(scale_factor) = self.pipeline_config.scale_factor {
-      let node_id = pipeline.add_node("Scale".to_string(), NodeType::Scale);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Scale {
-          factor: scale_factor,
-        });
-      }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect scale node");
-      last_node_id = node_id;
-    }
+        OperationType::Scale(factor) => {
+          let node_id = pipeline.add_node("Scale".to_string(), NodeType::Scale);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Scale { factor: *factor });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect scale node");
+          last_node_id = node_id;
+        }
 
-    if let Some(rotate_angle) = self.pipeline_config.rotate_angle {
-      let node_id = pipeline.add_node("Rotate".to_string(), NodeType::Rotate);
-      if let Some(node) = pipeline.get_node_mut(node_id) {
-        node.set_params(NodeParams::Rotate {
-          angle: rotate_angle,
-        });
+        OperationType::Rotate(angle) => {
+          let node_id = pipeline.add_node("Rotate".to_string(), NodeType::Rotate);
+          if let Some(node) = pipeline.get_node_mut(node_id) {
+            node.set_params(NodeParams::Rotate { angle: *angle });
+          }
+          pipeline
+            .connect_nodes(
+              last_node_id,
+              "image".to_string(),
+              node_id,
+              "image".to_string(),
+            )
+            .expect("Failed to connect rotate node");
+          last_node_id = node_id;
+        }
       }
-      pipeline
-        .connect_nodes(
-          last_node_id,
-          "image".to_string(),
-          node_id,
-          "image".to_string(),
-        )
-        .expect("Failed to connect rotate node");
-      last_node_id = node_id;
     }
 
     // Add output node
@@ -334,54 +513,41 @@ impl CliConfig {
     }
     println!();
 
-    let mut operations = Vec::new();
-
-    if let Some(brightness) = self.pipeline_config.brightness {
-      operations.push(format!("Brightness: {:.2}", brightness));
-    }
-    if let Some(contrast) = self.pipeline_config.contrast {
-      operations.push(format!("Contrast: {:.2}", contrast));
-    }
-    if let Some(saturation) = self.pipeline_config.saturation {
-      operations.push(format!("Saturation: {:.2}", saturation));
-    }
-    if let Some(hue) = self.pipeline_config.hue {
-      operations.push(format!("Hue: {:.2}°", hue));
-    }
-    if let Some(gamma) = self.pipeline_config.gamma {
-      operations.push(format!("Gamma: {:.2}", gamma));
-    }
-    if self.pipeline_config.auto_white_balance {
-      operations.push("Auto White Balance".to_string());
-    }
-    if let Some(temp) = self.pipeline_config.white_balance_temperature {
-      operations.push(format!("White Balance Temperature: {:.2}", temp));
-    }
-    if let Some(tint) = self.pipeline_config.white_balance_tint {
-      operations.push(format!("White Balance Tint: {:.2}", tint));
-    }
-    if let Some(blur_radius) = self.pipeline_config.blur_radius {
-      operations.push(format!("Blur: {:.2}px", blur_radius));
-    }
-    if let Some(sharpen_amount) = self.pipeline_config.sharpen_amount {
-      operations.push(format!("Sharpen: {:.2}", sharpen_amount));
-    }
-    if let Some(noise_amount) = self.pipeline_config.noise_amount {
-      operations.push(format!("Noise: {:.2}", noise_amount));
-    }
-    if let Some(scale_factor) = self.pipeline_config.scale_factor {
-      operations.push(format!("Scale: {:.2}x", scale_factor));
-    }
-    if let Some(rotate_angle) = self.pipeline_config.rotate_angle {
-      operations.push(format!("Rotate: {:.2}°", rotate_angle));
-    }
-
-    if operations.is_empty() {
+    if self.pipeline_config.operations.is_empty() {
       println!("No operations specified - image will be passed through unchanged.");
     } else {
-      println!("Operations to apply:");
-      for (i, op) in operations.iter().enumerate() {
-        println!("  {}. {}", i + 1, op);
+      println!("Operations to apply (in command-line order):");
+      for (i, operation) in self.pipeline_config.operations.iter().enumerate() {
+        let description = match &operation.op_type {
+          OperationType::Brightness(value) => format!("Brightness: {:.2}", value),
+          OperationType::Contrast(value) => format!("Contrast: {:.2}", value),
+          OperationType::Saturation(value) => format!("Saturation: {:.2}", value),
+          OperationType::Hue(value) => format!("Hue: {:.2}°", value),
+          OperationType::Gamma(value) => format!("Gamma: {:.2}", value),
+          OperationType::WhiteBalance {
+            auto_adjust,
+            temperature,
+            tint,
+          } => {
+            let mut parts = Vec::new();
+            if *auto_adjust {
+              parts.push("Auto".to_string());
+            }
+            if let Some(temp) = temperature {
+              parts.push(format!("Temperature: {:.2}", temp));
+            }
+            if let Some(tint_val) = tint {
+              parts.push(format!("Tint: {:.2}", tint_val));
+            }
+            format!("White Balance ({})", parts.join(", "))
+          }
+          OperationType::Blur(radius) => format!("Blur: {:.2}px", radius),
+          OperationType::Sharpen(amount) => format!("Sharpen: {:.2}", amount),
+          OperationType::Noise(amount) => format!("Noise: {:.2}", amount),
+          OperationType::Scale(factor) => format!("Scale: {:.2}x", factor),
+          OperationType::Rotate(angle) => format!("Rotate: {:.2}°", angle),
+        };
+        println!("  {}. {}", i + 1, description);
       }
     }
     println!();
@@ -392,7 +558,6 @@ impl CliConfig {
 fn build_cli() -> Command {
   Command::new("shade")
         .version("0.1.0")
-        .author("Your Name <your.email@example.com>")
         .about("GPU-accelerated image processing and color grading tool")
         .arg(
             Arg::new("example")
@@ -713,6 +878,18 @@ mod tests {
     );
     assert_eq!(config.pipeline_config.brightness, Some(0.2));
     assert_eq!(config.pipeline_config.contrast, Some(1.1));
+    // Check that operations are in the correct order
+    assert_eq!(config.pipeline_config.operations.len(), 2);
+    if let OperationType::Brightness(val) = config.pipeline_config.operations[0].op_type {
+      assert_eq!(val, 0.2);
+    } else {
+      panic!("Expected brightness operation first");
+    }
+    if let OperationType::Contrast(val) = config.pipeline_config.operations[1].op_type {
+      assert_eq!(val, 1.1);
+    } else {
+      panic!("Expected contrast operation second");
+    }
   }
 
   #[test]
@@ -722,6 +899,20 @@ mod tests {
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
+        operations: vec![
+          PipelineOperation {
+            op_type: OperationType::Brightness(0.2),
+            index: 0,
+          },
+          PipelineOperation {
+            op_type: OperationType::Contrast(1.1),
+            index: 1,
+          },
+          PipelineOperation {
+            op_type: OperationType::Saturation(1.3),
+            index: 2,
+          },
+        ],
         brightness: Some(0.2),
         contrast: Some(1.1),
         saturation: Some(1.3),
@@ -752,6 +943,20 @@ mod tests {
     assert_eq!(config.pipeline_config.auto_white_balance, true);
     assert_eq!(config.pipeline_config.white_balance_temperature, None);
     assert_eq!(config.pipeline_config.white_balance_tint, None);
+    // Check that white balance operation was added
+    assert_eq!(config.pipeline_config.operations.len(), 1);
+    if let OperationType::WhiteBalance {
+      auto_adjust,
+      temperature,
+      tint,
+    } = &config.pipeline_config.operations[0].op_type
+    {
+      assert_eq!(*auto_adjust, true);
+      assert_eq!(*temperature, None);
+      assert_eq!(*tint, None);
+    } else {
+      panic!("Expected white balance operation");
+    }
 
     // Test manual white balance
     let args = vec![
@@ -770,6 +975,20 @@ mod tests {
     assert_eq!(config.pipeline_config.auto_white_balance, false);
     assert_eq!(config.pipeline_config.white_balance_temperature, Some(0.3));
     assert_eq!(config.pipeline_config.white_balance_tint, Some(-0.1));
+    // Check that white balance operation was added
+    assert_eq!(config.pipeline_config.operations.len(), 1);
+    if let OperationType::WhiteBalance {
+      auto_adjust,
+      temperature,
+      tint,
+    } = &config.pipeline_config.operations[0].op_type
+    {
+      assert_eq!(*auto_adjust, false);
+      assert_eq!(*temperature, Some(0.3));
+      assert_eq!(*tint, Some(-0.1));
+    } else {
+      panic!("Expected white balance operation");
+    }
   }
 
   #[test]
@@ -780,6 +999,14 @@ mod tests {
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
+        operations: vec![PipelineOperation {
+          op_type: OperationType::WhiteBalance {
+            auto_adjust: true,
+            temperature: None,
+            tint: None,
+          },
+          index: 0,
+        }],
         auto_white_balance: true,
         ..Default::default()
       },
@@ -795,6 +1022,14 @@ mod tests {
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
+        operations: vec![PipelineOperation {
+          op_type: OperationType::WhiteBalance {
+            auto_adjust: false,
+            temperature: Some(0.2),
+            tint: Some(-0.1),
+          },
+          index: 0,
+        }],
         white_balance_temperature: Some(0.2),
         white_balance_tint: Some(-0.1),
         ..Default::default()
@@ -804,6 +1039,67 @@ mod tests {
 
     let pipeline = config.build_pipeline();
     assert_eq!(pipeline.nodes.len(), 3); // input + white balance + output
+  }
+
+  #[test]
+  fn test_argument_order_respected() {
+    // Test that operations are applied in command-line order
+    let args = vec![
+      OsString::from("shade"),
+      OsString::from("--input"),
+      OsString::from("input.jpg"),
+      OsString::from("--output"),
+      OsString::from("output.jpg"),
+      OsString::from("--contrast"),
+      OsString::from("1.1"),
+      OsString::from("--brightness"),
+      OsString::from("0.2"),
+      OsString::from("--saturation"),
+      OsString::from("1.3"),
+    ];
+
+    let matches = build_cli().try_get_matches_from(args).unwrap();
+    let config = CliConfig::from_matches(matches).unwrap();
+
+    // Verify operations are in command-line order (contrast, brightness, saturation)
+    assert_eq!(config.pipeline_config.operations.len(), 3);
+
+    if let OperationType::Contrast(val) = config.pipeline_config.operations[0].op_type {
+      assert_eq!(val, 1.1);
+    } else {
+      panic!(
+        "Expected contrast operation first (index 0), got: {:?}",
+        config.pipeline_config.operations[0].op_type
+      );
+    }
+
+    if let OperationType::Brightness(val) = config.pipeline_config.operations[1].op_type {
+      assert_eq!(val, 0.2);
+    } else {
+      panic!(
+        "Expected brightness operation second (index 1), got: {:?}",
+        config.pipeline_config.operations[1].op_type
+      );
+    }
+
+    if let OperationType::Saturation(val) = config.pipeline_config.operations[2].op_type {
+      assert_eq!(val, 1.3);
+    } else {
+      panic!(
+        "Expected saturation operation third (index 2), got: {:?}",
+        config.pipeline_config.operations[2].op_type
+      );
+    }
+
+    // Verify indices are in ascending order
+    assert!(
+      config.pipeline_config.operations[0].index
+        < config.pipeline_config.operations[1].index
+    );
+    assert!(
+      config.pipeline_config.operations[1].index
+        < config.pipeline_config.operations[2].index
+    );
   }
 
   #[test]
