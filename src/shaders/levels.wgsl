@@ -26,7 +26,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let input_color = textureLoad(input_texture, coords, 0);
 
     // Apply levels adjustment
-    // First, map input range to 0-1
+    // First, map input range
     let input_range = params.input_white - params.input_black;
     let normalized_color = vec3<f32>(
         (input_color.r - params.input_black) / input_range,
@@ -34,8 +34,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         (input_color.b - params.input_black) / input_range
     );
 
-    // Clamp to [0.0, 1.0] range after input mapping
-    let clamped_color = clamp(normalized_color, vec3<f32>(0.0), vec3<f32>(1.0));
+    // Only clamp negative values to preserve HDR highlights
+    let clamped_color = max(normalized_color, vec3<f32>(0.0));
 
     // Then, map to output range
     let output_range = params.output_white - params.output_black;
@@ -46,8 +46,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         input_color.a
     );
 
-    // Final clamp to [0.0, 1.0] range
-    let final_color = clamp(adjusted_color, vec4<f32>(0.0), vec4<f32>(1.0));
+    // Only clamp negative values to preserve HDR highlights
+    let final_color = max(adjusted_color, vec4<f32>(0.0, 0.0, 0.0, adjusted_color.a));
 
     textureStore(output_texture, coords, final_color);
 }

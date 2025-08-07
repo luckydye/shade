@@ -5,13 +5,10 @@ mod utils;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
 #[cfg(not(target_arch = "wasm32"))]
-use utils::{
-  OutputPrecision, is_openexr_file, load_openexr_image,
-  output_image_native_with_precision,
-};
+use utils::{is_openexr_file, load_openexr_image, output_image_native};
 
 use cli::CliConfig;
-use shade::TexturePrecision;
+use shade::{BYTES_PER_PIXEL, TEXTURE_FORMAT};
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -21,33 +18,19 @@ struct LoadedImage {
 }
 
 async fn load_image(config: &CliConfig) -> LoadedImage {
-  // Choose texture precision (can be made configurable via CLI later)
-  let precision = TexturePrecision::Float32; // Use 32-bit for maximum quality
-
-  // Helper function to convert 8-bit RGBA to float format
-  let convert_to_float = |data: &[u8], precision: TexturePrecision| -> Vec<u8> {
-    let mut float_data =
-      Vec::with_capacity(data.len() * precision.bytes_per_pixel() as usize / 4);
+  // Helper function to convert 8-bit RGBA to 32-bit float format
+  let convert_to_float = |data: &[u8]| -> Vec<u8> {
+    let mut float_data = Vec::with_capacity(data.len() * 4); // 4x expansion for f32
     for chunk in data.chunks(4) {
       let r = chunk[0] as f32 / 255.0;
       let g = chunk[1] as f32 / 255.0;
       let b = chunk[2] as f32 / 255.0;
       let a = chunk[3] as f32 / 255.0;
 
-      match precision {
-        TexturePrecision::Float32 => {
-          float_data.extend_from_slice(&r.to_le_bytes());
-          float_data.extend_from_slice(&g.to_le_bytes());
-          float_data.extend_from_slice(&b.to_le_bytes());
-          float_data.extend_from_slice(&a.to_le_bytes());
-        }
-        TexturePrecision::Float16 => {
-          float_data.extend_from_slice(&half::f16::from_f32(r).to_le_bytes());
-          float_data.extend_from_slice(&half::f16::from_f32(g).to_le_bytes());
-          float_data.extend_from_slice(&half::f16::from_f32(b).to_le_bytes());
-          float_data.extend_from_slice(&half::f16::from_f32(a).to_le_bytes());
-        }
-      }
+      float_data.extend_from_slice(&r.to_le_bytes());
+      float_data.extend_from_slice(&g.to_le_bytes());
+      float_data.extend_from_slice(&b.to_le_bytes());
+      float_data.extend_from_slice(&a.to_le_bytes());
     }
     float_data
   };
@@ -63,43 +46,21 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
         match load_openexr_image(&input_path_str) {
           Ok((exr_data, (width, height))) => {
             log::info!("Loaded OpenEXR input image: {}x{}", width, height);
-            // OpenEXR data is already in f32 format, but we need to convert based on precision
-            match precision {
-              TexturePrecision::Float32 => {
-                // Data is already in the right format
-                (exr_data, (width, height))
-              }
-              TexturePrecision::Float16 => {
-                // Convert f32 to f16
-                let mut f16_data = Vec::with_capacity(width * height * 8);
-                for chunk in exr_data.chunks(16) {
-                  let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                  let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
-                  let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
-                  let a =
-                    f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
-
-                  f16_data.extend_from_slice(&half::f16::from_f32(r).to_le_bytes());
-                  f16_data.extend_from_slice(&half::f16::from_f32(g).to_le_bytes());
-                  f16_data.extend_from_slice(&half::f16::from_f32(b).to_le_bytes());
-                  f16_data.extend_from_slice(&half::f16::from_f32(a).to_le_bytes());
-                }
-                (f16_data, (width, height))
-              }
-            }
+            // OpenEXR data is already in f32 format, which is what we want
+            (exr_data, (width, height))
           }
           Err(e) => {
             log::error!("Failed to load OpenEXR file: {}", e);
             let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
               .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
               .collect::<Vec<u8>>();
-            let float_data = convert_to_float(&default_data, precision);
+            let float_data = convert_to_float(&default_data);
             (float_data, TEXTURE_DIMS)
           }
         }
       } else {
         // Use standard image loading for other formats
-        use image::io::Reader as ImageReader;
+        use image::ImageReader;
 
         match ImageReader::open(input_path) {
           Ok(img_reader) => {
@@ -109,8 +70,8 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
                 let (width, height) = rgba_img.dimensions();
                 let data = rgba_img.into_raw();
                 log::info!("Loaded input image: {}x{}", width, height);
-                // Convert 8-bit RGBA to chosen float precision
-                let float_data = convert_to_float(&data, precision);
+                // Convert 8-bit RGBA to 32-bit float
+                let float_data = convert_to_float(&data);
                 (float_data, (width as usize, height as usize))
               }
               Err(e) => {
@@ -118,7 +79,7 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
                 let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
                   .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
                   .collect::<Vec<u8>>();
-                let float_data = convert_to_float(&default_data, precision);
+                let float_data = convert_to_float(&default_data);
                 (float_data, TEXTURE_DIMS)
               }
             }
@@ -128,7 +89,7 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
             let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
               .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
               .collect::<Vec<u8>>();
-            let float_data = convert_to_float(&default_data, precision);
+            let float_data = convert_to_float(&default_data);
             (float_data, TEXTURE_DIMS)
           }
         }
@@ -140,7 +101,7 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
       let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
         .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
         .collect::<Vec<u8>>();
-      let float_data = convert_to_float(&default_data, precision);
+      let float_data = convert_to_float(&default_data);
       (float_data, TEXTURE_DIMS)
     }
   } else {
@@ -148,7 +109,7 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
     let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
       .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
       .collect::<Vec<u8>>();
-    let float_data = convert_to_float(&default_data, precision);
+    let float_data = convert_to_float(&default_data);
     (float_data, TEXTURE_DIMS)
   };
 
@@ -208,12 +169,7 @@ async fn run(config: &CliConfig) {
       let output_path_str = output_path.to_string_lossy().to_string();
 
       // Use standard image output for other formats
-      output_image_native_with_precision(
-        texture_data.to_vec(),
-        actual_dims,
-        output_path_str,
-        config.output_precision,
-      );
+      output_image_native(texture_data.to_vec(), actual_dims, output_path_str);
     }
   }
   #[cfg(target_arch = "wasm32")]
@@ -235,7 +191,7 @@ pub fn main() {
           // Generate an example image
           let p = config.example.clone().unwrap();
           let path = Some(p.as_os_str().to_string_lossy().to_string());
-          pollster::block_on(example_image(path, config.output_precision));
+          pollster::block_on(example_image(path));
         }
 
         if let Err(e) = cli::validate_config(&config) {
@@ -264,11 +220,10 @@ pub fn main() {
   }
 }
 
-async fn example_image(path: Option<String>, output_precision: OutputPrecision) {
+async fn example_image(path: Option<String>) {
   // Use 32-bit float precision for the example
-  let precision = TexturePrecision::Float32;
   let mut texture_data =
-    vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * precision.bytes_per_pixel() as usize];
+    vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * BYTES_PER_PIXEL as usize];
 
   let instance = wgpu::Instance::default();
   let adapter = instance
@@ -298,14 +253,14 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
     mip_level_count: 1,
     sample_count: 1,
     dimension: wgpu::TextureDimension::D2,
-    format: precision.texture_format(),
+    format: TEXTURE_FORMAT,
     usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
     view_formats: &[],
   });
   let storage_texture_view =
     storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
   // Calculate padded buffer size for proper alignment
-  let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+  let unpadded_bytes_per_row = TEXTURE_DIMS.0 * BYTES_PER_PIXEL as usize;
   let align = wgpu::MAP_ALIGNMENT as usize;
   let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
   let buffer_size = padded_bytes_per_row * TEXTURE_DIMS.1;
@@ -325,7 +280,7 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
         visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::StorageTexture {
           access: wgpu::StorageTextureAccess::WriteOnly,
-          format: precision.texture_format(),
+          format: TEXTURE_FORMAT,
           view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
@@ -402,7 +357,7 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
   {
     let view = buffer_slice.get_mapped_range();
     // Copy data accounting for row padding
-    let unpadded_bytes_per_row = TEXTURE_DIMS.0 * precision.bytes_per_pixel() as usize;
+    let unpadded_bytes_per_row = TEXTURE_DIMS.0 * BYTES_PER_PIXEL as usize;
     let align = wgpu::MAP_ALIGNMENT as usize;
     let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
 
@@ -423,12 +378,7 @@ async fn example_image(path: Option<String>, output_precision: OutputPrecision) 
     let output_path = path.unwrap();
 
     // Use standard image output for other formats
-    output_image_native_with_precision(
-      texture_data.to_vec(),
-      TEXTURE_DIMS,
-      output_path,
-      output_precision,
-    );
+    output_image_native(texture_data.to_vec(), TEXTURE_DIMS, output_path);
   }
   #[cfg(target_arch = "wasm32")]
   output_image_wasm(texture_data.to_vec(), TEXTURE_DIMS);

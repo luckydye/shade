@@ -35,8 +35,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         input_color.a
     );
 
-    // Clamp to [0.0, 1.0] range
-    let final_color = clamp(adjusted_color, vec4<f32>(0.0), vec4<f32>(1.0));
+    // Only clamp negative values to preserve HDR highlights
+    let final_color = max(adjusted_color, vec4<f32>(0.0, 0.0, 0.0, adjusted_color.a));
 
     textureStore(output_texture, coords, final_color);
 }

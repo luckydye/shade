@@ -4,7 +4,7 @@
 //! image processing pipelines with various color grading and filter operations.
 
 use crate::shade::{ImagePipeline, NodeParams, NodeType};
-use crate::utils::OutputPrecision;
+
 use clap::{Arg, ArgMatches, Command, value_parser};
 use std::path::PathBuf;
 
@@ -13,7 +13,6 @@ pub struct CliConfig {
   pub example: Option<PathBuf>,
   pub input_path: Option<PathBuf>,
   pub output_path: Option<PathBuf>,
-  pub output_precision: OutputPrecision,
   pub pipeline_config: PipelineConfig,
   pub verbose: bool,
 }
@@ -48,14 +47,6 @@ impl CliConfig {
       .or(matches.get_one::<PathBuf>("input"))
       .cloned();
 
-    let output_precision =
-      match matches.get_one::<String>("precision").map(|s| s.as_str()) {
-        Some("8") => OutputPrecision::Bit8,
-        Some("16") => OutputPrecision::Bit16,
-        Some("32") | Some("float32") => OutputPrecision::Float32,
-        _ => OutputPrecision::Bit16,
-      };
-
     let pipeline_config = PipelineConfig {
       brightness: matches.get_one::<f32>("brightness").copied(),
       contrast: matches.get_one::<f32>("contrast").copied(),
@@ -75,7 +66,6 @@ impl CliConfig {
       example,
       input_path,
       output_path,
-      output_precision,
       pipeline_config,
       verbose,
     })
@@ -435,14 +425,7 @@ fn build_cli() -> Command {
                 .help("Rotate image (degrees)")
                 .value_parser(value_parser!(f32)),
         )
-        .arg(
-            Arg::new("precision")
-                .short('p')
-                .long("precision")
-                .value_name("BITS")
-                .help("Output precision: 8, 16, 32/float32 (default: 32)")
-                .value_parser(value_parser!(String)),
-        )
+
         .arg(
             Arg::new("verbose")
                 .short('v')
@@ -462,11 +445,11 @@ fn build_cli() -> Command {
             \n    \
             OpenEXR HDR processing:\n      \
             shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files\n      \
-            shade -i hdr.exr -o display.png --gamma 2.2 --precision 16\n    \
+            shade -i hdr.exr -o display.png --gamma 2.2\n    \
             \n    \
-            Output precision:\n      \
-            shade --example mandelbrot.raw --precision 32  # 32-bit float data\n      \
-            shade -i input.jpg -o output.png --precision 16  # 16-bit PNG",
+            High quality processing:\n      \
+            shade --example mandelbrot.raw  # 32-bit float data\n      \
+            shade -i input.jpg -o output.png  # Automatic format detection",
         )
 }
 
@@ -493,32 +476,42 @@ pub fn print_examples() {
   println!();
   println!("OpenEXR HDR processing:");
   println!("  shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files");
-  println!("  shade -i hdr.exr -o display.png --gamma 2.2 --precision 16");
+  println!("  shade -i hdr.exr -o display.png --gamma 2.2");
   println!();
-  println!("Output precision control:");
-  println!("  shade --example mandelbrot.raw --precision 32  # 32-bit float data");
-  println!("  shade -i input.jpg -o output.png --precision 16  # 16-bit PNG");
+  println!("High quality processing:");
+  println!("  shade --example mandelbrot.raw  # 32-bit float data");
+  println!("  shade -i input.jpg -o output.png  # Automatic format detection");
   println!();
 }
 
 /// Validate CLI configuration
 pub fn validate_config(config: &CliConfig) -> Result<(), String> {
-  // Check input file exists
-  if !config.input_path.clone().unwrap().exists() {
-    return Err(format!(
-      "Input file does not exist: {}",
-      config.input_path.clone().unwrap().display()
-    ));
+  // Skip validation if we're generating an example
+  if config.example.is_some() {
+    return Ok(());
   }
 
-  // Check input file extension
-  if let Some(ext) = config.input_path.clone().unwrap().extension() {
-    let ext_str = ext.to_string_lossy().to_lowercase();
-    if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"].contains(&ext_str.as_str()) {
-      return Err(format!("Unsupported input format: {}", ext_str));
+  // Check input file exists if one is specified
+  if let Some(input_path) = &config.input_path {
+    if !input_path.exists() {
+      return Err(format!(
+        "Input file does not exist: {}",
+        input_path.display()
+      ));
     }
-  } else {
-    return Err("Input file has no extension".to_string());
+  }
+
+  // Check input file extension if input path exists
+  if let Some(input_path) = &config.input_path {
+    if let Some(ext) = input_path.extension() {
+      let ext_str = ext.to_string_lossy().to_lowercase();
+      if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"].contains(&ext_str.as_str())
+      {
+        return Err(format!("Unsupported input format: {}", ext_str));
+      }
+    } else {
+      return Err("Input file has no extension".to_string());
+    }
   }
 
   // Validate parameter ranges

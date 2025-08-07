@@ -9,35 +9,10 @@ use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 use wgpu::{ComputePipeline, Device, Queue, Texture, TextureView};
 
-// Define texture precision options for better quality control
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TexturePrecision {
-  Float16, // 16-bit float (8 bytes per pixel) - good compatibility
-  Float32, // 32-bit float (16 bytes per pixel) - maximum quality
-}
-
-impl TexturePrecision {
-  pub fn texture_format(&self) -> wgpu::TextureFormat {
-    match self {
-      TexturePrecision::Float16 => wgpu::TextureFormat::Rgba16Float,
-      TexturePrecision::Float32 => wgpu::TextureFormat::Rgba32Float,
-    }
-  }
-
-  pub fn bytes_per_pixel(&self) -> u32 {
-    match self {
-      TexturePrecision::Float16 => 8, // 4 channels * 2 bytes per f16
-      TexturePrecision::Float32 => 16, // 4 channels * 4 bytes per f32
-    }
-  }
-
-  pub fn shader_format(&self) -> &'static str {
-    match self {
-      TexturePrecision::Float16 => "rgba16float",
-      TexturePrecision::Float32 => "rgba32float",
-    }
-  }
-}
+// Always use 32-bit float for maximum quality
+pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+pub const BYTES_PER_PIXEL: u32 = 16; // 4 channels * 4 bytes per f32
+pub const SHADER_FORMAT: &str = "rgba32float";
 
 // Define the types of processing nodes available
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -227,7 +202,6 @@ pub struct ImagePipeline {
   pub input_node_id: Option<usize>,
   pub output_node_id: Option<usize>,
   next_node_id: usize,
-  pub precision: TexturePrecision,
 
   // GPU resources (optional, set when initialized)
   device: Option<Device>,
@@ -240,23 +214,18 @@ pub struct ImagePipeline {
 impl ImagePipeline {
   /// Calculate aligned bytes per row for texture operations
   fn aligned_bytes_per_row(&self, width: u32) -> u32 {
-    let unpadded_bytes_per_row = width * self.precision.bytes_per_pixel();
+    let unpadded_bytes_per_row = width * BYTES_PER_PIXEL;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     (unpadded_bytes_per_row + align - 1) / align * align
   }
 
   pub fn new() -> Self {
-    Self::with_precision(TexturePrecision::Float32)
-  }
-
-  pub fn with_precision(precision: TexturePrecision) -> Self {
     ImagePipeline {
       nodes: HashMap::new(),
       connections: Vec::new(),
       input_node_id: None,
       output_node_id: None,
       next_node_id: 0,
-      precision,
       device: None,
       queue: None,
       pipelines: HashMap::new(),
@@ -303,7 +272,7 @@ impl ImagePipeline {
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::StorageTexture {
               access: wgpu::StorageTextureAccess::WriteOnly,
-              format: self.precision.texture_format(),
+              format: TEXTURE_FORMAT,
               view_dimension: wgpu::TextureViewDimension::D2,
             },
             count: None,
@@ -394,8 +363,7 @@ impl ImagePipeline {
     }?;
 
     // Replace the hardcoded texture format with the dynamic one
-    let shader_with_format =
-      base_shader.replace("rgba32float", self.precision.shader_format());
+    let shader_with_format = base_shader.replace("rgba32float", SHADER_FORMAT);
     Some(shader_with_format)
   }
 
@@ -635,7 +603,7 @@ impl ImagePipeline {
       mip_level_count: 1,
       sample_count: 1,
       dimension: wgpu::TextureDimension::D2,
-      format: self.precision.texture_format(),
+      format: TEXTURE_FORMAT,
       usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
       view_formats: &[],
     });
@@ -651,7 +619,7 @@ impl ImagePipeline {
       mip_level_count: 1,
       sample_count: 1,
       dimension: wgpu::TextureDimension::D2,
-      format: self.precision.texture_format(),
+      format: TEXTURE_FORMAT,
       usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
       view_formats: &[],
     });
@@ -667,7 +635,7 @@ impl ImagePipeline {
       &input_data,
       wgpu::TexelCopyBufferLayout {
         offset: 0,
-        bytes_per_row: Some(self.precision.bytes_per_pixel() * width),
+        bytes_per_row: Some(BYTES_PER_PIXEL * width),
         rows_per_image: Some(height),
       },
       wgpu::Extent3d {
@@ -705,7 +673,7 @@ impl ImagePipeline {
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::StorageTexture {
               access: wgpu::StorageTextureAccess::WriteOnly,
-              format: self.precision.texture_format(),
+              format: TEXTURE_FORMAT,
               view_dimension: wgpu::TextureViewDimension::D2,
             },
             count: None,
@@ -815,7 +783,7 @@ impl ImagePipeline {
     let data = buffer_slice.get_mapped_range();
 
     // Handle row padding when copying data back
-    let unpadded_bytes_per_row = width * self.precision.bytes_per_pixel();
+    let unpadded_bytes_per_row = width * BYTES_PER_PIXEL;
     let aligned_bytes_per_row = self.aligned_bytes_per_row(width);
     let mut result = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
 
@@ -988,12 +956,6 @@ impl PipelineBuilder {
   pub fn new() -> Self {
     PipelineBuilder {
       pipeline: ImagePipeline::new(),
-    }
-  }
-
-  pub fn with_precision(precision: TexturePrecision) -> Self {
-    PipelineBuilder {
-      pipeline: ImagePipeline::with_precision(precision),
     }
   }
 

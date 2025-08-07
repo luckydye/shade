@@ -52,7 +52,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let highlight_adjustment = midtone_adjustment * (1.0 + params.highlights * highlight_weight);
 
     let final_color = vec4<f32>(
-        clamp(highlight_adjustment, vec3<f32>(0.0), vec3<f32>(1.0)),
+        max(highlight_adjustment, vec3<f32>(0.0)),
         input_color.a
     );
 

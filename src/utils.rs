@@ -23,124 +23,91 @@ pub fn add_web_nothing_to_see_msg() {
     );
 }
 
-/// Output precision options for image data
-///
-/// This enum controls how the processed image data is written to disk:
-/// - `Bit8`: Standard 8-bit PNG (256 levels per channel, widely compatible)
-/// - `Bit16`: 16-bit PNG (65,536 levels per channel, high precision, good compatibility)
-/// - `Float32`: Raw 32-bit float binary data (maximum precision, requires special handling)
-///
-/// # Examples
-///
-/// ```rust
-/// // For maximum compatibility
-/// output_image_native_with_precision(data, dims, "output.png", OutputPrecision::Bit8);
-///
-/// // For high precision while maintaining PNG compatibility
-/// output_image_native_with_precision(data, dims, "output.png", OutputPrecision::Bit16);
-///
-/// // For maximum precision (raw binary format)
-/// output_image_native_with_precision(data, dims, "output.raw", OutputPrecision::Float32);
-/// ```
-#[derive(Debug, Clone, Copy)]
-pub enum OutputPrecision {
-  Bit8,    // Standard 8-bit PNG (good compatibility, lower precision)
-  Bit16,   // 16-bit PNG (high precision, good compatibility)
-  Float32, // Raw 32-bit float binary file (maximum precision, requires special handling)
-}
-
 /// Outputs image data with 16-bit PNG precision by default.
 ///
 /// This function automatically detects the input data format and outputs a 16-bit PNG
 /// for better precision than standard 8-bit PNGs while maintaining compatibility.
+#[cfg(not(target_arch = "wasm32"))]
+/// Outputs image data with automatic format detection based on file extension.
+///
+/// This function automatically chooses the best output format based on the file extension:
+/// - `.exr` -> OpenEXR (32-bit float HDR format)
+/// - `.png` -> 16-bit PNG (high quality, good compatibility)
+/// - `.jpg`, `.jpeg` -> 8-bit JPEG (standard format)
+/// - `.raw`, `.f32` -> Raw 32-bit float binary data
+/// - Other extensions -> Default to 16-bit PNG
+///
+/// Input data is assumed to be 32-bit float RGBA (16 bytes per pixel).
+///
+/// # Arguments
+///
+/// * `image_data` - Raw 32-bit float RGBA image data
+/// * `texture_dims` - Image dimensions as (width, height)
+/// * `path` - Output file path (extension determines format)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn output_image_native(
   image_data: Vec<u8>,
   texture_dims: (usize, usize),
   path: String,
 ) {
-  output_image_native_with_precision(
-    image_data,
-    texture_dims,
-    path,
-    OutputPrecision::Bit16,
-  );
-}
-
-/// Outputs image data with the specified precision format.
-///
-/// This function provides full control over the output format:
-/// - Automatically detects input data format (8-bit, 16-bit float, or 32-bit float)
-/// - Converts to the requested output precision
-/// - Handles proper file format selection based on precision
-///
-/// # Arguments
-///
-/// * `image_data` - Raw image data in bytes (format auto-detected)
-/// * `texture_dims` - Image dimensions as (width, height)
-/// * `path` - Output file path
-/// * `precision` - Desired output precision format
-///
-/// # File Extensions
-///
-/// - For `OutputPrecision::Bit8` and `Bit16`: Use `.png` extension
-/// - For `OutputPrecision::Float32`: Use `.raw` or `.f32` extension (raw binary data)
-#[cfg(not(target_arch = "wasm32"))]
-pub fn output_image_native_with_precision(
-  image_data: Vec<u8>,
-  texture_dims: (usize, usize),
-  path: String,
-  precision: OutputPrecision,
-) {
   let pixels = texture_dims.0 * texture_dims.1;
 
-  if image_data.len() == pixels * 16 {
-    match precision {
-      OutputPrecision::Float32 => {
-        // Write raw 32-bit float data
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&image_data[..]).unwrap();
-        log::info!("Raw 32-bit float data written to \"{path}\".");
-        return;
-      }
-      OutputPrecision::Bit8 => {
-        // Convert to 8-bit
-        let mut u8_data = Vec::with_capacity(pixels * 4);
-        for chunk in image_data.chunks(16) {
-          let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-          let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
-          let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
-          let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
+  // Ensure we have 32-bit float data (16 bytes per pixel)
+  if image_data.len() != pixels * 16 {
+    log::error!(
+      "Expected {} bytes for 32-bit float data, got {}",
+      pixels * 16,
+      image_data.len()
+    );
+    return;
+  }
 
-          u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
-          u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
-          u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
-          u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
-        }
+  // Determine output format from file extension
+  let path_lower = path.to_lowercase();
 
-        let mut png_data = Vec::<u8>::new();
-        let mut encoder = png::Encoder::new(
-          std::io::Cursor::new(&mut png_data),
-          texture_dims.0 as u32,
-          texture_dims.1 as u32,
-        );
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut png_writer = encoder.write_header().unwrap();
-        png_writer.write_image_data(&u8_data[..]).unwrap();
-        png_writer.finish().unwrap();
+  if is_openexr_file(&path) {
+    // Write OpenEXR format (32-bit float)
+    write_openexr_image(&image_data, texture_dims, &path);
+    return;
+  } else if path_lower.ends_with(".raw") || path_lower.ends_with(".f32") {
+    // Write raw 32-bit float data
+    let mut file = std::fs::File::create(&path).unwrap();
+    file.write_all(&image_data[..]).unwrap();
+    log::info!("Raw 32-bit float data written to \"{path}\".");
+    return;
+  } else if path_lower.ends_with(".jpg") || path_lower.ends_with(".jpeg") {
+    // Convert to 8-bit JPEG
+    let mut u8_data = Vec::with_capacity(pixels * 4);
+    for chunk in image_data.chunks(16) {
+      let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+      let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+      let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+      let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
 
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&png_data[..]).unwrap();
-        log::info!("8-bit PNG file written to disc as \"{path}\".");
-        return;
-      }
-      OutputPrecision::Bit16 => {
-        // Fall through to 16-bit PNG code below
-      }
+      u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+      u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+      u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+      u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
     }
 
-    // 32-bit float data - convert to 16-bit PNG
+    let mut png_data = Vec::<u8>::new();
+    let mut encoder = png::Encoder::new(
+      std::io::Cursor::new(&mut png_data),
+      texture_dims.0 as u32,
+      texture_dims.1 as u32,
+    );
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut png_writer = encoder.write_header().unwrap();
+    png_writer.write_image_data(&u8_data[..]).unwrap();
+    png_writer.finish().unwrap();
+
+    let mut file = std::fs::File::create(&path).unwrap();
+    file.write_all(&png_data[..]).unwrap();
+    log::info!("8-bit PNG file written to disc as \"{path}\".");
+    return;
+  } else {
+    // Default to 16-bit PNG for maximum quality and compatibility
     let mut u32_data = Vec::with_capacity(pixels * 4);
     for chunk in image_data.chunks(16) {
       let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
@@ -162,7 +129,7 @@ pub fn output_image_native_with_precision(
       texture_dims.1 as u32,
     );
     encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Sixteen); // Use 16-bit as closest supported bit depth
+    encoder.set_depth(png::BitDepth::Sixteen);
     let mut png_writer = encoder.write_header().unwrap();
 
     // Convert u32 to u16 for 16-bit PNG (still much better than 8-bit)
@@ -178,175 +145,6 @@ pub fn output_image_native_with_precision(
     let mut file = std::fs::File::create(&path).unwrap();
     file.write_all(&png_data[..]).unwrap();
     log::info!("16-bit PNG file written to disc as \"{path}\".");
-    return;
-  } else if image_data.len() == pixels * 8 {
-    match precision {
-      OutputPrecision::Float32 => {
-        // Convert f16 to f32 and write raw data
-        let mut f32_data = Vec::with_capacity(pixels * 16);
-        for chunk in image_data.chunks(8) {
-          let r = half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
-          let g = half::f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
-          let b = half::f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
-          let a = half::f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
-
-          f32_data.extend_from_slice(&r.to_le_bytes());
-          f32_data.extend_from_slice(&g.to_le_bytes());
-          f32_data.extend_from_slice(&b.to_le_bytes());
-          f32_data.extend_from_slice(&a.to_le_bytes());
-        }
-
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&f32_data[..]).unwrap();
-        log::info!(
-          "Raw 32-bit float data (converted from 16-bit) written to \"{path}\"."
-        );
-        return;
-      }
-      OutputPrecision::Bit8 => {
-        // Convert to 8-bit
-        let mut u8_data = Vec::with_capacity(pixels * 4);
-        for chunk in image_data.chunks(8) {
-          let r = half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
-          let g = half::f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
-          let b = half::f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
-          let a = half::f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
-
-          u8_data.push((r.clamp(0.0, 1.0) * 255.0) as u8);
-          u8_data.push((g.clamp(0.0, 1.0) * 255.0) as u8);
-          u8_data.push((b.clamp(0.0, 1.0) * 255.0) as u8);
-          u8_data.push((a.clamp(0.0, 1.0) * 255.0) as u8);
-        }
-
-        let mut png_data = Vec::<u8>::new();
-        let mut encoder = png::Encoder::new(
-          std::io::Cursor::new(&mut png_data),
-          texture_dims.0 as u32,
-          texture_dims.1 as u32,
-        );
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut png_writer = encoder.write_header().unwrap();
-        png_writer.write_image_data(&u8_data[..]).unwrap();
-        png_writer.finish().unwrap();
-
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&png_data[..]).unwrap();
-        log::info!("8-bit PNG file written to disc as \"{path}\".");
-        return;
-      }
-      OutputPrecision::Bit16 => {
-        // Fall through to 16-bit PNG code below
-      }
-    }
-    // 16-bit float data (8 bytes per pixel: 4 channels * 2 bytes per f16)
-    let mut u16_data = Vec::with_capacity(pixels * 4 * 2);
-    for chunk in image_data.chunks(8) {
-      let r = half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
-      let g = half::f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
-      let b = half::f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
-      let a = half::f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
-
-      // Convert to u16 maintaining precision
-      let r_u16 = (r.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
-      let g_u16 = (g.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
-      let b_u16 = (b.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
-      let a_u16 = (a.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
-
-      u16_data.extend_from_slice(&r_u16.to_be_bytes());
-      u16_data.extend_from_slice(&g_u16.to_be_bytes());
-      u16_data.extend_from_slice(&b_u16.to_be_bytes());
-      u16_data.extend_from_slice(&a_u16.to_be_bytes());
-    }
-
-    let mut png_data = Vec::<u8>::new();
-    let mut encoder = png::Encoder::new(
-      std::io::Cursor::new(&mut png_data),
-      texture_dims.0 as u32,
-      texture_dims.1 as u32,
-    );
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Sixteen);
-    let mut png_writer = encoder.write_header().unwrap();
-    png_writer.write_image_data(&u16_data[..]).unwrap();
-    png_writer.finish().unwrap();
-    log::info!("PNG file encoded in memory as 16-bit.");
-
-    let mut file = std::fs::File::create(&path).unwrap();
-    file.write_all(&png_data[..]).unwrap();
-    log::info!("16-bit PNG file written to disc as \"{path}\".");
-    return;
-  } else {
-    // 8-bit data
-    match precision {
-      OutputPrecision::Float32 => {
-        // Convert 8-bit to f32 and write raw data
-        let mut f32_data = Vec::with_capacity(pixels * 16);
-        for chunk in image_data.chunks(4) {
-          let r = chunk[0] as f32 / 255.0;
-          let g = chunk[1] as f32 / 255.0;
-          let b = chunk[2] as f32 / 255.0;
-          let a = chunk[3] as f32 / 255.0;
-
-          f32_data.extend_from_slice(&r.to_le_bytes());
-          f32_data.extend_from_slice(&g.to_le_bytes());
-          f32_data.extend_from_slice(&b.to_le_bytes());
-          f32_data.extend_from_slice(&a.to_le_bytes());
-        }
-
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&f32_data[..]).unwrap();
-        log::info!("Raw 32-bit float data (converted from 8-bit) written to \"{path}\".");
-      }
-      OutputPrecision::Bit16 => {
-        // Convert 8-bit to 16-bit PNG
-        let mut u16_data = Vec::with_capacity(pixels * 4 * 2);
-        for chunk in image_data.chunks(4) {
-          let r = ((chunk[0] as u16) << 8) | chunk[0] as u16;
-          let g = ((chunk[1] as u16) << 8) | chunk[1] as u16;
-          let b = ((chunk[2] as u16) << 8) | chunk[2] as u16;
-          let a = ((chunk[3] as u16) << 8) | chunk[3] as u16;
-
-          u16_data.extend_from_slice(&r.to_be_bytes());
-          u16_data.extend_from_slice(&g.to_be_bytes());
-          u16_data.extend_from_slice(&b.to_be_bytes());
-          u16_data.extend_from_slice(&a.to_be_bytes());
-        }
-
-        let mut png_data = Vec::<u8>::new();
-        let mut encoder = png::Encoder::new(
-          std::io::Cursor::new(&mut png_data),
-          texture_dims.0 as u32,
-          texture_dims.1 as u32,
-        );
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Sixteen);
-        let mut png_writer = encoder.write_header().unwrap();
-        png_writer.write_image_data(&u16_data[..]).unwrap();
-        png_writer.finish().unwrap();
-
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&png_data[..]).unwrap();
-        log::info!("16-bit PNG file written to disc as \"{path}\".");
-      }
-      OutputPrecision::Bit8 => {
-        let mut png_data = Vec::<u8>::new();
-        let mut encoder = png::Encoder::new(
-          std::io::Cursor::new(&mut png_data),
-          texture_dims.0 as u32,
-          texture_dims.1 as u32,
-        );
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut png_writer = encoder.write_header().unwrap();
-        png_writer.write_image_data(&image_data[..]).unwrap();
-        png_writer.finish().unwrap();
-
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&png_data[..]).unwrap();
-        log::info!("8-bit PNG file written to disc as \"{path}\".");
-      }
-    }
   }
 }
 
@@ -405,6 +203,52 @@ pub fn is_openexr_file(path: &str) -> bool {
     .and_then(|ext| ext.to_str())
     .map(|ext| ext.to_lowercase() == "exr")
     .unwrap_or(false)
+}
+
+/// Writes an OpenEXR image file from f32 RGBA data
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_openexr_image(image_data: &[u8], texture_dims: (usize, usize), path: &str) {
+  use exr::prelude::*;
+
+  log::info!("Writing OpenEXR file: {}", path);
+
+  let (width, height) = texture_dims;
+  let pixels = width * height;
+
+  // Convert byte data back to f32 RGBA values
+  let mut rgba_data = Vec::with_capacity(pixels);
+  for chunk in image_data.chunks(16) {
+    let r = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    let g = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+    let b = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+    let a = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
+
+    rgba_data.push((r, g, b, a));
+  }
+
+  // Create the image
+  // let layer = Layer::new(
+  //   (width, height),
+  //   LayerAttributes::named("rgba"),
+  //   Encoding::SMALL_FAST_LOSSLESS,
+  //   SpecificChannels::rgba(|position| {
+  //     let index = position.y() * width + position.x();
+  //     if index < rgba_data.len() {
+  //       let (r, g, b, a) = rgba_data[index];
+  //       (r, g, b, a)
+  //     } else {
+  //       (0.0, 0.0, 0.0, 1.0)
+  //     }
+  //   }),
+  // );
+
+  // let image = Image::from_layer(layer);
+
+  // Write the image
+  // match image.write_to_file(path) {
+  //   Ok(_) => log::info!("Successfully wrote OpenEXR file: {}", path),
+  //   Err(e) => log::error!("Failed to write OpenEXR file: {}", e),
+  // }
 }
 
 /// Effectively a version of `output_image_native` but meant for web browser contexts.
