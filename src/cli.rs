@@ -18,18 +18,41 @@ pub struct CliConfig {
 }
 
 /// Pipeline configuration from CLI arguments
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PipelineConfig {
   pub brightness: Option<f32>,
   pub contrast: Option<f32>,
   pub saturation: Option<f32>,
   pub hue: Option<f32>,
   pub gamma: Option<f32>,
+  pub auto_white_balance: bool,
+  pub white_balance_temperature: Option<f32>,
+  pub white_balance_tint: Option<f32>,
   pub blur_radius: Option<f32>,
   pub sharpen_amount: Option<f32>,
   pub noise_amount: Option<f32>,
   pub scale_factor: Option<f32>,
   pub rotate_angle: Option<f32>,
+}
+
+impl Default for PipelineConfig {
+  fn default() -> Self {
+    Self {
+      brightness: None,
+      contrast: None,
+      saturation: None,
+      hue: None,
+      gamma: None,
+      auto_white_balance: false,
+      white_balance_temperature: None,
+      white_balance_tint: None,
+      blur_radius: None,
+      sharpen_amount: None,
+      noise_amount: None,
+      scale_factor: None,
+      rotate_angle: None,
+    }
+  }
 }
 
 impl CliConfig {
@@ -53,6 +76,9 @@ impl CliConfig {
       saturation: matches.get_one::<f32>("saturation").copied(),
       hue: matches.get_one::<f32>("hue").copied(),
       gamma: matches.get_one::<f32>("gamma").copied(),
+      auto_white_balance: matches.get_flag("auto-white-balance"),
+      white_balance_temperature: matches.get_one::<f32>("wb-temperature").copied(),
+      white_balance_tint: matches.get_one::<f32>("wb-tint").copied(),
       blur_radius: matches.get_one::<f32>("blur").copied(),
       sharpen_amount: matches.get_one::<f32>("sharpen").copied(),
       noise_amount: matches.get_one::<f32>("noise").copied(),
@@ -157,6 +183,35 @@ impl CliConfig {
           "image".to_string(),
         )
         .expect("Failed to connect gamma node");
+      last_node_id = node_id;
+    }
+
+    // Add white balance node if any white balance options are set
+    if self.pipeline_config.auto_white_balance
+      || self.pipeline_config.white_balance_temperature.is_some()
+      || self.pipeline_config.white_balance_tint.is_some()
+    {
+      let node_id = pipeline.add_node("WhiteBalance".to_string(), NodeType::WhiteBalance);
+      if let Some(node) = pipeline.get_node_mut(node_id) {
+        let temperature = self
+          .pipeline_config
+          .white_balance_temperature
+          .unwrap_or(0.0);
+        let tint = self.pipeline_config.white_balance_tint.unwrap_or(0.0);
+        node.set_params(NodeParams::WhiteBalance {
+          auto_adjust: self.pipeline_config.auto_white_balance,
+          temperature,
+          tint,
+        });
+      }
+      pipeline
+        .connect_nodes(
+          last_node_id,
+          "image".to_string(),
+          node_id,
+          "image".to_string(),
+        )
+        .expect("Failed to connect white balance node");
       last_node_id = node_id;
     }
 
@@ -268,8 +323,15 @@ impl CliConfig {
   /// Print pipeline information
   pub fn print_pipeline_info(&self) {
     println!("Image Processing Pipeline Configuration:");
-    println!("Input:  {}", self.input_path.clone().unwrap().display());
-    println!("Output: {}", self.output_path.clone().unwrap().display());
+    if let Some(input) = &self.input_path {
+      println!("Input:  {}", input.display());
+    }
+    if let Some(output) = &self.output_path {
+      println!("Output: {}", output.display());
+    }
+    if let Some(example) = &self.example {
+      println!("Example: {}", example.display());
+    }
     println!();
 
     let mut operations = Vec::new();
@@ -288,6 +350,15 @@ impl CliConfig {
     }
     if let Some(gamma) = self.pipeline_config.gamma {
       operations.push(format!("Gamma: {:.2}", gamma));
+    }
+    if self.pipeline_config.auto_white_balance {
+      operations.push("Auto White Balance".to_string());
+    }
+    if let Some(temp) = self.pipeline_config.white_balance_temperature {
+      operations.push(format!("White Balance Temperature: {:.2}", temp));
+    }
+    if let Some(tint) = self.pipeline_config.white_balance_tint {
+      operations.push(format!("White Balance Tint: {:.2}", tint));
     }
     if let Some(blur_radius) = self.pipeline_config.blur_radius {
       operations.push(format!("Blur: {:.2}px", blur_radius));
@@ -425,6 +496,26 @@ fn build_cli() -> Command {
                 .help("Rotate image (degrees)")
                 .value_parser(value_parser!(f32)),
         )
+        .arg(
+            Arg::new("auto-white-balance")
+                .long("auto-white-balance")
+                .help("Automatically adjust white balance")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("wb-temperature")
+                .long("wb-temperature")
+                .value_name("VALUE")
+                .help("Manual white balance temperature (-1.0 to 1.0, 0.0 = no change)")
+                .value_parser(value_parser!(f32)),
+        )
+        .arg(
+            Arg::new("wb-tint")
+                .long("wb-tint")
+                .value_name("VALUE")
+                .help("Manual white balance tint (-1.0 to 1.0, 0.0 = no change)")
+                .value_parser(value_parser!(f32)),
+        )
 
         .arg(
             Arg::new("verbose")
@@ -438,7 +529,9 @@ fn build_cli() -> Command {
             Basic image processing:\n      \
             shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1\n      \
             shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8\n      \
-            shade -i image.jpg -o blurred.jpg --blur 2.5\n    \
+            shade -i image.jpg -o blurred.jpg --blur 2.5\n      \
+            shade -i portrait.jpg -o corrected.jpg --auto-white-balance\n      \
+            shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1\n    \
             \n    \
             Complex processing:\n      \
             shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9\n    \
@@ -466,6 +559,12 @@ pub fn print_examples() {
   println!("Apply blur effect:");
   println!("  shade -i image.jpg -o blurred.jpg --blur 2.5");
   println!();
+  println!("White balance correction:");
+  println!("  shade -i portrait.jpg -o corrected.jpg --auto-white-balance");
+  println!();
+  println!("Manual white balance adjustment:");
+  println!("  shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1");
+  println!();
   println!("Complex processing chain:");
   println!("  shade -i original.png -o processed.png \\");
   println!("        --brightness 0.1 --contrast 1.2 --saturation 1.1 \\");
@@ -486,31 +585,29 @@ pub fn print_examples() {
 
 /// Validate CLI configuration
 pub fn validate_config(config: &CliConfig) -> Result<(), String> {
-  // Skip validation if we're generating an example
-  if config.example.is_some() {
-    return Ok(());
-  }
-
-  // Check input file exists if one is specified
-  if let Some(input_path) = &config.input_path {
-    if !input_path.exists() {
-      return Err(format!(
-        "Input file does not exist: {}",
-        input_path.display()
-      ));
-    }
-  }
-
-  // Check input file extension if input path exists
-  if let Some(input_path) = &config.input_path {
-    if let Some(ext) = input_path.extension() {
-      let ext_str = ext.to_string_lossy().to_lowercase();
-      if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"].contains(&ext_str.as_str())
-      {
-        return Err(format!("Unsupported input format: {}", ext_str));
+  // Check input file exists if one is specified (skip for examples)
+  if config.example.is_none() {
+    if let Some(input_path) = &config.input_path {
+      if !input_path.exists() {
+        return Err(format!(
+          "Input file does not exist: {}",
+          input_path.display()
+        ));
       }
-    } else {
-      return Err("Input file has no extension".to_string());
+    }
+
+    // Check input file extension if input path exists
+    if let Some(input_path) = &config.input_path {
+      if let Some(ext) = input_path.extension() {
+        let ext_str = ext.to_string_lossy().to_lowercase();
+        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"]
+          .contains(&ext_str.as_str())
+        {
+          return Err(format!("Unsupported input format: {}", ext_str));
+        }
+      } else {
+        return Err("Input file has no extension".to_string());
+      }
     }
   }
 
@@ -554,6 +651,18 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
   if let Some(sharpen_amount) = config.pipeline_config.sharpen_amount {
     if sharpen_amount < 0.0 || sharpen_amount > 2.0 {
       return Err("Sharpen amount must be between 0.0 and 2.0".to_string());
+    }
+  }
+
+  if let Some(temperature) = config.pipeline_config.white_balance_temperature {
+    if temperature < -1.0 || temperature > 1.0 {
+      return Err("White balance temperature must be between -1.0 and 1.0".to_string());
+    }
+  }
+
+  if let Some(tint) = config.pipeline_config.white_balance_tint {
+    if tint < -1.0 || tint > 1.0 {
+      return Err("White balance tint must be between -1.0 and 1.0".to_string());
     }
   }
 
@@ -623,5 +732,123 @@ mod tests {
 
     let pipeline = config.build_pipeline();
     assert_eq!(pipeline.nodes.len(), 5); // input + 3 operations + output
+  }
+
+  #[test]
+  fn test_white_balance_cli_parsing() {
+    // Test auto white balance
+    let args = vec![
+      OsString::from("shade"),
+      OsString::from("--input"),
+      OsString::from("input.jpg"),
+      OsString::from("--output"),
+      OsString::from("output.jpg"),
+      OsString::from("--auto-white-balance"),
+    ];
+
+    let matches = build_cli().try_get_matches_from(args).unwrap();
+    let config = CliConfig::from_matches(matches).unwrap();
+
+    assert_eq!(config.pipeline_config.auto_white_balance, true);
+    assert_eq!(config.pipeline_config.white_balance_temperature, None);
+    assert_eq!(config.pipeline_config.white_balance_tint, None);
+
+    // Test manual white balance
+    let args = vec![
+      OsString::from("shade"),
+      OsString::from("--input"),
+      OsString::from("input.jpg"),
+      OsString::from("--output"),
+      OsString::from("output.jpg"),
+      OsString::from("--wb-temperature=0.3"),
+      OsString::from("--wb-tint=-0.1"),
+    ];
+
+    let matches = build_cli().try_get_matches_from(args).unwrap();
+    let config = CliConfig::from_matches(matches).unwrap();
+
+    assert_eq!(config.pipeline_config.auto_white_balance, false);
+    assert_eq!(config.pipeline_config.white_balance_temperature, Some(0.3));
+    assert_eq!(config.pipeline_config.white_balance_tint, Some(-0.1));
+  }
+
+  #[test]
+  fn test_white_balance_pipeline_building() {
+    // Test auto white balance pipeline
+    let config = CliConfig {
+      example: None,
+      input_path: Some(PathBuf::from("input.jpg")),
+      output_path: Some(PathBuf::from("output.jpg")),
+      pipeline_config: PipelineConfig {
+        auto_white_balance: true,
+        ..Default::default()
+      },
+      verbose: false,
+    };
+
+    let pipeline = config.build_pipeline();
+    assert_eq!(pipeline.nodes.len(), 3); // input + white balance + output
+
+    // Test manual white balance pipeline
+    let config = CliConfig {
+      example: None,
+      input_path: Some(PathBuf::from("input.jpg")),
+      output_path: Some(PathBuf::from("output.jpg")),
+      pipeline_config: PipelineConfig {
+        white_balance_temperature: Some(0.2),
+        white_balance_tint: Some(-0.1),
+        ..Default::default()
+      },
+      verbose: false,
+    };
+
+    let pipeline = config.build_pipeline();
+    assert_eq!(pipeline.nodes.len(), 3); // input + white balance + output
+  }
+
+  #[test]
+  fn test_white_balance_validation() {
+    // Test valid values with example (skips file validation)
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig {
+        white_balance_temperature: Some(0.5),
+        white_balance_tint: Some(-0.5),
+        ..Default::default()
+      },
+      verbose: false,
+    };
+
+    assert!(validate_config(&config).is_ok());
+
+    // Test invalid temperature with example
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig {
+        white_balance_temperature: Some(2.0),
+        ..Default::default()
+      },
+      verbose: false,
+    };
+
+    assert!(validate_config(&config).is_err());
+
+    // Test invalid tint with example
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig {
+        white_balance_tint: Some(-2.0),
+        ..Default::default()
+      },
+      verbose: false,
+    };
+
+    assert!(validate_config(&config).is_err());
   }
 }

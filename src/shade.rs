@@ -29,6 +29,7 @@ pub enum NodeType {
   Gamma,
   Levels,
   ColorBalance,
+  WhiteBalance,
 
   // Filters
   Blur,
@@ -74,6 +75,11 @@ pub enum NodeParams {
     shadows: [f32; 3],    // RGB
     midtones: [f32; 3],   // RGB
     highlights: [f32; 3], // RGB
+  },
+  WhiteBalance {
+    auto_adjust: bool,
+    temperature: f32, // Color temperature adjustment (-1.0 to 1.0)
+    tint: f32,        // Tint adjustment (-1.0 to 1.0)
   },
   Blur {
     radius: f32,
@@ -164,6 +170,11 @@ impl ProcessingNode {
         shadows: [1.0, 1.0, 1.0],
         midtones: [1.0, 1.0, 1.0],
         highlights: [1.0, 1.0, 1.0],
+      },
+      NodeType::WhiteBalance => NodeParams::WhiteBalance {
+        auto_adjust: false,
+        temperature: 0.0,
+        tint: 0.0,
       },
       NodeType::Blur => NodeParams::Blur { radius: 1.0 },
       NodeType::Sharpen => NodeParams::Sharpen { amount: 1.0 },
@@ -307,6 +318,7 @@ impl ImagePipeline {
       NodeType::Gamma,
       NodeType::Levels,
       NodeType::ColorBalance,
+      NodeType::WhiteBalance,
       NodeType::Blur,
       NodeType::Sharpen,
       NodeType::Noise,
@@ -350,6 +362,7 @@ impl ImagePipeline {
       NodeType::Gamma => Some(include_str!("shaders/gamma.wgsl")),
       NodeType::Levels => Some(include_str!("shaders/levels.wgsl")),
       NodeType::ColorBalance => Some(include_str!("shaders/color_balance.wgsl")),
+      NodeType::WhiteBalance => Some(include_str!("shaders/white_balance.wgsl")),
       NodeType::Blur => Some(include_str!("shaders/blur.wgsl")),
       NodeType::Sharpen => Some(include_str!("shaders/sharpen.wgsl")),
       NodeType::Noise => Some(include_str!("shaders/noise.wgsl")),
@@ -852,6 +865,16 @@ impl ImagePipeline {
         for &val in highlights {
           buffer.extend_from_slice(&val.to_le_bytes());
         }
+        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // padding
+      }
+      NodeParams::WhiteBalance {
+        auto_adjust,
+        temperature,
+        tint,
+      } => {
+        buffer.extend_from_slice(&(*auto_adjust as u32 as f32).to_le_bytes());
+        buffer.extend_from_slice(&temperature.to_le_bytes());
+        buffer.extend_from_slice(&tint.to_le_bytes());
         buffer.extend_from_slice(&0.0f32.to_le_bytes()); // padding
       }
       NodeParams::Blur { radius } => {
