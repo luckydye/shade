@@ -2,7 +2,7 @@
 
 Node-based GPU-accelerated image processing and color grading tool
 
-
+```
 Options:
   -e, --example <FILE>          Output image file
   -i, --input <FILE>            Input image file
@@ -42,3 +42,4 @@ EXAMPLES:
     High quality processing:
       shade --example mandelbrot.raw  # 32-bit float data
       shade -i input.jpg -o output.png  # Automatic format detection
+```
