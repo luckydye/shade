@@ -1,12 +1,13 @@
 [package]
 name = "shade"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "GPU-accelerated image processing and color grading tool"
 license = "MIT"
 repository = "https://github.com/luckydye/shade"
 
 [dependencies]
+base64 = "0.22"
 clap = { version = "4.0", features = ["derive"] }
 env_logger = "0.11.8"
 exr = "1.72.0"
@@ -16,6 +17,9 @@ image = "0.25.6"
 log = "0.4.27"
 png = "0.17.16"
 pollster = "0.4.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["io-util", "io-std", "rt", "macros"] }
 wasm-bindgen = "0.2.100"
 wgpu = "26.0.1"
 

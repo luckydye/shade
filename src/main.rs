@@ -1,5 +1,7 @@
 mod cli;
+mod server;
 mod shade;
+mod socket;
 mod utils;
 
 #[cfg(target_arch = "wasm32")]
@@ -8,6 +10,7 @@ use crate::utils::output_image_wasm;
 use utils::{is_openexr_file, load_openexr_image, output_image_native};
 
 use cli::CliConfig;
+use server::ImageProcessingServer;
 use shade::{BYTES_PER_PIXEL, TEXTURE_FORMAT};
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
@@ -184,6 +187,17 @@ pub fn main() {
       .filter_level(log::LevelFilter::Info)
       .format_timestamp_nanos()
       .init();
+
+    // Check if we should run in socket mode
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "--socket" {
+      let mut server = ImageProcessingServer::new();
+      if let Err(e) = server.run_socket_mode_sync() {
+        eprintln!("Socket server error: {}", e);
+        std::process::exit(1);
+      }
+      return;
+    }
 
     match CliConfig::from_args() {
       Ok(config) => {
