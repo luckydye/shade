@@ -88,7 +88,6 @@ function App() {
   const [zoom, setZoom] = useState(100);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const processingTimeoutRef = useRef<number | undefined>();
 
   // Initialize shade process
   useEffect(() => {
@@ -116,15 +115,13 @@ function App() {
 
     return () => {
       mounted = false;
-      if (processingTimeoutRef.current !== undefined) {
-        clearTimeout(processingTimeoutRef.current);
-      }
     };
   }, []);
 
   // Process image with debouncing
   const processImage = useCallback(
     async (operations: ImageOperation[]) => {
+
       if (!originalImage || !previewEnabled || isProcessing) return;
 
       setIsProcessing(true);
@@ -149,17 +146,12 @@ function App() {
         setIsProcessing(false);
       }
     },
-    [originalImage, previewEnabled, isProcessing],
+    [originalImage, previewEnabled],
   );
 
   // Debounced processing
   useEffect(() => {
     if (!originalImage || !previewEnabled) return;
-
-    // Clear existing timeout
-    if (processingTimeoutRef.current !== undefined) {
-      clearTimeout(processingTimeoutRef.current);
-    }
 
     // Create operations array from current state
     const operations: ImageOperation[] = [];
@@ -195,10 +187,10 @@ function App() {
       });
     }
 
-    // Set timeout for processing
-    processingTimeoutRef.current = window.setTimeout(() => {
-      processImage(operations);
-    }, 300); // 300ms debounce
+    processImage(operations);
+
+    console.error("Process image")
+
   }, [state, processImage, originalImage, previewEnabled]);
 
   const handleFileSelect = async () => {
@@ -208,7 +200,7 @@ function App() {
         filters: [
           {
             name: 'Images',
-            extensions: ['png', 'jpg', 'jpeg', 'bmp', 'tiff'],
+            extensions: ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'exr'],
           },
         ],
       });
@@ -802,25 +794,6 @@ function App() {
               {/* Image Viewport */}
               <div className="flex-1 overflow-auto bg-black rounded-lg shadow-inner flex items-center justify-center p-4">
                 <div className="flex space-x-4 items-stretch h-full w-full">
-                  {/* Original Image */}
-                  <div className="flex-1 flex flex-col items-center justify-start h-full overflow-hidden">
-                    <h4 className="text-lg font-medium mb-2 text-gray-400">
-                      Original
-                    </h4>
-                    <div className="relative flex-1 w-full overflow-hidden cursor-grab active:cursor-grabbing">
-                      <img
-                        src={originalImage}
-                        alt="Original"
-                        style={{
-                          width: `${zoom}%`,
-                          opacity: previewEnabled && processedImage ? 0.7 : 1,
-                          transformOrigin: "top left",
-                          maxWidth: "none",
-                        }}
-                        className="block mx-auto"
-                      />
-                    </div>
-                  </div>
 
                   {/* Processed Image */}
                   {previewEnabled && processedImage && (
