@@ -386,8 +386,8 @@ function App() {
                   <input
                     id="brightness-slider"
                     type="range"
-                    min="0"
-                    max="2"
+                    min="-1.0"
+                    max="1.0"
                     step="0.01"
                     value={state.brightness}
                     onChange={(e) =>
@@ -412,8 +412,8 @@ function App() {
                   <input
                     id="contrast-slider"
                     type="range"
-                    min="0"
-                    max="2"
+                    min="0.0"
+                    max="2.0"
                     step="0.01"
                     value={state.contrast}
                     onChange={(e) =>
@@ -438,8 +438,8 @@ function App() {
                   <input
                     id="saturation-slider"
                     type="range"
-                    min="0"
-                    max="2"
+                    min="0.0"
+                    max="2.0"
                     step="0.01"
                     value={state.saturation}
                     onChange={(e) =>
@@ -464,8 +464,8 @@ function App() {
                   <input
                     id="hue-slider"
                     type="range"
-                    min="-180"
-                    max="180"
+                    min="-180.0"
+                    max="180.0"
                     step="1"
                     value={state.hue}
                     onChange={(e) =>
@@ -490,8 +490,8 @@ function App() {
                   <input
                     id="gamma-slider"
                     type="range"
-                    min="0.5"
-                    max="2"
+                    min="0.1"
+                    max="3.0"
                     step="0.01"
                     value={state.gamma}
                     onChange={(e) =>
@@ -597,7 +597,7 @@ function App() {
                     id="scale-slider"
                     type="range"
                     min="0.1"
-                    max="3"
+                    max="5.0"
                     step="0.01"
                     value={state.scale}
                     onChange={(e) =>
