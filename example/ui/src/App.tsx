@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import {
   Download,
   Eye,
@@ -207,16 +207,19 @@ function App() {
         multiple: false,
         filters: [
           {
-            name: "Images",
-            extensions: ["png", "jpg", "jpeg", "bmp", "tiff"],
+            name: 'Images',
+            extensions: ['png', 'jpg', 'jpeg', 'bmp', 'tiff'],
           },
         ],
       });
 
-      if (selected && typeof selected === "string") {
-        // Read file and convert to base64
-        const response = await fetch(`file://${selected}`);
-        const blob = await response.blob();
+      if (selected && typeof selected === 'string') {
+        // Read file using our custom Tauri command
+        const fileData = await invoke<number[]>('read_image_file', { filePath: selected });
+
+        // Convert to base64 data URL
+        const uint8Array = new Uint8Array(fileData);
+        const blob = new Blob([uint8Array]);
         const reader = new FileReader();
 
         reader.onload = (e) => {
@@ -232,7 +235,6 @@ function App() {
       }
     } catch (err) {
       setError(`Failed to load image: ${err}`);
-      console.error("File selection error:", err);
     }
   };
 

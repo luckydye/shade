@@ -364,6 +364,14 @@ async fn get_shade_status(
   Ok(process.is_initialized().await)
 }
 
+#[tauri::command]
+async fn read_image_file(file_path: String) -> Result<Vec<u8>, String> {
+  match std::fs::read(&file_path) {
+    Ok(data) => Ok(data),
+    Err(e) => Err(format!("Failed to read file {}: {}", file_path, e)),
+  }
+}
+
 // Legacy greet command
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -385,7 +393,8 @@ pub fn run() {
       initialize_shade,
       process_image_base64,
       process_image_file,
-      get_shade_status
+      get_shade_status,
+      read_image_file
     ])
     .setup(|app| {
       // Start the shade process on app startup
