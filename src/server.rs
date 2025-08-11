@@ -2,7 +2,7 @@ use std::io::{stdin, stdout};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::cli::{CliConfig, PipelineConfig, PipelineOperation};
-use crate::socket::{
+use crate::protocol::{
   AsyncMessageTransport, ImageInput, InitializeParams, InitializeResult, Message,
   MessageId, MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
   ServerCapabilities, ServerInfo,
@@ -68,7 +68,6 @@ impl ImageProcessingServer {
       match transport.read_message() {
         Ok(message) => {
           let should_shutdown = message.method.as_deref() == Some("shutdown");
-          let should_exit = message.method.as_deref() == Some("exit");
 
           if let Some(response) = pollster::block_on(self.handle_message(message)) {
             if let Err(e) = transport.write_message(&response) {
@@ -77,7 +76,7 @@ impl ImageProcessingServer {
             }
           }
 
-          if should_shutdown || should_exit {
+          if should_shutdown {
             log::info!("Shutting down gracefully");
             break;
           }
@@ -95,18 +94,17 @@ impl ImageProcessingServer {
   /// Handle incoming message and return response if needed
   async fn handle_message(&mut self, message: Message) -> Option<Message> {
     match message.method.as_deref() {
+      // Just sends capabilities to client
       Some("initialize") => Some(self.handle_initialize(message).await),
+      // processes the image
       Some("process_image") => Some(self.handle_process_image(message).await),
+      // shotdown the process
       Some("shutdown") => {
         log::info!("Shutdown requested");
         Some(Message::new_response(
           message.id.unwrap_or(0),
           serde_json::Value::Null,
         ))
-      }
-      Some("exit") => {
-        log::info!("Exit requested");
-        None // Exit doesn't send a response
       }
       Some(method) => Some(Message::new_error_response(
         message.id,

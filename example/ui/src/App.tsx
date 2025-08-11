@@ -55,7 +55,7 @@ interface ImageProcessingState {
 }
 
 const DEFAULT_STATE: ImageProcessingState = {
-  brightness: 1.0,
+  brightness: 0.0,
   contrast: 1.0,
   saturation: 1.0,
   hue: 0.0,
@@ -67,12 +67,14 @@ const DEFAULT_STATE: ImageProcessingState = {
   rotate: 0.0,
   whiteBalance: {
     auto_adjust: false,
-    temperature: 5500.0,
+    temperature: 0.0,
     tint: 0.0,
   },
 };
 
 function App() {
+  const [imageFilePath, setImageFilePath] = useState<string | null>(null);
+  const [processingLatency, setProcessingLatency] = useState<number>(0);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [imageInfo, setImageInfo] = useState<{
@@ -122,16 +124,17 @@ function App() {
   const processImage = useCallback(
     async (operations: ImageOperation[]) => {
 
-      if (!originalImage || !previewEnabled || isProcessing) return;
+      if (!originalImage || !previewEnabled) return;
 
+      const startTime = Date.now();
       setIsProcessing(true);
       setError(null);
 
       try {
         const result = await invoke<ProcessImageResult>(
-          "process_image_base64",
+          "process_image_file",
           {
-            imageData: originalImage.split(",")[1], // Remove data:image/...;base64, prefix
+            filePath: imageFilePath, // Remove data:image/...;base64, prefix
             operations,
             outputFormat: "png",
           },
@@ -142,11 +145,13 @@ function App() {
       } catch (err) {
         setError(`Processing failed: ${err}`);
         setProcessedImage(null);
+        console.error(err);
       } finally {
         setIsProcessing(false);
+        setProcessingLatency(Date.now() - startTime);
       }
     },
-    [originalImage, previewEnabled],
+    [originalImage, previewEnabled, imageFilePath],
   );
 
   // Debounced processing
@@ -178,8 +183,7 @@ function App() {
       operations.push({ operation: "rotate", params: state.rotate });
     if (
       state.whiteBalance.auto_adjust ||
-      state.whiteBalance.temperature !== 5500.0 ||
-      state.whiteBalance.tint !== 0.0
+      state.whiteBalance.temperature !== 0.0
     ) {
       operations.push({
         operation: "white_balance",
@@ -206,6 +210,8 @@ function App() {
       });
 
       if (selected && typeof selected === 'string') {
+        setImageFilePath(selected)
+
         // Read file using our custom Tauri command
         const fileData = await invoke<number[]>('read_image_file', { filePath: selected });
 
@@ -306,7 +312,8 @@ function App() {
             ) : (
               <EyeOff className="w-4 h-4 mr-2" />
             )}
-            {previewEnabled ? "Live Preview" : "Preview Off"}
+            <span>{previewEnabled ? "Live Preview" : "Preview Off"}</span>
+            <span className="ml-2">{processingLatency}ms</span>
           </button>
         </div>
 
@@ -630,9 +637,9 @@ function App() {
                         <input
                           id="wb-temp-slider"
                           type="range"
-                          min="2000"
-                          max="10000"
-                          step="50"
+                          min="-1.0"
+                          max="1.0"
+                          step="0.01"
                           value={state.whiteBalance.temperature}
                           onChange={(e) =>
                             updateWhiteBalance(
@@ -643,7 +650,7 @@ function App() {
                           className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                         />
                         <span className="text-sm w-16 text-right">
-                          {state.whiteBalance.temperature.toFixed(0)}K
+                          {state.whiteBalance.temperature.toFixed(2)}
                         </span>
                       </div>
 
@@ -770,9 +777,6 @@ function App() {
                   {/* Processed Image */}
                   {previewEnabled && processedImage && (
                     <div className="flex-1 flex flex-col items-center justify-start h-full overflow-hidden">
-                      <h4 className="text-lg font-medium mb-2 text-gray-400">
-                        Processed
-                      </h4>
                       <div className="relative flex-1 w-full overflow-hidden cursor-grab active:cursor-grabbing">
                         <img
                           src={processedImage}

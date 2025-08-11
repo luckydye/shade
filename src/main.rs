@@ -1,7 +1,7 @@
 mod cli;
+mod protocol;
 mod server;
 mod shade;
-mod socket;
 mod utils;
 
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +18,60 @@ const TEXTURE_DIMS: (usize, usize) = (512, 512);
 struct LoadedImage {
   texture_data: Vec<u8>,
   actual_dims: (usize, usize),
+}
+
+pub fn main() {
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    env_logger::builder()
+      .filter_level(log::LevelFilter::Info)
+      .format_timestamp_nanos()
+      .init();
+
+    // Check if we should run in socket mode
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "--socket" {
+      let mut server = ImageProcessingServer::new();
+      if let Err(e) = server.run_socket_mode_sync() {
+        eprintln!("Socket server error: {}", e);
+        std::process::exit(1);
+      }
+      return;
+    }
+
+    match CliConfig::from_args() {
+      Ok(config) => {
+        if config.example.is_some() {
+          // Generate an example image
+          let p = config.example.clone().unwrap();
+          let path = Some(p.as_os_str().to_string_lossy().to_string());
+          pollster::block_on(example_image(path));
+        }
+
+        if let Err(e) = cli::validate_config(&config) {
+          eprintln!("Error: {}", e);
+          std::process::exit(1);
+        }
+
+        if config.verbose {
+          config.print_pipeline_info();
+        }
+
+        pollster::block_on(run(&config));
+      }
+      Err(e) => {
+        eprintln!("Error parsing arguments: {}", e);
+        cli::print_examples();
+        std::process::exit(1);
+      }
+    }
+  }
+  #[cfg(target_arch = "wasm32")]
+  {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init_with_level(log::Level::Info).expect("could not initialize logger");
+    wasm_bindgen_futures::spawn_local(run(None));
+  }
 }
 
 // Helper function to convert 8-bit RGBA to 32-bit float format
@@ -178,60 +232,6 @@ async fn run(config: &CliConfig) {
   #[cfg(target_arch = "wasm32")]
   output_image_wasm(texture_data.to_vec(), actual_dims);
   log::info!("Done.")
-}
-
-pub fn main() {
-  #[cfg(not(target_arch = "wasm32"))]
-  {
-    env_logger::builder()
-      .filter_level(log::LevelFilter::Info)
-      .format_timestamp_nanos()
-      .init();
-
-    // Check if we should run in socket mode
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 && args[1] == "--socket" {
-      let mut server = ImageProcessingServer::new();
-      if let Err(e) = server.run_socket_mode_sync() {
-        eprintln!("Socket server error: {}", e);
-        std::process::exit(1);
-      }
-      return;
-    }
-
-    match CliConfig::from_args() {
-      Ok(config) => {
-        if config.example.is_some() {
-          // Generate an example image
-          let p = config.example.clone().unwrap();
-          let path = Some(p.as_os_str().to_string_lossy().to_string());
-          pollster::block_on(example_image(path));
-        }
-
-        if let Err(e) = cli::validate_config(&config) {
-          eprintln!("Error: {}", e);
-          std::process::exit(1);
-        }
-
-        if config.verbose {
-          config.print_pipeline_info();
-        }
-
-        pollster::block_on(run(&config));
-      }
-      Err(e) => {
-        eprintln!("Error parsing arguments: {}", e);
-        cli::print_examples();
-        std::process::exit(1);
-      }
-    }
-  }
-  #[cfg(target_arch = "wasm32")]
-  {
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    console_log::init_with_level(log::Level::Info).expect("could not initialize logger");
-    wasm_bindgen_futures::spawn_local(run(None));
-  }
 }
 
 async fn example_image(path: Option<String>) {

@@ -71,7 +71,7 @@ fn calculate_auto_adjustment(coord: vec2<i32>, dimensions: vec2<u32>) -> vec2<f3
 
                 // Only consider brighter pixels for white balance estimation
                 let luminance = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
-                if (luminance > 0.3) {
+                if (luminance > 0.3 && luminance < 1.0) {
                     sum_rgb += color;
                     count += 1.0;
                 }

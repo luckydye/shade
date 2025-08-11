@@ -191,18 +191,6 @@ Gracefully shuts down the server.
 }
 ```
 
-### 4. exit
-
-Immediately exits the server (no response expected).
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "exit"
-}
-```
-
 ## Input Image Formats
 
 The `image` parameter in `process_image` requests supports three formats:

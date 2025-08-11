@@ -255,6 +255,7 @@ async fn start_shade_process(
   state: State<'_, Arc<Mutex<ShadeProcess>>>,
 ) -> Result<(), String> {
   let mut process = state.lock().await;
+  process.stop().await;
   process.start().await
 }
 

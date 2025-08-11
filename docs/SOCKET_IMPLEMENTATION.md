@@ -56,11 +56,6 @@ Client -> stdin -> Server -> GPU Processing -> stdout -> Client
 - **Parameters**: None
 - **Response**: Null result, then server exits
 
-### 4. exit
-- **Purpose**: Immediately exit server
-- **Parameters**: None
-- **Response**: No response (server exits immediately)
-
 ## Image Input Formats
 
 1. **File Path**: Absolute path to image file
@@ -166,7 +161,7 @@ python3 example_client.py input.jpg ./target/release/shade
 client = ShadeClient()
 client.start_server("shade")
 result = client.process_image_file(
-    "input.jpg", 
+    "input.jpg",
     [{"operation": "brightness", "params": 1.2}]
 )
 ```
