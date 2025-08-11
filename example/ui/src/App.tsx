@@ -293,6 +293,23 @@ function App() {
       {/* Header */}
       <header className="bg-gray-900 p-4 shadow-md flex justify-between items-center">
         <h1 className="text-2xl font-semibold">Shade Image Processor</h1>
+
+        {/* Preview Toggle */}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${previewEnabled ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-700 hover:bg-gray-600"}`}
+            onClick={() => setPreviewEnabled(!previewEnabled)}
+          >
+            {previewEnabled ? (
+              <Eye className="w-4 h-4 mr-2" />
+            ) : (
+              <EyeOff className="w-4 h-4 mr-2" />
+            )}
+            {previewEnabled ? "Live Preview" : "Preview Off"}
+          </button>
+        </div>
+
         <div className="flex items-center space-x-2">
           <div
             className={`w-3 h-3 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
@@ -304,48 +321,6 @@ function App() {
       <main className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <aside className="w-1/4 bg-gray-850 p-6 overflow-y-auto space-y-6">
-          {/* Image Upload */}
-          <div className="space-y-2">
-            <h3 className="text-lg font-medium">Image Upload</h3>
-            <button
-              onClick={handleFileSelect}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              type="button"
-              className="w-full h-32 flex flex-col items-center justify-center border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-blue-500 transition-colors"
-            >
-              <Upload className="w-8 h-8 text-gray-400 mb-2" />
-              <div className="text-center">
-                <strong className="text-blue-400 hover:underline">
-                  Click to upload
-                </strong>{" "}
-                or drag and drop
-                <br />
-                PNG, JPG, BMP, TIFF files
-              </div>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = (e) => {
-                    if (e.target?.result) {
-                      setOriginalImage(e.target.result as string);
-                      setProcessedImage(null);
-                      setImageInfo(null);
-                      setError(null);
-                    }
-                  };
-                  reader.readAsDataURL(file);
-                }
-              }}
-            />
-          </div>
 
           {/* Controls */}
           {originalImage && (
@@ -358,21 +333,6 @@ function App() {
                 </div>
               )}
 
-              {/* Preview Toggle */}
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  className={`flex items-center px-4 py-2 rounded-lg transition-colors ${previewEnabled ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-700 hover:bg-gray-600"}`}
-                  onClick={() => setPreviewEnabled(!previewEnabled)}
-                >
-                  {previewEnabled ? (
-                    <Eye className="w-4 h-4 mr-2" />
-                  ) : (
-                    <EyeOff className="w-4 h-4 mr-2" />
-                  )}
-                  {previewEnabled ? "Live Preview" : "Preview Off"}
-                </button>
-              </div>
 
               {/* Basic Adjustments */}
               <div className="space-y-2">
@@ -731,6 +691,7 @@ function App() {
                 <RotateCcw className="w-4 h-4" />
                 Reset All
               </button>
+
               <button
                 type="button"
                 className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
@@ -739,6 +700,17 @@ function App() {
               >
                 <Download className="w-4 h-4" />
                 Export Image
+              </button>
+
+              <button
+                type="button"
+                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
+                onClick={() => {
+                  setOriginalImage(null);
+                }}
+                disabled={!processedImage}
+              >
+                Clear
               </button>
             </div>
           )}
@@ -821,14 +793,48 @@ function App() {
           ) : (
             /* Empty State */
             <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-              <ImageIcon className="w-16 h-16 text-gray-500 mb-4" />
-              <h2 className="text-3xl font-bold text-white mb-3">
-                No Image Loaded
-              </h2>
-              <p className="text-gray-400 text-lg max-w-md">
-                Upload an image to start processing.Supported formats: PNG, JPG,
-                BMP, TIFF.
-              </p>
+              {/* Image Upload */}
+              <div className="space-y-2">
+                <h3 className="text-lg font-medium">Image Upload</h3>
+                <button
+                  onClick={handleFileSelect}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  type="button"
+                  className="w-full h-32 flex flex-col items-center justify-center border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-blue-500 transition-colors"
+                >
+                  <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                  <div className="text-center">
+                    <strong className="text-blue-400 hover:underline">
+                      Click to upload
+                    </strong>{" "}
+                    or drag and drop
+                    <br />
+                    PNG, JPG, BMP, TIFF files
+                  </div>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (e) => {
+                        if (e.target?.result) {
+                          setOriginalImage(e.target.result as string);
+                          setProcessedImage(null);
+                          setImageInfo(null);
+                          setError(null);
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>
