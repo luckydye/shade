@@ -605,6 +605,8 @@ impl ImagePipeline {
   ) -> Result<Vec<u8>, String> {
     let (width, height) = dimensions;
 
+    log::info!("Texture dimensions: {:?}", dimensions);
+
     // Create input texture
     let input_texture = device.create_texture(&wgpu::TextureDescriptor {
       label: Some("Input Texture"),
