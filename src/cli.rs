@@ -765,7 +765,7 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     if let Some(input_path) = &config.input_path {
       if let Some(ext) = input_path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
-        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr"]
+        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr", "cr3"]
           .contains(&ext_str.as_str())
         {
           return Err(format!("Unsupported input format: {}", ext_str));

@@ -373,12 +373,6 @@ async fn read_image_file(file_path: String) -> Result<Vec<u8>, String> {
   }
 }
 
-// Legacy greet command
-#[tauri::command]
-fn greet(name: &str) -> String {
-  format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let shade_process = Arc::new(Mutex::new(ShadeProcess::new()));
@@ -388,7 +382,6 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .manage(shade_process)
     .invoke_handler(tauri::generate_handler![
-      greet,
       start_shade_process,
       stop_shade_process,
       initialize_shade,

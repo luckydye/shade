@@ -6,6 +6,7 @@ mod utils;
 
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
+use rawler;
 #[cfg(not(target_arch = "wasm32"))]
 use utils::{is_openexr_file, load_openexr_image, output_image_native};
 
@@ -108,6 +109,43 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
           }
           Err(e) => {
             log::error!("Failed to load OpenEXR file: {}", e);
+            let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
+              .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
+              .collect::<Vec<u8>>();
+            let float_data = convert_to_float(&default_data);
+            (float_data, TEXTURE_DIMS)
+          }
+        }
+      } else if input_path_str.ends_with(".CR3") {
+        // Use rawler for camera raw files
+        match rawler::decode_file(&input_path_str.as_ref()) {
+          Ok(image) => {
+            let (width, height) = (image.width as usize, image.height as usize);
+            log::info!("Loaded raw input image: {}x{}", width, height);
+            if let rawler::RawImageData::Integer(data) = image.data {
+              // Convert raw integer data to 32-bit float RGBA
+              let mut rgba_data = Vec::with_capacity(width * height * 4);
+              for pix in data {
+                let value = (pix as f32) / 65535.0; // Normalize to [0, 1]
+                rgba_data.extend_from_slice(
+                  &[value, value, value, 1.0]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<u8>>(),
+                );
+              }
+              (rgba_data, (width, height))
+            } else {
+              log::error!("Unsupported raw image data format");
+              let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
+                .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
+                .collect::<Vec<u8>>();
+              let float_data = convert_to_float(&default_data);
+              (float_data, TEXTURE_DIMS)
+            }
+          }
+          Err(e) => {
+            log::error!("Failed to load raw file: {}", e);
             let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
               .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
               .collect::<Vec<u8>>();
