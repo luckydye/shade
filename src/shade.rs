@@ -14,6 +14,10 @@ pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float
 pub const BYTES_PER_PIXEL: u32 = 16; // 4 channels * 4 bytes per f32
 pub const SHADER_FORMAT: &str = "rgba32float";
 
+// WebGPU buffer limits
+pub const MAX_BUFFER_SIZE: u64 = 268_435_456; // 256 MB - WebGPU limit
+pub const MAX_TILE_SIZE: u32 = 2048; // Maximum tile dimension for processing large images
+
 // Define the types of processing nodes available
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeType {
@@ -223,6 +227,37 @@ pub struct ImagePipeline {
 }
 
 impl ImagePipeline {
+  /// Calculate the maximum square image dimension that can be processed without tiling.
+  ///
+  /// Uses binary search to find the largest dimension where the required staging buffer
+  /// would not exceed MAX_BUFFER_SIZE (256MB).
+  fn calculate_max_processable_dimension(&self) -> u32 {
+    let bytes_per_row = |width: u32| self.aligned_bytes_per_row(width);
+    let mut max_width = 1;
+
+    // Binary search to find maximum width that fits in buffer
+    let mut high = MAX_TILE_SIZE;
+    while high - max_width > 1 {
+      let mid = (max_width + high) / 2;
+      let buffer_size = bytes_per_row(mid) as u64 * mid as u64;
+      if buffer_size <= MAX_BUFFER_SIZE {
+        max_width = mid;
+      } else {
+        high = mid;
+      }
+    }
+    max_width
+  }
+
+  /// Determine if an image of given dimensions requires tiled processing.
+  ///
+  /// Returns true if the staging buffer for this image would exceed the
+  /// WebGPU buffer size limit of 256MB.
+  fn needs_tiling(&self, width: u32, height: u32) -> bool {
+    let aligned_bytes_per_row = self.aligned_bytes_per_row(width) as u64;
+    let buffer_size = aligned_bytes_per_row * height as u64;
+    buffer_size > MAX_BUFFER_SIZE
+  }
   /// Calculate aligned bytes per row for texture operations
   fn aligned_bytes_per_row(&self, width: u32) -> u32 {
     let unpadded_bytes_per_row = width * BYTES_PER_PIXEL;
@@ -569,17 +604,37 @@ impl ImagePipeline {
 
             // Process the node if we have a pipeline for it
             if let Some(pipeline) = self.pipelines.get(&node.node_type) {
-              current_data = self
-                .process_node(
-                  device,
-                  queue,
-                  pipeline,
-                  &node.node_type,
-                  &node.params,
-                  current_data,
-                  dimensions,
-                )
-                .await?;
+              let (width, height) = dimensions;
+              if self.needs_tiling(width, height) {
+                log::info!(
+                  "Using tiled processing for large image: {}x{}",
+                  width,
+                  height
+                );
+                current_data = self
+                  .process_node_tiled(
+                    device,
+                    queue,
+                    pipeline,
+                    &node.node_type,
+                    &node.params,
+                    current_data,
+                    dimensions,
+                  )
+                  .await?;
+              } else {
+                current_data = self
+                  .process_node(
+                    device,
+                    queue,
+                    pipeline,
+                    &node.node_type,
+                    &node.params,
+                    current_data,
+                    dimensions,
+                  )
+                  .await?;
+              }
             } else {
               log::warn!("No pipeline found for node type: {:?}", node.node_type);
             }
@@ -739,6 +794,8 @@ impl ImagePipeline {
       mapped_at_creation: false,
     });
 
+    log::info!("Execute compute shader");
+
     // Execute compute shader
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
       label: Some("Processing Command Encoder"),
@@ -758,6 +815,8 @@ impl ImagePipeline {
       let dispatch_y = (height + workgroup_size - 1) / workgroup_size;
       compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
+
+    log::info!("Copy to staging buffer");
 
     // Copy result to staging buffer
     encoder.copy_texture_to_buffer(
@@ -783,6 +842,8 @@ impl ImagePipeline {
     );
 
     queue.submit(Some(encoder.finish()));
+
+    log::info!("Copying data back to memory");
 
     // Read back result
     let buffer_slice = staging_buffer.slice(..);
@@ -812,6 +873,98 @@ impl ImagePipeline {
     staging_buffer.unmap();
 
     Ok(result)
+  }
+
+  /// Process a large image using tiled approach to avoid buffer size limits.
+  ///
+  /// This method splits large images into smaller tiles, processes each tile
+  /// individually using the regular `process_node` method, and then reassembles
+  /// the results into the final image.
+  ///
+  /// This approach is automatically used when an image would require a staging
+  /// buffer larger than the WebGPU maximum of 256MB.
+  async fn process_node_tiled(
+    &self,
+    device: &Device,
+    queue: &Queue,
+    pipeline: &ComputePipeline,
+    node_type: &NodeType,
+    params: &NodeParams,
+    input_data: Vec<u8>,
+    dimensions: (u32, u32),
+  ) -> Result<Vec<u8>, String> {
+    let (width, height) = dimensions;
+    let max_tile_size = self.calculate_max_processable_dimension();
+
+    log::info!(
+      "Processing {}x{} image in tiles of max size {}",
+      width,
+      height,
+      max_tile_size
+    );
+
+    // Calculate tile dimensions
+    let tiles_x = (width + max_tile_size - 1) / max_tile_size;
+    let tiles_y = (height + max_tile_size - 1) / max_tile_size;
+
+    let mut result_data = vec![0u8; input_data.len()];
+
+    for tile_y in 0..tiles_y {
+      for tile_x in 0..tiles_x {
+        let start_x = tile_x * max_tile_size;
+        let start_y = tile_y * max_tile_size;
+        let tile_width = (max_tile_size).min(width - start_x);
+        let tile_height = (max_tile_size).min(height - start_y);
+
+        log::debug!(
+          "Processing tile ({}, {}): {}x{}",
+          tile_x,
+          tile_y,
+          tile_width,
+          tile_height
+        );
+
+        // Extract tile data from input
+        let mut tile_data =
+          Vec::with_capacity((tile_width * tile_height * BYTES_PER_PIXEL) as usize);
+        for y in start_y..(start_y + tile_height) {
+          let input_row_start = (y * width * BYTES_PER_PIXEL) as usize;
+          let input_tile_start = input_row_start + (start_x * BYTES_PER_PIXEL) as usize;
+          let input_tile_end = input_tile_start + (tile_width * BYTES_PER_PIXEL) as usize;
+          tile_data.extend_from_slice(&input_data[input_tile_start..input_tile_end]);
+        }
+
+        // Process tile
+        let processed_tile = self
+          .process_node(
+            device,
+            queue,
+            pipeline,
+            node_type,
+            params,
+            tile_data,
+            (tile_width, tile_height),
+          )
+          .await?;
+
+        // Copy processed tile back to result
+        for y in 0..tile_height {
+          let result_y = start_y + y;
+          let result_row_start = (result_y * width * BYTES_PER_PIXEL) as usize;
+          let result_tile_start = result_row_start + (start_x * BYTES_PER_PIXEL) as usize;
+          let result_tile_end =
+            result_tile_start + (tile_width * BYTES_PER_PIXEL) as usize;
+
+          let tile_row_start = (y * tile_width * BYTES_PER_PIXEL) as usize;
+          let tile_row_end = tile_row_start + (tile_width * BYTES_PER_PIXEL) as usize;
+
+          result_data[result_tile_start..result_tile_end]
+            .copy_from_slice(&processed_tile[tile_row_start..tile_row_end]);
+        }
+      }
+    }
+
+    Ok(result_data)
   }
 
   fn serialize_params(&self, params: &NodeParams) -> Result<Vec<u8>, String> {
@@ -1139,5 +1292,28 @@ mod tests {
     assert_eq!(pipeline.nodes.len(), 5);
     assert!(pipeline.input_node_id.is_some());
     assert!(pipeline.output_node_id.is_some());
+  }
+
+  #[test]
+  fn test_tiling_calculation() {
+    let pipeline = ImagePipeline::new();
+
+    // Test small image (should not need tiling)
+    assert!(!pipeline.needs_tiling(1024, 1024));
+
+    // Test large image (should need tiling)
+    // Calculate dimensions that would exceed MAX_BUFFER_SIZE
+    let large_dimension = 5000; // This should create a buffer > 256MB
+    assert!(pipeline.needs_tiling(large_dimension, large_dimension));
+
+    // Test max processable dimension calculation
+    let max_dim = pipeline.calculate_max_processable_dimension();
+    assert!(max_dim > 0);
+    assert!(max_dim <= MAX_TILE_SIZE);
+
+    // Verify that max dimension doesn't exceed buffer size
+    let aligned_bytes = pipeline.aligned_bytes_per_row(max_dim);
+    let buffer_size = aligned_bytes as u64 * max_dim as u64;
+    assert!(buffer_size <= MAX_BUFFER_SIZE);
   }
 }
