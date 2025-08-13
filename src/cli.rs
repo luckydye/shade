@@ -42,6 +42,8 @@ pub struct CliConfig {
   pub output_path: Option<PathBuf>,
   pub pipeline_config: PipelineConfig,
   pub verbose: bool,
+  pub resize_width: Option<u32>,
+  pub resize_height: Option<u32>,
 }
 
 /// Pipeline configuration from CLI arguments
@@ -272,6 +274,8 @@ impl CliConfig {
     };
 
     let verbose = matches.get_flag("verbose");
+    let resize_width = matches.get_one::<u32>("resize-width").copied();
+    let resize_height = matches.get_one::<u32>("resize-height").copied();
 
     Ok(CliConfig {
       example,
@@ -279,6 +283,8 @@ impl CliConfig {
       output_path,
       pipeline_config,
       verbose,
+      resize_width,
+      resize_height,
     })
   }
 
@@ -683,6 +689,20 @@ fn build_cli() -> Command {
         )
 
         .arg(
+            Arg::new("resize-width")
+                .long("resize-width")
+                .value_name("PIXELS")
+                .help("Resize output width (pixels). Use with --resize-height or alone to maintain aspect ratio")
+                .value_parser(value_parser!(u32)),
+        )
+        .arg(
+            Arg::new("resize-height")
+                .long("resize-height")
+                .value_name("PIXELS")
+                .help("Resize output height (pixels). Use with --resize-width or alone to maintain aspect ratio")
+                .value_parser(value_parser!(u32)),
+        )
+        .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
@@ -697,6 +717,11 @@ fn build_cli() -> Command {
             shade -i image.jpg -o blurred.jpg --blur 2.5\n      \
             shade -i portrait.jpg -o corrected.jpg --auto-white-balance\n      \
             shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1\n    \
+            \n    \
+            Resize operations:\n      \
+            shade -i large.jpg -o small.jpg --resize-width 800  # Maintain aspect ratio\n      \
+            shade -i photo.png -o thumbnail.png --resize-width 300 --resize-height 200\n      \
+            shade -i input.jpg -o output.jpg --resize-height 1080  # HD height, auto width\n    \
             \n    \
             Complex processing:\n      \
             shade -i original.png -o processed.png -b 0.1 -c 1.2 -s 1.1 --gamma 0.9\n    \
@@ -738,6 +763,17 @@ pub fn print_examples() {
   println!("Geometric transformations:");
   println!("  shade -i input.jpg -o output.jpg --scale 1.5 --rotate 15");
   println!();
+  println!("Resize operations:");
+  println!(
+    "  shade -i large.jpg -o small.jpg --resize-width 800  # Maintain aspect ratio"
+  );
+  println!(
+    "  shade -i photo.png -o thumbnail.png --resize-width 300 --resize-height 200"
+  );
+  println!(
+    "  shade -i input.jpg -o output.jpg --resize-height 1080  # HD height, auto width"
+  );
+  println!();
   println!("OpenEXR HDR processing:");
   println!("  shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files");
   println!("  shade -i hdr.exr -o display.png --gamma 2.2");
@@ -773,6 +809,49 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
       } else {
         return Err("Input file has no extension".to_string());
       }
+    }
+  }
+
+  // Validate resize parameters
+  if let (Some(width), Some(height)) = (config.resize_width, config.resize_height) {
+    if width == 0 {
+      return Err("Resize width must be greater than 0".to_string());
+    }
+    if height == 0 {
+      return Err("Resize height must be greater than 0".to_string());
+    }
+    if width > 16384 {
+      return Err("Resize width cannot exceed 16384 pixels".to_string());
+    }
+    if height > 16384 {
+      return Err("Resize height cannot exceed 16384 pixels".to_string());
+    }
+  } else if let Some(width) = config.resize_width {
+    if width == 0 {
+      return Err("Resize width must be greater than 0".to_string());
+    }
+    if width > 16384 {
+      return Err("Resize width cannot exceed 16384 pixels".to_string());
+    }
+  } else if let Some(height) = config.resize_height {
+    if height == 0 {
+      return Err("Resize height must be greater than 0".to_string());
+    }
+    if height > 16384 {
+      return Err("Resize height cannot exceed 16384 pixels".to_string());
+    }
+  }
+
+  // Validate white balance parameters
+  if let Some(temp) = config.pipeline_config.white_balance_temperature {
+    if temp < -1.0 || temp > 1.0 {
+      return Err("White balance temperature must be between -1.0 and 1.0".to_string());
+    }
+  }
+
+  if let Some(tint) = config.pipeline_config.white_balance_tint {
+    if tint < -1.0 || tint > 1.0 {
+      return Err("White balance tint must be between -1.0 and 1.0".to_string());
     }
   }
 
@@ -846,12 +925,11 @@ mod tests {
             index: 2,
           },
         ],
-        brightness: Some(0.2),
-        contrast: Some(1.1),
-        saturation: Some(1.3),
         ..Default::default()
       },
       verbose: false,
+      resize_width: None,
+      resize_height: None,
     };
 
     let pipeline = config.build_pipeline();
@@ -944,6 +1022,8 @@ mod tests {
         ..Default::default()
       },
       verbose: false,
+      resize_width: None,
+      resize_height: None,
     };
 
     let pipeline = config.build_pipeline();
@@ -958,16 +1038,18 @@ mod tests {
         operations: vec![PipelineOperation {
           op_type: OperationType::WhiteBalance {
             auto_adjust: false,
-            temperature: Some(0.2),
+            temperature: Some(0.3),
             tint: Some(-0.1),
           },
           index: 0,
         }],
-        white_balance_temperature: Some(0.2),
+        white_balance_temperature: Some(0.3),
         white_balance_tint: Some(-0.1),
         ..Default::default()
       },
       verbose: false,
+      resize_width: None,
+      resize_height: None,
     };
 
     let pipeline = config.build_pipeline();
@@ -1048,6 +1130,8 @@ mod tests {
         ..Default::default()
       },
       verbose: false,
+      resize_width: None,
+      resize_height: None,
     };
 
     assert!(validate_config(&config).is_ok());
@@ -1062,6 +1146,8 @@ mod tests {
         ..Default::default()
       },
       verbose: false,
+      resize_width: None,
+      resize_height: None,
     };
 
     assert!(validate_config(&config).is_err());
@@ -1076,6 +1162,102 @@ mod tests {
         ..Default::default()
       },
       verbose: false,
+      resize_width: None,
+      resize_height: None,
+    };
+
+    assert!(validate_config(&config).is_err());
+  }
+
+  #[test]
+  fn test_resize_validation() {
+    // Test valid resize dimensions with example
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: Some(800),
+      resize_height: Some(600),
+    };
+
+    assert!(validate_config(&config).is_ok());
+
+    // Test valid resize width only
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: Some(1920),
+      resize_height: None,
+    };
+
+    assert!(validate_config(&config).is_ok());
+
+    // Test valid resize height only
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: None,
+      resize_height: Some(1080),
+    };
+
+    assert!(validate_config(&config).is_ok());
+
+    // Test zero width
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: Some(0),
+      resize_height: Some(600),
+    };
+
+    assert!(validate_config(&config).is_err());
+
+    // Test zero height
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: Some(800),
+      resize_height: Some(0),
+    };
+
+    assert!(validate_config(&config).is_err());
+
+    // Test width too large
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: Some(20000),
+      resize_height: Some(600),
+    };
+
+    assert!(validate_config(&config).is_err());
+
+    // Test height too large
+    let config = CliConfig {
+      example: Some(PathBuf::from("test.png")),
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      resize_width: Some(800),
+      resize_height: Some(20000),
     };
 
     assert!(validate_config(&config).is_err());
