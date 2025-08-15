@@ -254,7 +254,6 @@ impl ImageProcessingServer {
 
     // Create a temporary config for pipeline building
     let config = CliConfig {
-      example: None,
       input_path: None,
       output_path: None,
       pipeline_config,

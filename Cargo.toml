@@ -29,3 +29,7 @@ console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
 wasm-bindgen-futures = "0.4.43"
 web-sys = "0.3.70"
+
+[profile.release]
+opt-level = 3
+strip = "debuginfo"

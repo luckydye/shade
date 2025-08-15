@@ -1,3 +1,6 @@
+[env]
+RUST_LOG="INFO,shade=DEBUG"
+
 [tools]
 bun = "1.2.19"
 rust = "1.85.0"

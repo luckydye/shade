@@ -37,7 +37,6 @@ pub enum OperationType {
 
 /// CLI configuration structure
 pub struct CliConfig {
-  pub example: Option<PathBuf>,
   pub input_path: Option<PathBuf>,
   pub output_path: Option<PathBuf>,
   pub pipeline_config: PipelineConfig,
@@ -96,7 +95,6 @@ impl CliConfig {
 
   /// Create CLI configuration from parsed matches
   fn from_matches(matches: ArgMatches) -> Result<Self, String> {
-    let example = matches.get_one::<PathBuf>("example").cloned();
     let input_path = matches.get_one::<PathBuf>("input").cloned();
     let output_path = matches
       .get_one::<PathBuf>("output")
@@ -278,7 +276,6 @@ impl CliConfig {
     let resize_height = matches.get_one::<u32>("resize-height").copied();
 
     Ok(CliConfig {
-      example,
       input_path,
       output_path,
       pipeline_config,
@@ -514,9 +511,6 @@ impl CliConfig {
     if let Some(output) = &self.output_path {
       println!("Output: {}", output.display());
     }
-    if let Some(example) = &self.example {
-      println!("Example: {}", example.display());
-    }
     println!();
 
     if self.pipeline_config.operations.is_empty() {
@@ -565,15 +559,6 @@ fn build_cli() -> Command {
   Command::new("shade")
         .version("0.1.0")
         .about("GPU-accelerated image processing and color grading tool")
-        .arg(
-            Arg::new("example")
-                .short('e')
-                .long("example")
-                .value_name("FILE")
-                .help("Output image file")
-                .required(false)
-                .value_parser(value_parser!(PathBuf)),
-        )
         .arg(
             Arg::new("input")
                 .short('i')
@@ -731,7 +716,6 @@ fn build_cli() -> Command {
             shade -i hdr.exr -o display.png --gamma 2.2\n    \
             \n    \
             High quality processing:\n      \
-            shade --example mandelbrot.raw  # 32-bit float data\n      \
             shade -i input.jpg -o output.png  # Automatic format detection",
         )
 }
@@ -779,7 +763,6 @@ pub fn print_examples() {
   println!("  shade -i hdr.exr -o display.png --gamma 2.2");
   println!();
   println!("High quality processing:");
-  println!("  shade --example mandelbrot.raw  # 32-bit float data");
   println!("  shade -i input.jpg -o output.png  # Automatic format detection");
   println!();
 }
@@ -787,28 +770,26 @@ pub fn print_examples() {
 /// Validate CLI configuration
 pub fn validate_config(config: &CliConfig) -> Result<(), String> {
   // Check input file exists if one is specified (skip for examples)
-  if config.example.is_none() {
-    if let Some(input_path) = &config.input_path {
-      if !input_path.exists() {
-        return Err(format!(
-          "Input file does not exist: {}",
-          input_path.display()
-        ));
-      }
+  if let Some(input_path) = &config.input_path {
+    if !input_path.exists() {
+      return Err(format!(
+        "Input file does not exist: {}",
+        input_path.display()
+      ));
     }
+  }
 
-    // Check input file extension if input path exists
-    if let Some(input_path) = &config.input_path {
-      if let Some(ext) = input_path.extension() {
-        let ext_str = ext.to_string_lossy().to_lowercase();
-        if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr", "cr3"]
-          .contains(&ext_str.as_str())
-        {
-          return Err(format!("Unsupported input format: {}", ext_str));
-        }
-      } else {
-        return Err("Input file has no extension".to_string());
+  // Check input file extension if input path exists
+  if let Some(input_path) = &config.input_path {
+    if let Some(ext) = input_path.extension() {
+      let ext_str = ext.to_string_lossy().to_lowercase();
+      if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr", "cr3"]
+        .contains(&ext_str.as_str())
+      {
+        return Err(format!("Unsupported input format: {}", ext_str));
       }
+    } else {
+      return Err("Input file has no extension".to_string());
     }
   }
 
@@ -907,7 +888,6 @@ mod tests {
   #[test]
   fn test_pipeline_building() {
     let config = CliConfig {
-      example: None,
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
@@ -1006,7 +986,6 @@ mod tests {
   fn test_white_balance_pipeline_building() {
     // Test auto white balance pipeline
     let config = CliConfig {
-      example: None,
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
@@ -1031,7 +1010,6 @@ mod tests {
 
     // Test manual white balance pipeline
     let config = CliConfig {
-      example: None,
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
@@ -1121,7 +1099,6 @@ mod tests {
   fn test_white_balance_validation() {
     // Test valid values with example (skips file validation)
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
@@ -1138,7 +1115,6 @@ mod tests {
 
     // Test invalid temperature with example
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
@@ -1154,7 +1130,6 @@ mod tests {
 
     // Test invalid tint with example
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
@@ -1173,7 +1148,6 @@ mod tests {
   fn test_resize_validation() {
     // Test valid resize dimensions with example
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1186,7 +1160,6 @@ mod tests {
 
     // Test valid resize width only
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1199,7 +1172,6 @@ mod tests {
 
     // Test valid resize height only
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1212,7 +1184,6 @@ mod tests {
 
     // Test zero width
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1225,7 +1196,6 @@ mod tests {
 
     // Test zero height
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1238,7 +1208,6 @@ mod tests {
 
     // Test width too large
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1251,7 +1220,6 @@ mod tests {
 
     // Test height too large
     let config = CliConfig {
-      example: Some(PathBuf::from("test.png")),
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),

@@ -23,11 +23,12 @@ struct LoadedImage {
 }
 
 pub fn main() {
+  let perf = std::time::Instant::now();
+
   #[cfg(not(target_arch = "wasm32"))]
   {
     env_logger::builder()
-      .filter_level(log::LevelFilter::Info)
-      .format_timestamp_nanos()
+      .format_timestamp_millis()
       .init();
 
     // Check if we should run in socket mode
@@ -43,13 +44,6 @@ pub fn main() {
 
     match CliConfig::from_args() {
       Ok(config) => {
-        if config.example.is_some() {
-          // Generate an example image
-          let p = config.example.clone().unwrap();
-          let path = Some(p.as_os_str().to_string_lossy().to_string());
-          pollster::block_on(example_image(path));
-        }
-
         if let Err(e) = cli::validate_config(&config) {
           eprintln!("Error: {}", e);
           std::process::exit(1);
@@ -58,6 +52,8 @@ pub fn main() {
         if config.verbose {
           config.print_pipeline_info();
         }
+
+        log::debug!("Time spent parsing args: {:?}", perf.elapsed());
 
         pollster::block_on(run(&config));
       }
@@ -94,11 +90,15 @@ fn convert_to_float(data: &[u8]) -> Vec<u8> {
 }
 
 async fn load_image(config: &CliConfig) -> LoadedImage {
+  log::info!("Loading image: {:?}", config.input_path);
+
   // Load input image if provided
   let (texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
     #[cfg(not(target_arch = "wasm32"))]
     {
       let input_path_str = input_path.to_string_lossy();
+
+      // TODO: read file before decoding, dont decode file by path
 
       // Check if it's an OpenEXR file first
       if is_openexr_file(&input_path_str) {
@@ -120,24 +120,33 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
       } else if input_path_str.ends_with(".CR3") {
         // Use rawler for camera raw files
         match rawler::decode_file(&input_path_str.as_ref()) {
-          Ok(image) => {
-            let (width, height) = (image.width as usize, image.height as usize);
+          Ok(rawimage) => {
+            use rawler::imgop::develop::RawDevelop;
+
+            let pixels = rawimage.pixels_u16();
+
+            log::info!("Pixels {:?} CPP {:?}", pixels.len(), rawimage.cpp);
+
+            let (width, height) = (rawimage.width as usize, rawimage.height as usize);
             log::info!("Loaded raw input image: {}x{}", width, height);
-            if let rawler::RawImageData::Integer(data) = image.data {
-              // Convert raw integer data to 32-bit float RGBA
-              let mut rgba_data = Vec::with_capacity(width * height * 4);
-              for pix in data {
-                let value = (pix as f32) / 65535.0; // Normalize to [0, 1]
-                rgba_data.extend_from_slice(
-                  &[value, value, value, 1.0]
-                    .iter()
-                    .flat_map(|v| v.to_le_bytes())
-                    .collect::<Vec<u8>>(),
-                );
-              }
-              (rgba_data, (width, height))
+
+            let dev = RawDevelop::default();
+            let image = dev.develop_intermediate(&rawimage);
+
+            if image.is_ok() {
+              let image = image.unwrap();
+              let img = image.to_dynamic_image().unwrap();
+
+              let rgba_img = img.to_rgba8();
+              let (width, height) = rgba_img.dimensions();
+              let data = rgba_img.into_raw();
+              log::info!("Loaded input image: {}x{}", width, height);
+
+              // Convert 8-bit RGBA to 32-bit float
+              let float_data = convert_to_float(&data);
+              (float_data, (width as usize, height as usize))
             } else {
-              log::error!("Unsupported raw image data format");
+              log::error!("Failed to load raw file");
               let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
                 .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
                 .collect::<Vec<u8>>();
@@ -216,7 +225,13 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
 }
 
 async fn run(config: &CliConfig) {
+  let perf = std::time::Instant::now();
+
   let loaded_image = load_image(config).await;
+
+  log::debug!("Time spent loading image: {:?}", perf.elapsed());
+  let perf = std::time::Instant::now();
+
   let mut image_pipeline = config.build_pipeline();
 
   let mut texture_data = loaded_image.texture_data;
@@ -241,6 +256,9 @@ async fn run(config: &CliConfig) {
 
   image_pipeline.init_gpu(device.clone(), queue.clone());
 
+  log::debug!("Time spent seting up gpu: {:?}", perf.elapsed());
+  let perf = std::time::Instant::now();
+
   // Process the image through the pipeline using actual dimensions
   match image_pipeline
     .process(
@@ -257,6 +275,9 @@ async fn run(config: &CliConfig) {
       log::error!("Pipeline processing failed: {}", e);
     }
   }
+
+  log::debug!("Time spent on porcessing: {:?}", perf.elapsed());
+  let perf = std::time::Instant::now();
 
   // Apply resize if specified
   if config.resize_width.is_some() || config.resize_height.is_some() {
@@ -281,6 +302,9 @@ async fn run(config: &CliConfig) {
     }
   }
 
+  log::debug!("Time spent on resize: {:?}", perf.elapsed());
+  let perf = std::time::Instant::now();
+
   // Output using final dimensions
   if let Some(output_path) = &config.output_path {
     #[cfg(not(target_arch = "wasm32"))]
@@ -293,7 +317,9 @@ async fn run(config: &CliConfig) {
   }
   #[cfg(target_arch = "wasm32")]
   output_image_wasm(texture_data.to_vec(), actual_dims);
-  log::info!("Done.")
+  log::info!("Done.");
+
+  log::debug!("Time spent on output: {:?}", perf.elapsed())
 }
 
 async fn resize_image(
@@ -552,169 +578,4 @@ async fn resize_image(
   output_buffer.unmap();
 
   Ok((result_data, (target_width, target_height)))
-}
-
-async fn example_image(path: Option<String>) {
-  // Use 32-bit float precision for the example
-  let mut texture_data =
-    vec![0u8; TEXTURE_DIMS.0 * TEXTURE_DIMS.1 * BYTES_PER_PIXEL as usize];
-
-  let instance = wgpu::Instance::default();
-  let adapter = instance
-    .request_adapter(&wgpu::RequestAdapterOptions::default())
-    .await
-    .unwrap();
-  let (device, queue) = adapter
-    .request_device(&wgpu::DeviceDescriptor {
-      label: None,
-      required_features: wgpu::Features::empty(),
-      required_limits: wgpu::Limits::defaults(),
-      memory_hints: wgpu::MemoryHints::MemoryUsage,
-      trace: wgpu::Trace::Off,
-    })
-    .await
-    .unwrap();
-
-  let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/example.wgsl"));
-
-  let storage_texture = device.create_texture(&wgpu::TextureDescriptor {
-    label: None,
-    size: wgpu::Extent3d {
-      width: TEXTURE_DIMS.0 as u32,
-      height: TEXTURE_DIMS.1 as u32,
-      depth_or_array_layers: 1,
-    },
-    mip_level_count: 1,
-    sample_count: 1,
-    dimension: wgpu::TextureDimension::D2,
-    format: TEXTURE_FORMAT,
-    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-    view_formats: &[],
-  });
-  let storage_texture_view =
-    storage_texture.create_view(&wgpu::TextureViewDescriptor::default());
-  // Calculate padded buffer size for proper alignment
-  let unpadded_bytes_per_row = TEXTURE_DIMS.0 * BYTES_PER_PIXEL as usize;
-  let align = wgpu::MAP_ALIGNMENT as usize;
-  let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
-  let buffer_size = padded_bytes_per_row * TEXTURE_DIMS.1;
-
-  let output_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-    label: None,
-    size: buffer_size as u64,
-    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-    mapped_at_creation: false,
-  });
-
-  let bind_group_layout =
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-      label: None,
-      entries: &[wgpu::BindGroupLayoutEntry {
-        binding: 0,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::StorageTexture {
-          access: wgpu::StorageTextureAccess::WriteOnly,
-          format: TEXTURE_FORMAT,
-          view_dimension: wgpu::TextureViewDimension::D2,
-        },
-        count: None,
-      }],
-    });
-  let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-    label: None,
-    layout: &bind_group_layout,
-    entries: &[wgpu::BindGroupEntry {
-      binding: 0,
-      resource: wgpu::BindingResource::TextureView(&storage_texture_view),
-    }],
-  });
-
-  let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-    label: None,
-    bind_group_layouts: &[&bind_group_layout],
-    push_constant_ranges: &[],
-  });
-  let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-    label: None,
-    layout: Some(&pipeline_layout),
-    module: &shader,
-    entry_point: Some("main"),
-    compilation_options: Default::default(),
-    cache: None,
-  });
-
-  log::info!("Wgpu context set up.");
-  //----------------------------------------
-
-  let mut command_encoder =
-    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-  {
-    let mut compute_pass =
-      command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: None,
-        timestamp_writes: None,
-      });
-    compute_pass.set_bind_group(0, &bind_group, &[]);
-    compute_pass.set_pipeline(&pipeline);
-    compute_pass.dispatch_workgroups(TEXTURE_DIMS.0 as u32, TEXTURE_DIMS.1 as u32, 1);
-  }
-  command_encoder.copy_texture_to_buffer(
-    wgpu::TexelCopyTextureInfo {
-      texture: &storage_texture,
-      mip_level: 0,
-      origin: wgpu::Origin3d::ZERO,
-      aspect: wgpu::TextureAspect::All,
-    },
-    wgpu::TexelCopyBufferInfo {
-      buffer: &output_staging_buffer,
-      layout: wgpu::TexelCopyBufferLayout {
-        offset: 0,
-        // This needs to be padded to 256. Using bytes per pixel based on precision
-        bytes_per_row: Some(padded_bytes_per_row as u32),
-        rows_per_image: Some(TEXTURE_DIMS.1 as u32),
-      },
-    },
-    wgpu::Extent3d {
-      width: TEXTURE_DIMS.0 as u32,
-      height: TEXTURE_DIMS.1 as u32,
-      depth_or_array_layers: 1,
-    },
-  );
-  queue.submit(Some(command_encoder.finish()));
-
-  let buffer_slice = output_staging_buffer.slice(..);
-  let (sender, receiver) = flume::bounded(1);
-  buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
-  device.poll(wgpu::PollType::wait()).unwrap();
-  receiver.recv_async().await.unwrap().unwrap();
-  log::info!("Output buffer mapped");
-  {
-    let view = buffer_slice.get_mapped_range();
-    // Copy data accounting for row padding
-    let unpadded_bytes_per_row = TEXTURE_DIMS.0 * BYTES_PER_PIXEL as usize;
-    let align = wgpu::MAP_ALIGNMENT as usize;
-    let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
-
-    for row in 0..TEXTURE_DIMS.1 {
-      let src_start = row * padded_bytes_per_row;
-      let src_end = src_start + unpadded_bytes_per_row;
-      let dst_start = row * unpadded_bytes_per_row;
-      let dst_end = dst_start + unpadded_bytes_per_row;
-
-      texture_data[dst_start..dst_end].copy_from_slice(&view[src_start..src_end]);
-    }
-  }
-  log::info!("GPU data copied to local.");
-  output_staging_buffer.unmap();
-
-  #[cfg(not(target_arch = "wasm32"))]
-  {
-    let output_path = path.unwrap();
-
-    // Use standard image output for other formats
-    output_image_native(texture_data.to_vec(), TEXTURE_DIMS, output_path);
-  }
-  #[cfg(target_arch = "wasm32")]
-  output_image_wasm(texture_data.to_vec(), TEXTURE_DIMS);
-  log::info!("Done.")
 }

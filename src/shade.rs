@@ -1137,65 +1137,6 @@ impl PipelineBuilder {
     }
   }
 
-  /// Create a basic color grading pipeline
-  pub fn basic_color_grading(mut self) -> Self {
-    let input_id = self
-      .pipeline
-      .add_node("Input".to_string(), NodeType::ImageInput);
-    let brightness_id = self
-      .pipeline
-      .add_node("Brightness".to_string(), NodeType::Brightness);
-    let contrast_id = self
-      .pipeline
-      .add_node("Contrast".to_string(), NodeType::Contrast);
-    let saturation_id = self
-      .pipeline
-      .add_node("Saturation".to_string(), NodeType::Saturation);
-    let output_id = self
-      .pipeline
-      .add_node("Output".to_string(), NodeType::ImageOutput);
-
-    // Connect nodes in sequence
-    self
-      .pipeline
-      .connect_nodes(
-        input_id,
-        "image".to_string(),
-        brightness_id,
-        "image".to_string(),
-      )
-      .unwrap();
-    self
-      .pipeline
-      .connect_nodes(
-        brightness_id,
-        "image".to_string(),
-        contrast_id,
-        "image".to_string(),
-      )
-      .unwrap();
-    self
-      .pipeline
-      .connect_nodes(
-        contrast_id,
-        "image".to_string(),
-        saturation_id,
-        "image".to_string(),
-      )
-      .unwrap();
-    self
-      .pipeline
-      .connect_nodes(
-        saturation_id,
-        "image".to_string(),
-        output_id,
-        "image".to_string(),
-      )
-      .unwrap();
-
-    self
-  }
-
   /// Add a blur filter to the pipeline
   pub fn with_blur(mut self, radius: f32) -> Self {
     let blur_id = self.pipeline.add_node("Blur".to_string(), NodeType::Blur);
