@@ -31,8 +31,7 @@ pub enum OperationType {
   Blur(f32),
   Sharpen(f32),
   Noise(f32),
-  Scale(f32),
-  Rotate(f32),
+  Resize { width: Option<u32>, height: Option<u32> },
 }
 
 /// CLI configuration structure
@@ -61,8 +60,8 @@ pub struct PipelineConfig {
   pub blur_radius: Option<f32>,
   pub sharpen_amount: Option<f32>,
   pub noise_amount: Option<f32>,
-  pub scale_factor: Option<f32>,
-  pub rotate_angle: Option<f32>,
+  pub resize_width: Option<u32>,
+  pub resize_height: Option<u32>,
 }
 
 impl Default for PipelineConfig {
@@ -80,8 +79,8 @@ impl Default for PipelineConfig {
       blur_radius: None,
       sharpen_amount: None,
       noise_amount: None,
-      scale_factor: None,
-      rotate_angle: None,
+      resize_width: None,
+      resize_height: None,
     }
   }
 }
@@ -229,25 +228,33 @@ impl CliConfig {
       }
     }
 
-    if let Some(value) = matches.get_one::<f32>("scale") {
-      if let Some(indices) = matches.indices_of("scale") {
-        for index in indices {
-          operations.push(PipelineOperation {
-            op_type: OperationType::Scale(*value),
-            index,
-          });
+    // Handle resize - check for resize width or height arguments
+    let resize_width = matches.get_one::<u32>("resize-width").copied();
+    let resize_height = matches.get_one::<u32>("resize-height").copied();
+
+    if resize_width.is_some() || resize_height.is_some() {
+      // Find the earliest index among resize arguments
+      let mut resize_index = usize::MAX;
+
+      if resize_width.is_some() {
+        if let Some(indices) = matches.indices_of("resize-width") {
+          resize_index = resize_index.min(indices.min().unwrap_or(usize::MAX));
         }
       }
-    }
-
-    if let Some(value) = matches.get_one::<f32>("rotate") {
-      if let Some(indices) = matches.indices_of("rotate") {
-        for index in indices {
-          operations.push(PipelineOperation {
-            op_type: OperationType::Rotate(*value),
-            index,
-          });
+      if resize_height.is_some() {
+        if let Some(indices) = matches.indices_of("resize-height") {
+          resize_index = resize_index.min(indices.min().unwrap_or(usize::MAX));
         }
+      }
+
+      if resize_index != usize::MAX {
+        operations.push(PipelineOperation {
+          op_type: OperationType::Resize {
+            width: resize_width,
+            height: resize_height,
+          },
+          index: resize_index,
+        });
       }
     }
 
@@ -267,21 +274,19 @@ impl CliConfig {
       blur_radius: matches.get_one::<f32>("blur").copied(),
       sharpen_amount: matches.get_one::<f32>("sharpen").copied(),
       noise_amount: matches.get_one::<f32>("noise").copied(),
-      scale_factor: matches.get_one::<f32>("scale").copied(),
-      rotate_angle: matches.get_one::<f32>("rotate").copied(),
+      resize_width: resize_width,
+      resize_height: resize_height,
     };
 
     let verbose = matches.get_flag("verbose");
-    let resize_width = matches.get_one::<u32>("resize-width").copied();
-    let resize_height = matches.get_one::<u32>("resize-height").copied();
 
     Ok(CliConfig {
       input_path,
       output_path,
       pipeline_config,
       verbose,
-      resize_width,
-      resize_height,
+      resize_width: None,
+      resize_height: None,
     })
   }
 
@@ -454,10 +459,10 @@ impl CliConfig {
           last_node_id = node_id;
         }
 
-        OperationType::Scale(factor) => {
-          let node_id = pipeline.add_node("Scale".to_string(), NodeType::Scale);
+        OperationType::Resize { width, height } => {
+          let node_id = pipeline.add_node("Resize".to_string(), NodeType::Resize);
           if let Some(node) = pipeline.get_node_mut(node_id) {
-            node.set_params(NodeParams::Scale { factor: *factor });
+            node.set_params(NodeParams::Resize { width: *width, height: *height });
           }
           pipeline
             .connect_nodes(
@@ -466,23 +471,7 @@ impl CliConfig {
               node_id,
               "image".to_string(),
             )
-            .expect("Failed to connect scale node");
-          last_node_id = node_id;
-        }
-
-        OperationType::Rotate(angle) => {
-          let node_id = pipeline.add_node("Rotate".to_string(), NodeType::Rotate);
-          if let Some(node) = pipeline.get_node_mut(node_id) {
-            node.set_params(NodeParams::Rotate { angle: *angle });
-          }
-          pipeline
-            .connect_nodes(
-              last_node_id,
-              "image".to_string(),
-              node_id,
-              "image".to_string(),
-            )
-            .expect("Failed to connect rotate node");
+            .expect("Failed to connect resize node");
           last_node_id = node_id;
         }
       }
@@ -544,8 +533,14 @@ impl CliConfig {
           OperationType::Blur(radius) => format!("Blur: {:.2}px", radius),
           OperationType::Sharpen(amount) => format!("Sharpen: {:.2}", amount),
           OperationType::Noise(amount) => format!("Noise: {:.2}", amount),
-          OperationType::Scale(factor) => format!("Scale: {:.2}x", factor),
-          OperationType::Rotate(angle) => format!("Rotate: {:.2}°", angle),
+          OperationType::Resize { width, height } => {
+            match (width, height) {
+              (Some(w), Some(h)) => format!("Resize: {}x{}", w, h),
+              (Some(w), None) => format!("Resize: {}x? (maintain aspect)", w),
+              (None, Some(h)) => format!("Resize: ?x{} (maintain aspect)", h),
+              (None, None) => "Resize: no change".to_string(),
+            }
+          },
         };
         println!("  {}. {}", i + 1, description);
       }
@@ -638,20 +633,8 @@ fn build_cli() -> Command {
                 .help("Add noise (0.0 to 1.0)")
                 .value_parser(value_parser!(f32)),
         )
-        .arg(
-            Arg::new("scale")
-                .long("scale")
-                .value_name("FACTOR")
-                .help("Scale image (0.1 to 5.0)")
-                .value_parser(value_parser!(f32)),
-        )
-        .arg(
-            Arg::new("rotate")
-                .long("rotate")
-                .value_name("DEGREES")
-                .help("Rotate image (degrees)")
-                .value_parser(value_parser!(f32)),
-        )
+
+
         .arg(
             Arg::new("auto-white-balance")
                 .long("auto-white-balance")
@@ -743,9 +726,6 @@ pub fn print_examples() {
   println!("  shade -i original.png -o processed.png \\");
   println!("        --brightness 0.1 --contrast 1.2 --saturation 1.1 \\");
   println!("        --gamma 0.9 --sharpen 0.5");
-  println!();
-  println!("Geometric transformations:");
-  println!("  shade -i input.jpg -o output.jpg --scale 1.5 --rotate 15");
   println!();
   println!("Resize operations:");
   println!(

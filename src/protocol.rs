@@ -272,16 +272,17 @@ impl TryFrom<&OperationSpec> for OperationType {
           .map_err(|e| format!("Invalid noise parameter: {}", e))?;
         Ok(OperationType::Noise(value))
       }
-      "scale" => {
-        let value: f32 = serde_json::from_value(spec.params.clone())
-          .map_err(|e| format!("Invalid scale parameter: {}", e))?;
-        Ok(OperationType::Scale(value))
+      "resize" => {
+        #[derive(serde::Deserialize)]
+        struct ResizeParams {
+          width: Option<u32>,
+          height: Option<u32>,
+        }
+        let params: ResizeParams = serde_json::from_value(spec.params.clone())
+          .map_err(|e| format!("Invalid resize parameters: {}", e))?;
+        Ok(OperationType::Resize { width: params.width, height: params.height })
       }
-      "rotate" => {
-        let value: f32 = serde_json::from_value(spec.params.clone())
-          .map_err(|e| format!("Invalid rotate parameter: {}", e))?;
-        Ok(OperationType::Rotate(value))
-      }
+
       _ => Err(format!("Unknown operation: {}", spec.operation)),
     }
   }

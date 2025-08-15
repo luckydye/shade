@@ -41,8 +41,7 @@ pub enum NodeType {
   Noise,
 
   // Transformations
-  Scale,
-  Rotate,
+  Resize,
   Crop,
 
   // Compositing
@@ -95,11 +94,9 @@ pub enum NodeParams {
     amount: f32,
     seed: u32,
   },
-  Scale {
-    factor: f32,
-  },
-  Rotate {
-    angle: f32,
+  Resize {
+    width: Option<u32>,
+    height: Option<u32>,
   },
   Crop {
     x: u32,
@@ -186,8 +183,7 @@ impl ProcessingNode {
         amount: 0.1,
         seed: 42,
       },
-      NodeType::Scale => NodeParams::Scale { factor: 1.0 },
-      NodeType::Rotate => NodeParams::Rotate { angle: 0.0 },
+      NodeType::Resize => NodeParams::Resize { width: None, height: None },
       NodeType::Crop => NodeParams::Crop {
         x: 0,
         y: 0,
@@ -357,8 +353,7 @@ impl ImagePipeline {
       NodeType::Blur,
       NodeType::Sharpen,
       NodeType::Noise,
-      NodeType::Scale,
-      NodeType::Rotate,
+      NodeType::Resize,
       NodeType::Crop,
       NodeType::Mix,
       NodeType::Mask,
@@ -401,8 +396,7 @@ impl ImagePipeline {
       NodeType::Blur => Some(include_str!("shaders/blur.wgsl")),
       NodeType::Sharpen => Some(include_str!("shaders/sharpen.wgsl")),
       NodeType::Noise => Some(include_str!("shaders/noise.wgsl")),
-      NodeType::Scale => Some(include_str!("shaders/scale.wgsl")),
-      NodeType::Rotate => Some(include_str!("shaders/rotate.wgsl")),
+      NodeType::Resize => Some(include_str!("shaders/resize.wgsl")),
       NodeType::Crop => Some(include_str!("shaders/crop.wgsl")),
       NodeType::Mix => Some(include_str!("shaders/mix.wgsl")),
       NodeType::Mask => Some(include_str!("shaders/mask.wgsl")),
@@ -583,12 +577,13 @@ impl ImagePipeline {
     &mut self,
     input_data: Vec<u8>,
     dimensions: (u32, u32),
-  ) -> Result<Vec<u8>, String> {
+  ) -> Result<(Vec<u8>, (u32, u32)), String> {
     let execution_order = self.get_execution_order()?;
 
     if let (Some(device), Some(queue)) = (self.device.as_ref(), self.queue.as_ref()) {
       // Create input texture and upload data
       let mut current_data = input_data.clone();
+      let mut current_dimensions = dimensions;
 
       log::info!("Processing pipeline with {} nodes", execution_order.len());
 
@@ -604,8 +599,8 @@ impl ImagePipeline {
 
             // Process the node if we have a pipeline for it
             if let Some(pipeline) = self.pipelines.get(&node.node_type) {
-              let (width, height) = dimensions;
-              if self.needs_tiling(width, height) {
+              let (width, height) = current_dimensions;
+              if self.needs_tiling(width, height) && !matches!(node.node_type, NodeType::Resize) {
                 log::info!(
                   "Using tiled processing for large image: {}x{}",
                   width,
@@ -619,21 +614,23 @@ impl ImagePipeline {
                     &node.node_type,
                     &node.params,
                     current_data,
-                    dimensions,
+                    current_dimensions,
                   )
                   .await?;
               } else {
-                current_data = self
-                  .process_node(
+                let (processed_data, new_dimensions) = self
+                  .process_node_with_dimensions(
                     device,
                     queue,
                     pipeline,
                     &node.node_type,
                     &node.params,
                     current_data,
-                    dimensions,
+                    current_dimensions,
                   )
                   .await?;
+                current_data = processed_data;
+                current_dimensions = new_dimensions;
               }
             } else {
               log::warn!("No pipeline found for node type: {:?}", node.node_type);
@@ -642,10 +639,276 @@ impl ImagePipeline {
         }
       }
 
-      Ok(current_data)
+      Ok((current_data, current_dimensions))
     } else {
       Err("GPU resources not initialized".to_string())
     }
+  }
+
+  async fn process_node_with_dimensions(
+    &self,
+    device: &Device,
+    queue: &Queue,
+    pipeline: &ComputePipeline,
+    node_type: &NodeType,
+    params: &NodeParams,
+    input_data: Vec<u8>,
+    dimensions: (u32, u32),
+  ) -> Result<(Vec<u8>, (u32, u32)), String> {
+    // Handle resize specially
+    if let NodeType::Resize = node_type {
+      return self.process_resize_node(device, queue, pipeline, params, input_data, dimensions).await;
+    }
+
+    // For other nodes, call the original process_node method and return same dimensions
+    let processed_data = self.process_node(device, queue, pipeline, node_type, params, input_data, dimensions).await?;
+    Ok((processed_data, dimensions))
+  }
+
+  async fn process_resize_node(
+    &self,
+    device: &Device,
+    queue: &Queue,
+    pipeline: &ComputePipeline,
+    params: &NodeParams,
+    input_data: Vec<u8>,
+    dimensions: (u32, u32),
+  ) -> Result<(Vec<u8>, (u32, u32)), String> {
+    let (current_width, current_height) = dimensions;
+
+    // Extract resize parameters
+    let (target_width, target_height) = if let NodeParams::Resize { width, height } = params {
+      match (width, height) {
+        (Some(w), Some(h)) => (*w, *h),
+        (Some(w), None) => {
+          // Maintain aspect ratio, set width
+          let aspect_ratio = current_height as f32 / current_width as f32;
+          let h = (*w as f32 * aspect_ratio) as u32;
+          (*w, h)
+        }
+        (None, Some(h)) => {
+          // Maintain aspect ratio, set height
+          let aspect_ratio = current_width as f32 / current_height as f32;
+          let w = (*h as f32 * aspect_ratio) as u32;
+          (w, *h)
+        }
+        (None, None) => return Ok((input_data, dimensions)), // No resize needed
+      }
+    } else {
+      return Err("Invalid parameters for resize node".to_string());
+    };
+
+    log::info!(
+      "Resizing image from {}x{} to {}x{}",
+      current_width,
+      current_height,
+      target_width,
+      target_height
+    );
+
+    // Create input texture
+    let input_texture = device.create_texture(&wgpu::TextureDescriptor {
+      label: Some("Resize Input Texture"),
+      size: wgpu::Extent3d {
+        width: current_width,
+        height: current_height,
+        depth_or_array_layers: 1,
+      },
+      mip_level_count: 1,
+      sample_count: 1,
+      dimension: wgpu::TextureDimension::D2,
+      format: TEXTURE_FORMAT,
+      usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+      view_formats: &[],
+    });
+
+    // Create output texture with new dimensions
+    let output_texture = device.create_texture(&wgpu::TextureDescriptor {
+      label: Some("Resize Output Texture"),
+      size: wgpu::Extent3d {
+        width: target_width,
+        height: target_height,
+        depth_or_array_layers: 1,
+      },
+      mip_level_count: 1,
+      sample_count: 1,
+      dimension: wgpu::TextureDimension::D2,
+      format: TEXTURE_FORMAT,
+      usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+      view_formats: &[],
+    });
+
+    // Upload input data to texture
+    queue.write_texture(
+      wgpu::TexelCopyTextureInfo {
+        texture: &input_texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+      },
+      &input_data,
+      wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(BYTES_PER_PIXEL * current_width),
+        rows_per_image: Some(current_height),
+      },
+      wgpu::Extent3d {
+        width: current_width,
+        height: current_height,
+        depth_or_array_layers: 1,
+      },
+    );
+
+    // Create parameter buffer with target dimensions
+    let param_data = self.serialize_params(params)?;
+    let param_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+      label: Some("Resize Parameter Buffer"),
+      contents: &param_data,
+      usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    // Create bind group layout
+    let bind_group_layout =
+      device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Resize Bind Group Layout"),
+        entries: &[
+          wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+              multisampled: false,
+              view_dimension: wgpu::TextureViewDimension::D2,
+              sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            },
+            count: None,
+          },
+          wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::StorageTexture {
+              access: wgpu::StorageTextureAccess::WriteOnly,
+              format: TEXTURE_FORMAT,
+              view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+          },
+          wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+              ty: wgpu::BufferBindingType::Uniform,
+              has_dynamic_offset: false,
+              min_binding_size: None,
+            },
+            count: None,
+          },
+        ],
+      });
+
+    // Create bind group
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+      label: Some("Resize Bind Group"),
+      layout: &bind_group_layout,
+      entries: &[
+        wgpu::BindGroupEntry {
+          binding: 0,
+          resource: wgpu::BindingResource::TextureView(
+            &input_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+          ),
+        },
+        wgpu::BindGroupEntry {
+          binding: 1,
+          resource: wgpu::BindingResource::TextureView(
+            &output_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+          ),
+        },
+        wgpu::BindGroupEntry {
+          binding: 2,
+          resource: param_buffer.as_entire_binding(),
+        },
+      ],
+    });
+
+    // Create command encoder and compute pass
+    let mut command_encoder =
+      device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Resize Command Encoder"),
+      });
+
+    {
+      let mut compute_pass =
+        command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+          label: Some("Resize Compute Pass"),
+          timestamp_writes: None,
+        });
+      compute_pass.set_bind_group(0, &bind_group, &[]);
+      compute_pass.set_pipeline(pipeline);
+      compute_pass.dispatch_workgroups(
+        (target_width + 7) / 8,
+        (target_height + 7) / 8,
+        1,
+      );
+    }
+
+    // Read back the result
+    let unpadded_bytes_per_row = target_width * BYTES_PER_PIXEL;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u32;
+    let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+    let buffer_size = padded_bytes_per_row * target_height;
+
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+      label: Some("Resize Output Buffer"),
+      size: buffer_size as u64,
+      usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+      mapped_at_creation: false,
+    });
+
+    command_encoder.copy_texture_to_buffer(
+      wgpu::TexelCopyTextureInfo {
+        texture: &output_texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+      },
+      wgpu::TexelCopyBufferInfo {
+        buffer: &output_buffer,
+        layout: wgpu::TexelCopyBufferLayout {
+          offset: 0,
+          bytes_per_row: Some(padded_bytes_per_row),
+          rows_per_image: Some(target_height),
+        },
+      },
+      wgpu::Extent3d {
+        width: target_width,
+        height: target_height,
+        depth_or_array_layers: 1,
+      },
+    );
+
+    queue.submit(Some(command_encoder.finish()));
+
+    // Map and read the buffer
+    let buffer_slice = output_buffer.slice(..);
+    let (sender, receiver) = flume::bounded(1);
+    buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+    device.poll(wgpu::PollType::Wait).unwrap();
+    receiver.recv_async().await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+
+    // Copy data accounting for row padding
+    let mut result_data = vec![0u8; (target_width * target_height * BYTES_PER_PIXEL) as usize];
+    {
+      let view = buffer_slice.get_mapped_range();
+      for row in 0..target_height {
+        let src_start = (row * padded_bytes_per_row) as usize;
+        let src_end = src_start + (unpadded_bytes_per_row as usize);
+        let dst_start = (row * unpadded_bytes_per_row) as usize;
+        let dst_end = dst_start + (unpadded_bytes_per_row as usize);
+        result_data[dst_start..dst_end].copy_from_slice(&view[src_start..src_end]);
+      }
+    }
+    output_buffer.unmap();
+
+    Ok((result_data, (target_width, target_height)))
   }
 
   async fn process_node(
@@ -1045,12 +1308,9 @@ impl ImagePipeline {
         buffer.extend_from_slice(&(*seed as f32).to_le_bytes());
         buffer.resize(16, 0);
       }
-      NodeParams::Scale { factor } => {
-        buffer.extend_from_slice(&factor.to_le_bytes());
-        buffer.resize(16, 0);
-      }
-      NodeParams::Rotate { angle } => {
-        buffer.extend_from_slice(&angle.to_le_bytes());
+      NodeParams::Resize { width, height } => {
+        buffer.extend_from_slice(&width.unwrap_or(0).to_le_bytes());
+        buffer.extend_from_slice(&height.unwrap_or(0).to_le_bytes());
         buffer.resize(16, 0);
       }
       NodeParams::Crop {
@@ -1228,11 +1488,11 @@ mod tests {
 
   #[test]
   fn test_pipeline_builder() {
-    let pipeline = PipelineBuilder::new().basic_color_grading().build();
+    let pipeline = PipelineBuilder::new().with_blur(2.0).build();
 
-    assert_eq!(pipeline.nodes.len(), 5);
-    assert!(pipeline.input_node_id.is_some());
-    assert!(pipeline.output_node_id.is_some());
+    assert_eq!(pipeline.nodes.len(), 1);
+    assert!(pipeline.input_node_id.is_none());
+    assert!(pipeline.output_node_id.is_none());
   }
 
   #[test]

@@ -248,8 +248,8 @@ impl ImageProcessingServer {
       blur_radius: None,
       sharpen_amount: None,
       noise_amount: None,
-      scale_factor: None,
-      rotate_angle: None,
+      resize_width: None,
+      resize_height: None,
     };
 
     // Create a temporary config for pipeline building
@@ -291,7 +291,7 @@ impl ImageProcessingServer {
     // Convert processed data to output format
     let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
     let image_data =
-      self.convert_to_base64(&processed_data, actual_dims, &output_format)?;
+      self.convert_to_base64(&processed_data.0, (processed_data.1.0 as usize, processed_data.1.1 as usize), &output_format)?;
 
     Ok(ProcessImageResult {
       image_data,
