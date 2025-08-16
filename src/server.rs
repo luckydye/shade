@@ -249,8 +249,7 @@ impl ImageProcessingServer {
       output_path: None,
       pipeline_config,
       verbose: false,
-      resize_width: None,
-      resize_height: None,
+      config_path: None,
     };
 
     // Build and initialize pipeline

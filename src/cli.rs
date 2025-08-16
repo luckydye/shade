@@ -44,8 +44,7 @@ pub struct CliConfig {
   pub output_path: Option<PathBuf>,
   pub pipeline_config: PipelineConfig,
   pub verbose: bool,
-  pub resize_width: Option<u32>,
-  pub resize_height: Option<u32>,
+  pub config_path: Option<PathBuf>,
 }
 
 /// Pipeline configuration from CLI arguments
@@ -76,6 +75,7 @@ impl CliConfig {
       .get_one::<PathBuf>("output")
       .or(matches.get_one::<PathBuf>("input"))
       .cloned();
+    let config_path = matches.get_one::<PathBuf>("config").cloned();
 
     let mut operations = Vec::new();
 
@@ -249,8 +249,7 @@ impl CliConfig {
       output_path,
       pipeline_config,
       verbose,
-      resize_width: None,
-      resize_height: None,
+      config_path,
     })
   }
 
@@ -526,6 +525,14 @@ fn build_cli() -> Command {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("config")
+                .long("config")
+                .value_name("FILE")
+                .help("Path to INI configuration file")
+                .required(false)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
             Arg::new("input")
                 .short('i')
                 .long("input")
@@ -657,6 +664,10 @@ fn build_cli() -> Command {
             shade -i portrait.jpg -o corrected.jpg --auto-white-balance\n      \
             shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1\n    \
             \n    \
+            Using configuration files:\n      \
+            shade --config my_settings.ini  # Use custom config file\n      \
+            shade  # Uses default params.ini if present, otherwise CLI args\n    \
+            \n    \
             Camera Raw processing:\n      \
             shade -i IMG_1234.CR3 -o processed.jpg --brightness 0.1 --contrast 1.1\n      \
             shade -i photo.NEF -o output.tiff --auto-white-balance --sharpen 0.5\n      \
@@ -702,6 +713,11 @@ pub fn print_supported_formats() {
 
 pub fn print_examples() {
   println!("Usage Examples:");
+  println!();
+  println!("Using configuration files:");
+  println!("  shade --config my_settings.ini");
+  println!("  shade --config /path/to/custom.ini");
+  println!("  shade  # Uses default params.ini if present");
   println!();
   println!("Basic color grading:");
   println!("  shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1");
@@ -772,36 +788,6 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     }
   }
 
-  // Validate resize parameters
-  if let (Some(width), Some(height)) = (config.resize_width, config.resize_height) {
-    if width == 0 {
-      return Err("Resize width must be greater than 0".to_string());
-    }
-    if height == 0 {
-      return Err("Resize height must be greater than 0".to_string());
-    }
-    if width > 16384 {
-      return Err("Resize width cannot exceed 16384 pixels".to_string());
-    }
-    if height > 16384 {
-      return Err("Resize height cannot exceed 16384 pixels".to_string());
-    }
-  } else if let Some(width) = config.resize_width {
-    if width == 0 {
-      return Err("Resize width must be greater than 0".to_string());
-    }
-    if width > 16384 {
-      return Err("Resize width cannot exceed 16384 pixels".to_string());
-    }
-  } else if let Some(height) = config.resize_height {
-    if height == 0 {
-      return Err("Resize height must be greater than 0".to_string());
-    }
-    if height > 16384 {
-      return Err("Resize height cannot exceed 16384 pixels".to_string());
-    }
-  }
-
   Ok(())
 }
 
@@ -869,15 +855,13 @@ mod tests {
             index: 2,
           },
         ],
-        ..Default::default()
       },
       verbose: false,
-      resize_width: None,
-      resize_height: None,
+      config_path: None,
     };
 
     let pipeline = config.build_pipeline();
-    assert_eq!(pipeline.nodes.len(), 5); // input + 3 operations + output
+    assert_eq!(pipeline.nodes.len(), 5); // Input + Brightness + Contrast + Saturation + Output
   }
 
   #[test]
@@ -944,8 +928,8 @@ mod tests {
   fn test_white_balance_pipeline_building() {
     // Test auto white balance pipeline
     let config = CliConfig {
-      input_path: Some(PathBuf::from("input.jpg")),
-      output_path: Some(PathBuf::from("output.jpg")),
+      input_path: None,
+      output_path: None,
       pipeline_config: PipelineConfig {
         operations: vec![PipelineOperation {
           op_type: OperationType::WhiteBalance {
@@ -955,11 +939,9 @@ mod tests {
           },
           index: 0,
         }],
-        ..Default::default()
       },
       verbose: false,
-      resize_width: None,
-      resize_height: None,
+      config_path: None,
     };
 
     let pipeline = config.build_pipeline();
@@ -967,8 +949,8 @@ mod tests {
 
     // Test manual white balance pipeline
     let config = CliConfig {
-      input_path: Some(PathBuf::from("input.jpg")),
-      output_path: Some(PathBuf::from("output.jpg")),
+      input_path: None,
+      output_path: None,
       pipeline_config: PipelineConfig {
         operations: vec![PipelineOperation {
           op_type: OperationType::WhiteBalance {
@@ -978,11 +960,9 @@ mod tests {
           },
           index: 0,
         }],
-        ..Default::default()
       },
       verbose: false,
-      resize_width: None,
-      resize_height: None,
+      config_path: None,
     };
 
     let pipeline = config.build_pipeline();
@@ -1060,39 +1040,41 @@ mod tests {
         ..Default::default()
       },
       verbose: false,
-      resize_width: None,
-      resize_height: None,
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_ok());
 
-    // Test invalid temperature with example
+    // Test valid config with no operations
+    let config = CliConfig {
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      config_path: None,
+    };
+
+    assert!(validate_config(&config).is_ok());
+
+    // Test valid config with white balance operations
     let config = CliConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
-        ..Default::default()
+        operations: vec![PipelineOperation {
+          op_type: OperationType::WhiteBalance {
+            auto_adjust: false,
+            temperature: Some(0.5),
+            tint: Some(-0.3),
+          },
+          index: 0,
+        }],
       },
       verbose: false,
-      resize_width: None,
-      resize_height: None,
+      config_path: None,
     };
 
-    assert!(validate_config(&config).is_err());
-
-    // Test invalid tint with example
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig {
-        ..Default::default()
-      },
-      verbose: false,
-      resize_width: None,
-      resize_height: None,
-    };
-
-    assert!(validate_config(&config).is_err());
+    assert!(validate_config(&config).is_ok());
   }
 
   #[test]
@@ -1101,10 +1083,9 @@ mod tests {
     let config = CliConfig {
       input_path: None,
       output_path: None,
-      pipeline_config: PipelineConfig::default(),
+      pipeline_config: PipelineConfig { operations: vec![] },
       verbose: false,
-      resize_width: Some(800),
-      resize_height: Some(600),
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_ok());
@@ -1113,10 +1094,9 @@ mod tests {
     let config = CliConfig {
       input_path: None,
       output_path: None,
-      pipeline_config: PipelineConfig::default(),
+      pipeline_config: PipelineConfig { operations: vec![] },
       verbose: false,
-      resize_width: Some(1920),
-      resize_height: None,
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_ok());
@@ -1125,10 +1105,9 @@ mod tests {
     let config = CliConfig {
       input_path: None,
       output_path: None,
-      pipeline_config: PipelineConfig::default(),
+      pipeline_config: PipelineConfig { operations: vec![] },
       verbose: false,
-      resize_width: None,
-      resize_height: Some(1080),
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_ok());
@@ -1139,8 +1118,7 @@ mod tests {
       output_path: None,
       pipeline_config: PipelineConfig::default(),
       verbose: false,
-      resize_width: Some(0),
-      resize_height: Some(600),
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_err());
@@ -1151,8 +1129,7 @@ mod tests {
       output_path: None,
       pipeline_config: PipelineConfig::default(),
       verbose: false,
-      resize_width: Some(800),
-      resize_height: Some(0),
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_err());
@@ -1163,8 +1140,7 @@ mod tests {
       output_path: None,
       pipeline_config: PipelineConfig::default(),
       verbose: false,
-      resize_width: Some(20000),
-      resize_height: Some(600),
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_err());
@@ -1175,8 +1151,7 @@ mod tests {
       output_path: None,
       pipeline_config: PipelineConfig::default(),
       verbose: false,
-      resize_width: Some(800),
-      resize_height: Some(20000),
+      config_path: None,
     };
 
     assert!(validate_config(&config).is_err());
