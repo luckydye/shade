@@ -1,6 +1,9 @@
 use std::error::Error;
 use std::fmt;
-
+use crate::utils::convert_to_float;
+use rawler::{
+  decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource,
+};
 use tokio::time::Instant;
 
 /// Error type for file loading operations
@@ -173,36 +176,45 @@ impl ImageLoader for RawLoader {
 
       // Try to load from cache first
       let cache = ImageCache::new().map_err(|e| {
-        log::warn!("Failed to initialize cache: {}, proceeding without cache", e);
+        log::warn!(
+          "Failed to initialize cache: {}, proceeding without cache",
+          e
+        );
         e
-      });
+      })?;
 
-      if let Ok(cache) = &cache {
-        let cache_params = Self::get_cache_params();
-        let cache_key = cache.generate_cache_key(buffer, &cache_params);
+      let cache_key = cache.generate_cache_key(buffer, &Self::get_cache_params());
 
-        if let Some(cached_image) = cache.load_from_cache(&cache_key) {
-          log::info!("Loaded raw image from cache in {}ms", load_start.elapsed().as_millis());
-          return Ok((cached_image.data, cached_image.dimensions));
-        }
+      log::info!(
+        "Generate cache key in {}ms",
+        load_start.elapsed().as_millis()
+      );
+      let load_start = Instant::now();
+
+      if let Some(cached_image) = cache.load_from_cache(&cache_key) {
+        log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
+        return Ok((cached_image.data, cached_image.dimensions));
       }
-      use crate::utils::convert_to_float;
-      use rawler::{
-        decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource,
-      };
+
 
       log::info!("Loading camera raw from buffer (filename: {:?})", filename);
 
       let rawsource = RawSource::new_from_slice(buffer);
 
-      log::info!("Loaded raw source at {}ms", load_start.elapsed().as_millis());
+      log::info!(
+        "Loaded raw source at {}ms",
+        load_start.elapsed().as_millis()
+      );
 
       let rawimage =
         rawler::decode(&rawsource, &RawDecodeParams::default()).map_err(|e| {
           FileLoaderError::DecodeError(format!("Could not decode source: {}", e))
         })?;
 
-      log::info!("Decoded raw image at {}ms", load_start.elapsed().as_millis());
+      log::info!(
+        "Decoded raw image at {}ms",
+        load_start.elapsed().as_millis()
+      );
 
       let pixels = rawimage.pixels_u16();
       log::info!("Raw pixels: {} CPP: {:?}", pixels.len(), rawimage.cpp);
@@ -215,7 +227,10 @@ impl ImageLoader for RawLoader {
         FileLoaderError::DecodeError(format!("Raw development error: {}", e))
       })?;
 
-      log::info!("Developed raw image at {}ms", load_start.elapsed().as_millis());
+      log::info!(
+        "Developed raw image at {}ms",
+        load_start.elapsed().as_millis()
+      );
 
       let img = image.to_dynamic_image().ok_or_else(|| {
         FileLoaderError::DecodeError("Failed to convert to dynamic image".to_string())
@@ -232,17 +247,13 @@ impl ImageLoader for RawLoader {
 
       // 50ms for conversions
 
-      log::info!("Converted raw image at {}ms", load_start.elapsed().as_millis());
+      log::info!(
+        "Converted raw image at {}ms",
+        load_start.elapsed().as_millis()
+      );
 
       // Save to cache if cache is available
-      if let Ok(cache) = &cache {
-        let cache_params = Self::get_cache_params();
-        let cache_key = cache.generate_cache_key(buffer, &cache_params);
-
-        if let Err(e) = cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize)) {
-          log::warn!("Failed to save to cache: {}", e);
-        }
-      }
+      cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
 
       Ok((float_data, (width as usize, height as usize)))
     }

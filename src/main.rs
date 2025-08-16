@@ -115,9 +115,14 @@ pub fn main() -> Result<()> {
             match cache.get_cache_size() {
               Ok(size) => {
                 let size_mb = size as f64 / (1024.0 * 1024.0);
-                let cache_dir = cache.get_cache_path("").parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from(""));
+                let cache_dir = cache
+                  .get_cache_path("")
+                  .parent()
+                  .map(|p| p.to_path_buf())
+                  .unwrap_or_else(|| std::path::PathBuf::from(""));
                 println!("Cache location: {}", cache_dir.display());
                 println!("Cache size: {:.2} MB ({} bytes)", size_mb, size);
+                println!("Cache dir: {:?}", cache.cache_dir);
               }
               Err(e) => {
                 eprintln!("Failed to get cache info: {}", e);
@@ -176,12 +181,10 @@ async fn run(config: &CliConfig) -> Result<()> {
   let (texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
     #[cfg(not(target_arch = "wasm32"))]
     {
-      let load_start = std::time::Instant::now();
-
       // Load image file into memory
       let image_file = std::fs::read(&input_path)?;
 
-      let load_time = load_start.elapsed();
+      let load_time = run_start.elapsed();
       timing.image_load_ms = load_time.as_secs_f64() * 1000.0;
 
       match load_image(&image_file, Some(&input_path.to_string_lossy())) {
