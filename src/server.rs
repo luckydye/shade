@@ -7,9 +7,9 @@ use crate::protocol::{
   MessageId, MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
   ServerCapabilities, ServerInfo,
 };
+use crate::utils::convert_to_float;
 use crate::utils::{is_openexr_file, load_openexr_image};
 use base64::Engine;
-use crate::utils::convert_to_float;
 use rawler::imgop::develop::RawDevelop;
 
 /// Image processing server that handles socket communication
@@ -241,19 +241,6 @@ impl ImageProcessingServer {
 
     let pipeline_config = PipelineConfig {
       operations,
-      brightness: None,
-      contrast: None,
-      saturation: None,
-      hue: None,
-      gamma: None,
-      auto_white_balance: false,
-      white_balance_temperature: None,
-      white_balance_tint: None,
-      blur_radius: None,
-      sharpen_amount: None,
-      noise_amount: None,
-      resize_width: None,
-      resize_height: None,
     };
 
     // Create a temporary config for pipeline building
@@ -294,8 +281,11 @@ impl ImageProcessingServer {
 
     // Convert processed data to output format
     let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
-    let image_data =
-      self.convert_to_base64(&processed_data.0, (processed_data.1.0 as usize, processed_data.1.1 as usize), &output_format)?;
+    let image_data = self.convert_to_base64(
+      &processed_data.0,
+      (processed_data.1.0 as usize, processed_data.1.1 as usize),
+      &output_format,
+    )?;
 
     Ok(ProcessImageResult {
       image_data,

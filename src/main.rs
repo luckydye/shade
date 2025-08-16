@@ -4,6 +4,8 @@ mod server;
 mod shade;
 mod utils;
 
+use std::path::PathBuf;
+
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
 use rawler;
@@ -13,7 +15,9 @@ use utils::{is_openexr_file, load_openexr_image, output_image_native};
 use cli::CliConfig;
 use server::ImageProcessingServer;
 
-use crate::utils::convert_to_float;
+use ini::Ini;
+
+use crate::{cli::{PipelineConfig, PipelineOperation}, utils::convert_to_float};
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -27,9 +31,7 @@ pub fn main() {
 
   #[cfg(not(target_arch = "wasm32"))]
   {
-    env_logger::builder()
-      .format_timestamp_millis()
-      .init();
+    env_logger::builder().format_timestamp_millis().init();
 
     // Check if we should run in socket mode
     let args: Vec<String> = std::env::args().collect();
@@ -42,25 +44,33 @@ pub fn main() {
       return;
     }
 
-    match CliConfig::from_args() {
-      Ok(config) => {
-        if let Err(e) = cli::validate_config(&config) {
-          eprintln!("Error: {}", e);
+    let ini_conf = config_from_ini();
+
+    if ini_conf.is_ok() {
+      let config = ini_conf.unwrap();
+      log::info!("Ini {:?}", config);
+      pollster::block_on(run(&config));
+    } else {
+      match CliConfig::from_args() {
+        Ok(config) => {
+          if let Err(e) = cli::validate_config(&config) {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+          }
+
+          if config.verbose {
+            config.print_pipeline_info();
+          }
+
+          log::debug!("Time spent parsing args: {:?}", perf.elapsed());
+
+          pollster::block_on(run(&config));
+        }
+        Err(e) => {
+          eprintln!("Error parsing arguments: {}", e);
+          cli::print_examples();
           std::process::exit(1);
         }
-
-        if config.verbose {
-          config.print_pipeline_info();
-        }
-
-        log::debug!("Time spent parsing args: {:?}", perf.elapsed());
-
-        pollster::block_on(run(&config));
-      }
-      Err(e) => {
-        eprintln!("Error parsing arguments: {}", e);
-        cli::print_examples();
-        std::process::exit(1);
       }
     }
   }
@@ -93,7 +103,6 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
             (exr_data, (width, height))
           }
           Err(e) => {
-
             log::error!("Failed to load OpenEXR file: {}", e);
             let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
               .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
@@ -103,7 +112,10 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
           }
         }
       } else if input_path_str.ends_with(".CR3") {
-        log::debug!("[Load] Time spent reaching raw decode: {:?}", perf.elapsed());
+        log::debug!(
+          "[Load] Time spent reaching raw decode: {:?}",
+          perf.elapsed()
+        );
         let perf = std::time::Instant::now();
 
         // Use rawler for camera raw files
@@ -263,7 +275,11 @@ async fn run(config: &CliConfig) {
     Ok((processed_data, final_dimensions)) => {
       texture_data = processed_data;
       actual_dims = (final_dimensions.0 as usize, final_dimensions.1 as usize);
-      log::info!("Image processed through pipeline with final dimensions: {}x{}", actual_dims.0, actual_dims.1);
+      log::info!(
+        "Image processed through pipeline with final dimensions: {}x{}",
+        actual_dims.0,
+        actual_dims.1
+      );
     }
     Err(e) => {
       log::error!("Pipeline processing failed: {}", e);
@@ -290,5 +306,31 @@ async fn run(config: &CliConfig) {
   log::debug!("Time spent on output: {:?}", perf.elapsed())
 }
 
-// Resize functionality has been moved into the image processing pipeline
-// as the Resize node type, eliminating the need for separate resize handling
+pub fn config_from_ini() -> anyhow::Result<CliConfig> {
+  let conf = Ini::load_from_file("params.ini")?;
+
+  let section = conf.section(Some("params")).unwrap();
+
+  // Create pipeline config from ini values
+  let mut pipeline_config = PipelineConfig::default();
+
+  // Parse pipeline-related parameters from ini
+  if let Some(brightness) = section.get("brightness") {
+    if let Ok(exp_val) = brightness.parse::<f32>() {
+      pipeline_config.operations.push(PipelineOperation {
+        index: 0,
+        op_type: cli::OperationType::Brightness(exp_val)
+      });
+
+    }
+  }
+
+  Ok(CliConfig {
+    input_path: section.get("input_path").and_then(|f| Some(PathBuf::from(f.to_string()))),
+    output_path: section.get("output_path").and_then(|f| Some(PathBuf::from(f.to_string()))),
+    pipeline_config,
+    verbose: section.get("verbose").map(|v| v == "true").unwrap_or(false),
+    resize_width: section.get("resize_width").and_then(|w| w.parse().ok()),
+    resize_height: section.get("resize_height").and_then(|h| h.parse().ok()),
+  })
+}

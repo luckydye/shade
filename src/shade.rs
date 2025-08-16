@@ -183,7 +183,10 @@ impl ProcessingNode {
         amount: 0.1,
         seed: 42,
       },
-      NodeType::Resize => NodeParams::Resize { width: None, height: None },
+      NodeType::Resize => NodeParams::Resize {
+        width: None,
+        height: None,
+      },
       NodeType::Crop => NodeParams::Crop {
         x: 0,
         y: 0,
@@ -600,7 +603,9 @@ impl ImagePipeline {
             // Process the node if we have a pipeline for it
             if let Some(pipeline) = self.pipelines.get(&node.node_type) {
               let (width, height) = current_dimensions;
-              if self.needs_tiling(width, height) && !matches!(node.node_type, NodeType::Resize) {
+              if self.needs_tiling(width, height)
+                && !matches!(node.node_type, NodeType::Resize)
+              {
                 log::info!(
                   "Using tiled processing for large image: {}x{}",
                   width,
@@ -657,11 +662,17 @@ impl ImagePipeline {
   ) -> Result<(Vec<u8>, (u32, u32)), String> {
     // Handle resize specially
     if let NodeType::Resize = node_type {
-      return self.process_resize_node(device, queue, pipeline, params, input_data, dimensions).await;
+      return self
+        .process_resize_node(device, queue, pipeline, params, input_data, dimensions)
+        .await;
     }
 
     // For other nodes, call the original process_node method and return same dimensions
-    let processed_data = self.process_node(device, queue, pipeline, node_type, params, input_data, dimensions).await?;
+    let processed_data = self
+      .process_node(
+        device, queue, pipeline, node_type, params, input_data, dimensions,
+      )
+      .await?;
     Ok((processed_data, dimensions))
   }
 
@@ -677,26 +688,27 @@ impl ImagePipeline {
     let (current_width, current_height) = dimensions;
 
     // Extract resize parameters
-    let (target_width, target_height) = if let NodeParams::Resize { width, height } = params {
-      match (width, height) {
-        (Some(w), Some(h)) => (*w, *h),
-        (Some(w), None) => {
-          // Maintain aspect ratio, set width
-          let aspect_ratio = current_height as f32 / current_width as f32;
-          let h = (*w as f32 * aspect_ratio) as u32;
-          (*w, h)
+    let (target_width, target_height) =
+      if let NodeParams::Resize { width, height } = params {
+        match (width, height) {
+          (Some(w), Some(h)) => (*w, *h),
+          (Some(w), None) => {
+            // Maintain aspect ratio, set width
+            let aspect_ratio = current_height as f32 / current_width as f32;
+            let h = (*w as f32 * aspect_ratio) as u32;
+            (*w, h)
+          }
+          (None, Some(h)) => {
+            // Maintain aspect ratio, set height
+            let aspect_ratio = current_width as f32 / current_height as f32;
+            let w = (*h as f32 * aspect_ratio) as u32;
+            (w, *h)
+          }
+          (None, None) => return Ok((input_data, dimensions)), // No resize needed
         }
-        (None, Some(h)) => {
-          // Maintain aspect ratio, set height
-          let aspect_ratio = current_width as f32 / current_height as f32;
-          let w = (*h as f32 * aspect_ratio) as u32;
-          (w, *h)
-        }
-        (None, None) => return Ok((input_data, dimensions)), // No resize needed
-      }
-    } else {
-      return Err("Invalid parameters for resize node".to_string());
-    };
+      } else {
+        return Err("Invalid parameters for resize node".to_string());
+      };
 
     log::info!(
       "Resizing image from {}x{} to {}x{}",
@@ -892,10 +904,15 @@ impl ImagePipeline {
     let (sender, receiver) = flume::bounded(1);
     buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
     device.poll(wgpu::PollType::Wait).unwrap();
-    receiver.recv_async().await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    receiver
+      .recv_async()
+      .await
+      .map_err(|e| e.to_string())?
+      .map_err(|e| e.to_string())?;
 
     // Copy data accounting for row padding
-    let mut result_data = vec![0u8; (target_width * target_height * BYTES_PER_PIXEL) as usize];
+    let mut result_data =
+      vec![0u8; (target_width * target_height * BYTES_PER_PIXEL) as usize];
     {
       let view = buffer_slice.get_mapped_range();
       for row in 0..target_height {

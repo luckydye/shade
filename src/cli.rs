@@ -31,10 +31,14 @@ pub enum OperationType {
   Blur(f32),
   Sharpen(f32),
   Noise(f32),
-  Resize { width: Option<u32>, height: Option<u32> },
+  Resize {
+    width: Option<u32>,
+    height: Option<u32>,
+  },
 }
 
 /// CLI configuration structure
+#[derive(Debug)]
 pub struct CliConfig {
   pub input_path: Option<PathBuf>,
   pub output_path: Option<PathBuf>,
@@ -48,39 +52,12 @@ pub struct CliConfig {
 #[derive(Debug)]
 pub struct PipelineConfig {
   pub operations: Vec<PipelineOperation>,
-  // Keep these for backwards compatibility and validation
-  pub brightness: Option<f32>,
-  pub contrast: Option<f32>,
-  pub saturation: Option<f32>,
-  pub hue: Option<f32>,
-  pub gamma: Option<f32>,
-  pub auto_white_balance: bool,
-  pub white_balance_temperature: Option<f32>,
-  pub white_balance_tint: Option<f32>,
-  pub blur_radius: Option<f32>,
-  pub sharpen_amount: Option<f32>,
-  pub noise_amount: Option<f32>,
-  pub resize_width: Option<u32>,
-  pub resize_height: Option<u32>,
 }
 
 impl Default for PipelineConfig {
   fn default() -> Self {
     Self {
       operations: Vec::new(),
-      brightness: None,
-      contrast: None,
-      saturation: None,
-      hue: None,
-      gamma: None,
-      auto_white_balance: false,
-      white_balance_temperature: None,
-      white_balance_tint: None,
-      blur_radius: None,
-      sharpen_amount: None,
-      noise_amount: None,
-      resize_width: None,
-      resize_height: None,
     }
   }
 }
@@ -263,19 +240,6 @@ impl CliConfig {
 
     let pipeline_config = PipelineConfig {
       operations,
-      brightness: matches.get_one::<f32>("brightness").copied(),
-      contrast: matches.get_one::<f32>("contrast").copied(),
-      saturation: matches.get_one::<f32>("saturation").copied(),
-      hue: matches.get_one::<f32>("hue").copied(),
-      gamma: matches.get_one::<f32>("gamma").copied(),
-      auto_white_balance: matches.get_flag("auto-white-balance"),
-      white_balance_temperature: matches.get_one::<f32>("wb-temperature").copied(),
-      white_balance_tint: matches.get_one::<f32>("wb-tint").copied(),
-      blur_radius: matches.get_one::<f32>("blur").copied(),
-      sharpen_amount: matches.get_one::<f32>("sharpen").copied(),
-      noise_amount: matches.get_one::<f32>("noise").copied(),
-      resize_width: resize_width,
-      resize_height: resize_height,
     };
 
     let verbose = matches.get_flag("verbose");
@@ -462,7 +426,10 @@ impl CliConfig {
         OperationType::Resize { width, height } => {
           let node_id = pipeline.add_node("Resize".to_string(), NodeType::Resize);
           if let Some(node) = pipeline.get_node_mut(node_id) {
-            node.set_params(NodeParams::Resize { width: *width, height: *height });
+            node.set_params(NodeParams::Resize {
+              width: *width,
+              height: *height,
+            });
           }
           pipeline
             .connect_nodes(
@@ -533,13 +500,11 @@ impl CliConfig {
           OperationType::Blur(radius) => format!("Blur: {:.2}px", radius),
           OperationType::Sharpen(amount) => format!("Sharpen: {:.2}", amount),
           OperationType::Noise(amount) => format!("Noise: {:.2}", amount),
-          OperationType::Resize { width, height } => {
-            match (width, height) {
-              (Some(w), Some(h)) => format!("Resize: {}x{}", w, h),
-              (Some(w), None) => format!("Resize: {}x? (maintain aspect)", w),
-              (None, Some(h)) => format!("Resize: ?x{} (maintain aspect)", h),
-              (None, None) => "Resize: no change".to_string(),
-            }
+          OperationType::Resize { width, height } => match (width, height) {
+            (Some(w), Some(h)) => format!("Resize: {}x{}", w, h),
+            (Some(w), None) => format!("Resize: {}x? (maintain aspect)", w),
+            (None, Some(h)) => format!("Resize: ?x{} (maintain aspect)", h),
+            (None, None) => "Resize: no change".to_string(),
           },
         };
         println!("  {}. {}", i + 1, description);
@@ -803,19 +768,6 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     }
   }
 
-  // Validate white balance parameters
-  if let Some(temp) = config.pipeline_config.white_balance_temperature {
-    if temp < -1.0 || temp > 1.0 {
-      return Err("White balance temperature must be between -1.0 and 1.0".to_string());
-    }
-  }
-
-  if let Some(tint) = config.pipeline_config.white_balance_tint {
-    if tint < -1.0 || tint > 1.0 {
-      return Err("White balance tint must be between -1.0 and 1.0".to_string());
-    }
-  }
-
   Ok(())
 }
 
@@ -849,8 +801,6 @@ mod tests {
       config.output_path.clone().unwrap(),
       PathBuf::from("output.jpg")
     );
-    assert_eq!(config.pipeline_config.brightness, Some(0.2));
-    assert_eq!(config.pipeline_config.contrast, Some(1.1));
     // Check that operations are in the correct order
     assert_eq!(config.pipeline_config.operations.len(), 2);
     if let OperationType::Brightness(val) = config.pipeline_config.operations[0].op_type {
@@ -911,9 +861,6 @@ mod tests {
     let matches = build_cli().try_get_matches_from(args).unwrap();
     let config = CliConfig::from_matches(matches).unwrap();
 
-    assert_eq!(config.pipeline_config.auto_white_balance, true);
-    assert_eq!(config.pipeline_config.white_balance_temperature, None);
-    assert_eq!(config.pipeline_config.white_balance_tint, None);
     // Check that white balance operation was added
     assert_eq!(config.pipeline_config.operations.len(), 1);
     if let OperationType::WhiteBalance {
@@ -943,9 +890,6 @@ mod tests {
     let matches = build_cli().try_get_matches_from(args).unwrap();
     let config = CliConfig::from_matches(matches).unwrap();
 
-    assert_eq!(config.pipeline_config.auto_white_balance, false);
-    assert_eq!(config.pipeline_config.white_balance_temperature, Some(0.3));
-    assert_eq!(config.pipeline_config.white_balance_tint, Some(-0.1));
     // Check that white balance operation was added
     assert_eq!(config.pipeline_config.operations.len(), 1);
     if let OperationType::WhiteBalance {
@@ -977,7 +921,6 @@ mod tests {
           },
           index: 0,
         }],
-        auto_white_balance: true,
         ..Default::default()
       },
       verbose: false,
@@ -1001,8 +944,6 @@ mod tests {
           },
           index: 0,
         }],
-        white_balance_temperature: Some(0.3),
-        white_balance_tint: Some(-0.1),
         ..Default::default()
       },
       verbose: false,
@@ -1082,8 +1023,6 @@ mod tests {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
-        white_balance_temperature: Some(0.5),
-        white_balance_tint: Some(-0.5),
         ..Default::default()
       },
       verbose: false,
@@ -1098,7 +1037,6 @@ mod tests {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
-        white_balance_temperature: Some(2.0),
         ..Default::default()
       },
       verbose: false,
@@ -1113,7 +1051,6 @@ mod tests {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
-        white_balance_tint: Some(-2.0),
         ..Default::default()
       },
       verbose: false,

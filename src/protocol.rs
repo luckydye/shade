@@ -280,7 +280,10 @@ impl TryFrom<&OperationSpec> for OperationType {
         }
         let params: ResizeParams = serde_json::from_value(spec.params.clone())
           .map_err(|e| format!("Invalid resize parameters: {}", e))?;
-        Ok(OperationType::Resize { width: params.width, height: params.height })
+        Ok(OperationType::Resize {
+          width: params.width,
+          height: params.height,
+        })
       }
 
       _ => Err(format!("Unknown operation: {}", spec.operation)),
