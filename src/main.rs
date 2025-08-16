@@ -1,3 +1,4 @@
+mod cache;
 mod cli;
 mod config;
 mod file_loaders;
@@ -6,6 +7,7 @@ mod server;
 mod shade;
 mod utils;
 
+use crate::cache::ImageCache;
 use crate::config::config_from_ini_path;
 use crate::file_loaders::load_image;
 #[cfg(target_arch = "wasm32")]
@@ -91,6 +93,50 @@ pub fn main() -> Result<()> {
     if let Err(e) = cli::validate_config(&final_config) {
       eprintln!("Error: {}", e);
       std::process::exit(1);
+    }
+
+    // Handle cache management options
+    if final_config.clear_cache || final_config.show_cache_info {
+      match ImageCache::new() {
+        Ok(cache) => {
+          if final_config.clear_cache {
+            match cache.clear_cache() {
+              Ok(()) => {
+                println!("Cache cleared successfully");
+              }
+              Err(e) => {
+                eprintln!("Failed to clear cache: {}", e);
+                std::process::exit(1);
+              }
+            }
+          }
+
+          if final_config.show_cache_info {
+            match cache.get_cache_size() {
+              Ok(size) => {
+                let size_mb = size as f64 / (1024.0 * 1024.0);
+                let cache_dir = cache.get_cache_path("").parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from(""));
+                println!("Cache location: {}", cache_dir.display());
+                println!("Cache size: {:.2} MB ({} bytes)", size_mb, size);
+              }
+              Err(e) => {
+                eprintln!("Failed to get cache info: {}", e);
+              }
+            }
+          }
+
+          // If we only ran cache commands, exit
+          if final_config.input_path.is_none() {
+            return Ok(());
+          }
+        }
+        Err(e) => {
+          eprintln!("Failed to initialize cache: {}", e);
+          if final_config.clear_cache || final_config.show_cache_info {
+            std::process::exit(1);
+          }
+        }
+      }
     }
 
     if final_config.verbose {

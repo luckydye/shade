@@ -7,6 +7,7 @@ use tokio::time::Instant;
 #[derive(Debug)]
 pub enum FileLoaderError {
   IoError(std::io::Error),
+  IoStringError(String),
   DecodeError(String),
   UnsupportedFormat(String),
 }
@@ -15,6 +16,7 @@ impl fmt::Display for FileLoaderError {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       FileLoaderError::IoError(e) => write!(f, "IO error: {}", e),
+      FileLoaderError::IoStringError(msg) => write!(f, "IO error: {}", msg),
       FileLoaderError::DecodeError(msg) => write!(f, "Decode error: {}", msg),
       FileLoaderError::UnsupportedFormat(msg) => write!(f, "Unsupported format: {}", msg),
     }
@@ -134,6 +136,15 @@ impl ImageLoader for ExrLoader {
 /// Camera raw file loader (CR3, CR2, NEF, ARW, etc.)
 pub struct RawLoader;
 
+impl RawLoader {
+  #[cfg(not(target_arch = "wasm32"))]
+  fn get_cache_params() -> String {
+    // Include processing parameters that would affect the final image
+    // This ensures different processing settings get separate cache entries
+    "default_raw_develop".to_string()
+  }
+}
+
 impl ImageLoader for RawLoader {
   fn can_load(_buffer: &[u8], filename: Option<&str>) -> bool {
     // Fallback to extension check if filename is provided
@@ -158,6 +169,23 @@ impl ImageLoader for RawLoader {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
+      use crate::cache::ImageCache;
+
+      // Try to load from cache first
+      let cache = ImageCache::new().map_err(|e| {
+        log::warn!("Failed to initialize cache: {}, proceeding without cache", e);
+        e
+      });
+
+      if let Ok(cache) = &cache {
+        let cache_params = Self::get_cache_params();
+        let cache_key = cache.generate_cache_key(buffer, &cache_params);
+
+        if let Some(cached_image) = cache.load_from_cache(&cache_key) {
+          log::info!("Loaded raw image from cache in {}ms", load_start.elapsed().as_millis());
+          return Ok((cached_image.data, cached_image.dimensions));
+        }
+      }
       use crate::utils::convert_to_float;
       use rawler::{
         decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource,
@@ -205,6 +233,16 @@ impl ImageLoader for RawLoader {
       // 50ms for conversions
 
       log::info!("Converted raw image at {}ms", load_start.elapsed().as_millis());
+
+      // Save to cache if cache is available
+      if let Ok(cache) = &cache {
+        let cache_params = Self::get_cache_params();
+        let cache_key = cache.generate_cache_key(buffer, &cache_params);
+
+        if let Err(e) = cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize)) {
+          log::warn!("Failed to save to cache: {}", e);
+        }
+      }
 
       Ok((float_data, (width as usize, height as usize)))
     }

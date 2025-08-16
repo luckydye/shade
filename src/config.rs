@@ -147,5 +147,7 @@ fn parse_ini_config(conf: Ini) -> anyhow::Result<CliConfig> {
     pipeline_config,
     verbose: section.get("verbose").map(|v| v == "true").unwrap_or(false),
     config_path: None,
+    clear_cache: false,
+    show_cache_info: false,
   })
 }

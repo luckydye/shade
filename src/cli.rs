@@ -45,6 +45,8 @@ pub struct CliConfig {
   pub pipeline_config: PipelineConfig,
   pub verbose: bool,
   pub config_path: Option<PathBuf>,
+  pub clear_cache: bool,
+  pub show_cache_info: bool,
 }
 
 /// Pipeline configuration from CLI arguments
@@ -57,6 +59,20 @@ impl Default for PipelineConfig {
   fn default() -> Self {
     Self {
       operations: Vec::new(),
+    }
+  }
+}
+
+impl Default for CliConfig {
+  fn default() -> Self {
+    Self {
+      input_path: None,
+      output_path: None,
+      pipeline_config: PipelineConfig::default(),
+      verbose: false,
+      config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     }
   }
 }
@@ -241,6 +257,8 @@ impl CliConfig {
     let pipeline_config = PipelineConfig { operations };
 
     let verbose = matches.get_flag("verbose");
+    let clear_cache = matches.get_flag("clear-cache");
+    let show_cache_info = matches.get_flag("cache-info");
 
     Ok(CliConfig {
       input_path,
@@ -248,6 +266,8 @@ impl CliConfig {
       pipeline_config,
       verbose,
       config_path,
+      clear_cache,
+      show_cache_info,
     })
   }
 
@@ -653,6 +673,18 @@ fn build_cli() -> Command {
                 .help("Enable verbose output")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("clear-cache")
+                .long("clear-cache")
+                .help("Clear the persistent raw image cache")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("cache-info")
+                .long("cache-info")
+                .help("Show cache information (size, location)")
+                .action(clap::ArgAction::SetTrue),
+        )
         .after_help(
             "EXAMPLES:\n    \
             Basic image processing:\n      \
@@ -685,6 +717,10 @@ fn build_cli() -> Command {
             \n    \
             Format information:\n      \
             shade --list-formats  # Show all supported file types\n    \
+            \n    \
+            Cache management:\n      \
+            shade --cache-info  # Show cache location and size\n      \
+            shade --clear-cache  # Clear the persistent raw image cache\n    \
             \n    \
             High quality processing:\n      \
             shade -i input.jpg -o output.png  # Automatic format detection",
@@ -859,6 +895,8 @@ mod tests {
       },
       verbose: false,
       config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     };
 
     let pipeline = config.build_pipeline();
@@ -943,6 +981,8 @@ mod tests {
       },
       verbose: false,
       config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     };
 
     let pipeline = config.build_pipeline();
@@ -964,6 +1004,8 @@ mod tests {
       },
       verbose: false,
       config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     };
 
     let pipeline = config.build_pipeline();
@@ -1042,6 +1084,8 @@ mod tests {
       },
       verbose: false,
       config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     };
 
     assert!(validate_config(&config).is_ok());
@@ -1053,6 +1097,8 @@ mod tests {
       pipeline_config: PipelineConfig::default(),
       verbose: false,
       config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     };
 
     assert!(validate_config(&config).is_ok());
@@ -1073,6 +1119,8 @@ mod tests {
       },
       verbose: false,
       config_path: None,
+      clear_cache: false,
+      show_cache_info: false,
     };
 
     assert!(validate_config(&config).is_ok());
