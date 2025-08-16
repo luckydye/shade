@@ -427,3 +427,20 @@ fn create_output_image_element(
   log::info!("Created new output target image: {:?}", &new_image);
   new_image
 }
+
+// Helper function to convert 8-bit RGBA to 32-bit float format
+pub fn convert_to_float(data: &[u8]) -> Vec<u8> {
+  let mut float_data = Vec::with_capacity(data.len() * 4); // 4x expansion for f32
+  for chunk in data.chunks(4) {
+    let r = chunk[0] as f32 / 255.0;
+    let g = chunk[1] as f32 / 255.0;
+    let b = chunk[2] as f32 / 255.0;
+    let a = chunk[3] as f32 / 255.0;
+
+    float_data.extend_from_slice(&r.to_le_bytes());
+    float_data.extend_from_slice(&g.to_le_bytes());
+    float_data.extend_from_slice(&b.to_le_bytes());
+    float_data.extend_from_slice(&a.to_le_bytes());
+  }
+  float_data
+}

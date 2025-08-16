@@ -117,7 +117,7 @@ impl ShadeProcess {
       .arg("--socket")
       .stdin(Stdio::piped())
       .stdout(Stdio::piped())
-      .stderr(Stdio::piped())
+      .stderr(Stdio::inherit())
       .spawn()
       .map_err(|e| format!("Failed to start shade process: {}", e))?;
 

@@ -13,6 +13,7 @@ use utils::{is_openexr_file, load_openexr_image, output_image_native};
 use cli::CliConfig;
 use server::ImageProcessingServer;
 
+use crate::utils::convert_to_float;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -71,23 +72,6 @@ pub fn main() {
   }
 }
 
-// Helper function to convert 8-bit RGBA to 32-bit float format
-fn convert_to_float(data: &[u8]) -> Vec<u8> {
-  let mut float_data = Vec::with_capacity(data.len() * 4); // 4x expansion for f32
-  for chunk in data.chunks(4) {
-    let r = chunk[0] as f32 / 255.0;
-    let g = chunk[1] as f32 / 255.0;
-    let b = chunk[2] as f32 / 255.0;
-    let a = chunk[3] as f32 / 255.0;
-
-    float_data.extend_from_slice(&r.to_le_bytes());
-    float_data.extend_from_slice(&g.to_le_bytes());
-    float_data.extend_from_slice(&b.to_le_bytes());
-    float_data.extend_from_slice(&a.to_le_bytes());
-  }
-  float_data
-}
-
 async fn load_image(config: &CliConfig) -> LoadedImage {
   let perf = std::time::Instant::now();
   log::info!("Loading image: {:?}", config.input_path);
@@ -109,6 +93,7 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
             (exr_data, (width, height))
           }
           Err(e) => {
+
             log::error!("Failed to load OpenEXR file: {}", e);
             let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
               .flat_map(|_| [0u8, 0u8, 0u8, 255u8])

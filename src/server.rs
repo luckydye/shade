@@ -9,6 +9,8 @@ use crate::protocol::{
 };
 use crate::utils::{is_openexr_file, load_openexr_image};
 use base64::Engine;
+use crate::utils::convert_to_float;
+use rawler::imgop::develop::RawDevelop;
 
 /// Image processing server that handles socket communication
 pub struct ImageProcessingServer {
@@ -191,6 +193,8 @@ impl ImageProcessingServer {
       );
     }
 
+    log::info!("{:?}", message.params);
+
     match message.params {
       Some(params) => match serde_json::from_value::<ProcessImageParams>(params) {
         Ok(process_params) => match self.process_image_internal(process_params).await {
@@ -313,6 +317,27 @@ impl ImageProcessingServer {
           if is_openexr_file(&path) {
             let (data, dims) = load_openexr_image(&path)?;
             Ok((data, dims))
+          } else if path.ends_with(".CR3") {
+            let rawimage = rawler::decode_file(&path)?;
+            let pixels = rawimage.pixels_u16();
+
+            log::info!("Pixels {:?} CPP {:?}", pixels.len(), rawimage.cpp);
+
+            let (width, height) = (rawimage.width as usize, rawimage.height as usize);
+            log::info!("Loaded raw input image: {}x{}", width, height);
+
+            let dev = RawDevelop::default();
+            let image = dev.develop_intermediate(&rawimage)?;
+            let img = image.to_dynamic_image().unwrap();
+
+            let rgba_img = img.to_rgba8();
+            let (width, height) = rgba_img.dimensions();
+            let data = rgba_img.into_raw();
+            log::info!("Loaded input image: {}x{}", width, height);
+
+            // Convert 8-bit RGBA to 32-bit float
+            let float_data = convert_to_float(&data);
+            Ok((float_data, (width as usize, height as usize)))
           } else {
             use image::ImageReader;
             let img_reader = ImageReader::open(&path)?;
@@ -320,7 +345,7 @@ impl ImageProcessingServer {
             let rgba_img = img.to_rgba8();
             let (width, height) = rgba_img.dimensions();
             let data = rgba_img.into_raw();
-            let float_data = self.convert_to_float(&data);
+            let float_data = convert_to_float(&data);
             Ok((float_data, (width as usize, height as usize)))
           }
         }
@@ -348,25 +373,8 @@ impl ImageProcessingServer {
     let rgba_img = img.to_rgba8();
     let (width, height) = rgba_img.dimensions();
     let pixel_data = rgba_img.into_raw();
-    let float_data = self.convert_to_float(&pixel_data);
+    let float_data = convert_to_float(&pixel_data);
     Ok((float_data, (width as usize, height as usize)))
-  }
-
-  /// Convert 8-bit RGBA to 32-bit float format (same as in main.rs)
-  fn convert_to_float(&self, data: &[u8]) -> Vec<u8> {
-    let mut float_data = Vec::with_capacity(data.len() * 4);
-    for chunk in data.chunks(4) {
-      let r = chunk[0] as f32 / 255.0;
-      let g = chunk[1] as f32 / 255.0;
-      let b = chunk[2] as f32 / 255.0;
-      let a = chunk[3] as f32 / 255.0;
-
-      float_data.extend_from_slice(&r.to_le_bytes());
-      float_data.extend_from_slice(&g.to_le_bytes());
-      float_data.extend_from_slice(&b.to_le_bytes());
-      float_data.extend_from_slice(&a.to_le_bytes());
-    }
-    float_data
   }
 
   /// Convert processed float data back to base64 encoded image
