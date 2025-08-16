@@ -45,11 +45,7 @@ pub fn add_web_nothing_to_see_msg() {
 /// * `texture_dims` - Image dimensions as (width, height)
 /// * `path` - Output file path (extension determines format)
 #[cfg(not(target_arch = "wasm32"))]
-pub fn write_image(
-  image_data: Vec<u8>,
-  texture_dims: (usize, usize),
-  path: String,
-) {
+pub fn write_image(image_data: Vec<u8>, texture_dims: (usize, usize), path: String) {
   let pixels = texture_dims.0 * texture_dims.1;
 
   // Ensure we have 32-bit float data (16 bytes per pixel)
