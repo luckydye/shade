@@ -520,11 +520,17 @@ fn build_cli() -> Command {
         .version("0.1.0")
         .about("GPU-accelerated image processing and color grading tool")
         .arg(
+            Arg::new("list-formats")
+                .long("list-formats")
+                .help("List all supported image file formats and exit")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("input")
                 .short('i')
                 .long("input")
                 .value_name("FILE")
-                .help("Input image file")
+                .help("Input image file (supports EXR, CR3/CR2/NEF/ARW/DNG, JPG/PNG/TIFF/etc)")
                 .required(false)
                 .value_parser(value_parser!(PathBuf)),
         )
@@ -651,6 +657,11 @@ fn build_cli() -> Command {
             shade -i portrait.jpg -o corrected.jpg --auto-white-balance\n      \
             shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1\n    \
             \n    \
+            Camera Raw processing:\n      \
+            shade -i IMG_1234.CR3 -o processed.jpg --brightness 0.1 --contrast 1.1\n      \
+            shade -i photo.NEF -o output.tiff --auto-white-balance --sharpen 0.5\n      \
+            shade -i image.ARW -o enhanced.exr  # Raw to HDR workflow\n    \
+            \n    \
             Resize operations:\n      \
             shade -i large.jpg -o small.jpg --resize-width 800  # Maintain aspect ratio\n      \
             shade -i photo.png -o thumbnail.png --resize-width 300 --resize-height 200\n      \
@@ -663,12 +674,32 @@ fn build_cli() -> Command {
             shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files\n      \
             shade -i hdr.exr -o display.png --gamma 2.2\n    \
             \n    \
+            Format information:\n      \
+            shade --list-formats  # Show all supported file types\n    \
+            \n    \
             High quality processing:\n      \
             shade -i input.jpg -o output.png  # Automatic format detection",
         )
 }
 
 /// Print usage examples
+pub fn print_supported_formats() {
+  use crate::file_loaders::get_supported_extensions;
+
+  println!("Supported Image Formats:");
+  println!("========================");
+
+  let formats = get_supported_extensions();
+  for (loader_name, extensions) in formats {
+    println!("{}: {}", loader_name, extensions.join(", "));
+  }
+
+  println!("\nNotes:");
+  println!("- OpenEXR files support HDR/wide color gamut processing");
+  println!("- Camera raw files are processed with automatic development");
+  println!("- Standard formats are converted to 32-bit float for processing");
+}
+
 pub fn print_examples() {
   println!("Usage Examples:");
   println!();
@@ -724,17 +755,20 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
     }
   }
 
-  // Check input file extension if input path exists
+  // Check input file format if input path exists
   if let Some(input_path) = &config.input_path {
-    if let Some(ext) = input_path.extension() {
-      let ext_str = ext.to_string_lossy().to_lowercase();
-      if !["jpg", "jpeg", "png", "bmp", "tiff", "webp", "exr", "cr3"]
-        .contains(&ext_str.as_str())
-      {
-        return Err(format!("Unsupported input format: {}", ext_str));
-      }
-    } else {
-      return Err("Input file has no extension".to_string());
+    let path_str = input_path.to_string_lossy();
+    if !crate::file_loaders::is_supported_format(&path_str) {
+      let ext = crate::file_loaders::get_file_extension(&path_str)
+        .unwrap_or_else(|| "none".to_string());
+      let supported_formats: Vec<String> = crate::file_loaders::get_supported_extensions()
+        .into_iter()
+        .flat_map(|(_, exts)| exts.into_iter().map(|e| e.to_string()))
+        .collect();
+      return Err(format!(
+        "Unsupported input format: {} (extension: {}). Supported formats: {}",
+        input_path.display(), ext, supported_formats.join(", ")
+      ));
     }
   }
 

@@ -4,17 +4,16 @@ mod server;
 mod shade;
 mod utils;
 mod config;
+mod file_loaders;
 
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
-use rawler;
 #[cfg(not(target_arch = "wasm32"))]
-use utils::{is_openexr_file, load_openexr_image, output_image_native};
+use utils::output_image_native;
 use cli::CliConfig;
 use server::ImageProcessingServer;
-use rawler::imgop::develop::RawDevelop;
-use crate::utils::convert_to_float;
 use crate::config::config_from_ini;
+use crate::file_loaders::load_image;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -60,6 +59,12 @@ pub fn main() {
         eprintln!("Socket server error: {}", e);
         std::process::exit(1);
       }
+      return;
+    }
+
+    // Check for --list-formats before full CLI parsing
+    if args.iter().any(|arg| arg == "--list-formats") {
+      cli::print_supported_formats();
       return;
     }
 
@@ -117,113 +122,22 @@ async fn run(config: &CliConfig) {
     {
       let input_path_str = input_path.to_string_lossy();
 
-      let file = std::fs::read(&input_path_str.as_ref()).unwrap_or_else(|e| {
-        log::error!("Failed to read file: {}", e);
-        Vec::new()
-      });
-
-      // TODO: read file before decoding, dont decode file by path
-
       let load_time = run_start.elapsed();
       timing.image_load_ms = load_time.as_secs_f64() * 1000.0;
 
-      // Check if it's an OpenEXR file first
-      if is_openexr_file(&input_path_str) {
-        match load_openexr_image(&input_path_str) {
-          Ok((exr_data, (width, height))) => {
-            log::info!("Loaded OpenEXR input image: {}x{}", width, height);
-            // OpenEXR data is already in f32 format, which is what we want
-            (exr_data, (width, height))
-          }
-          Err(e) => {
-            log::error!("Failed to load OpenEXR file: {}", e);
-            let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
-              .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
-              .collect::<Vec<u8>>();
-            let float_data = convert_to_float(&default_data);
-            (float_data, TEXTURE_DIMS)
-          }
+      match load_image(&input_path_str) {
+        Ok((image_data, (width, height))) => {
+          log::info!("Successfully loaded image: {}x{}", width, height);
+          (image_data, (width, height))
         }
-      } else if input_path_str.ends_with(".CR3") {
-        // Use rawler for camera raw files
-        match rawler::decode_file(&input_path_str.as_ref()) {
-          Ok(rawimage) => {
-
-
-            let pixels = rawimage.pixels_u16();
-
-            log::info!("Pixels {:?} CPP {:?}", pixels.len(), rawimage.cpp);
-
-            let (width, height) = (rawimage.width as usize, rawimage.height as usize);
-            log::info!("Loaded raw input image: {}x{}", width, height);
-
-            let dev = RawDevelop::default();
-            let image = dev.develop_intermediate(&rawimage);
-
-            if image.is_ok() {
-              let image = image.unwrap();
-              let img = image.to_dynamic_image().unwrap();
-
-              let rgba_img = img.to_rgba8();
-              let (width, height) = rgba_img.dimensions();
-              let data = rgba_img.into_raw();
-              log::info!("Loaded input image: {}x{}", width, height);
-
-              // Convert 8-bit RGBA to 32-bit float
-              let float_data = convert_to_float(&data);
-              (float_data, (width as usize, height as usize))
-            } else {
-              log::error!("Failed to load raw file");
-              let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
-                .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
-                .collect::<Vec<u8>>();
-              let float_data = convert_to_float(&default_data);
-              (float_data, TEXTURE_DIMS)
-            }
-          }
-          Err(e) => {
-            log::error!("Failed to load raw file: {}", e);
-            let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
-              .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
-              .collect::<Vec<u8>>();
-            let float_data = convert_to_float(&default_data);
-            (float_data, TEXTURE_DIMS)
-          }
-        }
-      } else {
-        // Use standard image loading for other formats
-        use image::ImageReader;
-
-        match ImageReader::open(input_path) {
-          Ok(img_reader) => {
-            match img_reader.decode() {
-              Ok(img) => {
-                let rgba_img = img.to_rgba8();
-                let (width, height) = rgba_img.dimensions();
-                let data = rgba_img.into_raw();
-                log::info!("Loaded input image: {}x{}", width, height);
-                // Convert 8-bit RGBA to 32-bit float
-                let float_data = convert_to_float(&data);
-                (float_data, (width as usize, height as usize))
-              }
-              Err(e) => {
-                log::error!("Failed to decode image: {}", e);
-                let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
-                  .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
-                  .collect::<Vec<u8>>();
-                let float_data = convert_to_float(&default_data);
-                (float_data, TEXTURE_DIMS)
-              }
-            }
-          }
-          Err(e) => {
-            log::error!("Failed to open image file: {}", e);
-            let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
-              .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
-              .collect::<Vec<u8>>();
-            let float_data = convert_to_float(&default_data);
-            (float_data, TEXTURE_DIMS)
-          }
+        Err(e) => {
+          log::error!("Failed to load image: {}", e);
+          // Fallback to default texture
+          let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
+            .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
+            .collect::<Vec<u8>>();
+          let float_data = crate::utils::convert_to_float(&default_data);
+          (float_data, TEXTURE_DIMS)
         }
       }
     }
@@ -233,7 +147,7 @@ async fn run(config: &CliConfig) {
       let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
         .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
         .collect::<Vec<u8>>();
-      let float_data = convert_to_float(&default_data);
+      let float_data = crate::utils::convert_to_float(&default_data);
       (float_data, TEXTURE_DIMS)
     }
   } else {
@@ -241,7 +155,7 @@ async fn run(config: &CliConfig) {
     let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
       .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
       .collect::<Vec<u8>>();
-    let float_data = convert_to_float(&default_data);
+    let float_data = crate::utils::convert_to_float(&default_data);
     (float_data, TEXTURE_DIMS)
   };
 
@@ -249,7 +163,6 @@ async fn run(config: &CliConfig) {
     actual_dims: actual_dims,
     texture_data: texture_data,
   };
-
 
   // decode image
 
@@ -269,6 +182,7 @@ async fn run(config: &CliConfig) {
     .request_adapter(&wgpu::RequestAdapterOptions::default())
     .await
     .unwrap();
+
   let (device, queue) = adapter
     .request_device(&wgpu::DeviceDescriptor {
       label: None,
