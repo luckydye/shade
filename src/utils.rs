@@ -45,7 +45,7 @@ pub fn add_web_nothing_to_see_msg() {
 /// * `texture_dims` - Image dimensions as (width, height)
 /// * `path` - Output file path (extension determines format)
 #[cfg(not(target_arch = "wasm32"))]
-pub fn output_image_native(
+pub fn write_image(
   image_data: Vec<u8>,
   texture_dims: (usize, usize),
   path: String,
@@ -65,17 +65,7 @@ pub fn output_image_native(
   // Determine output format from file extension
   let path_lower = path.to_lowercase();
 
-  if is_openexr_file(&path) {
-    // Write OpenEXR format (32-bit float)
-    write_openexr_image(&image_data, texture_dims, &path);
-    return;
-  } else if path_lower.ends_with(".raw") || path_lower.ends_with(".f32") {
-    // Write raw 32-bit float data
-    let mut file = std::fs::File::create(&path).unwrap();
-    file.write_all(&image_data[..]).unwrap();
-    log::info!("Raw 32-bit float data written to \"{path}\".");
-    return;
-  } else if path_lower.ends_with(".jpg") || path_lower.ends_with(".jpeg") {
+  if path_lower.ends_with(".jpg") || path_lower.ends_with(".jpeg") {
     // Convert to 8-bit JPEG
     let mut u8_data = Vec::with_capacity(pixels * 4);
     for chunk in image_data.chunks(16) {

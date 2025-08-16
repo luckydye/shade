@@ -16,7 +16,7 @@ use anyhow::Result;
 use cli::CliConfig;
 use server::ImageProcessingServer;
 #[cfg(not(target_arch = "wasm32"))]
-use utils::output_image_native;
+use utils::write_image;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -296,7 +296,7 @@ async fn run(config: &CliConfig) -> Result<()> {
       let output_path_str = output_path.to_string_lossy().to_string();
 
       // Use standard image output for other formats
-      output_image_native(texture_data.to_vec(), actual_dims, output_path_str);
+      write_image(texture_data.to_vec(), actual_dims, output_path_str);
     }
   }
   #[cfg(target_arch = "wasm32")]

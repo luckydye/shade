@@ -45,6 +45,12 @@ pub trait ImageLoader {
     filename: Option<&str>,
   ) -> Result<(Vec<u8>, (usize, usize)), FileLoaderError>;
 
+  /// Write image data from buffer to disk
+  // fn write(
+  //   buffer: &[u8],
+  //   filename: Option<&str>,
+  // ) -> Result<(Vec<u8>, (usize, usize)), FileLoaderError>;
+
   /// Get the name of this loader for debugging
   fn loader_name() -> &'static str;
 }
@@ -196,7 +202,6 @@ impl ImageLoader for RawLoader {
         return Ok((cached_image.data, cached_image.dimensions));
       }
 
-
       log::info!("Loading camera raw from buffer (filename: {:?})", filename);
 
       let rawsource = RawSource::new_from_slice(buffer);
@@ -210,6 +215,8 @@ impl ImageLoader for RawLoader {
         rawler::decode(&rawsource, &RawDecodeParams::default()).map_err(|e| {
           FileLoaderError::DecodeError(format!("Could not decode source: {}", e))
         })?;
+
+      let orientation = rawimage.orientation;
 
       log::info!(
         "Decoded raw image at {}ms",
