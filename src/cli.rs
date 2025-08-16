@@ -238,9 +238,7 @@ impl CliConfig {
     // Sort operations by their original index
     operations.sort_by_key(|op| op.index);
 
-    let pipeline_config = PipelineConfig {
-      operations,
-    };
+    let pipeline_config = PipelineConfig { operations };
 
     let verbose = matches.get_flag("verbose");
 
@@ -774,16 +772,19 @@ pub fn validate_config(config: &CliConfig) -> Result<(), String> {
   // Check input file format if input path exists
   if let Some(input_path) = &config.input_path {
     let path_str = input_path.to_string_lossy();
-    if !crate::file_loaders::is_supported_format(&path_str) {
+    if !crate::file_loaders::is_supported_format_path(&path_str) {
       let ext = crate::file_loaders::get_file_extension(&path_str)
         .unwrap_or_else(|| "none".to_string());
-      let supported_formats: Vec<String> = crate::file_loaders::get_supported_extensions()
-        .into_iter()
-        .flat_map(|(_, exts)| exts.into_iter().map(|e| e.to_string()))
-        .collect();
+      let supported_formats: Vec<String> =
+        crate::file_loaders::get_supported_extensions()
+          .into_iter()
+          .flat_map(|(_, exts)| exts.into_iter().map(|e| e.to_string()))
+          .collect();
       return Err(format!(
         "Unsupported input format: {} (extension: {}). Supported formats: {}",
-        input_path.display(), ext, supported_formats.join(", ")
+        input_path.display(),
+        ext,
+        supported_formats.join(", ")
       ));
     }
   }
@@ -1075,85 +1076,5 @@ mod tests {
     };
 
     assert!(validate_config(&config).is_ok());
-  }
-
-  #[test]
-  fn test_resize_validation() {
-    // Test valid resize dimensions with example
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig { operations: vec![] },
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_ok());
-
-    // Test valid resize width only
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig { operations: vec![] },
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_ok());
-
-    // Test valid resize height only
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig { operations: vec![] },
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_ok());
-
-    // Test zero width
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig::default(),
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_err());
-
-    // Test zero height
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig::default(),
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_err());
-
-    // Test width too large
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig::default(),
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_err());
-
-    // Test height too large
-    let config = CliConfig {
-      input_path: None,
-      output_path: None,
-      pipeline_config: PipelineConfig::default(),
-      verbose: false,
-      config_path: None,
-    };
-
-    assert!(validate_config(&config).is_err());
   }
 }

@@ -239,9 +239,7 @@ impl ImageProcessingServer {
 
     let operations = pipeline_operations?;
 
-    let pipeline_config = PipelineConfig {
-      operations,
-    };
+    let pipeline_config = PipelineConfig { operations };
 
     // Create a temporary config for pipeline building
     let config = CliConfig {

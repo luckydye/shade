@@ -1,19 +1,20 @@
 mod cli;
+mod config;
+mod file_loaders;
 mod protocol;
 mod server;
 mod shade;
 mod utils;
-mod config;
-mod file_loaders;
 
+use crate::config::config_from_ini_path;
+use crate::file_loaders::load_image;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
-#[cfg(not(target_arch = "wasm32"))]
-use utils::output_image_native;
+use anyhow::Result;
 use cli::CliConfig;
 use server::ImageProcessingServer;
-use crate::config::{config_from_ini_path};
-use crate::file_loaders::load_image;
+#[cfg(not(target_arch = "wasm32"))]
+use utils::output_image_native;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -43,7 +44,7 @@ impl Performance {
   }
 }
 
-pub fn main() {
+pub fn main() -> Result<()> {
   let run_start = std::time::Instant::now();
 
   #[cfg(not(target_arch = "wasm32"))]
@@ -54,67 +55,71 @@ pub fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "--socket" {
       let mut server = ImageProcessingServer::new();
-      if let Err(e) = server.run_socket_mode_sync() {
-        eprintln!("Socket server error: {}", e);
+      let res = server.run_socket_mode_sync();
+      if let Err(e) = res {
+        eprintln!("Socket server error: {:?}", e);
         std::process::exit(1);
       }
-      return;
+      return Ok(());
     }
 
     // Check for --list-formats before full CLI parsing
     if args.iter().any(|arg| arg == "--list-formats") {
       cli::print_supported_formats();
-      return;
+      return Ok(());
     }
 
-    match CliConfig::from_args() {
-      Ok(config) => {
-        // Check if a custom config file path was provided
-        let final_config = if let Some(config_path) = &config.config_path {
-          // Use custom config file path
-          match config_from_ini_path(config_path) {
-            Ok(ini_config) => {
-              log::info!("Loaded config from: {:?}", config_path);
-              ini_config
-            }
-            Err(e) => {
-              eprintln!("Error loading config from {}: {}", config_path.display(), e);
-              std::process::exit(1);
-            }
-          }
-        } else {
-          config
-        };
+    let config = CliConfig::from_args().map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        if let Err(e) = cli::validate_config(&final_config) {
-          eprintln!("Error: {}", e);
+    // Check if a custom config file path was provided
+    let final_config = if let Some(config_path) = &config.config_path {
+      // Use custom config file path
+      match config_from_ini_path(config_path) {
+        Ok(ini_config) => {
+          log::info!("Loaded config from: {:?}", config_path);
+          ini_config
+        }
+        Err(e) => {
+          eprintln!("Error loading config from {}: {}", config_path.display(), e);
           std::process::exit(1);
         }
-
-        if final_config.verbose {
-          final_config.print_pipeline_info();
-        }
-
-        log::info!("Parse config: {:?}", run_start.elapsed());
-
-        pollster::block_on(run(&final_config));
       }
-      Err(e) => {
-        eprintln!("Error parsing arguments: {}", e);
-        cli::print_examples();
-        std::process::exit(1);
-      }
+    } else {
+      config
+    };
+
+    if let Err(e) = cli::validate_config(&final_config) {
+      eprintln!("Error: {}", e);
+      std::process::exit(1);
+    }
+
+    if final_config.verbose {
+      final_config.print_pipeline_info();
+    }
+
+    log::info!("Parse config: {:?}", run_start.elapsed());
+
+    let res = pollster::block_on(run(&final_config));
+
+    if let Err(e) = res {
+      eprintln!("Error: {:?}", e);
     }
   }
   #[cfg(target_arch = "wasm32")]
   {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init_with_level(log::Level::Info).expect("could not initialize logger");
-    wasm_bindgen_futures::spawn_local(run(None));
+    // Create a default config for WASM
+    let default_config = CliConfig::default();
+    wasm_bindgen_futures::spawn_local(async move {
+      let _ = run(&default_config).await;
+    });
   }
+
+  Ok(())
 }
 
-async fn run(config: &CliConfig) {
+async fn run(config: &CliConfig) -> Result<()> {
   let run_start = std::time::Instant::now();
   let mut timing = Performance::default();
 
@@ -125,14 +130,15 @@ async fn run(config: &CliConfig) {
   let (texture_data, actual_dims) = if let Some(input_path) = &config.input_path {
     #[cfg(not(target_arch = "wasm32"))]
     {
+      let load_start = std::time::Instant::now();
 
       // Load image file into memory
-      let image_file = std::fs::read(&input_path).expect("Failed to read image file");
+      let image_file = std::fs::read(&input_path)?;
 
-      let load_time = run_start.elapsed();
+      let load_time = load_start.elapsed();
       timing.image_load_ms = load_time.as_secs_f64() * 1000.0;
 
-      match load_image(&input_path.to_string_lossy()) {
+      match load_image(&image_file, Some(&input_path.to_string_lossy())) {
         Ok((image_data, (width, height))) => {
           log::info!("Successfully loaded image: {}x{}", width, height);
           (image_data, (width, height))
@@ -256,4 +262,6 @@ async fn run(config: &CliConfig) {
   log::info!("Done.");
 
   timing.print_all();
+
+  Ok(())
 }
