@@ -3,21 +3,18 @@ mod protocol;
 mod server;
 mod shade;
 mod utils;
-
-use std::path::PathBuf;
+mod config;
 
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
 use rawler;
 #[cfg(not(target_arch = "wasm32"))]
 use utils::{is_openexr_file, load_openexr_image, output_image_native};
-
 use cli::CliConfig;
 use server::ImageProcessingServer;
-
-use ini::Ini;
-
-use crate::{cli::{PipelineConfig, PipelineOperation}, utils::convert_to_float};
+use rawler::imgop::develop::RawDevelop;
+use crate::utils::convert_to_float;
+use crate::config::config_from_ini;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
@@ -26,8 +23,30 @@ struct LoadedImage {
   actual_dims: (usize, usize),
 }
 
+#[derive(Default)]
+struct Performance {
+  image_load_ms: f64,
+  image_decode_ms: f64,
+  gpu_setup_ms: f64,
+  processing_ms: f64,
+  output_ms: f64,
+  total_ms: f64,
+}
+
+impl Performance {
+  fn print_all(&self) {
+    log::debug!("[Perf] image_load_ms: {:.2}", self.image_load_ms);
+    log::debug!("[Perf] image_decode_ms: {:.2}", self.image_decode_ms);
+    log::debug!("[Perf] gpu_setup_ms: {:.2}", self.gpu_setup_ms);
+    log::debug!("[Perf] processing_ms: {:.2}", self.processing_ms);
+    log::debug!("[Perf] output_ms: {:.2}", self.output_ms);
+    log::debug!("[Perf] total_ms: {:.2}", self.total_ms);
+  }
+}
+
 pub fn main() {
-  let perf = std::time::Instant::now();
+  let run_start = std::time::Instant::now();
+
 
   #[cfg(not(target_arch = "wasm32"))]
   {
@@ -49,6 +68,9 @@ pub fn main() {
     if ini_conf.is_ok() {
       let config = ini_conf.unwrap();
       log::info!("Ini {:?}", config);
+
+      log::info!("Main time with config: {:?}", run_start.elapsed());
+
       pollster::block_on(run(&config));
     } else {
       match CliConfig::from_args() {
@@ -62,7 +84,7 @@ pub fn main() {
             config.print_pipeline_info();
           }
 
-          log::debug!("Time spent parsing args: {:?}", perf.elapsed());
+          log::info!("Main time: {:?}", run_start.elapsed());
 
           pollster::block_on(run(&config));
         }
@@ -82,8 +104,11 @@ pub fn main() {
   }
 }
 
-async fn load_image(config: &CliConfig) -> LoadedImage {
-  let perf = std::time::Instant::now();
+async fn run(config: &CliConfig) {
+  let run_start = std::time::Instant::now();
+  let mut timing = Performance::default();
+
+  // load image
   log::info!("Loading image: {:?}", config.input_path);
 
   // Load input image if provided
@@ -92,7 +117,15 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
     {
       let input_path_str = input_path.to_string_lossy();
 
+      let file = std::fs::read(&input_path_str.as_ref()).unwrap_or_else(|e| {
+        log::error!("Failed to read file: {}", e);
+        Vec::new()
+      });
+
       // TODO: read file before decoding, dont decode file by path
+
+      let load_time = run_start.elapsed();
+      timing.image_load_ms = load_time.as_secs_f64() * 1000.0;
 
       // Check if it's an OpenEXR file first
       if is_openexr_file(&input_path_str) {
@@ -112,16 +145,10 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
           }
         }
       } else if input_path_str.ends_with(".CR3") {
-        log::debug!(
-          "[Load] Time spent reaching raw decode: {:?}",
-          perf.elapsed()
-        );
-        let perf = std::time::Instant::now();
-
         // Use rawler for camera raw files
         match rawler::decode_file(&input_path_str.as_ref()) {
           Ok(rawimage) => {
-            use rawler::imgop::develop::RawDevelop;
+
 
             let pixels = rawimage.pixels_u16();
 
@@ -130,12 +157,8 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
             let (width, height) = (rawimage.width as usize, rawimage.height as usize);
             log::info!("Loaded raw input image: {}x{}", width, height);
 
-            log::debug!("[Load] Time spent reaching develop: {:?}", perf.elapsed());
-
             let dev = RawDevelop::default();
             let image = dev.develop_intermediate(&rawimage);
-
-            log::debug!("[Load] Time spent to develop: {:?}", perf.elapsed());
 
             if image.is_ok() {
               let image = image.unwrap();
@@ -222,19 +245,18 @@ async fn load_image(config: &CliConfig) -> LoadedImage {
     (float_data, TEXTURE_DIMS)
   };
 
-  LoadedImage {
+  let loaded_image = LoadedImage {
     actual_dims: actual_dims,
     texture_data: texture_data,
-  }
-}
+  };
 
-async fn run(config: &CliConfig) {
-  let perf = std::time::Instant::now();
 
-  let loaded_image = load_image(config).await;
+  // decode image
 
-  log::debug!("Time spent loading image: {:?}", perf.elapsed());
-  let perf = std::time::Instant::now();
+  let decode_time = run_start.elapsed();
+  timing.image_decode_ms = decode_time.as_secs_f64() * 1000.0;
+
+  let gpu_setup_start = std::time::Instant::now();
 
   let mut image_pipeline = config.build_pipeline();
 
@@ -260,8 +282,9 @@ async fn run(config: &CliConfig) {
 
   image_pipeline.init_gpu(device.clone(), queue.clone());
 
-  log::debug!("Time spent seting up gpu: {:?}", perf.elapsed());
-  let perf = std::time::Instant::now();
+  let gpu_setup_time = gpu_setup_start.elapsed();
+  timing.gpu_setup_ms = gpu_setup_time.as_secs_f64() * 1000.0;
+  let processing_start = std::time::Instant::now();
 
   // Process the image through the pipeline using actual dimensions
   // The pipeline now handles resizing as part of the processing chain
@@ -286,8 +309,9 @@ async fn run(config: &CliConfig) {
     }
   }
 
-  log::debug!("Time spent on processing: {:?}", perf.elapsed());
-  let perf = std::time::Instant::now();
+  let processing_time = processing_start.elapsed();
+  timing.processing_ms = processing_time.as_secs_f64() * 1000.0;
+  let output_start = std::time::Instant::now();
 
   // Output using final dimensions
   if let Some(output_path) = &config.output_path {
@@ -301,36 +325,14 @@ async fn run(config: &CliConfig) {
   }
   #[cfg(target_arch = "wasm32")]
   output_image_wasm(texture_data.to_vec(), actual_dims);
+
+  let output_time = output_start.elapsed();
+  let total_time = run_start.elapsed();
+
+  timing.output_ms = output_time.as_secs_f64() * 1000.0;
+  timing.total_ms = total_time.as_secs_f64() * 1000.0;
+
+  timing.print_all();
+
   log::info!("Done.");
-
-  log::debug!("Time spent on output: {:?}", perf.elapsed())
-}
-
-pub fn config_from_ini() -> anyhow::Result<CliConfig> {
-  let conf = Ini::load_from_file("params.ini")?;
-
-  let section = conf.section(Some("params")).unwrap();
-
-  // Create pipeline config from ini values
-  let mut pipeline_config = PipelineConfig::default();
-
-  // Parse pipeline-related parameters from ini
-  if let Some(brightness) = section.get("brightness") {
-    if let Ok(exp_val) = brightness.parse::<f32>() {
-      pipeline_config.operations.push(PipelineOperation {
-        index: 0,
-        op_type: cli::OperationType::Brightness(exp_val)
-      });
-
-    }
-  }
-
-  Ok(CliConfig {
-    input_path: section.get("input_path").and_then(|f| Some(PathBuf::from(f.to_string()))),
-    output_path: section.get("output_path").and_then(|f| Some(PathBuf::from(f.to_string()))),
-    pipeline_config,
-    verbose: section.get("verbose").map(|v| v == "true").unwrap_or(false),
-    resize_width: section.get("resize_width").and_then(|w| w.parse().ok()),
-    resize_height: section.get("resize_height").and_then(|h| h.parse().ok()),
-  })
 }
