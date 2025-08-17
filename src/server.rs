@@ -409,6 +409,7 @@ impl ImageProcessingServer {
     let image_hash = hasher.finish();
 
     if let Some(cached_image) = self.cached_image.clone() && image_hash == cached_image.hash {
+      log::info!("Using cached loaded image");
       return Ok(cached_image);
     }
 
