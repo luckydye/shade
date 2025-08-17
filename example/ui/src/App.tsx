@@ -13,6 +13,15 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 
+function debounce<T>(callback: (arg: T) => void, ms = 80) {
+	let timeout: ReturnType<typeof setTimeout>;
+
+	return (arg: T) => {
+		clearTimeout(timeout);
+		timeout = setTimeout(() => callback(arg), ms);
+	};
+}
+
 interface ImageOperation {
 	operation: string;
 	params: unknown;
@@ -117,7 +126,7 @@ function App() {
 
 	// Process image with debouncing
 	const processImage = useCallback(
-		async (operations: ImageOperation[]) => {
+		debounce(async (operations: ImageOperation[]) => {
 			if (!imageFilePath || !previewEnabled) return;
 
 			const startTime = Date.now();
@@ -141,7 +150,7 @@ function App() {
 				setIsProcessing(false);
 				setProcessingLatency(Date.now() - startTime);
 			}
-		},
+		}, 16),
 		[previewEnabled, imageFilePath],
 	);
 
@@ -514,59 +523,6 @@ function App() {
 									/>
 									<span className="text-sm w-12 text-right">
 										{state.noise.toFixed(2)}
-									</span>
-								</div>
-							</div>
-
-							{/* Transform */}
-							<div className="space-y-2">
-								<label
-									htmlFor="scale-slider"
-									className="block text-sm font-medium"
-								>
-									Scale
-								</label>
-								<div className="flex items-center space-x-3">
-									<input
-										id="scale-slider"
-										type="range"
-										min="0.1"
-										max="5.0"
-										step="0.01"
-										value={state.scale}
-										onChange={(e) =>
-											updateState("scale", parseFloat(e.target.value))
-										}
-										className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-									/>
-									<span className="text-sm w-12 text-right">
-										{state.scale.toFixed(2)}x
-									</span>
-								</div>
-							</div>
-
-							<div className="space-y-2">
-								<label
-									htmlFor="rotate-slider"
-									className="block text-sm font-medium"
-								>
-									Rotate
-								</label>
-								<div className="flex items-center space-x-3">
-									<input
-										id="rotate-slider"
-										type="range"
-										min="-180"
-										max="180"
-										step="1"
-										value={state.rotate}
-										onChange={(e) =>
-											updateState("rotate", parseFloat(e.target.value))
-										}
-										className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-									/>
-									<span className="text-sm w-12 text-right">
-										{state.rotate.toFixed(0)}°
 									</span>
 								</div>
 							</div>

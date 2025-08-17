@@ -1,7 +1,7 @@
 use std::io::{stdin, stdout};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::cli::{CliConfig, PipelineConfig, PipelineOperation};
+use crate::cli::{ProcessingConfig, PipelineConfig, PipelineOperation};
 use crate::protocol::{
   AsyncMessageTransport, ImageInput, InitializeParams, InitializeResult, Message,
   MessageId, MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
@@ -9,8 +9,14 @@ use crate::protocol::{
 };
 use crate::utils::convert_to_float;
 use crate::utils::{is_openexr_file, load_openexr_image};
+use crate::{LoadedImage, Performance};
+use anyhow::Result;
+use anyhow::anyhow;
 use base64::Engine;
 use rawler::imgop::develop::RawDevelop;
+use crate::file_loaders::load_image;
+
+const TEXTURE_DIMS: (usize, usize) = (512, 512);
 
 /// Image processing server that handles socket communication
 pub struct ImageProcessingServer {
@@ -220,9 +226,9 @@ impl ImageProcessingServer {
   async fn process_image_internal(
     &self,
     params: ProcessImageParams,
-  ) -> Result<ProcessImageResult, Box<dyn std::error::Error>> {
-    // Load image data
-    let (texture_data, actual_dims) = self.load_image_from_input(params.image).await?;
+  ) -> Result<ProcessImageResult> {
+    let run_start = std::time::Instant::now();
+    let mut timing = Performance::default();
 
     // Build pipeline from operations
     let pipeline_operations: Result<Vec<PipelineOperation>, String> = params
@@ -237,30 +243,61 @@ impl ImageProcessingServer {
       })
       .collect();
 
-    let operations = pipeline_operations?;
-
-    let pipeline_config = PipelineConfig { operations };
 
     // Create a temporary config for pipeline building
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: None,
       output_path: None,
-      pipeline_config,
+      pipeline_config: PipelineConfig {
+        operations: pipeline_operations.map_err(|e: String| anyhow!("Error {}", e))?
+      },
       verbose: false,
       config_path: None,
       clear_cache: false,
       show_cache_info: false,
     };
 
-    // Build and initialize pipeline
+    // load image
+    log::info!("Loading image: {:?}", config.input_path);
+
+    let image_file = self.load_image_from_input(params.image).await.map_err(|e| anyhow!("Error {}", e))?;
+
+    // Load input image if provided
+    let load_time = run_start.elapsed();
+    timing.image_load_ms = load_time.as_secs_f64() * 1000.0;
+
+    let (texture_data, mut actual_dims) = match load_image(&image_file, None) {
+      Ok((image_data, (width, height))) => {
+        log::info!("Successfully loaded image: {}x{}", width, height);
+        (image_data, (width, height))
+      }
+      Err(e) => {
+        log::error!("Failed to load image: {}", e);
+        // Fallback to default texture
+        let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
+          .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
+          .collect::<Vec<u8>>();
+        let float_data = crate::utils::convert_to_float(&default_data);
+        (float_data, TEXTURE_DIMS)
+      }
+    };
+
+    // decode image
+
+    let decode_time = run_start.elapsed();
+    timing.image_decode_ms = decode_time.as_secs_f64() * 1000.0;
+
+    let gpu_setup_start = std::time::Instant::now();
+
     let mut image_pipeline = config.build_pipeline();
 
-    // Initialize GPU resources
+    // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
     let instance = wgpu::Instance::default();
     let adapter = instance
       .request_adapter(&wgpu::RequestAdapterOptions::default())
       .await
       .unwrap();
+
     let (device, queue) = adapter
       .request_device(&wgpu::DeviceDescriptor {
         label: None,
@@ -269,74 +306,64 @@ impl ImageProcessingServer {
         memory_hints: wgpu::MemoryHints::MemoryUsage,
         trace: wgpu::Trace::Off,
       })
-      .await?;
+      .await
+      .unwrap();
 
-    image_pipeline.init_gpu(device, queue);
+    image_pipeline.init_gpu(device.clone(), queue.clone());
 
-    // Process the image
-    let processed_data = image_pipeline
-      .process(texture_data, (actual_dims.0 as u32, actual_dims.1 as u32))
-      .await?;
+    let gpu_setup_time = gpu_setup_start.elapsed();
+    timing.gpu_setup_ms = gpu_setup_time.as_secs_f64() * 1000.0;
 
-    // Convert processed data to output format
-    let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
-    let image_data = self.convert_to_base64(
-      &processed_data.0,
-      (processed_data.1.0 as usize, processed_data.1.1 as usize),
-      &output_format,
-    )?;
+    // Process the image through the pipeline using actual dimensions
+    // The pipeline now handles resizing as part of the processing chain
+    match image_pipeline
+      .process(
+        texture_data.clone(),
+        (actual_dims.0 as u32, actual_dims.1 as u32),
+      )
+      .await
+    {
+      Ok((processed_data, final_dimensions)) => {
+        actual_dims = (final_dimensions.0 as usize, final_dimensions.1 as usize);
+        log::info!(
+          "Image processed through pipeline with final dimensions: {}x{}",
+          actual_dims.0,
+          actual_dims.1
+        );
 
-    Ok(ProcessImageResult {
-      image_data,
-      width: actual_dims.0 as u32,
-      height: actual_dims.1 as u32,
-      format: output_format,
-    })
+        // Convert processed data to output format
+        let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
+        let image_data = self.convert_to_base64(
+          &processed_data,
+          final_dimensions,
+          &output_format,
+        )?;
+
+        Ok(ProcessImageResult {
+          image_data,
+          width: actual_dims.0 as u32,
+          height: actual_dims.1 as u32,
+          format: output_format,
+        })
+      }
+      Err(e) => {
+        log::error!("Pipeline processing failed: {}", e);
+        Err(anyhow!("Pipeline processing failed"))
+      }
+    }
   }
 
   /// Load image data from various input formats
   async fn load_image_from_input(
     &self,
     input: ImageInput,
-  ) -> Result<(Vec<u8>, (usize, usize)), Box<dyn std::error::Error>> {
+  ) -> Result<Vec<u8>> {
     match input {
       ImageInput::File { path } => {
         #[cfg(not(target_arch = "wasm32"))]
         {
-          if is_openexr_file(&path) {
-            let (data, dims) = load_openexr_image(&path)?;
-            Ok((data, dims))
-          } else if path.ends_with(".CR3") {
-            let rawimage = rawler::decode_file(&path)?;
-            let pixels = rawimage.pixels_u16();
-
-            log::info!("Pixels {:?} CPP {:?}", pixels.len(), rawimage.cpp);
-
-            let (width, height) = (rawimage.width as usize, rawimage.height as usize);
-            log::info!("Loaded raw input image: {}x{}", width, height);
-
-            let dev = RawDevelop::default();
-            let image = dev.develop_intermediate(&rawimage)?;
-            let img = image.to_dynamic_image().unwrap();
-
-            let rgba_img = img.to_rgba8();
-            let (width, height) = rgba_img.dimensions();
-            let data = rgba_img.into_raw();
-            log::info!("Loaded input image: {}x{}", width, height);
-
-            // Convert 8-bit RGBA to 32-bit float
-            let float_data = convert_to_float(&data);
-            Ok((float_data, (width as usize, height as usize)))
-          } else {
-            use image::ImageReader;
-            let img_reader = ImageReader::open(&path)?;
-            let img = img_reader.decode()?;
-            let rgba_img = img.to_rgba8();
-            let (width, height) = rgba_img.dimensions();
-            let data = rgba_img.into_raw();
-            let float_data = convert_to_float(&data);
-            Ok((float_data, (width as usize, height as usize)))
-          }
+          let image_file = std::fs::read(&path)?;
+          Ok(image_file)
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -345,34 +372,19 @@ impl ImageProcessingServer {
       }
       ImageInput::Base64 { data } => {
         let decoded = base64::engine::general_purpose::STANDARD.decode(&data)?;
-        self.load_from_bytes(decoded).await
+        Ok(decoded)
       }
-      ImageInput::Blob { data } => self.load_from_bytes(data).await,
+      ImageInput::Blob { data } => Ok(data),
     }
-  }
-
-  /// Load image from byte data
-  async fn load_from_bytes(
-    &self,
-    data: Vec<u8>,
-  ) -> Result<(Vec<u8>, (usize, usize)), Box<dyn std::error::Error>> {
-    let cursor = std::io::Cursor::new(data);
-    let img_reader = image::ImageReader::new(cursor).with_guessed_format()?;
-    let img = img_reader.decode()?;
-    let rgba_img = img.to_rgba8();
-    let (width, height) = rgba_img.dimensions();
-    let pixel_data = rgba_img.into_raw();
-    let float_data = convert_to_float(&pixel_data);
-    Ok((float_data, (width as usize, height as usize)))
   }
 
   /// Convert processed float data back to base64 encoded image
   fn convert_to_base64(
     &self,
     data: &[u8],
-    dims: (usize, usize),
+    dims: (u32, u32),
     format: &str,
-  ) -> Result<String, Box<dyn std::error::Error>> {
+  ) -> Result<String> {
     // Convert float data back to 8-bit RGBA
     let mut rgba_data = Vec::with_capacity(data.len() / 4);
     for chunk in data.chunks(16) {
@@ -408,21 +420,20 @@ impl ImageProcessingServer {
         .collect();
 
       let rgb_buffer =
-        ImageBuffer::<Rgb<u8>, _>::from_raw(dims.0 as u32, dims.1 as u32, rgb_data)
-          .ok_or("Failed to create RGB image buffer")?;
+        ImageBuffer::<Rgb<u8>, _>::from_raw(dims.0, dims.1, rgb_data)
+          .ok_or(anyhow!("Failed to create RGB image buffer"))?;
 
       rgb_buffer.write_to(&mut cursor, image_format)?;
     } else {
       // Use RGBA for formats that support transparency
       let rgba_buffer =
-        ImageBuffer::<Rgba<u8>, _>::from_raw(dims.0 as u32, dims.1 as u32, rgba_data)
-          .ok_or("Failed to create RGBA image buffer")?;
+        ImageBuffer::<Rgba<u8>, _>::from_raw(dims.0, dims.1, rgba_data)
+          .ok_or(anyhow!("Failed to create RGBA image buffer"))?;
 
       rgba_buffer.write_to(&mut cursor, image_format)?;
     }
-    let encoded_data =
-      base64::engine::general_purpose::STANDARD.encode(cursor.into_inner());
-    Ok(encoded_data)
+
+    Ok(base64::engine::general_purpose::STANDARD.encode(cursor.into_inner()))
   }
 }
 

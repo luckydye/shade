@@ -1,15 +1,15 @@
 use ini::Ini;
 use std::path::PathBuf;
 
-use crate::cli::{self, CliConfig, PipelineConfig, PipelineOperation};
+use crate::cli::{self, ProcessingConfig, PipelineConfig, PipelineOperation};
 
-pub fn config_from_ini_path(config_path: &PathBuf) -> anyhow::Result<CliConfig> {
+pub fn config_from_ini_path(config_path: &PathBuf) -> anyhow::Result<ProcessingConfig> {
   let conf = Ini::load_from_file(config_path)?;
 
   Ok(parse_ini_config(conf)?)
 }
 
-fn parse_ini_config(conf: Ini) -> anyhow::Result<CliConfig> {
+fn parse_ini_config(conf: Ini) -> anyhow::Result<ProcessingConfig> {
   let section = conf.section(Some("params")).unwrap();
 
   // Create pipeline config from ini values
@@ -137,7 +137,7 @@ fn parse_ini_config(conf: Ini) -> anyhow::Result<CliConfig> {
     });
   }
 
-  Ok(CliConfig {
+  Ok(ProcessingConfig {
     input_path: section
       .get("input_path")
       .and_then(|f| Some(PathBuf::from(f.to_string()))),

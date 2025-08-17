@@ -178,7 +178,29 @@ impl RawLoader {
 }
 
 impl ImageLoader for RawLoader {
-  fn can_load(_buffer: &[u8], filename: Option<&str>) -> bool {
+  fn can_load(buffer: &[u8], filename: Option<&str>) -> bool {
+    // Check magic numbers for various RAW formats
+    if buffer.len() >= 12 {
+      // TIFF-based formats (CR2, NEF, ARW, DNG) - check TIFF magic first
+      if (buffer[0] == 0x49 && buffer[1] == 0x49 && buffer[2] == 0x2A && buffer[3] == 0x00) ||
+         (buffer[0] == 0x4D && buffer[1] == 0x4D && buffer[2] == 0x00 && buffer[3] == 0x2A) {
+        return true;
+      }
+
+      // CR3 files - check for 'ftyp' box at offset 4 and 'crx ' brand
+      if buffer.len() >= 20 &&
+         buffer[4..8] == [0x66, 0x74, 0x79, 0x70] && // 'ftyp'
+         buffer[8..12] == [0x63, 0x72, 0x78, 0x20] { // 'crx '
+        return true;
+      }
+
+      // RW2 (Panasonic) - typically TIFF-based but can have specific markers
+      // IIH1 for some Panasonic files
+      if buffer[0..4] == [0x49, 0x49, 0x48, 0x31] {
+        return true;
+      }
+    }
+
     // Fallback to extension check if filename is provided
     if let Some(filename) = filename {
       let path_lower = filename.to_lowercase();

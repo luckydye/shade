@@ -13,7 +13,7 @@ use crate::file_loaders::load_image;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::output_image_wasm;
 use anyhow::Result;
-use cli::CliConfig;
+use cli::ProcessingConfig;
 use server::ImageProcessingServer;
 #[cfg(not(target_arch = "wasm32"))]
 use utils::write_image;
@@ -71,7 +71,7 @@ pub fn main() -> Result<()> {
       return Ok(());
     }
 
-    let config = CliConfig::from_args().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let config = ProcessingConfig::from_args().map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Check if a custom config file path was provided
     let final_config = if let Some(config_path) = &config.config_path {
@@ -161,7 +161,7 @@ pub fn main() -> Result<()> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init_with_level(log::Level::Info).expect("could not initialize logger");
     // Create a default config for WASM
-    let default_config = CliConfig::default();
+    let default_config = ProcessingConfig::default();
     wasm_bindgen_futures::spawn_local(async move {
       let _ = run(&default_config).await;
     });
@@ -170,7 +170,7 @@ pub fn main() -> Result<()> {
   Ok(())
 }
 
-async fn run(config: &CliConfig) -> Result<()> {
+async fn run(config: &ProcessingConfig) -> Result<()> {
   let run_start = std::time::Instant::now();
   let mut timing = Performance::default();
 

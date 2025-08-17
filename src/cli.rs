@@ -39,7 +39,7 @@ pub enum OperationType {
 
 /// CLI configuration structure
 #[derive(Debug)]
-pub struct CliConfig {
+pub struct ProcessingConfig {
   pub input_path: Option<PathBuf>,
   pub output_path: Option<PathBuf>,
   pub pipeline_config: PipelineConfig,
@@ -63,7 +63,7 @@ impl Default for PipelineConfig {
   }
 }
 
-impl Default for CliConfig {
+impl Default for ProcessingConfig {
   fn default() -> Self {
     Self {
       input_path: None,
@@ -77,7 +77,7 @@ impl Default for CliConfig {
   }
 }
 
-impl CliConfig {
+impl ProcessingConfig {
   /// Parse command line arguments and create CLI configuration
   pub fn from_args() -> Result<Self, String> {
     let cli = build_cli();
@@ -260,7 +260,7 @@ impl CliConfig {
     let clear_cache = matches.get_flag("clear-cache");
     let show_cache_info = matches.get_flag("cache-info");
 
-    Ok(CliConfig {
+    Ok(ProcessingConfig {
       input_path,
       output_path,
       pipeline_config,
@@ -794,7 +794,7 @@ pub fn print_examples() {
 }
 
 /// Validate CLI configuration
-pub fn validate_config(config: &CliConfig) -> Result<(), String> {
+pub fn validate_config(config: &ProcessingConfig) -> Result<(), String> {
   // Check input file exists if one is specified (skip for examples)
   if let Some(input_path) = &config.input_path {
     if !input_path.exists() {
@@ -848,7 +848,7 @@ mod tests {
     ];
 
     let matches = build_cli().try_get_matches_from(args).unwrap();
-    let config = CliConfig::from_matches(matches).unwrap();
+    let config = ProcessingConfig::from_matches(matches).unwrap();
 
     assert_eq!(
       config.input_path.clone().unwrap(),
@@ -874,7 +874,7 @@ mod tests {
 
   #[test]
   fn test_pipeline_building() {
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: Some(PathBuf::from("input.jpg")),
       output_path: Some(PathBuf::from("output.jpg")),
       pipeline_config: PipelineConfig {
@@ -916,7 +916,7 @@ mod tests {
     ];
 
     let matches = build_cli().try_get_matches_from(args).unwrap();
-    let config = CliConfig::from_matches(matches).unwrap();
+    let config = ProcessingConfig::from_matches(matches).unwrap();
 
     // Check that white balance operation was added
     assert_eq!(config.pipeline_config.operations.len(), 1);
@@ -945,7 +945,7 @@ mod tests {
     ];
 
     let matches = build_cli().try_get_matches_from(args).unwrap();
-    let config = CliConfig::from_matches(matches).unwrap();
+    let config = ProcessingConfig::from_matches(matches).unwrap();
 
     // Check that white balance operation was added
     assert_eq!(config.pipeline_config.operations.len(), 1);
@@ -966,7 +966,7 @@ mod tests {
   #[test]
   fn test_white_balance_pipeline_building() {
     // Test auto white balance pipeline
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
@@ -989,7 +989,7 @@ mod tests {
     assert_eq!(pipeline.nodes.len(), 3); // input + white balance + output
 
     // Test manual white balance pipeline
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
@@ -1030,7 +1030,7 @@ mod tests {
     ];
 
     let matches = build_cli().try_get_matches_from(args).unwrap();
-    let config = CliConfig::from_matches(matches).unwrap();
+    let config = ProcessingConfig::from_matches(matches).unwrap();
 
     // Verify operations are in command-line order (contrast, brightness, saturation)
     assert_eq!(config.pipeline_config.operations.len(), 3);
@@ -1076,7 +1076,7 @@ mod tests {
   #[test]
   fn test_white_balance_validation() {
     // Test valid values with example (skips file validation)
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
@@ -1091,7 +1091,7 @@ mod tests {
     assert!(validate_config(&config).is_ok());
 
     // Test valid config with no operations
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig::default(),
@@ -1104,7 +1104,7 @@ mod tests {
     assert!(validate_config(&config).is_ok());
 
     // Test valid config with white balance operations
-    let config = CliConfig {
+    let config = ProcessingConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
