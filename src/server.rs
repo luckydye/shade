@@ -227,7 +227,7 @@ impl ImageProcessingServer {
     &self,
     params: ProcessImageParams,
   ) -> Result<ProcessImageResult> {
-    let run_start = std::time::Instant::now();
+    let time = std::time::Instant::now();
     let mut timing = Performance::default();
 
     // Build pipeline from operations
@@ -263,12 +263,12 @@ impl ImageProcessingServer {
     let image_file = self.load_image_from_input(params.image).await.map_err(|e| anyhow!("Error {}", e))?;
 
     // Load input image if provided
-    let load_time = run_start.elapsed();
-    timing.image_load_ms = load_time.as_secs_f64() * 1000.0;
+    timing.image_load_ms = time.elapsed().as_secs_f64() * 1000.0;
+    let time = std::time::Instant::now();
 
     let (texture_data, mut actual_dims) = match load_image(&image_file, None) {
       Ok((image_data, (width, height))) => {
-        log::info!("Successfully loaded image: {}x{}", width, height);
+        log::info!("Successfully loaded image: {}x{} in {}ms", width, height, timing.image_load_ms);
         (image_data, (width, height))
       }
       Err(e) => {
@@ -284,10 +284,8 @@ impl ImageProcessingServer {
 
     // decode image
 
-    let decode_time = run_start.elapsed();
-    timing.image_decode_ms = decode_time.as_secs_f64() * 1000.0;
-
-    let gpu_setup_start = std::time::Instant::now();
+    timing.image_decode_ms = time.elapsed().as_secs_f64() * 1000.0;
+    let time = std::time::Instant::now();
 
     let mut image_pipeline = config.build_pipeline();
 
@@ -311,8 +309,8 @@ impl ImageProcessingServer {
 
     image_pipeline.init_gpu(device.clone(), queue.clone());
 
-    let gpu_setup_time = gpu_setup_start.elapsed();
-    timing.gpu_setup_ms = gpu_setup_time.as_secs_f64() * 1000.0;
+    timing.gpu_setup_ms = time.elapsed().as_secs_f64() * 1000.0;
+    let time = std::time::Instant::now();
 
     // Process the image through the pipeline using actual dimensions
     // The pipeline now handles resizing as part of the processing chain
@@ -339,6 +337,9 @@ impl ImageProcessingServer {
           &output_format,
         )?;
 
+        timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
+        timing.print_all();
+
         Ok(ProcessImageResult {
           image_data,
           width: actual_dims.0 as u32,
@@ -347,6 +348,9 @@ impl ImageProcessingServer {
         })
       }
       Err(e) => {
+        timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
+        timing.print_all();
+
         log::error!("Pipeline processing failed: {}", e);
         Err(anyhow!("Pipeline processing failed"))
       }

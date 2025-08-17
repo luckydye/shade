@@ -234,7 +234,7 @@ impl ImageLoader for RawLoader {
       e
     })?;
 
-    let cache_key = cache.generate_cache_key(buffer, &Self::get_cache_params());
+    // let cache_key = cache.generate_cache_key(buffer, &Self::get_cache_params());
 
     log::info!(
       "Generate cache key in {}ms",
@@ -242,10 +242,10 @@ impl ImageLoader for RawLoader {
     );
     let load_start = Instant::now();
 
-    if let Some(cached_image) = cache.load_from_cache(&cache_key) {
-      log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
-      return Ok((cached_image.data, cached_image.dimensions));
-    }
+    // if let Some(cached_image) = cache.load_from_cache(&cache_key) {
+    //   log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
+    //   return Ok((cached_image.data, cached_image.dimensions));
+    // }
 
     log::info!("Loading camera raw from buffer (filename: {:?})", filename);
 
@@ -311,7 +311,7 @@ impl ImageLoader for RawLoader {
     );
 
     // Save to cache if cache is available
-    cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
+    // cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
 
     Ok((float_data, (width as usize, height as usize)))
   }
