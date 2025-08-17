@@ -170,7 +170,6 @@ fn apply_orientation(
 }
 
 impl RawLoader {
-  #[cfg(not(target_arch = "wasm32"))]
   fn get_cache_params() -> String {
     // Include processing parameters that would affect the final image
     // This ensures different processing settings get separate cache entries
@@ -200,108 +199,99 @@ impl ImageLoader for RawLoader {
   ) -> Result<(Vec<u8>, (usize, usize)), FileLoaderError> {
     let load_start = Instant::now();
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-      use rawler::decoders::cr3;
+    use rawler::decoders::cr3;
 
-      use crate::cache::ImageCache;
+    use crate::cache::ImageCache;
 
-      // Try to load from cache first
-      let cache = ImageCache::new().map_err(|e| {
-        log::warn!(
-          "Failed to initialize cache: {}, proceeding without cache",
-          e
-        );
+    // Try to load from cache first
+    let cache = ImageCache::new().map_err(|e| {
+      log::warn!(
+        "Failed to initialize cache: {}, proceeding without cache",
         e
-      })?;
-
-      let cache_key = cache.generate_cache_key(buffer, &Self::get_cache_params());
-
-      log::info!(
-        "Generate cache key in {}ms",
-        load_start.elapsed().as_millis()
       );
-      let load_start = Instant::now();
+      e
+    })?;
 
-      // if let Some(cached_image) = cache.load_from_cache(&cache_key) {
-      //   log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
-      //   return Ok((cached_image.data, cached_image.dimensions));
-      // }
+    let cache_key = cache.generate_cache_key(buffer, &Self::get_cache_params());
 
-      log::info!("Loading camera raw from buffer (filename: {:?})", filename);
+    log::info!(
+      "Generate cache key in {}ms",
+      load_start.elapsed().as_millis()
+    );
+    let load_start = Instant::now();
 
-      let rawsource = RawSource::new_from_slice(buffer);
-
-      log::info!(
-        "Loaded raw source at {}ms",
-        load_start.elapsed().as_millis()
-      );
-
-      let rawimage =
-        rawler::decode(&rawsource, &RawDecodeParams::default()).map_err(|e| {
-          FileLoaderError::DecodeError(format!("Could not decode source: {}", e))
-        })?;
-
-      let orientation = rawimage.orientation;
-
-      log::info!("Image dimensions {:?}", rawimage.dim());
-      log::info!("Image orientation {:?}", orientation);
-
-      log::info!(
-        "Decoded raw image at {}ms",
-        load_start.elapsed().as_millis()
-      );
-
-      let pixels = rawimage.pixels_u16();
-      log::info!("Raw pixels: {} CPP: {:?}", pixels.len(), rawimage.cpp);
-
-      let (width, height) = (rawimage.width as usize, rawimage.height as usize);
-      log::info!("Raw image dimensions: {}x{}", width, height);
-
-      let dev = RawDevelop::default();
-      let image = dev.develop_intermediate(&rawimage).map_err(|e| {
-        FileLoaderError::DecodeError(format!("Raw development error: {}", e))
-      })?;
-
-      log::info!(
-        "Developed raw image at {}ms",
-        load_start.elapsed().as_millis()
-      );
-
-      let img = image.to_dynamic_image().ok_or_else(|| {
-        FileLoaderError::DecodeError("Failed to convert to dynamic image".to_string())
-      })?;
-
-      // Apply orientation correction
-      let corrected_img = apply_orientation(img, orientation);
-
-      let rgba_img = corrected_img.to_rgba8();
-      let (width, height) = rgba_img.dimensions();
-      let data = rgba_img.into_raw();
-
-      log::info!("Successfully loaded raw image: {}x{}", width, height);
-
-      // Convert 8-bit RGBA to 32-bit float
-      let float_data = convert_to_float(&data);
-
-      // 50ms for conversions
-
-      log::info!(
-        "Converted raw image at {}ms",
-        load_start.elapsed().as_millis()
-      );
-
-      // Save to cache if cache is available
-      // cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
-
-      Ok((float_data, (width as usize, height as usize)))
+    if let Some(cached_image) = cache.load_from_cache(&cache_key) {
+      log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
+      return Ok((cached_image.data, cached_image.dimensions));
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-      Err(FileLoaderError::UnsupportedFormat(
-        "Camera raw files not supported in WASM".to_string(),
-      ))
-    }
+
+    log::info!("Loading camera raw from buffer (filename: {:?})", filename);
+
+    let rawsource = RawSource::new_from_slice(buffer);
+
+    log::info!(
+      "Loaded raw source at {}ms",
+      load_start.elapsed().as_millis()
+    );
+
+    let rawimage =
+      rawler::decode(&rawsource, &RawDecodeParams::default()).map_err(|e| {
+        FileLoaderError::DecodeError(format!("Could not decode source: {}", e))
+      })?;
+
+    let orientation = rawimage.orientation;
+
+    log::info!("Image dimensions {:?}", rawimage.dim());
+    log::info!("Image orientation {:?}", orientation);
+
+    log::info!(
+      "Decoded raw image at {}ms",
+      load_start.elapsed().as_millis()
+    );
+
+    let pixels = rawimage.pixels_u16();
+    log::info!("Raw pixels: {} CPP: {:?}", pixels.len(), rawimage.cpp);
+
+    let (width, height) = (rawimage.width as usize, rawimage.height as usize);
+    log::info!("Raw image dimensions: {}x{}", width, height);
+
+    let dev = RawDevelop::default();
+    let image = dev.develop_intermediate(&rawimage).map_err(|e| {
+      FileLoaderError::DecodeError(format!("Raw development error: {}", e))
+    })?;
+
+    log::info!(
+      "Developed raw image at {}ms",
+      load_start.elapsed().as_millis()
+    );
+
+    let img = image.to_dynamic_image().ok_or_else(|| {
+      FileLoaderError::DecodeError("Failed to convert to dynamic image".to_string())
+    })?;
+
+    // Apply orientation correction
+    let corrected_img = apply_orientation(img, orientation);
+
+    let rgba_img = corrected_img.to_rgba8();
+    let (width, height) = rgba_img.dimensions();
+    let data = rgba_img.into_raw();
+
+    log::info!("Successfully loaded raw image: {}x{}", width, height);
+
+    // Convert 8-bit RGBA to 32-bit float
+    let float_data = convert_to_float(&data);
+
+    // 50ms for conversions
+
+    log::info!(
+      "Converted raw image at {}ms",
+      load_start.elapsed().as_millis()
+    );
+
+    // Save to cache if cache is available
+    cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
+
+    Ok((float_data, (width as usize, height as usize)))
   }
 
   fn loader_name() -> &'static str {
