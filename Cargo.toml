@@ -19,7 +19,7 @@ log = "0.4.27"
 png = "0.17.16"
 pollster = "0.4.0"
 rawler = { git = "https://github.com/tokyoapp/dnglab.git" }
-rust-ini = "0.21.2"
+rust-ini = "0.21.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["io-util", "io-std", "rt", "macros", "time"] }

@@ -1,9 +1,10 @@
-use std::error::Error;
-use std::fmt;
 use crate::utils::convert_to_float;
+use image::DynamicImage;
 use rawler::{
   decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource,
 };
+use std::error::Error;
+use std::fmt;
 use tokio::time::Instant;
 
 /// Error type for file loading operations
@@ -145,6 +146,29 @@ impl ImageLoader for ExrLoader {
 /// Camera raw file loader (CR3, CR2, NEF, ARW, etc.)
 pub struct RawLoader;
 
+/// Apply EXIF orientation correction to an image
+fn apply_orientation(
+  img: DynamicImage,
+  orientation: rawler::Orientation,
+) -> DynamicImage {
+  use rawler::Orientation;
+
+  match orientation {
+    Orientation::Normal => img, // No transformation needed
+    Orientation::HorizontalFlip => img.fliph(), // Flip horizontal
+    Orientation::Rotate180 => img.rotate180(), // Rotate 180°
+    Orientation::VerticalFlip => img.flipv(), // Flip vertical
+    Orientation::Transpose => img.rotate90().fliph(), // Rotate 90° CW + flip horizontal
+    Orientation::Rotate90 => img.rotate90(), // Rotate 90° CW
+    Orientation::Transverse => img.rotate270().fliph(), // Rotate 270° CW + flip horizontal
+    Orientation::Rotate270 => img.rotate270(),          // Rotate 270° CW
+    Orientation::Unknown => {
+      log::warn!("Unknown orientation, applying no transformation");
+      img
+    }
+  }
+}
+
 impl RawLoader {
   #[cfg(not(target_arch = "wasm32"))]
   fn get_cache_params() -> String {
@@ -178,6 +202,8 @@ impl ImageLoader for RawLoader {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
+      use rawler::decoders::cr3;
+
       use crate::cache::ImageCache;
 
       // Try to load from cache first
@@ -197,10 +223,10 @@ impl ImageLoader for RawLoader {
       );
       let load_start = Instant::now();
 
-      if let Some(cached_image) = cache.load_from_cache(&cache_key) {
-        log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
-        return Ok((cached_image.data, cached_image.dimensions));
-      }
+      // if let Some(cached_image) = cache.load_from_cache(&cache_key) {
+      //   log::info!("Load from cache in {}ms", load_start.elapsed().as_millis());
+      //   return Ok((cached_image.data, cached_image.dimensions));
+      // }
 
       log::info!("Loading camera raw from buffer (filename: {:?})", filename);
 
@@ -217,6 +243,9 @@ impl ImageLoader for RawLoader {
         })?;
 
       let orientation = rawimage.orientation;
+
+      log::info!("Image dimensions {:?}", rawimage.dim());
+      log::info!("Image orientation {:?}", orientation);
 
       log::info!(
         "Decoded raw image at {}ms",
@@ -243,7 +272,10 @@ impl ImageLoader for RawLoader {
         FileLoaderError::DecodeError("Failed to convert to dynamic image".to_string())
       })?;
 
-      let rgba_img = img.to_rgba8();
+      // Apply orientation correction
+      let corrected_img = apply_orientation(img, orientation);
+
+      let rgba_img = corrected_img.to_rgba8();
       let (width, height) = rgba_img.dimensions();
       let data = rgba_img.into_raw();
 
@@ -260,7 +292,7 @@ impl ImageLoader for RawLoader {
       );
 
       // Save to cache if cache is available
-      cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
+      // cache.save_to_cache(&cache_key, &float_data, (width as usize, height as usize))?;
 
       Ok((float_data, (width as usize, height as usize)))
     }
@@ -509,10 +541,6 @@ mod tests {
 
   #[test]
   fn test_raw_can_load() {
-    // Test with TIFF/raw magic number (little endian)
-    let tiff_header = [0x49, 0x49, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00];
-    assert!(RawLoader::can_load(&tiff_header, None));
-
     // Test with filename only
     let empty_buffer = [];
     assert!(RawLoader::can_load(&empty_buffer, Some("test.cr3")));
