@@ -1,7 +1,7 @@
 use ini::Ini;
 use std::path::PathBuf;
 
-use crate::cli::{self, ProcessingConfig, PipelineConfig, PipelineOperation};
+use crate::cli::{self, PipelineConfig, PipelineOperation, ProcessingConfig};
 
 pub fn config_from_ini_path(config_path: &PathBuf) -> anyhow::Result<ProcessingConfig> {
   let conf = Ini::load_from_file(config_path)?;

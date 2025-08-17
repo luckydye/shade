@@ -1,27 +1,40 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::io::{stdin, stdout};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::cli::{ProcessingConfig, PipelineConfig, PipelineOperation};
+use crate::Performance;
+use crate::cli::{PipelineConfig, PipelineOperation, ProcessingConfig};
 use crate::protocol::{
   AsyncMessageTransport, ImageInput, InitializeParams, InitializeResult, Message,
   MessageId, MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
   ServerCapabilities, ServerInfo,
 };
-use crate::utils::convert_to_float;
-use crate::utils::{is_openexr_file, load_openexr_image};
-use crate::{LoadedImage, Performance};
 use anyhow::Result;
 use anyhow::anyhow;
 use base64::Engine;
-use rawler::imgop::develop::RawDevelop;
+use image::{ImageBuffer, ImageFormat, Rgb, Rgba};
+use wgpu::{Device, Queue};
+
 use crate::file_loaders::load_image;
 
 const TEXTURE_DIMS: (usize, usize) = (512, 512);
+
+/// Cached image data
+#[derive(Clone)]
+struct CachedImage {
+  hash: u64,
+  texture_data: Vec<u8>,
+  dimensions: (usize, usize),
+}
 
 /// Image processing server that handles socket communication
 pub struct ImageProcessingServer {
   next_id: AtomicU64,
   initialized: bool,
+  cached_image: Option<CachedImage>,
+  queue: Option<Queue>,
+  device: Option<Device>
 }
 
 impl ImageProcessingServer {
@@ -29,6 +42,9 @@ impl ImageProcessingServer {
     Self {
       next_id: AtomicU64::new(0),
       initialized: false,
+      cached_image: None,
+      queue: None,
+      device: None
     }
   }
 
@@ -129,6 +145,27 @@ impl ImageProcessingServer {
   async fn handle_initialize(&mut self, message: Message) -> Message {
     let id = message.id.unwrap_or(0);
 
+    // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
+    let instance = wgpu::Instance::default();
+    let adapter = instance
+      .request_adapter(&wgpu::RequestAdapterOptions::default())
+      .await
+      .unwrap();
+
+    let (device, queue) = adapter
+      .request_device(&wgpu::DeviceDescriptor {
+        label: None,
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::defaults(),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        trace: wgpu::Trace::Off,
+      })
+      .await
+      .unwrap();
+
+    self.device = Some(device);
+    self.queue = Some(queue);
+
     match message.params {
       Some(params) => match serde_json::from_value::<InitializeParams>(params) {
         Ok(_init_params) => {
@@ -224,7 +261,7 @@ impl ImageProcessingServer {
 
   /// Internal image processing logic
   async fn process_image_internal(
-    &self,
+    &mut self,
     params: ProcessImageParams,
   ) -> Result<ProcessImageResult> {
     let time = std::time::Instant::now();
@@ -243,13 +280,12 @@ impl ImageProcessingServer {
       })
       .collect();
 
-
     // Create a temporary config for pipeline building
     let config = ProcessingConfig {
       input_path: None,
       output_path: None,
       pipeline_config: PipelineConfig {
-        operations: pipeline_operations.map_err(|e: String| anyhow!("Error {}", e))?
+        operations: pipeline_operations.map_err(|e: String| anyhow!("Error {}", e))?,
       },
       verbose: false,
       config_path: None,
@@ -260,27 +296,17 @@ impl ImageProcessingServer {
     // load image
     log::info!("Loading image: {:?}", config.input_path);
 
-    let image_file = self.load_image_from_input(params.image).await.map_err(|e| anyhow!("Error {}", e))?;
+    let image_file = self
+      .load_image_from_input(params.image)
+      .await
+      .map_err(|e| anyhow!("Error {}", e))?;
 
-    // Load input image if provided
     timing.image_load_ms = time.elapsed().as_secs_f64() * 1000.0;
-    let time = std::time::Instant::now();
 
-    let (texture_data, mut actual_dims) = match load_image(&image_file, None) {
-      Ok((image_data, (width, height))) => {
-        log::info!("Successfully loaded image: {}x{} in {}ms", width, height, timing.image_load_ms);
-        (image_data, (width, height))
-      }
-      Err(e) => {
-        log::error!("Failed to load image: {}", e);
-        // Fallback to default texture
-        let default_data = (0..(TEXTURE_DIMS.0 * TEXTURE_DIMS.1))
-          .flat_map(|_| [0u8, 0u8, 0u8, 255u8])
-          .collect::<Vec<u8>>();
-        let float_data = crate::utils::convert_to_float(&default_data);
-        (float_data, TEXTURE_DIMS)
-      }
-    };
+    // let cached_image = self.load_image(image_file).await?;
+
+    // Check if we have this image cached
+    let cached_image = self.load_and_cache_image(image_file, &mut timing, time).await?;
 
     // decode image
 
@@ -289,79 +315,45 @@ impl ImageProcessingServer {
 
     let mut image_pipeline = config.build_pipeline();
 
-    // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
-    let instance = wgpu::Instance::default();
-    let adapter = instance
-      .request_adapter(&wgpu::RequestAdapterOptions::default())
-      .await
-      .unwrap();
-
-    let (device, queue) = adapter
-      .request_device(&wgpu::DeviceDescriptor {
-        label: None,
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::defaults(),
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::Off,
-      })
-      .await
-      .unwrap();
-
-    image_pipeline.init_gpu(device.clone(), queue.clone());
+    image_pipeline.init_gpu(self.device.clone().unwrap().clone(), self.queue.clone().unwrap().clone());
 
     timing.gpu_setup_ms = time.elapsed().as_secs_f64() * 1000.0;
     let time = std::time::Instant::now();
 
-    // Process the image through the pipeline using actual dimensions
-    // The pipeline now handles resizing as part of the processing chain
-    match image_pipeline
+    let mut actual_dims = cached_image.dimensions;
+
+    let (processed_data, final_dimensions) = image_pipeline
       .process(
-        texture_data.clone(),
+        cached_image.texture_data.clone(),
         (actual_dims.0 as u32, actual_dims.1 as u32),
       )
-      .await
-    {
-      Ok((processed_data, final_dimensions)) => {
-        actual_dims = (final_dimensions.0 as usize, final_dimensions.1 as usize);
-        log::info!(
-          "Image processed through pipeline with final dimensions: {}x{}",
-          actual_dims.0,
-          actual_dims.1
-        );
+      .await.map_err(|e: String| anyhow!("Operation {}", e))?;
 
-        // Convert processed data to output format
-        let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
-        let image_data = self.convert_to_base64(
-          &processed_data,
-          final_dimensions,
-          &output_format,
-        )?;
+    actual_dims = (final_dimensions.0 as usize, final_dimensions.1 as usize);
+    log::info!(
+      "Image processed through pipeline with final dimensions: {}x{}",
+      actual_dims.0,
+      actual_dims.1
+    );
 
-        timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
-        timing.print_all();
+    // Convert processed data to output format
+    let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
+    let image_data =
+      self.convert_to_base64(&processed_data, final_dimensions)?;
 
-        Ok(ProcessImageResult {
-          image_data,
-          width: actual_dims.0 as u32,
-          height: actual_dims.1 as u32,
-          format: output_format,
-        })
-      }
-      Err(e) => {
-        timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
-        timing.print_all();
+    timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
+    timing.print_all();
 
-        log::error!("Pipeline processing failed: {}", e);
-        Err(anyhow!("Pipeline processing failed"))
-      }
-    }
+    Ok(ProcessImageResult {
+      image_data,
+      width: actual_dims.0 as u32,
+      height: actual_dims.1 as u32,
+      format: output_format,
+    })
   }
 
   /// Load image data from various input formats
-  async fn load_image_from_input(
-    &self,
-    input: ImageInput,
-  ) -> Result<Vec<u8>> {
+  async fn load_image_from_input(&self, input: ImageInput) -> Result<Vec<u8>> {
     match input {
       ImageInput::File { path } => {
         #[cfg(not(target_arch = "wasm32"))]
@@ -382,12 +374,67 @@ impl ImageProcessingServer {
     }
   }
 
+  async fn load_image(&mut self, image_file: Vec<u8>) -> Result<CachedImage> {
+    let mut hasher = DefaultHasher::new();
+    image_file.hash(&mut hasher);
+    let image_hash = hasher.finish();
+
+    if let Some(cached_image) = self.cached_image.clone() && image_hash == cached_image.hash {
+      return Ok(cached_image);
+    }
+
+    let (image_data, (width, height)) = load_image(&image_file, None)?;
+
+    log::info!("Successfully loaded image: {}x{}", width, height);
+
+    Ok(CachedImage {
+      dimensions: (width, height),
+      texture_data: image_data,
+      hash: image_hash,
+    })
+  }
+
+  /// Load image and cache it for future requests
+  async fn load_and_cache_image(
+    &mut self,
+    image_file: Vec<u8>,
+    timing: &mut Performance,
+    time: std::time::Instant,
+  ) -> Result<CachedImage> {
+    // Load input image if provided
+    timing.image_load_ms = time.elapsed().as_secs_f64() * 1000.0;
+
+    let mut hasher = DefaultHasher::new();
+    image_file.hash(&mut hasher);
+    let image_hash = hasher.finish();
+
+    if let Some(cached_image) = self.cached_image.clone() && image_hash == cached_image.hash {
+      return Ok(cached_image);
+    }
+
+    let (image_data, (width, height)) = load_image(&image_file, None)?;
+
+    log::info!("Successfully loaded image: {}x{}", width, height);
+
+    let loaded_image = CachedImage {
+      dimensions: (width, height),
+      texture_data: image_data,
+      hash: image_hash,
+    };
+
+    // Cache the loaded image
+    self.cached_image = Some(loaded_image.clone());
+
+    log::info!("Image cached for future requests");
+
+    Ok(loaded_image)
+  }
+
   /// Convert processed float data back to base64 encoded image
   fn convert_to_base64(
     &self,
     data: &[u8],
     dims: (u32, u32),
-    format: &str,
   ) -> Result<String> {
     // Convert float data back to 8-bit RGBA
     let mut rgba_data = Vec::with_capacity(data.len() / 4);
@@ -405,37 +452,15 @@ impl ImageProcessingServer {
     }
 
     // Create image buffer and handle format-specific conversions
-    use image::{ImageBuffer, ImageFormat, Rgb, Rgba};
+
     let mut cursor = std::io::Cursor::new(Vec::new());
-    let image_format = match format.to_lowercase().as_str() {
-      "png" => ImageFormat::Png,
-      "jpg" | "jpeg" => ImageFormat::Jpeg,
-      "bmp" => ImageFormat::Bmp,
-      "tiff" => ImageFormat::Tiff,
-      _ => ImageFormat::Png, // Default to PNG
-    };
+    let image_format = ImageFormat::Png;
 
-    // Handle JPEG separately since it doesn't support alpha channel
-    if matches!(image_format, ImageFormat::Jpeg) {
-      // Convert RGBA to RGB by dropping alpha channel
-      let rgb_data: Vec<u8> = rgba_data
-        .chunks(4)
-        .flat_map(|chunk| [chunk[0], chunk[1], chunk[2]])
-        .collect();
+    // Use RGBA for formats that support transparency
+    let rgba_buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(dims.0, dims.1, rgba_data)
+      .ok_or(anyhow!("Failed to create RGBA image buffer"))?;
 
-      let rgb_buffer =
-        ImageBuffer::<Rgb<u8>, _>::from_raw(dims.0, dims.1, rgb_data)
-          .ok_or(anyhow!("Failed to create RGB image buffer"))?;
-
-      rgb_buffer.write_to(&mut cursor, image_format)?;
-    } else {
-      // Use RGBA for formats that support transparency
-      let rgba_buffer =
-        ImageBuffer::<Rgba<u8>, _>::from_raw(dims.0, dims.1, rgba_data)
-          .ok_or(anyhow!("Failed to create RGBA image buffer"))?;
-
-      rgba_buffer.write_to(&mut cursor, image_format)?;
-    }
+    rgba_buffer.write_to(&mut cursor, image_format)?;
 
     Ok(base64::engine::general_purpose::STANDARD.encode(cursor.into_inner()))
   }

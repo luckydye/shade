@@ -129,10 +129,10 @@ function App() {
 		debounce(async (operations: ImageOperation[]) => {
 			if (!imageFilePath || !previewEnabled) return;
 
-			const startTime = Date.now();
 			setIsProcessing(true);
 			setError(null);
 
+			const startTime = Date.now();
 			try {
 				const result = await invoke<ProcessImageResult>("process_image_file", {
 					filePath: imageFilePath, // Remove data:image/...;base64, prefix
