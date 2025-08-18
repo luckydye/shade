@@ -274,15 +274,20 @@ function App() {
 
 	return (
 		<div className="bg-gray-800 text-white min-h-screen flex flex-col">
-			{/* Header */}
-			<header className="bg-gray-900 p-4 shadow-md flex justify-between items-center">
-				<h1 className="text-2xl font-semibold">Shade Image Processor</h1>
+			<main className="flex flex-1 overflow-hidden">
+				{/* Sidebar */}
+				<aside className="w-1/4 bg-gray-850 p-6 overflow-y-auto space-y-6">
+					<div className="flex items-center space-x-2">
+						<div
+							className={`w-3 h-3 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+						></div>
+						<span>{isConnected ? "Connected" : "Disconnected"}</span>
+						<span className="ml-2">{processingLatency}ms</span>
+					</div>
 
-				{/* Preview Toggle */}
-				<div className="flex items-center justify-between">
 					<button
 						type="button"
-						className={`flex items-center px-4 py-2 rounded-lg transition-colors ${previewEnabled ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-700 hover:bg-gray-600"}`}
+						className={`flex items-center px-2 py-1 rounded-lg transition-colors ${previewEnabled ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-700 hover:bg-gray-600"}`}
 						onClick={() => setPreviewEnabled(!previewEnabled)}
 					>
 						{previewEnabled ? (
@@ -291,21 +296,8 @@ function App() {
 							<EyeOff className="w-4 h-4 mr-2" />
 						)}
 						<span>{previewEnabled ? "Live Preview" : "Preview Off"}</span>
-						<span className="ml-2">{processingLatency}ms</span>
 					</button>
-				</div>
 
-				<div className="flex items-center space-x-2">
-					<div
-						className={`w-3 h-3 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
-					></div>
-					<span>{isConnected ? "Connected" : "Disconnected"}</span>
-				</div>
-			</header>
-
-			<main className="flex flex-1 overflow-hidden">
-				{/* Sidebar */}
-				<aside className="w-1/4 bg-gray-850 p-6 overflow-y-auto space-y-6">
 					{/* Controls */}
 					{imageFilePath && (
 						<div className="space-y-4">
@@ -615,7 +607,7 @@ function App() {
 						<div className="space-y-3">
 							<button
 								type="button"
-								className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+								className="w-full flex items-center justify-center space-x-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
 								onClick={handleReset}
 							>
 								<RotateCcw className="w-4 h-4" />
@@ -624,7 +616,7 @@ function App() {
 
 							<button
 								type="button"
-								className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
+								className="w-full flex items-center justify-center space-x-2 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
 								onClick={handleExport}
 								disabled={!processedImage}
 							>
@@ -634,7 +626,7 @@ function App() {
 
 							<button
 								type="button"
-								className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
+								className="w-full flex items-center justify-center space-x-2 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
 								onClick={() => {
 									setImageFilePath(null);
 								}}
