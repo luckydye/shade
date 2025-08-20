@@ -116,6 +116,7 @@ function App() {
 			} catch (err) {
 				setError(`Failed to initialize Shade: ${err}`);
 				setIsConnected(false);
+				console.error(err);
 			}
 		};
 

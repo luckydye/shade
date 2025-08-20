@@ -199,6 +199,7 @@ impl ShadeProcess {
           .map_err(|e| format!("Failed to read header: {}", e))?;
 
         if !header_line.starts_with("Content-Length:") {
+          println!("Invalid format: {}", header_line);
           return Err("Invalid response format".to_string());
         }
 

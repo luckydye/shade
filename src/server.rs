@@ -6,19 +6,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::Performance;
 use crate::cli::{PipelineConfig, PipelineOperation, ProcessingConfig};
 use crate::protocol::{
-  AsyncMessageTransport, ImageInput, InitializeParams, InitializeResult, Message,
-  MessageId, MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
-  ServerCapabilities, ServerInfo,
+  BinaryAttachment, ImageInput, InitializeParams,
+  InitializeResult, Message, MessageTransport, ProcessImageParams,
+  ProcessImageResult, ResponseError, ServerCapabilities, ServerInfo,
 };
 use anyhow::Result;
 use anyhow::anyhow;
 use base64::Engine;
-use image::{ImageBuffer, ImageFormat, Rgb, Rgba};
+use image::{ImageBuffer, ImageFormat, Rgba};
 use wgpu::{Device, Queue};
 
 use crate::file_loaders::load_image;
-
-const TEXTURE_DIMS: (usize, usize) = (512, 512);
+use std::collections::HashMap;
 
 /// Cached image data
 #[derive(Clone)]
@@ -30,54 +29,20 @@ struct CachedImage {
 
 /// Image processing server that handles socket communication
 pub struct ImageProcessingServer {
-  next_id: AtomicU64,
   initialized: bool,
   cached_image: Option<CachedImage>,
   queue: Option<Queue>,
-  device: Option<Device>
+  device: Option<Device>,
 }
 
 impl ImageProcessingServer {
   pub fn new() -> Self {
     Self {
-      next_id: AtomicU64::new(0),
       initialized: false,
       cached_image: None,
       queue: None,
-      device: None
+      device: None,
     }
-  }
-
-  fn next_message_id(&self) -> MessageId {
-    self.next_id.fetch_add(1, Ordering::SeqCst)
-  }
-
-  /// Run the server in socket mode using stdin/stdout
-  pub async fn run_socket_mode(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let mut transport = AsyncMessageTransport::new(stdin, stdout);
-
-    log::info!("Image processing server started in socket mode");
-
-    loop {
-      match transport.read_message().await {
-        Ok(message) => {
-          if let Some(response) = self.handle_message(message).await {
-            if let Err(e) = transport.write_message(&response).await {
-              log::error!("Failed to send response: {}", e);
-              break;
-            }
-          }
-        }
-        Err(e) => {
-          log::error!("Failed to read message: {}", e);
-          break;
-        }
-      }
-    }
-
-    Ok(())
   }
 
   /// Run the server in synchronous socket mode using stdin/stdout
@@ -86,15 +51,18 @@ impl ImageProcessingServer {
     let stdout = stdout();
     let mut transport = MessageTransport::new(stdin, stdout);
 
-    log::info!("Image processing server started in socket mode (sync)");
+    log::info!("Image processing server started in socket mode");
 
     loop {
       match transport.read_message() {
-        Ok(message) => {
-          let should_shutdown = message.method.as_deref() == Some("shutdown");
+        Ok(msg_with_binary) => {
+          let should_shutdown =
+            msg_with_binary.message.method.as_deref() == Some("shutdown");
 
-          if let Some(response) = pollster::block_on(self.handle_message(message)) {
-            if let Err(e) = transport.write_message(&response) {
+          if let Some((response, binary_data)) =
+            pollster::block_on(self.handle_message(msg_with_binary.message))
+          {
+            if let Err(e) = transport.write_message(&response, &binary_data) {
               log::error!("Failed to send response: {}", e);
               break;
             }
@@ -116,23 +84,32 @@ impl ImageProcessingServer {
   }
 
   /// Handle incoming message and return response if needed
-  async fn handle_message(&mut self, message: Message) -> Option<Message> {
+  async fn handle_message(
+    &mut self,
+    message: Message,
+  ) -> Option<(Message, HashMap<String, Vec<u8>>)> {
     match message.method.as_deref() {
       // Just sends capabilities to client
-      Some("initialize") => Some(self.handle_initialize(message).await),
+      Some("initialize") => {
+        let (response, binary_data) = self.handle_initialize(message).await;
+        Some((response, binary_data))
+      }
       // processes the image
-      Some("process_image") => Some(self.handle_process_image(message).await),
+      Some("process_image") => {
+        let (response, binary_data) = self.handle_process_image(message).await;
+        Some((response, binary_data))
+      }
       // shotdown the process
       Some("shutdown") => {
         log::info!("Shutdown requested");
-        Some(Message::new_response(
-          message.id.unwrap_or(0),
-          serde_json::Value::Null,
+        Some((
+          Message::new_response(message.id.unwrap_or(0), serde_json::Value::Null),
+          HashMap::new(),
         ))
       }
-      Some(method) => Some(Message::new_error_response(
-        message.id,
-        ResponseError::method_not_found(method),
+      Some(method) => Some((
+        Message::new_error_response(message.id, ResponseError::method_not_found(method)),
+        HashMap::new(),
       )),
       None => {
         // Response or notification - ignore for now
@@ -142,7 +119,10 @@ impl ImageProcessingServer {
   }
 
   /// Handle initialize request
-  async fn handle_initialize(&mut self, message: Message) -> Message {
+  async fn handle_initialize(
+    &mut self,
+    message: Message,
+  ) -> (Message, HashMap<String, Vec<u8>>) {
     let id = message.id.unwrap_or(0);
 
     // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
@@ -211,28 +191,43 @@ impl ImageProcessingServer {
             }),
           };
 
-          Message::new_response(id, serde_json::to_value(result).unwrap())
+          (
+            Message::new_response(id, serde_json::to_value(result).unwrap()),
+            HashMap::new(),
+          )
         }
-        Err(e) => Message::new_error_response(
-          Some(id),
-          ResponseError::invalid_params(format!("Invalid initialize params: {}", e)),
+        Err(e) => (
+          Message::new_error_response(
+            Some(id),
+            ResponseError::invalid_params(format!("Invalid initialize params: {}", e)),
+          ),
+          HashMap::new(),
         ),
       },
-      None => Message::new_error_response(
-        Some(id),
-        ResponseError::invalid_params("Missing initialize parameters".to_string()),
+      None => (
+        Message::new_error_response(
+          Some(id),
+          ResponseError::invalid_params("Missing initialize parameters".to_string()),
+        ),
+        HashMap::new(),
       ),
     }
   }
 
   /// Handle process_image request
-  async fn handle_process_image(&mut self, message: Message) -> Message {
+  async fn handle_process_image(
+    &mut self,
+    message: Message,
+  ) -> (Message, HashMap<String, Vec<u8>>) {
     let id = message.id.unwrap_or(0);
 
     if !self.initialized {
-      return Message::new_error_response(
-        Some(id),
-        ResponseError::new(-32002, "Server not initialized".to_string()),
+      return (
+        Message::new_error_response(
+          Some(id),
+          ResponseError::new(-32002, "Server not initialized".to_string()),
+        ),
+        HashMap::new(),
       );
     }
 
@@ -241,20 +236,48 @@ impl ImageProcessingServer {
     match message.params {
       Some(params) => match serde_json::from_value::<ProcessImageParams>(params) {
         Ok(process_params) => match self.process_image_internal(process_params).await {
-          Ok(result) => Message::new_response(id, serde_json::to_value(result).unwrap()),
-          Err(e) => Message::new_error_response(
-            Some(id),
-            ResponseError::internal_error(e.to_string()),
+          Ok((result, binary_data)) => {
+            let attachment_id = "processed_image".to_string();
+            let attachment = BinaryAttachment {
+              id: attachment_id.clone(),
+              content_type: "image/png".to_string(),
+              size: binary_data.len(),
+            };
+
+            let mut binary_map = HashMap::new();
+            binary_map.insert(attachment_id, binary_data);
+
+            (
+              Message::new_response_with_binary(
+                id,
+                serde_json::to_value(result).unwrap(),
+                vec![attachment],
+              ),
+              binary_map,
+            )
+          }
+          Err(e) => (
+            Message::new_error_response(
+              Some(id),
+              ResponseError::internal_error(e.to_string()),
+            ),
+            HashMap::new(),
           ),
         },
-        Err(e) => Message::new_error_response(
-          Some(id),
-          ResponseError::invalid_params(format!("Invalid process_image params: {}", e)),
+        Err(e) => (
+          Message::new_error_response(
+            Some(id),
+            ResponseError::invalid_params(format!("Invalid process_image params: {}", e)),
+          ),
+          HashMap::new(),
         ),
       },
-      None => Message::new_error_response(
-        Some(id),
-        ResponseError::invalid_params("Missing process_image parameters".to_string()),
+      None => (
+        Message::new_error_response(
+          Some(id),
+          ResponseError::invalid_params("Missing process_image parameters".to_string()),
+        ),
+        HashMap::new(),
       ),
     }
   }
@@ -263,7 +286,7 @@ impl ImageProcessingServer {
   async fn process_image_internal(
     &mut self,
     params: ProcessImageParams,
-  ) -> Result<ProcessImageResult> {
+  ) -> Result<(ProcessImageResult, Vec<u8>)> {
     let time = std::time::Instant::now();
     let mut timing = Performance::default();
 
@@ -306,7 +329,9 @@ impl ImageProcessingServer {
     // let cached_image = self.load_image(image_file).await?;
 
     // Check if we have this image cached
-    let cached_image = self.load_and_cache_image(image_file, &mut timing, time).await?;
+    let cached_image = self
+      .load_and_cache_image(image_file, &mut timing, time)
+      .await?;
 
     // decode image
 
@@ -315,7 +340,10 @@ impl ImageProcessingServer {
 
     let mut image_pipeline = config.build_pipeline();
 
-    image_pipeline.init_gpu(self.device.clone().unwrap().clone(), self.queue.clone().unwrap().clone());
+    image_pipeline.init_gpu(
+      self.device.clone().unwrap().clone(),
+      self.queue.clone().unwrap().clone(),
+    );
 
     timing.gpu_setup_ms = time.elapsed().as_secs_f64() * 1000.0;
     let time = std::time::Instant::now();
@@ -327,7 +355,8 @@ impl ImageProcessingServer {
         cached_image.texture_data.clone(),
         (actual_dims.0 as u32, actual_dims.1 as u32),
       )
-      .await.map_err(|e: String| anyhow!("Operation {}", e))?;
+      .await
+      .map_err(|e: String| anyhow!("Operation {}", e))?;
 
     actual_dims = (final_dimensions.0 as usize, final_dimensions.1 as usize);
     log::info!(
@@ -338,18 +367,19 @@ impl ImageProcessingServer {
 
     // Convert processed data to output format
     let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
-    let image_data =
-      self.convert_to_base64(&processed_data, final_dimensions)?;
+    let binary_data = self.convert_to_binary(&processed_data, final_dimensions)?;
 
     timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
     timing.print_all();
 
-    Ok(ProcessImageResult {
-      image_data,
+    let result = ProcessImageResult {
+      image_attachment_id: "processed_image".to_string(),
       width: actual_dims.0 as u32,
       height: actual_dims.1 as u32,
       format: output_format,
-    })
+    };
+
+    Ok((result, binary_data))
   }
 
   /// Load image data from various input formats
@@ -379,7 +409,9 @@ impl ImageProcessingServer {
     image_file.hash(&mut hasher);
     let image_hash = hasher.finish();
 
-    if let Some(cached_image) = self.cached_image.clone() && image_hash == cached_image.hash {
+    if let Some(cached_image) = self.cached_image.clone()
+      && image_hash == cached_image.hash
+    {
       return Ok(cached_image);
     }
 
@@ -408,7 +440,9 @@ impl ImageProcessingServer {
     image_file.hash(&mut hasher);
     let image_hash = hasher.finish();
 
-    if let Some(cached_image) = self.cached_image.clone() && image_hash == cached_image.hash {
+    if let Some(cached_image) = self.cached_image.clone()
+      && image_hash == cached_image.hash
+    {
       log::info!("Using cached loaded image");
       return Ok(cached_image);
     }
@@ -431,12 +465,8 @@ impl ImageProcessingServer {
     Ok(loaded_image)
   }
 
-  /// Convert processed float data back to base64 encoded image
-  fn convert_to_base64(
-    &self,
-    data: &[u8],
-    dims: (u32, u32),
-  ) -> Result<String> {
+  /// Convert processed float data back to binary image data
+  fn convert_to_binary(&self, data: &[u8], dims: (u32, u32)) -> Result<Vec<u8>> {
     // Convert float data back to 8-bit RGBA
     let mut rgba_data = Vec::with_capacity(data.len() / 4);
     for chunk in data.chunks(16) {
@@ -463,7 +493,7 @@ impl ImageProcessingServer {
 
     rgba_buffer.write_to(&mut cursor, image_format)?;
 
-    Ok(base64::engine::general_purpose::STANDARD.encode(cursor.into_inner()))
+    Ok(cursor.into_inner())
   }
 }
 

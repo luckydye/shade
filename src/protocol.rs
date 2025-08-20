@@ -1,12 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader, Read};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
+use std::io::{self, BufRead, BufReader, Read, Write};
+use tokio::io::{
+  AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader as TokioBufReader,
+};
 
 use crate::cli::OperationType;
 
 /// Message ID for request/response correlation
 pub type MessageId = u64;
+
+/// Binary attachment metadata
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BinaryAttachment {
+  pub id: String,
+  pub content_type: String,
+  pub size: usize,
+}
 
 /// Base structure for all messages following LSP-style protocol
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,6 +32,8 @@ pub struct Message {
   pub result: Option<serde_json::Value>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<ResponseError>,
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub binary_attachments: Vec<BinaryAttachment>,
 }
 
 /// Error response structure
@@ -76,8 +88,8 @@ pub struct OperationSpec {
 /// Image processing response result
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProcessImageResult {
-  /// Processed image as base64 string
-  pub image_data: String,
+  /// Reference to binary attachment containing image data
+  pub image_attachment_id: String,
   /// Image dimensions
   pub width: u32,
   pub height: u32,
@@ -130,6 +142,7 @@ impl Message {
       params: Some(params),
       result: None,
       error: None,
+      binary_attachments: Vec::new(),
     }
   }
 
@@ -142,6 +155,24 @@ impl Message {
       params: None,
       result: Some(result),
       error: None,
+      binary_attachments: Vec::new(),
+    }
+  }
+
+  /// Create a new response message with binary attachments
+  pub fn new_response_with_binary(
+    id: MessageId,
+    result: serde_json::Value,
+    attachments: Vec<BinaryAttachment>,
+  ) -> Self {
+    Self {
+      jsonrpc: "2.0".to_string(),
+      id: Some(id),
+      method: None,
+      params: None,
+      result: Some(result),
+      error: None,
+      binary_attachments: attachments,
     }
   }
 
@@ -154,6 +185,7 @@ impl Message {
       params: None,
       result: None,
       error: Some(error),
+      binary_attachments: Vec::new(),
     }
   }
 
@@ -166,6 +198,7 @@ impl Message {
       params: Some(params),
       result: None,
       error: None,
+      binary_attachments: Vec::new(),
     }
   }
 }
@@ -291,13 +324,19 @@ impl TryFrom<&OperationSpec> for OperationType {
   }
 }
 
+/// Message with optional binary data
+pub struct MessageWithBinary {
+  pub message: Message,
+  pub binary_data: HashMap<String, Vec<u8>>,
+}
+
 /// Message transport layer for reading/writing messages with Content-Length headers
 pub struct MessageTransport<R, W> {
   reader: BufReader<R>,
   writer: W,
 }
 
-impl<R: std::io::Read, W: std::io::Write> MessageTransport<R, W> {
+impl<R: Read, W: Write> MessageTransport<R, W> {
   pub fn new(reader: R, writer: W) -> Self {
     Self {
       reader: BufReader::new(reader),
@@ -306,9 +345,7 @@ impl<R: std::io::Read, W: std::io::Write> MessageTransport<R, W> {
   }
 
   /// Read a message from the input stream
-  pub fn read_message(&mut self) -> io::Result<Message> {
-    // Read headers until empty line
-    let mut headers = HashMap::new();
+  pub fn read_message(&mut self) -> io::Result<MessageWithBinary> {
     let mut line = String::new();
 
     loop {
@@ -325,22 +362,9 @@ impl<R: std::io::Read, W: std::io::Write> MessageTransport<R, W> {
       if line.is_empty() {
         break;
       }
-
-      if let Some((key, value)) = line.split_once(':') {
-        headers.insert(key.trim().to_lowercase(), value.trim().to_string());
-      }
     }
 
-    // Get content length
-    let content_length = headers
-      .get("content-length")
-      .ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "Missing Content-Length header")
-      })?
-      .parse::<usize>()
-      .map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidData, "Invalid Content-Length")
-      })?;
+    // TODO: redo message parsing
 
     // Read the message body
     let mut buffer = vec![0; content_length];
@@ -349,108 +373,46 @@ impl<R: std::io::Read, W: std::io::Write> MessageTransport<R, W> {
     let message_str = String::from_utf8(buffer)
       .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
 
-    serde_json::from_str(&message_str).map_err(|e| {
+    let message: Message = serde_json::from_str(&message_str).map_err(|e| {
       io::Error::new(
         io::ErrorKind::InvalidData,
         format!("Failed to parse JSON: {}", e),
       )
+    })?;
+
+    // Read binary attachments if any
+    let mut binary_data = HashMap::new();
+    for attachment in &message.binary_attachments {
+      let mut buffer = vec![0; attachment.size];
+      self.reader.read_exact(&mut buffer)?;
+      binary_data.insert(attachment.id.clone(), buffer);
+    }
+
+    Ok(MessageWithBinary {
+      message,
+      binary_data,
     })
   }
 
-  /// Write a message to the output stream
-  pub fn write_message(&mut self, message: &Message) -> io::Result<()> {
+  /// Write a message with binary data to the output stream
+  pub fn write_message(
+    &mut self,
+    message: &Message,
+    binary_data: &HashMap<String, Vec<u8>>,
+  ) -> io::Result<()> {
     let json = serde_json::to_string(message)
       .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    write!(
-      self.writer,
-      "Content-Length: {}\r\n\r\n{}",
-      json.len(),
-      json
-    )?;
+    write!(self.writer, "{}", json)?;
+
+    // Write binary attachments
+    for attachment in &message.binary_attachments {
+      if let Some(data) = binary_data.get(&attachment.id) {
+        self.writer.write_all(data)?;
+      }
+    }
+
     self.writer.flush()?;
-    Ok(())
-  }
-}
-
-/// Async version of MessageTransport
-pub struct AsyncMessageTransport<R, W> {
-  reader: TokioBufReader<R>,
-  writer: W,
-}
-
-impl<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + Unpin>
-  AsyncMessageTransport<R, W>
-{
-  pub fn new(reader: R, writer: W) -> Self {
-    Self {
-      reader: TokioBufReader::new(reader),
-      writer,
-    }
-  }
-
-  /// Read a message from the input stream asynchronously
-  pub async fn read_message(&mut self) -> io::Result<Message> {
-    // Read headers until empty line
-    let mut headers = HashMap::new();
-    let mut line = String::new();
-
-    loop {
-      line.clear();
-      let bytes_read = self.reader.read_line(&mut line).await?;
-      if bytes_read == 0 {
-        return Err(io::Error::new(
-          io::ErrorKind::UnexpectedEof,
-          "Unexpected EOF while reading headers",
-        ));
-      }
-
-      let line = line.trim();
-      if line.is_empty() {
-        break;
-      }
-
-      if let Some((key, value)) = line.split_once(':') {
-        headers.insert(key.trim().to_lowercase(), value.trim().to_string());
-      }
-    }
-
-    // Get content length
-    let content_length = headers
-      .get("content-length")
-      .ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "Missing Content-Length header")
-      })?
-      .parse::<usize>()
-      .map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidData, "Invalid Content-Length")
-      })?;
-
-    // Read the message body
-    let mut buffer = vec![0; content_length];
-    use tokio::io::AsyncReadExt;
-    self.reader.read_exact(&mut buffer).await?;
-
-    let message_str = String::from_utf8(buffer)
-      .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
-
-    serde_json::from_str(&message_str).map_err(|e| {
-      io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("Failed to parse JSON: {}", e),
-      )
-    })
-  }
-
-  /// Write a message to the output stream asynchronously
-  pub async fn write_message(&mut self, message: &Message) -> io::Result<()> {
-    let json = serde_json::to_string(message)
-      .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    let header = format!("Content-Length: {}\r\n\r\n", json.len());
-    self.writer.write_all(header.as_bytes()).await?;
-    self.writer.write_all(json.as_bytes()).await?;
-    self.writer.flush().await?;
     Ok(())
   }
 }
