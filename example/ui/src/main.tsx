@@ -14,7 +14,7 @@ function debounce<T>(callback: (arg: T) => void, ms = 80) {
 
 function App() {
 	return (
-		<div className="bg-gray-800 text-white min-h-screen flex flex-col">
+		<div className="h-screen overflow-hidden">
 			<ImageProcessor />
 		</div>
 	);
