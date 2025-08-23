@@ -84,6 +84,89 @@ export const ShadeAPI = {
 	},
 
 	/**
+	 * Get binary attachment data by ID
+	 *
+	 * This method retrieves binary image data from the Shade server using an attachment ID
+	 * returned from image processing operations. The binary data can then be converted to
+	 * a Blob and used to create object URLs for display in the UI.
+	 *
+	 * @param attachmentId - The unique identifier for the binary attachment
+	 * @returns Promise<Uint8Array> - The raw binary data of the processed image
+	 *
+	 * @example
+	 * ```typescript
+	 * // Process image and get attachment ID
+	 * const result = await ShadeAPI.processImageFile(filePath, operations, "png");
+	 *
+	 * // Retrieve binary data
+	 * const binaryData = await ShadeAPI.getAttachment(result.image_attachment_id);
+	 *
+	 * // Create blob URL for preview display
+	 * const blob = new Blob([binaryData], { type: `image/${result.format}` });
+	 * const blobUrl = URL.createObjectURL(blob);
+	 *
+	 * // Remember to clean up the blob URL when done
+	 * URL.revokeObjectURL(blobUrl);
+	 * ```
+	 */
+	async getAttachment(attachmentId: string): Promise<Uint8Array> {
+		return invoke("get_attachment", { attachmentId });
+	},
+
+	/**
+	 * Read image file as raw bytes and create blob URL
+	 *
+	 * This method reads an image file from the local filesystem as raw bytes and creates
+	 * a blob URL for display. This is useful for files with problematic paths (spaces,
+	 * special characters) that don't work well with convertFileSrc or file:// URLs.
+	 *
+	 * @param filePath - Full path to the image file
+	 * @returns Promise<string> - Blob URL that can be used in img elements
+	 *
+	 * @example
+	 * ```typescript
+	 * // Read image with spaces in filename
+	 * const blobUrl = await ShadeAPI.readImageAsBlob("/path/to/my image.jpg");
+	 *
+	 * // Use in img element
+	 * imageElement.src = blobUrl;
+	 *
+	 * // Remember to clean up when done
+	 * URL.revokeObjectURL(blobUrl);
+	 * ```
+	 */
+	async readImageAsBlob(filePath: string): Promise<string> {
+		// Get raw bytes from Tauri command
+		const binaryData = await invoke<number[]>("read_image_as_bytes", {
+			filePath,
+		});
+
+		// Convert number array to Uint8Array
+		const uint8Array = new Uint8Array(binaryData);
+
+		// Determine MIME type from file extension
+		const extension = filePath.split(".").pop()?.toLowerCase();
+		const mimeType =
+			extension === "jpeg" || extension === "jpg"
+				? "image/jpeg"
+				: extension === "png"
+					? "image/png"
+					: extension === "gif"
+						? "image/gif"
+						: extension === "webp"
+							? "image/webp"
+							: extension === "bmp"
+								? "image/bmp"
+								: extension === "tiff" || extension === "tif"
+									? "image/tiff"
+									: "image/jpeg"; // Default fallback
+
+		// Create blob and return object URL
+		const blob = new Blob([uint8Array], { type: mimeType });
+		return URL.createObjectURL(blob);
+	},
+
+	/**
 	 * Convenience method to process an image from a file path
 	 */
 	async processImageFile(

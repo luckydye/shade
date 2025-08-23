@@ -1,3 +1,4 @@
+use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -305,6 +306,72 @@ async fn process_image(
     .map_err(|e| format!("Failed to parse result: {}", e))
 }
 
+/// Tauri command to get binary attachment data
+///
+/// This command retrieves binary image data from the Shade server using an attachment ID.
+/// The Shade server stores processed images as binary attachments and returns attachment IDs
+/// in processing responses. This command fetches the actual binary data for display in the UI.
+///
+/// # Arguments
+/// * `state` - Shared state containing the Shade process connection
+/// * `attachment_id` - Unique identifier for the binary attachment to retrieve
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` - The raw binary image data
+/// * `Err(String)` - Error message if retrieval fails
+///
+/// # Flow
+/// 1. Send "get_attachment" request to Shade server with attachment ID
+/// 2. Server responds with base64-encoded binary data
+/// 3. Decode base64 data to raw bytes
+/// 4. Return binary data to frontend for blob URL creation
+///
+/// # Usage in Frontend
+/// ```typescript
+/// const binaryData = await invoke("get_attachment", { attachmentId: "abc123" });
+/// const blob = new Blob([binaryData], { type: "image/png" });
+/// const url = URL.createObjectURL(blob);
+/// ```
+#[tauri::command]
+async fn get_attachment(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+  attachment_id: String,
+) -> Result<Vec<u8>, String> {
+  let params = serde_json::json!({ "attachment_id": attachment_id });
+  let result = send_request(state, "get_attachment", params).await?;
+
+  // The result should contain the binary data as base64
+  if let Some(data) = result.get("data").and_then(|d| d.as_str()) {
+    BASE64_STANDARD.decode(data)
+      .map_err(|e| format!("Failed to decode base64 data: {}", e))
+  } else {
+    Err("No binary data in response".to_string())
+  }
+}
+
+/// Tauri command to read image file as raw bytes
+///
+/// This command reads an image file from the local filesystem and returns it as raw bytes.
+/// This is useful for files with problematic paths (spaces, special characters) that
+/// don't work well with convertFileSrc or file:// URLs.
+///
+/// # Arguments
+/// * `file_path` - Full path to the image file
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` - Raw binary data of the image
+/// * `Err(String)` - Error message if reading fails
+#[tauri::command]
+async fn read_image_as_bytes(file_path: String) -> Result<Vec<u8>, String> {
+  use std::fs;
+
+  // Read the file as binary data
+  let binary_data = fs::read(&file_path)
+    .map_err(|e| format!("Failed to read file '{}': {}", file_path, e))?;
+
+  Ok(binary_data)
+}
+
 /// Tauri command to get server capabilities
 #[tauri::command]
 async fn get_capabilities(
@@ -402,6 +469,8 @@ pub fn run() {
     .manage(Arc::new(Mutex::new(ShadeProcess::new())))
     .invoke_handler(tauri::generate_handler![
       process_image,
+      get_attachment,
+      read_image_as_bytes,
       get_capabilities,
       is_shade_running,
       restart_shade,

@@ -2,11 +2,7 @@ import type React from "react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type {
-	ProcessImageResult,
-	ShadeStatus,
-	OperationSpec,
-} from "../lib/shade-api";
+import type { ShadeStatus, OperationSpec } from "../lib/shade-api";
 import { ShadeAPI } from "../lib/shade-api";
 
 interface ImageProcessorProps {
@@ -80,10 +76,8 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 
 	const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	// Generate histogram data (simplified simulation)
-	const generateHistogram = useCallback((imageSrc: string): HistogramData => {
-		// In a real implementation, this would analyze the actual image pixels
-		// For now, we'll generate realistic-looking histogram data
+	// Fallback histogram generator
+	const generateFallbackHistogram = useCallback((): HistogramData => {
 		const bins = 256;
 		const red = Array.from(
 			{ length: bins },
@@ -102,7 +96,89 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 		return { red, green, blue, luminance };
 	}, []);
 
-	// Update operations when adjustments change
+	/**
+	 * Generate histogram data from actual image pixels using Canvas API
+	 * Analyzes RGB channels and calculates luminance distribution
+	 * Falls back to dummy data if canvas operations fail
+	 */
+	const generateHistogram = useCallback(
+		(imageSrc: string): Promise<HistogramData> => {
+			return new Promise((resolve) => {
+				const img = new Image();
+				img.crossOrigin = "anonymous";
+
+				img.onload = () => {
+					try {
+						// Create canvas to analyze pixel data
+						const canvas = document.createElement("canvas");
+						const ctx = canvas.getContext("2d");
+						if (!ctx) {
+							resolve(generateFallbackHistogram());
+							return;
+						}
+
+						canvas.width = img.width;
+						canvas.height = img.height;
+						ctx.drawImage(img, 0, 0);
+
+						const imageData = ctx.getImageData(
+							0,
+							0,
+							canvas.width,
+							canvas.height,
+						);
+						const data = imageData.data;
+
+						// Initialize histogram bins (256 values for each channel)
+						const red = new Array(256).fill(0);
+						const green = new Array(256).fill(0);
+						const blue = new Array(256).fill(0);
+						const luminance = new Array(256).fill(0);
+
+						// Analyze pixels
+						for (let i = 0; i < data.length; i += 4) {
+							const r = data[i];
+							const g = data[i + 1];
+							const b = data[i + 2];
+							// Alpha is data[i + 3], but we'll ignore it for histogram
+
+							red[r]++;
+							green[g]++;
+							blue[b]++;
+
+							// Calculate luminance using standard weights
+							const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+							luminance[lum]++;
+						}
+
+						// Normalize values to get relative frequencies
+						const totalPixels = canvas.width * canvas.height;
+						const normalizeArray = (arr: number[]) =>
+							arr.map((count) => count / totalPixels);
+
+						resolve({
+							red: normalizeArray(red),
+							green: normalizeArray(green),
+							blue: normalizeArray(blue),
+							luminance: normalizeArray(luminance),
+						});
+					} catch (error) {
+						console.warn("Failed to generate histogram from pixels:", error);
+						resolve(generateFallbackHistogram());
+					}
+				};
+
+				img.onerror = () => resolve(generateFallbackHistogram());
+				img.src = imageSrc;
+			});
+		},
+		[generateFallbackHistogram],
+	);
+
+	/**
+	 * Convert UI adjustment values to Shade operations
+	 * Maps slider values to appropriate operation parameters
+	 */
 	useEffect(() => {
 		const newOperations: OperationSpec[] = [];
 
@@ -147,9 +223,25 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 		setOperations(newOperations);
 	}, [adjustments]);
 
-	// Live preview with debouncing
+	/**
+	 * Live preview system with debouncing
+	 *
+	 * This effect handles the core preview functionality:
+	 * 1. Debounces adjustment changes (300ms delay)
+	 * 2. Sends processing request to Shade server
+	 * 3. Retrieves binary attachment containing processed image
+	 * 4. Creates blob URL for display in UI
+	 * 5. Generates histogram from processed image pixels
+	 * 6. Cleans up blob URLs to prevent memory leaks
+	 */
 	useEffect(() => {
 		if (!selectedFile || operations.length === 0) {
+			// Reset to original image if no operations
+			setPreviewState((prev) => ({
+				...prev,
+				processed: prev.original,
+				isProcessing: false,
+			}));
 			return;
 		}
 
@@ -167,47 +259,184 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					"png",
 				);
 
-				// Note: In a full implementation, you would need to handle binary attachments
-				// and convert them to displayable images. For now, this shows the structure.
+				/**
+				 * Binary Attachment Processing:
+				 * 1. Use attachment ID to fetch binary data from Shade server
+				 * 2. Convert binary data to Blob with correct MIME type
+				 * 3. Create object URL for display in img elements
+				 * 4. Store URL for cleanup later
+				 */
+				const binaryData = await ShadeAPI.getAttachment(
+					result.image_attachment_id,
+				);
+				const blob = new Blob([binaryData], { type: `image/${result.format}` });
+				const blobUrl = URL.createObjectURL(blob);
+
 				setPreviewState((prev) => ({
 					...prev,
 					processed: prev.original
 						? {
 								...prev.original,
-								src: prev.original.src, // Would be replaced with processed image data
+								src: blobUrl,
+								width: result.width,
+								height: result.height,
+								name: `processed_${prev.original.name}`,
 							}
 						: null,
 					isProcessing: false,
 				}));
+
+				// Generate real histogram from processed image pixels
+				generateHistogram(blobUrl).then(setHistogram);
 			} catch (err) {
 				setError(`Preview failed: ${err}`);
 				setPreviewState((prev) => ({ ...prev, isProcessing: false }));
 			}
 		}, 300);
-	}, [selectedFile, operations]);
 
-	const resetAll = useCallback(() => {
-		setAdjustments({
-			exposure: 0.0,
-			highlights: 0.0,
-			shadows: 0.0,
-			whites: 0.0,
-			blacks: 0.0,
-			brightness: 1.0,
-			contrast: 1.0,
-			gamma: 1.0,
-			saturation: 1.0,
-			vibrance: 0.0,
-			hue: 0.0,
-			temperature: 0.0,
-			tint: 0.0,
-			clarity: 0.0,
-			dehaze: 0.0,
-			blur: 0.0,
-			sharpen: 0.0,
-			noise: 0.0,
-		});
-	}, []);
+		// Cleanup blob URLs when component unmounts or dependencies change
+		return () => {
+			if (previewTimeoutRef.current) {
+				clearTimeout(previewTimeoutRef.current);
+			}
+		};
+	}, [selectedFile, operations, generateHistogram]);
+
+	/**
+	 * Memory Management: Clean up blob URLs to prevent memory leaks
+	 * Blob URLs must be explicitly revoked when no longer needed
+	 */
+	useEffect(() => {
+		return () => {
+			// Clean up all blob URLs when component unmounts or state changes
+			if (previewState.processed?.src?.startsWith("blob:")) {
+				URL.revokeObjectURL(previewState.processed.src);
+			}
+			if (previewState.original?.src?.startsWith("blob:")) {
+				URL.revokeObjectURL(previewState.original.src);
+			}
+		};
+	}, [previewState.processed, previewState.original]);
+
+	// Helper function to try multiple image loading methods
+	const tryLoadImage = useCallback(
+		async (filePath: string): Promise<ImageData> => {
+			const fileName = filePath.split("/").pop() || "Unknown";
+
+			// Method 1: Try Tauri's convertFileSrc first (recommended)
+			try {
+				const tauriSrc = convertFileSrc(filePath);
+				console.log("Trying Tauri convertFileSrc:", tauriSrc);
+
+				const imageData = await new Promise<ImageData>((resolve, reject) => {
+					const img = new Image();
+					img.onload = () => {
+						console.log("✓ Successfully loaded with Tauri convertFileSrc");
+						resolve({
+							src: tauriSrc,
+							width: img.naturalWidth,
+							height: img.naturalHeight,
+							name: fileName,
+						});
+					};
+					img.onerror = (error) => {
+						console.warn("✗ Tauri convertFileSrc failed:", error);
+						reject(new Error("Tauri method failed"));
+					};
+					img.src = tauriSrc;
+				});
+
+				return imageData;
+			} catch (error) {
+				console.log(
+					"Tauri convertFileSrc failed, trying file reading approach...",
+				);
+			}
+
+			// Method 2: Use custom Tauri command to read file as raw bytes and create blob
+			try {
+				console.log("Reading file as raw bytes with Tauri command:", filePath);
+
+				// Use our custom Tauri command to read the file as bytes and create blob URL
+				const blobUrl = await ShadeAPI.readImageAsBlob(filePath);
+
+				console.log("✓ File read as binary data, blob URL created");
+
+				const imageData = await new Promise<ImageData>((resolve, reject) => {
+					const img = new Image();
+					img.onload = () => {
+						console.log("✓ Successfully loaded with blob URL from binary data");
+						resolve({
+							src: blobUrl,
+							width: img.naturalWidth,
+							height: img.naturalHeight,
+							name: fileName,
+						});
+					};
+					img.onerror = (error) => {
+						console.warn("✗ Blob URL from binary data failed:", error);
+						URL.revokeObjectURL(blobUrl); // Clean up on error
+						reject(new Error("Binary blob method failed"));
+					};
+					img.src = blobUrl;
+				});
+
+				return imageData;
+			} catch (error) {
+				console.log("Binary blob method failed:", error);
+			}
+
+			// Method 3: Try various URL encoding approaches as fallback
+			const encodedPath = encodeURI(filePath);
+			const encodedPathComponents = filePath
+				.split("/")
+				.map(encodeURIComponent)
+				.join("/");
+
+			const urlsToTry = [
+				`file://${encodedPath}`,
+				`file://${encodedPathComponents}`,
+				`file://localhost${encodedPath}`,
+				`file://localhost${encodedPathComponents}`,
+				`file://${filePath.replace(/\s+/g, "%20")}`,
+			];
+
+			console.log("Trying alternative URL formats:", urlsToTry);
+
+			for (let i = 0; i < urlsToTry.length; i++) {
+				const srcUrl = urlsToTry[i];
+				try {
+					const imageData = await new Promise<ImageData>((resolve, reject) => {
+						const img = new Image();
+						img.onload = () => {
+							console.log(
+								`✓ Successfully loaded with URL method ${i + 1}:`,
+								srcUrl,
+							);
+							resolve({
+								src: srcUrl,
+								width: img.naturalWidth,
+								height: img.naturalHeight,
+								name: fileName,
+							});
+						};
+						img.onerror = (error) => {
+							console.warn(`✗ URL method ${i + 1} failed:`, srcUrl, error);
+							reject(new Error(`Failed to load: ${srcUrl}`));
+						};
+						img.src = srcUrl;
+					});
+
+					return imageData;
+				} catch (error) {
+					// Continue to next method
+				}
+			}
+
+			throw new Error(`All loading methods failed for: ${filePath}`);
+		},
+		[],
+	);
 
 	const selectFile = useCallback(async () => {
 		try {
@@ -238,16 +467,9 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 				setSelectedFile(selected);
 				setError(null);
 
-				// Load original image for preview
-				const imageSrc = convertFileSrc(selected);
-				const img = new Image();
-				img.onload = () => {
-					const imageData: ImageData = {
-						src: imageSrc,
-						width: img.naturalWidth,
-						height: img.naturalHeight,
-						name: selected.split("/").pop() || "Unknown",
-					};
+				try {
+					// Use the improved image loading method
+					const imageData = await tryLoadImage(selected);
 
 					setPreviewState({
 						original: imageData,
@@ -255,37 +477,133 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 						isProcessing: false,
 					});
 
-					// Generate histogram for the loaded image
-					setHistogram(generateHistogram(imageSrc));
-				};
-				img.onerror = () => {
-					// Fallback if image can't be loaded
+					// Generate histogram for original image
+					try {
+						const histogramData = await generateHistogram(imageData.src);
+						setHistogram(histogramData);
+					} catch (err) {
+						console.warn(
+							"Failed to generate histogram for original image:",
+							err,
+						);
+					}
+				} catch (error) {
+					console.error("All image loading methods failed:", error);
+					setError(
+						`Unable to load image "${selected.split("/").pop()}". Please check file permissions, format support, or try a different image.`,
+					);
+
+					// Set a minimal state so UI doesn't break
 					setPreviewState({
 						original: {
-							src: imageSrc,
-							width: 1920,
-							height: 1080,
+							src: "",
+							width: 0,
+							height: 0,
 							name: selected.split("/").pop() || "Unknown",
 						},
 						processed: null,
 						isProcessing: false,
 					});
-				};
-				img.src = imageSrc;
+				}
 			}
 		} catch (err) {
 			setError(`Failed to select file: ${err}`);
 		}
+	}, [generateHistogram, tryLoadImage]);
+
+	/**
+	 * Load test image for debugging - creates a simple colored canvas
+	 * Useful for testing the preview and histogram functionality
+	 */
+	const loadTestImage = useCallback(() => {
+		try {
+			// Create a test canvas with gradient colors
+			const canvas = document.createElement("canvas");
+			const ctx = canvas.getContext("2d");
+			if (!ctx) {
+				setError("Canvas not supported");
+				return;
+			}
+
+			canvas.width = 400;
+			canvas.height = 300;
+
+			// Create a gradient background
+			const gradient = ctx.createLinearGradient(
+				0,
+				0,
+				canvas.width,
+				canvas.height,
+			);
+			gradient.addColorStop(0, "#ff6b6b");
+			gradient.addColorStop(0.33, "#4ecdc4");
+			gradient.addColorStop(0.66, "#45b7d1");
+			gradient.addColorStop(1, "#96ceb4");
+
+			ctx.fillStyle = gradient;
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+			// Add some geometric shapes for testing
+			ctx.fillStyle = "#ffffff";
+			ctx.fillRect(50, 50, 100, 100);
+
+			ctx.fillStyle = "#000000";
+			ctx.beginPath();
+			ctx.arc(300, 150, 50, 0, 2 * Math.PI);
+			ctx.fill();
+
+			// Convert canvas to blob URL
+			canvas.toBlob((blob) => {
+				if (!blob) {
+					setError("Failed to create test image");
+					return;
+				}
+
+				const blobUrl = URL.createObjectURL(blob);
+				const testImageData: ImageData = {
+					src: blobUrl,
+					width: canvas.width,
+					height: canvas.height,
+					name: "test_image.png",
+				};
+
+				setPreviewState({
+					original: testImageData,
+					processed: null,
+					isProcessing: false,
+				});
+
+				// Generate histogram for test image
+				generateHistogram(blobUrl)
+					.then(setHistogram)
+					.catch((err) =>
+						console.warn("Failed to generate test histogram:", err),
+					);
+
+				setSelectedFile("test://image"); // Dummy file path
+				setError(null);
+			}, "image/png");
+		} catch (err) {
+			setError(`Failed to create test image: ${err}`);
+		}
+	}, [generateHistogram]);
+
+	/**
+	 * Apply sample operations for testing
+	 */
+	const applySampleOperations = useCallback(() => {
+		setAdjustments((prev) => ({
+			...prev,
+			brightness: 1.2,
+			contrast: 1.1,
+			saturation: 1.3,
+			hue: 15,
+		}));
 	}, []);
 
 	// Keyboard shortcuts
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
-			// Cmd/Ctrl + R to reset all adjustments
-			if ((event.metaKey || event.ctrlKey) && event.key === "r") {
-				event.preventDefault();
-				resetAll();
-			}
 			// Cmd/Ctrl + I to import image
 			if ((event.metaKey || event.ctrlKey) && event.key === "i") {
 				event.preventDefault();
@@ -321,7 +639,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [resetAll, selectFile, showBeforeAfter, previewState.original]);
+	}, [selectFile, showBeforeAfter, previewState.original]);
 
 	// Check Shade status
 	useEffect(() => {
@@ -480,16 +798,6 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 									"Unknown"}
 							</div>
 						</div>
-
-						{/* Mini Histogram */}
-						<div className="mt-4">
-							<h4 className="text-sm font-medium mb-2 text-gray-300">
-								Histogram
-							</h4>
-							<div className="h-16 bg-gray-700 rounded border">
-								<Histogram data={histogram} />
-							</div>
-						</div>
 					</div>
 				)}
 
@@ -513,15 +821,100 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 				</div>
 
 				{/* Status & Actions */}
-				<div className="p-4 border-t border-gray-700">
-					<button
-						type="button"
-						onClick={resetAll}
-						className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors tooltip"
-						data-tooltip="Cmd+R"
-					>
-						🔄 Reset All
-					</button>
+				<div className="p-4 border-t border-gray-700 space-y-2">
+					{/* Status Information */}
+					<div className="pt-2 border-t border-gray-600">
+						<div className="text-xs text-gray-400 mb-2">Status</div>
+						<div className="space-y-1 text-xs">
+							<div className="flex justify-between">
+								<span className="text-gray-400">Operations:</span>
+								<span className="text-white">{operations.length}</span>
+							</div>
+							<div className="flex justify-between">
+								<span className="text-gray-400">Processing:</span>
+								<span
+									className={
+										previewState.isProcessing
+											? "text-yellow-400"
+											: "text-green-400"
+									}
+								>
+									{previewState.isProcessing ? "Yes" : "No"}
+								</span>
+							</div>
+							<div className="flex justify-between">
+								<span className="text-gray-400">Shade Server:</span>
+								<span
+									className={
+										shadeStatus?.running ? "text-green-400" : "text-red-400"
+									}
+								>
+									{shadeStatus?.running ? "Running" : "Stopped"}
+								</span>
+							</div>
+							{shadeStatus?.running && (
+								<div className="flex justify-between">
+									<span className="text-gray-400">Pending:</span>
+									<span className="text-white">
+										{shadeStatus.pending_requests}
+									</span>
+								</div>
+							)}
+							<div className="flex justify-between">
+								<span className="text-gray-400">Image Loaded:</span>
+								<span
+									className={
+										previewState.original?.src
+											? "text-green-400"
+											: "text-red-400"
+									}
+								>
+									{previewState.original?.src ? "Yes" : "No"}
+								</span>
+							</div>
+							{selectedFile && (
+								<div className="pt-1 border-t border-gray-700 mt-1">
+									<div className="text-xs text-gray-400 mb-1">Debug Info</div>
+									<div className="text-xs text-gray-300 break-all">
+										File: {selectedFile.split("/").pop()}
+									</div>
+									{previewState.original?.src && (
+										<div className="text-xs text-gray-300 break-all mt-1">
+											Method:{" "}
+											{previewState.original.src.startsWith("blob:")
+												? "Binary Blob"
+												: "File URL"}
+										</div>
+									)}
+									{previewState.original?.src && (
+										<div className="text-xs text-gray-300 break-all mt-1">
+											URL: {previewState.original?.src.substring(0, 50)}...
+										</div>
+									)}
+								</div>
+							)}
+						</div>
+					</div>
+
+					{/* Debug/Test Controls */}
+					<div className="pt-2 border-t border-gray-600">
+						<div className="text-xs text-gray-400 mb-2">Debug Tools</div>
+						<button
+							type="button"
+							onClick={loadTestImage}
+							className="w-full px-3 py-1 mb-1 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors"
+						>
+							🎨 Load Test Image (Binary)
+						</button>
+						<button
+							type="button"
+							onClick={applySampleOperations}
+							disabled={!previewState.original}
+							className="w-full px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs transition-colors"
+						>
+							⚡ Apply Sample Edits
+						</button>
+					</div>
 					{error && (
 						<div className="mt-2 p-2 bg-red-900/50 border border-red-700 rounded text-sm text-red-200">
 							{error}
@@ -605,6 +998,10 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 												alt="Original"
 												className="w-80 h-60 object-contain bg-gray-700 rounded-lg"
 												onError={(e) => {
+													console.error(
+														"Image display error for:",
+														previewState.original.src,
+													);
 													const target = e.target as HTMLImageElement;
 													target.style.display = "none";
 													target.nextElementSibling?.classList.remove("hidden");
@@ -619,7 +1016,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 									</div>
 									<div className="text-center">
 										<div className="text-sm text-gray-400 mb-3">After</div>
-										<div className="w-80 h-60 bg-gray-700 rounded-lg flex items-center justify-center image-preview">
+										<div className="rounded-lg flex items-center justify-center">
 											{previewState.isProcessing ? (
 												<div className="flex items-center space-x-2 text-blue-400">
 													<div className="loading-spinner"></div>
@@ -645,7 +1042,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 								</div>
 							) : (
 								<div className="text-center">
-									<div className="relative image-preview mb-4">
+									<div className="relative mb-4">
 										{previewState.isProcessing && (
 											<div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
 												<div className="flex items-center space-x-2 text-blue-400">
@@ -654,31 +1051,54 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 												</div>
 											</div>
 										)}
-										<img
-											src={
-												previewState.processed?.src || previewState.original.src
-											}
-											alt="Preview"
-											className="max-w-full max-h-96 object-contain bg-gray-700 rounded-lg"
-											style={{ maxHeight: "calc(100vh - 300px)" }}
-											onError={(e) => {
-												const target = e.target as HTMLImageElement;
-												target.style.display = "none";
-												target.nextElementSibling?.classList.remove("hidden");
-											}}
-										/>
-										<div className="hidden w-96 h-72 bg-gray-700 rounded-lg flex items-center justify-center">
-											<span className="text-gray-500">
-												Failed to load image
-											</span>
+										{previewState.processed?.src ||
+										previewState.original.src ? (
+											<img
+												src={
+													previewState.processed?.src ||
+													previewState.original.src
+												}
+												alt="Preview"
+												className="max-w-full max-h-96 object-contain"
+												style={{ maxHeight: "calc(100vh - 300px)" }}
+												onError={(e) => {
+													console.error(
+														"Preview image error for:",
+														previewState.processed?.src ||
+															previewState.original.src,
+													);
+													const target = e.target as HTMLImageElement;
+													target.style.display = "none";
+													target.nextElementSibling?.classList.remove("hidden");
+												}}
+											/>
+										) : (
+											<div className="max-w-full flex items-center justify-center">
+												<div className="text-center text-gray-500">
+													<div className="text-6xl mb-4">⚠️</div>
+													<div className="text-lg mb-2">
+														Unable to Load Image
+													</div>
+													<div className="text-sm text-gray-400 max-w-md">
+														The selected image could not be loaded. This might
+														be due to:
+													</div>
+													<div className="text-xs text-gray-400 mt-2 space-y-1">
+														<div>• File permissions restrictions</div>
+														<div>• Unsupported image format</div>
+														<div>• File path contains special characters</div>
+														<div>• File has been moved or deleted</div>
+													</div>
+													<div className="text-xs text-blue-400 mt-3">
+														Check browser console for detailed error info
+													</div>
+												</div>
+											</div>
+										)}
+										<div className="hidden text-center py-20 text-gray-500">
+											<div className="text-4xl mb-2">❌</div>
+											<div>Failed to load image</div>
 										</div>
-									</div>
-									<div className="text-sm text-gray-400">
-										{previewState.original.name}
-									</div>
-									<div className="text-xs text-gray-600 mt-1">
-										{previewState.original.width} ×{" "}
-										{previewState.original.height} pixels
 									</div>
 								</div>
 							)}
@@ -949,7 +1369,6 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 				<div className="font-medium mb-1">Keyboard Shortcuts</div>
 				<div className="space-y-0.5">
 					<div>Cmd+I: Import Image</div>
-					<div>Cmd+R: Reset All</div>
 					<div>B: Toggle Before/After</div>
 					<div>1-5: Switch Panels</div>
 				</div>
