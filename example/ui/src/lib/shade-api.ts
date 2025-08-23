@@ -9,7 +9,7 @@ export interface ImageInput {
 
 export interface OperationSpec {
 	operation: string;
-	params: any;
+	params: unknown;
 }
 
 export interface ProcessImageRequest {
@@ -37,56 +37,56 @@ export interface ServerCapabilities {
 	supported_output_formats: string[];
 }
 
-// Shade API wrapper class
-export class ShadeAPI {
+// Shade API utility functions
+export const ShadeAPI = {
 	/**
 	 * Process an image with the specified operations
 	 */
-	static async processImage(
+	async processImage(
 		request: ProcessImageRequest,
 	): Promise<ProcessImageResult> {
 		return invoke("process_image", { request });
-	}
+	},
 
 	/**
 	 * Get server capabilities (supported operations, formats, etc.)
 	 */
-	static async getCapabilities(): Promise<ServerCapabilities> {
+	async getCapabilities(): Promise<ServerCapabilities> {
 		return invoke("get_capabilities");
-	}
+	},
 
 	/**
 	 * Check if the Shade process is running
 	 */
-	static async isShadeRunning(): Promise<boolean> {
+	async isShadeRunning(): Promise<boolean> {
 		return invoke("is_shade_running");
-	}
+	},
 
 	/**
 	 * Restart the Shade process
 	 */
-	static async restartShade(): Promise<void> {
+	async restartShade(): Promise<void> {
 		return invoke("restart_shade");
-	}
+	},
 
 	/**
 	 * Stop the Shade process
 	 */
-	static async stopShade(): Promise<void> {
+	async stopShade(): Promise<void> {
 		return invoke("stop_shade");
-	}
+	},
 
 	/**
 	 * Get detailed status of the Shade process
 	 */
-	static async getShadeStatus(): Promise<ShadeStatus> {
+	async getShadeStatus(): Promise<ShadeStatus> {
 		return invoke("get_shade_status");
-	}
+	},
 
 	/**
 	 * Convenience method to process an image from a file path
 	 */
-	static async processImageFile(
+	async processImageFile(
 		filePath: string,
 		operations: OperationSpec[],
 		outputFormat: string = "png",
@@ -96,13 +96,13 @@ export class ShadeAPI {
 			operations,
 			output_format: outputFormat,
 		};
-		return this.processImage(request);
-	}
+		return ShadeAPI.processImage(request);
+	},
 
 	/**
 	 * Convenience method to process an image from base64 data
 	 */
-	static async processImageBase64(
+	async processImageBase64(
 		base64Data: string,
 		operations: OperationSpec[],
 		outputFormat: string = "png",
@@ -112,13 +112,13 @@ export class ShadeAPI {
 			operations,
 			output_format: outputFormat,
 		};
-		return this.processImage(request);
-	}
+		return ShadeAPI.processImage(request);
+	},
 
 	/**
 	 * Helper to create common operations
 	 */
-	static operations = {
+	operations: {
 		brightness: (value: number): OperationSpec => ({
 			operation: "brightness",
 			params: value,
@@ -172,8 +172,8 @@ export class ShadeAPI {
 			operation: "resize",
 			params: options,
 		}),
-	};
-}
+	},
+};
 
 // Usage examples:
 /*

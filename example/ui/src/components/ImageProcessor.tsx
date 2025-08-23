@@ -1,13 +1,16 @@
-import React, { useState, useCallback, useEffect } from "react";
+import type React from "react";
+import { useState, useCallback, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import {
-	ShadeAPI,
+import type {
 	ProcessImageResult,
 	ShadeStatus,
 	OperationSpec,
 } from "../lib/shade-api";
+import { ShadeAPI } from "../lib/shade-api";
 
-interface ImageProcessorProps {}
+interface ImageProcessorProps {
+	className?: string;
+}
 
 const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 	const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -178,6 +181,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					<div>Loading status...</div>
 				)}
 				<button
+					type="button"
 					onClick={restartShade}
 					className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
 					disabled={processing}
@@ -190,6 +194,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 			<div className="mb-6 p-4 border border-gray-300 rounded-lg">
 				<h2 className="text-lg font-semibold mb-2">Select Image</h2>
 				<button
+					type="button"
 					onClick={selectFile}
 					className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
 					disabled={processing}
@@ -210,86 +215,87 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					<div>
 						<label className="block text-sm font-medium text-gray-700 mb-1">
 							Brightness: {brightness.toFixed(2)}
+							<input
+								type="range"
+								min="0.1"
+								max="3.0"
+								step="0.1"
+								value={brightness}
+								onChange={(e) => setBrightness(parseFloat(e.target.value))}
+								className="w-full mt-1"
+								disabled={processing}
+							/>
 						</label>
-						<input
-							type="range"
-							min="0.1"
-							max="3.0"
-							step="0.1"
-							value={brightness}
-							onChange={(e) => setBrightness(parseFloat(e.target.value))}
-							className="w-full"
-							disabled={processing}
-						/>
 					</div>
 
 					<div>
 						<label className="block text-sm font-medium text-gray-700 mb-1">
 							Contrast: {contrast.toFixed(2)}
+							<input
+								type="range"
+								min="0.1"
+								max="3.0"
+								step="0.1"
+								value={contrast}
+								onChange={(e) => setContrast(parseFloat(e.target.value))}
+								className="w-full mt-1"
+								disabled={processing}
+							/>
 						</label>
-						<input
-							type="range"
-							min="0.1"
-							max="3.0"
-							step="0.1"
-							value={contrast}
-							onChange={(e) => setContrast(parseFloat(e.target.value))}
-							className="w-full"
-							disabled={processing}
-						/>
 					</div>
 
 					<div>
 						<label className="block text-sm font-medium text-gray-700 mb-1">
 							Saturation: {saturation.toFixed(2)}
+							<input
+								type="range"
+								min="0.0"
+								max="2.0"
+								step="0.1"
+								value={saturation}
+								onChange={(e) => setSaturation(parseFloat(e.target.value))}
+								className="w-full mt-1"
+								disabled={processing}
+							/>
 						</label>
-						<input
-							type="range"
-							min="0.0"
-							max="2.0"
-							step="0.1"
-							value={saturation}
-							onChange={(e) => setSaturation(parseFloat(e.target.value))}
-							className="w-full"
-							disabled={processing}
-						/>
 					</div>
 
 					<div>
 						<label className="block text-sm font-medium text-gray-700 mb-1">
 							Hue: {hue.toFixed(1)}°
+							<input
+								type="range"
+								min="-180"
+								max="180"
+								step="10"
+								value={hue}
+								onChange={(e) => setHue(parseFloat(e.target.value))}
+								className="w-full mt-1"
+								disabled={processing}
+							/>
 						</label>
-						<input
-							type="range"
-							min="-180"
-							max="180"
-							step="10"
-							value={hue}
-							onChange={(e) => setHue(parseFloat(e.target.value))}
-							className="w-full"
-							disabled={processing}
-						/>
 					</div>
 
 					<div>
 						<label className="block text-sm font-medium text-gray-700 mb-1">
 							Gamma: {gamma.toFixed(2)}
+							<input
+								type="range"
+								min="0.1"
+								max="3.0"
+								step="0.1"
+								value={gamma}
+								onChange={(e) => setGamma(parseFloat(e.target.value))}
+								className="w-full mt-1"
+								disabled={processing}
+							/>
 						</label>
-						<input
-							type="range"
-							min="0.1"
-							max="3.0"
-							step="0.1"
-							value={gamma}
-							onChange={(e) => setGamma(parseFloat(e.target.value))}
-							className="w-full"
-							disabled={processing}
-						/>
 					</div>
 				</div>
 
 				<div className="mt-4 flex gap-4">
 					<button
+						type="button"
 						onClick={resetControls}
 						className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
 						disabled={processing}
@@ -306,6 +312,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 			{/* Process Button */}
 			<div className="mb-6">
 				<button
+					type="button"
 					onClick={processImage}
 					disabled={
 						!selectedFile ||
@@ -369,12 +376,15 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					</h3>
 					<ul className="text-sm text-blue-700 space-y-1">
 						{operations.map((op, index) => (
-							<li key={index} className="flex items-center gap-2">
+							<li
+								key={`${op.operation}-${index}`}
+								className="flex items-center gap-2"
+							>
 								<span className="font-medium">{op.operation}:</span>
 								<span>
-									{typeof op.params === "object"
+									{typeof op.params === "object" && op.params !== null
 										? JSON.stringify(op.params)
-										: op.params}
+										: String(op.params)}
 								</span>
 							</li>
 						))}
