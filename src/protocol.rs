@@ -32,7 +32,7 @@ pub struct Message {
   pub result: Option<serde_json::Value>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<ResponseError>,
-  #[serde(skip_serializing_if = "Vec::is_empty")]
+  #[serde(skip_serializing_if = "Vec::is_empty", default)]
   pub binary_attachments: Vec<BinaryAttachment>,
 }
 
@@ -330,7 +330,7 @@ pub struct MessageWithBinary {
   pub binary_data: HashMap<String, Vec<u8>>,
 }
 
-/// Message transport layer for reading/writing messages with Content-Length headers
+/// Message transport layer for reading/writing line-delimited JSON messages
 pub struct MessageTransport<R, W> {
   reader: BufReader<R>,
   writer: W,
@@ -347,33 +347,24 @@ impl<R: Read, W: Write> MessageTransport<R, W> {
   /// Read a message from the input stream
   pub fn read_message(&mut self) -> io::Result<MessageWithBinary> {
     let mut line = String::new();
+    let bytes_read = self.reader.read_line(&mut line)?;
 
-    loop {
-      line.clear();
-      let bytes_read = self.reader.read_line(&mut line)?;
-      if bytes_read == 0 {
-        return Err(io::Error::new(
-          io::ErrorKind::UnexpectedEof,
-          "Unexpected EOF while reading headers",
-        ));
-      }
-
-      let line = line.trim();
-      if line.is_empty() {
-        break;
-      }
+    if bytes_read == 0 {
+      return Err(io::Error::new(
+        io::ErrorKind::UnexpectedEof,
+        "Unexpected EOF while reading message",
+      ));
     }
 
-    // TODO: redo message parsing
+    let line = line.trim();
+    if line.is_empty() {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "Empty message line",
+      ));
+    }
 
-    // Read the message body
-    let mut buffer = vec![0; content_length];
-    self.reader.read_exact(&mut buffer)?;
-
-    let message_str = String::from_utf8(buffer)
-      .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
-
-    let message: Message = serde_json::from_str(&message_str).map_err(|e| {
+    let message: Message = serde_json::from_str(line).map_err(|e| {
       io::Error::new(
         io::ErrorKind::InvalidData,
         format!("Failed to parse JSON: {}", e),
@@ -403,7 +394,7 @@ impl<R: Read, W: Write> MessageTransport<R, W> {
     let json = serde_json::to_string(message)
       .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    write!(self.writer, "{}", json)?;
+    writeln!(self.writer, "{}", json)?;
 
     // Write binary attachments
     for attachment in &message.binary_attachments {
@@ -413,6 +404,85 @@ impl<R: Read, W: Write> MessageTransport<R, W> {
     }
 
     self.writer.flush()?;
+    Ok(())
+  }
+}
+
+/// Async message transport layer for reading/writing line-delimited JSON messages
+pub struct AsyncMessageTransport<R, W> {
+  reader: TokioBufReader<R>,
+  writer: W,
+}
+
+impl<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin> AsyncMessageTransport<R, W> {
+  pub fn new(reader: R, writer: W) -> Self {
+    Self {
+      reader: TokioBufReader::new(reader),
+      writer,
+    }
+  }
+
+  /// Read a message from the input stream asynchronously
+  pub async fn read_message(&mut self) -> io::Result<MessageWithBinary> {
+    let mut line = String::new();
+    let bytes_read = self.reader.read_line(&mut line).await?;
+
+    if bytes_read == 0 {
+      return Err(io::Error::new(
+        io::ErrorKind::UnexpectedEof,
+        "Unexpected EOF while reading message",
+      ));
+    }
+
+    let line = line.trim();
+    if line.is_empty() {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "Empty message line",
+      ));
+    }
+
+    let message: Message = serde_json::from_str(line).map_err(|e| {
+      io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("Failed to parse JSON: {}", e),
+      )
+    })?;
+
+    // Read binary attachments if any
+    let mut binary_data = HashMap::new();
+    for attachment in &message.binary_attachments {
+      let mut buffer = vec![0; attachment.size];
+      self.reader.read_exact(&mut buffer).await?;
+      binary_data.insert(attachment.id.clone(), buffer);
+    }
+
+    Ok(MessageWithBinary {
+      message,
+      binary_data,
+    })
+  }
+
+  /// Write a message with binary data to the output stream asynchronously
+  pub async fn write_message(
+    &mut self,
+    message: &Message,
+    binary_data: &HashMap<String, Vec<u8>>,
+  ) -> io::Result<()> {
+    let json = serde_json::to_string(message)
+      .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    self.writer.write_all(json.as_bytes()).await?;
+    self.writer.write_all(b"\n").await?;
+
+    // Write binary attachments
+    for attachment in &message.binary_attachments {
+      if let Some(data) = binary_data.get(&attachment.id) {
+        self.writer.write_all(data).await?;
+      }
+    }
+
+    self.writer.flush().await?;
     Ok(())
   }
 }
@@ -467,5 +537,68 @@ mod tests {
       }
       _ => panic!("Wrong operation type"),
     }
+  }
+
+  #[test]
+  fn test_message_transport() {
+    use std::io::Cursor;
+
+    // Create a test message
+    let message = Message::new_request(
+      42,
+      "test_method".to_string(),
+      serde_json::json!({"param": "value"}),
+    );
+
+    // Write message to buffer
+    let mut write_buffer = Vec::new();
+    {
+      let cursor = Cursor::new(&mut write_buffer);
+      let mut transport = MessageTransport::new(std::io::empty(), cursor);
+      transport.write_message(&message, &HashMap::new()).unwrap();
+    }
+
+    // Read message back from buffer
+    let read_cursor = Cursor::new(&write_buffer);
+    let mut transport = MessageTransport::new(read_cursor, std::io::sink());
+    let received = transport.read_message().unwrap();
+
+    // Verify the message was correctly serialized and deserialized
+    assert_eq!(received.message.jsonrpc, "2.0");
+    assert_eq!(received.message.id, Some(42));
+    assert_eq!(received.message.method, Some("test_method".to_string()));
+    assert!(received.message.params.is_some());
+    assert!(received.binary_data.is_empty());
+  }
+
+  #[test]
+  fn test_line_based_protocol_example() {
+    use std::io::Cursor;
+
+    // Example showing how the new line-based protocol works
+    // Each message is a single line of JSON followed by a newline
+
+    // Sample JSON-RPC message
+    let json_message = r#"{"jsonrpc":"2.0","id":1,"method":"process_image","params":{"image":{"type":"file","path":"test.jpg"},"operations":[{"operation":"brightness","params":1.2}],"output_format":"png"}}"#;
+
+    // In the line-based protocol, messages are simply JSON lines
+    let input_data = format!("{}\n", json_message);
+
+    // Read the message
+    let cursor = Cursor::new(input_data.as_bytes());
+    let mut transport = MessageTransport::new(cursor, std::io::sink());
+    let received = transport.read_message().unwrap();
+
+    // Verify the message was parsed correctly
+    assert_eq!(received.message.jsonrpc, "2.0");
+    assert_eq!(received.message.id, Some(1));
+    assert_eq!(received.message.method, Some("process_image".to_string()));
+    assert!(received.message.params.is_some());
+
+    // The protocol is now much simpler:
+    // - No Content-Length headers required
+    // - Each message is a single line of JSON
+    // - Binary attachments still follow after the JSON line
+    // - Easy to debug and implement in any language
   }
 }

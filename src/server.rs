@@ -1,7 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{stdin, stdout};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::Performance;
 use crate::cli::{PipelineConfig, PipelineOperation, ProcessingConfig};
