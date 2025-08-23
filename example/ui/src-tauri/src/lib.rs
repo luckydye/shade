@@ -5,391 +5,408 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
-// JSON-RPC types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JsonRpcRequest {
-  pub jsonrpc: String,
-  pub id: u32,
-  pub method: String,
-  pub params: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JsonRpcResponse {
-  pub jsonrpc: String,
-  pub id: u32,
-  pub result: Option<serde_json::Value>,
-  pub error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JsonRpcError {
-  pub code: i32,
-  pub message: String,
-  pub data: Option<serde_json::Value>,
-}
-
-// Image processing types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageInput {
-  #[serde(rename = "type")]
-  pub input_type: String,
-  pub path: Option<String>,
-  pub data: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageOperation {
-  pub operation: String,
-  pub params: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessImageParams {
-  pub image: ImageInput,
-  pub operations: Vec<ImageOperation>,
-  pub output_format: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessImageResult {
-  pub image_data: String,
-  pub width: u32,
-  pub height: u32,
-  pub format: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerCapabilities {
-  pub supported_operations: Vec<String>,
-  pub supported_input_formats: Vec<String>,
-  pub supported_output_formats: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InitializeResult {
-  pub capabilities: ServerCapabilities,
-  pub server_info: HashMap<String, String>,
-}
-
-// State management
+/// Shade process manager
 pub struct ShadeProcess {
   child: Option<Child>,
-  request_id: Arc<Mutex<u32>>,
-  initialized: Arc<RwLock<bool>>,
+  stdin: Option<Arc<Mutex<tokio::process::ChildStdin>>>,
+  message_id_counter: u64,
+  pending_requests: HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
 }
 
 impl ShadeProcess {
   pub fn new() -> Self {
     Self {
       child: None,
-      request_id: Arc::new(Mutex::new(0)),
-      initialized: Arc::new(RwLock::new(false)),
+      stdin: None,
+      message_id_counter: 0,
+      pending_requests: HashMap::new(),
     }
   }
 
-  pub async fn start(&mut self) -> Result<(), String> {
-    if self.child.is_some() {
-      return Ok(());
-    }
-
-    // Try to find shade binary in various locations
-    let shade_paths = [
-      "../../target/release/shade",
-      "../../target/debug/shade",
-      "../../../target/release/shade",
-      "../../../target/debug/shade",
-      "shade", // System PATH
-    ];
-
-    let mut shade_path = None;
-    for path in &shade_paths {
-      if std::path::Path::new(path).exists() {
-        shade_path = Some(path);
-        break;
-      }
-    }
-
-    let shade_cmd = shade_path.unwrap_or(&"shade");
-    let child = Command::new(shade_cmd)
-      .arg("--socket")
-      .stdin(Stdio::piped())
-      .stdout(Stdio::piped())
-      .stderr(Stdio::inherit())
-      .spawn()
-      .map_err(|e| format!("Failed to start shade process: {}", e))?;
-
-    self.child = Some(child);
-    Ok(())
+  pub fn next_message_id(&mut self) -> u64 {
+    self.message_id_counter += 1;
+    self.message_id_counter
   }
 
-  pub async fn stop(&mut self) -> Result<(), String> {
-    if let Some(mut child) = self.child.take() {
-      // Send shutdown message
-      let _ = self.send_message("shutdown", None).await;
-
-      // Wait for graceful shutdown or kill after timeout
-      tokio::select! {
-          _ = child.wait() => {},
-          _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
-              let _ = child.kill().await;
-          }
-      }
-    }
-    *self.initialized.write().await = false;
-    Ok(())
+  pub fn is_running(&self) -> bool {
+    self.child.is_some()
   }
 
-  pub async fn send_message(
-    &mut self,
-    method: &str,
-    params: Option<serde_json::Value>,
-  ) -> Result<serde_json::Value, String> {
-    if self.child.is_none() {
-      return Err("Shade process not started".to_string());
-    }
-
-    let mut request_id = self.request_id.lock().await;
-    *request_id += 1;
-    let id = *request_id;
-    drop(request_id);
-
-    let request = JsonRpcRequest {
-      jsonrpc: "2.0".to_string(),
-      id,
-      method: method.to_string(),
-      params,
-    };
-
-    let request_json = serde_json::to_string(&request)
-      .map_err(|e| format!("Failed to serialize request: {}", e))?;
-
-    let message = format!(
-      "Content-Length: {}\r\n\r\n{}",
-      request_json.len(),
-      request_json
-    );
-
-    // Send message
-    if let Some(child) = &mut self.child {
-      if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-          .write_all(message.as_bytes())
-          .await
-          .map_err(|e| format!("Failed to write to shade process: {}", e))?;
-        stdin
-          .flush()
-          .await
-          .map_err(|e| format!("Failed to flush stdin: {}", e))?;
-      } else {
-        return Err("No stdin available".to_string());
-      }
-
-      // Read response
-      if let Some(stdout) = child.stdout.as_mut() {
-        let mut reader = BufReader::new(stdout);
-
-        // Read Content-Length header
-        let mut header_line = String::new();
-        reader
-          .read_line(&mut header_line)
-          .await
-          .map_err(|e| format!("Failed to read header: {}", e))?;
-
-        if !header_line.starts_with("Content-Length:") {
-          println!("Invalid format: {}", header_line);
-          return Err("Invalid response format".to_string());
-        }
-
-        let content_length: usize = header_line
-          .trim()
-          .strip_prefix("Content-Length:")
-          .ok_or("Invalid Content-Length header")?
-          .trim()
-          .parse()
-          .map_err(|e| format!("Invalid content length: {}", e))?;
-
-        // Read empty line
-        let mut empty_line = String::new();
-        reader
-          .read_line(&mut empty_line)
-          .await
-          .map_err(|e| format!("Failed to read empty line: {}", e))?;
-
-        // Read JSON content
-        let mut buffer = vec![0u8; content_length];
-        tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buffer)
-          .await
-          .map_err(|e| format!("Failed to read response body: {}", e))?;
-
-        let response_json = String::from_utf8(buffer)
-          .map_err(|e| format!("Invalid UTF-8 in response: {}", e))?;
-
-        let response: JsonRpcResponse = serde_json::from_str(&response_json)
-          .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        if let Some(error) = response.error {
-          return Err(format!("Shade error: {}", error.message));
-        }
-
-        response
-          .result
-          .ok_or_else(|| "No result in response".to_string())
-      } else {
-        Err("No stdout available".to_string())
-      }
-    } else {
-      Err("No child process available".to_string())
-    }
-  }
-
-  pub async fn is_initialized(&self) -> bool {
-    *self.initialized.read().await
+  pub fn get_stdin(&self) -> Option<Arc<Mutex<tokio::process::ChildStdin>>> {
+    self.stdin.clone()
   }
 }
 
-// Tauri commands
-#[tauri::command]
-async fn start_shade_process(
-  state: State<'_, Arc<Mutex<ShadeProcess>>>,
-) -> Result<(), String> {
-  let mut process = state.lock().await;
-  process.stop().await;
-  process.start().await
+/// JSON-RPC 2.0 Message structure
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JsonRpcMessage {
+  pub jsonrpc: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub id: Option<u64>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub method: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub params: Option<serde_json::Value>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub result: Option<serde_json::Value>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub error: Option<JsonRpcError>,
+  #[serde(skip_serializing_if = "Vec::is_empty", default)]
+  pub binary_attachments: Vec<BinaryAttachment>,
 }
 
-#[tauri::command]
-async fn stop_shade_process(
-  state: State<'_, Arc<Mutex<ShadeProcess>>>,
-) -> Result<(), String> {
-  let mut process = state.lock().await;
-  process.stop().await
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JsonRpcError {
+  pub code: i32,
+  pub message: String,
+  pub data: Option<serde_json::Value>,
 }
 
-#[tauri::command]
-async fn initialize_shade(
-  state: State<'_, Arc<Mutex<ShadeProcess>>>,
-) -> Result<InitializeResult, String> {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BinaryAttachment {
+  pub id: String,
+  pub content_type: String,
+  pub size: usize,
+}
+
+/// Image processing request parameters
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProcessImageRequest {
+  pub image: ImageInput,
+  pub operations: Vec<OperationSpec>,
+  pub output_format: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ImageInput {
+  #[serde(rename = "file")]
+  File { path: String },
+  #[serde(rename = "base64")]
+  Base64 { data: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OperationSpec {
+  pub operation: String,
+  pub params: serde_json::Value,
+}
+
+/// Process image result
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProcessImageResult {
+  pub image_attachment_id: String,
+  pub width: u32,
+  pub height: u32,
+  pub format: String,
+}
+
+/// Initialize the shade process
+async fn start_shade_process(state: State<'_, Arc<Mutex<ShadeProcess>>>) -> Result<(), String> {
   let mut process = state.lock().await;
 
-  let client_info = serde_json::json!({
-      "client_info": {
-          "name": "shade-tauri-ui",
-          "version": "1.0.0"
-      }
+  if process.is_running() {
+    return Ok(());
+  }
+
+  // Start the shade process in socket mode
+  let mut child = Command::new("shade")
+    .arg("--socket")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true) // Automatically kill child when dropped
+    .spawn()
+    .map_err(|e| format!("Failed to start shade process: {}", e))?;
+
+  let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+  let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+
+  // Store the handles for communication
+  let stdin = Arc::new(Mutex::new(stdin));
+  let stdout = Arc::new(Mutex::new(BufReader::new(stdout)));
+
+  process.stdin = Some(stdin.clone());
+  process.child = Some(child);
+
+  // Initialize the shade server
+  send_initialize_request(stdin.clone()).await?;
+
+  drop(process); // Release the lock before spawning the reader task
+
+  // Spawn a task to handle incoming messages
+  let state_clone = state.inner().clone();
+  tokio::spawn(async move {
+    handle_incoming_messages(stdout, state_clone).await;
   });
 
-  let result = process
-    .send_message("initialize", Some(client_info))
-    .await?;
-  *process.initialized.write().await = true;
-
-  serde_json::from_value(result)
-    .map_err(|e| format!("Failed to parse initialize result: {}", e))
+  Ok(())
 }
 
-#[tauri::command]
-async fn process_image_base64(
-  state: State<'_, Arc<Mutex<ShadeProcess>>>,
-  image_data: String,
-  operations: Vec<ImageOperation>,
-  output_format: String,
-) -> Result<ProcessImageResult, String> {
-  let mut process = state.lock().await;
-
-  if !process.is_initialized().await {
-    return Err("Shade process not initialized".to_string());
-  }
-
-  let params = ProcessImageParams {
-    image: ImageInput {
-      input_type: "base64".to_string(),
-      path: None,
-      data: Some(image_data),
-    },
-    operations,
-    output_format,
+/// Send initialize request to shade server
+async fn send_initialize_request(
+  stdin: Arc<Mutex<tokio::process::ChildStdin>>,
+) -> Result<(), String> {
+  let message = JsonRpcMessage {
+    jsonrpc: "2.0".to_string(),
+    id: Some(1), // Use fixed ID for initialization
+    method: Some("initialize".to_string()),
+    params: Some(serde_json::json!({
+      "client_info": {
+        "name": "Tauri UI",
+        "version": "1.0.0"
+      }
+    })),
+    result: None,
+    error: None,
+    binary_attachments: Vec::new(),
   };
 
-  let params_value = serde_json::to_value(params)
-    .map_err(|e| format!("Failed to serialize params: {}", e))?;
+  let json = serde_json::to_string(&message)
+    .map_err(|e| format!("Failed to serialize message: {}", e))?;
 
-  let result = process
-    .send_message("process_image", Some(params_value))
-    .await?;
+  let mut stdin_lock = stdin.lock().await;
+  stdin_lock.write_all(json.as_bytes()).await
+    .map_err(|e| format!("Failed to write to stdin: {}", e))?;
+  stdin_lock.write_all(b"\n").await
+    .map_err(|e| format!("Failed to write newline: {}", e))?;
+  stdin_lock.flush().await
+    .map_err(|e| format!("Failed to flush stdin: {}", e))?;
 
-  serde_json::from_value(result)
-    .map_err(|e| format!("Failed to parse process result: {}", e))
+  Ok(())
 }
 
-#[tauri::command]
-async fn process_image_file(
-  state: State<'_, Arc<Mutex<ShadeProcess>>>,
-  file_path: String,
-  operations: Vec<ImageOperation>,
-  output_format: String,
-) -> Result<ProcessImageResult, String> {
-  let mut process = state.lock().await;
+/// Handle incoming messages from shade process
+async fn handle_incoming_messages(
+  stdout: Arc<Mutex<BufReader<tokio::process::ChildStdout>>>,
+  state: Arc<Mutex<ShadeProcess>>,
+) {
+  loop {
+    let mut line = String::new();
 
-  if !process.is_initialized().await {
-    return Err("Shade process not initialized".to_string());
+    let bytes_read = {
+      let mut stdout_lock = stdout.lock().await;
+      match stdout_lock.read_line(&mut line).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+          eprintln!("Failed to read from shade process: {}", e);
+          break;
+        }
+      }
+    };
+
+    if bytes_read == 0 {
+      eprintln!("Shade process stdout closed");
+      break;
+    }
+
+    let line = line.trim();
+    if line.is_empty() {
+      continue;
+    }
+
+    match serde_json::from_str::<JsonRpcMessage>(line) {
+      Ok(message) => {
+        if let Some(id) = message.id {
+          // This is a response to a request
+          let mut process = state.lock().await;
+          if let Some(sender) = process.pending_requests.remove(&id) {
+            let result = if let Some(error) = message.error {
+              serde_json::json!({ "error": error })
+            } else {
+              message.result.unwrap_or(serde_json::Value::Null)
+            };
+            let _ = sender.send(result);
+          } else {
+            println!("Received response for unknown request ID: {}", id);
+          }
+        } else if let Some(method) = &message.method {
+          // Handle notifications/events from server
+          println!("Received notification: {} - {:?}", method, message.params);
+        }
+      }
+      Err(e) => {
+        eprintln!("Failed to parse message from shade: {} - {}", e, line);
+      }
+    }
+  }
+}
+
+/// Send a JSON-RPC request to the shade process
+async fn send_request(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+  method: &str,
+  params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+  let (sender, receiver) = tokio::sync::oneshot::channel();
+  let message_id;
+
+  {
+    let mut process = state.lock().await;
+    if !process.is_running() {
+      return Err("Shade process is not running".to_string());
+    }
+
+    message_id = process.next_message_id();
+    process.pending_requests.insert(message_id, sender);
   }
 
-  let params = ProcessImageParams {
-    image: ImageInput {
-      input_type: "file".to_string(),
-      path: Some(file_path),
-      data: None,
-    },
-    operations,
-    output_format,
+  let message = JsonRpcMessage {
+    jsonrpc: "2.0".to_string(),
+    id: Some(message_id),
+    method: Some(method.to_string()),
+    params: Some(params),
+    result: None,
+    error: None,
+    binary_attachments: Vec::new(),
   };
 
-  let params_value = serde_json::to_value(params)
-    .map_err(|e| format!("Failed to serialize params: {}", e))?;
+  let json = serde_json::to_string(&message)
+    .map_err(|e| format!("Failed to serialize message: {}", e))?;
 
-  let result = process
-    .send_message("process_image", Some(params_value))
-    .await?;
+  // Get stdin handle from process
+  let stdin_handle = {
+    let process = state.lock().await;
+    process.get_stdin().ok_or("No stdin available".to_string())?
+  };
 
-  serde_json::from_value(result)
-    .map_err(|e| format!("Failed to parse process result: {}", e))
+  {
+    let mut stdin = stdin_handle.lock().await;
+    stdin.write_all(json.as_bytes()).await
+      .map_err(|e| format!("Failed to write to stdin: {}", e))?;
+    stdin.write_all(b"\n").await
+      .map_err(|e| format!("Failed to write newline: {}", e))?;
+    stdin.flush().await
+      .map_err(|e| format!("Failed to flush stdin: {}", e))?;
+  }
+
+  // Wait for response with timeout
+  match tokio::time::timeout(std::time::Duration::from_secs(30), receiver).await {
+    Ok(Ok(result)) => Ok(result),
+    Ok(Err(_)) => Err("Request was cancelled".to_string()),
+    Err(_) => Err("Request timed out".to_string()),
+  }
 }
 
+/// Tauri command to process an image
 #[tauri::command]
-async fn get_shade_status(
+async fn process_image(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+  request: ProcessImageRequest,
+) -> Result<ProcessImageResult, String> {
+  let params = serde_json::to_value(request)
+    .map_err(|e| format!("Failed to serialize request: {}", e))?;
+
+  let result = send_request(state, "process_image", params).await?;
+
+  serde_json::from_value(result)
+    .map_err(|e| format!("Failed to parse result: {}", e))
+}
+
+/// Tauri command to get server capabilities
+#[tauri::command]
+async fn get_capabilities(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+) -> Result<serde_json::Value, String> {
+  send_request(state, "capabilities", serde_json::Value::Null).await
+}
+
+/// Tauri command to check if shade process is running
+#[tauri::command]
+async fn is_shade_running(
   state: State<'_, Arc<Mutex<ShadeProcess>>>,
 ) -> Result<bool, String> {
   let process = state.lock().await;
-  Ok(process.is_initialized().await)
+  Ok(process.is_running())
 }
 
+/// Tauri command to restart shade process
 #[tauri::command]
-async fn read_image_file(file_path: String) -> Result<Vec<u8>, String> {
-  match std::fs::read(&file_path) {
-    Ok(data) => Ok(data),
-    Err(e) => Err(format!("Failed to read file {}: {}", file_path, e)),
+async fn restart_shade(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+) -> Result<(), String> {
+  // Stop current process
+  {
+    let mut process = state.lock().await;
+    if let Some(mut child) = process.child.take() {
+      let _ = child.kill().await;
+      let _ = child.wait().await;
+    }
+    process.stdin = None;
+    process.pending_requests.clear();
   }
+
+  // Start new process
+  start_shade_process(state).await
+}
+
+/// Tauri command to stop shade process
+#[tauri::command]
+async fn stop_shade(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+) -> Result<(), String> {
+  let mut process = state.lock().await;
+  if let Some(mut child) = process.child.take() {
+    // Send shutdown message first
+    if let Some(stdin_handle) = process.get_stdin() {
+      let message = JsonRpcMessage {
+        jsonrpc: "2.0".to_string(),
+        id: None, // Notification
+        method: Some("shutdown".to_string()),
+        params: None,
+        result: None,
+        error: None,
+        binary_attachments: Vec::new(),
+      };
+
+      if let Ok(json) = serde_json::to_string(&message) {
+        let mut stdin = stdin_handle.lock().await;
+        let _ = stdin.write_all(json.as_bytes()).await;
+        let _ = stdin.write_all(b"\n").await;
+        let _ = stdin.flush().await;
+      }
+    }
+
+    // Give it a moment to shutdown gracefully
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Force kill if still running
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+  }
+  process.stdin = None;
+  process.pending_requests.clear();
+  Ok(())
+}
+
+/// Tauri command to get process status and stats
+#[tauri::command]
+async fn get_shade_status(
+  state: State<'_, Arc<Mutex<ShadeProcess>>>,
+) -> Result<serde_json::Value, String> {
+  let process = state.lock().await;
+  Ok(serde_json::json!({
+    "running": process.is_running(),
+    "pending_requests": process.pending_requests.len(),
+    "message_counter": process.message_id_counter
+  }))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  let shade_process = Arc::new(Mutex::new(ShadeProcess::new()));
-
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_dialog::init())
-    .manage(shade_process)
+    .manage(Arc::new(Mutex::new(ShadeProcess::new())))
     .invoke_handler(tauri::generate_handler![
-      start_shade_process,
-      stop_shade_process,
-      initialize_shade,
-      process_image_base64,
-      process_image_file,
-      get_shade_status,
-      read_image_file
+      process_image,
+      get_capabilities,
+      is_shade_running,
+      restart_shade,
+      stop_shade,
+      get_shade_status
     ])
     .setup(|app| {
       // Start the shade process on app startup
@@ -401,6 +418,16 @@ pub fn run() {
         }
       });
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { .. } = event {
+        // Cleanup shade process on app close
+        let app_handle = window.app_handle();
+        let state: State<Arc<Mutex<ShadeProcess>>> = app_handle.state();
+        tauri::async_runtime::block_on(async move {
+          let _ = stop_shade(state).await;
+        });
+      }
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
