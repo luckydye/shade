@@ -134,6 +134,8 @@ impl ImageProcessingServer {
   ) -> (Message, HashMap<String, Vec<u8>>) {
     let id = message.id.unwrap_or(0);
 
+    log::error!("Handle initialize request");
+
     // Initialize the pipeline with GPU resources (moved device and queue so we need to recreate them)
     let instance = wgpu::Instance::default();
     let adapter = instance

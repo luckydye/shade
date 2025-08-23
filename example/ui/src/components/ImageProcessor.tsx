@@ -303,6 +303,9 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 				const binaryData = await ShadeAPI.getAttachment(
 					result.image_attachment_id,
 				);
+
+				console.log("Data", binaryData);
+
 				const blob = new Blob([binaryData], { type: `image/${result.format}` });
 				const blobUrl = URL.createObjectURL(blob);
 
@@ -623,19 +626,6 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 		}
 	}, [generateHistogram]);
 
-	/**
-	 * Apply sample operations for testing
-	 */
-	const applySampleOperations = useCallback(() => {
-		setAdjustments((prev) => ({
-			...prev,
-			brightness: 1.2,
-			contrast: 1.1,
-			saturation: 1.3,
-			hue: 15,
-		}));
-	}, []);
-
 	// Keyboard shortcuts
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -799,11 +789,19 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 			<div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
 				{/* Header */}
 				<div className="p-4 border-b border-gray-700">
-					<div className="flex items-center justify-between mb-4">
-						<h1 className="text-xl font-semibold">Shade</h1>
-						<div
-							className={`status-indicator ${shadeStatus?.running ? "online" : "offline"}`}
-						></div>
+					<div className="flex items-center space-x-4 mb-2">
+						<div className="flex items-center space-x-2">
+							<div
+								className={`status-indicator ${previewState.isProcessing ? "processing" : shadeStatus?.running ? "online" : "offline"}`}
+							></div>
+							<span className="text-sm text-gray-400">
+								{previewState.isProcessing
+									? "Processing..."
+									: shadeStatus?.running
+										? "Ready"
+										: "Disconnected"}
+							</span>
+						</div>
 					</div>
 
 					<button
@@ -950,24 +948,6 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					</div>
 
 					{/* Debug/Test Controls */}
-					<div className="pt-2 border-t border-gray-600">
-						<div className="text-xs text-gray-400 mb-2">Debug Tools</div>
-						<button
-							type="button"
-							onClick={loadTestImage}
-							className="w-full px-3 py-1 mb-1 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors"
-						>
-							🎨 Load Test Image (Binary)
-						</button>
-						<button
-							type="button"
-							onClick={applySampleOperations}
-							disabled={!previewState.original}
-							className="w-full px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs transition-colors"
-						>
-							⚡ Apply Sample Edits
-						</button>
-					</div>
 					{error && (
 						<div className="mt-2 p-2 bg-red-900/50 border border-red-700 rounded text-sm text-red-200">
 							{error}
@@ -978,183 +958,66 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 
 			{/* Center - Image Preview */}
 			<div className="flex-1 flex flex-col">
-				{/* Preview Header */}
-				<div className="p-4 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
-					<div className="flex items-center space-x-4">
-						<button
-							type="button"
-							onClick={() => setShowBeforeAfter(!showBeforeAfter)}
-							className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors tooltip ${
-								showBeforeAfter
-									? "bg-blue-600 text-white"
-									: "bg-gray-700 text-gray-300 hover:bg-gray-600"
-							}`}
-							disabled={!previewState.original}
-							data-tooltip="Press B"
-						>
-							📊 Before/After
-						</button>
-						<div className="flex items-center space-x-2">
-							<div
-								className={`status-indicator ${previewState.isProcessing ? "processing" : shadeStatus?.running ? "online" : "offline"}`}
-							></div>
-							<span className="text-sm text-gray-400">
-								{previewState.isProcessing
-									? "Processing..."
-									: shadeStatus?.running
-										? "Ready"
-										: "Disconnected"}
-							</span>
-						</div>
-					</div>
-
-					<div className="flex items-center space-x-2">
-						<button
-							type="button"
-							className="p-2 hover:bg-gray-700 rounded transition-colors"
-							disabled={!previewState.original}
-						>
-							🔍-
-						</button>
-						<span className="text-sm text-gray-400 min-w-12 text-center">
-							100%
-						</span>
-						<button
-							type="button"
-							className="p-2 hover:bg-gray-700 rounded transition-colors"
-							disabled={!previewState.original}
-						>
-							🔍+
-						</button>
-						<div className="w-px h-6 bg-gray-600 mx-2"></div>
-						<button
-							type="button"
-							className="p-2 hover:bg-gray-700 rounded transition-colors text-sm"
-							disabled={!previewState.original}
-						>
-							⤢ Fit
-						</button>
-					</div>
-				</div>
-
 				{/* Preview Area */}
-				<div className="flex-1 flex items-center justify-center bg-gray-900 p-8">
+				<div className="flex-1 flex items-center justify-center bg-gray-900 p-4">
 					{selectedFile && previewState.original ? (
 						<div className="relative max-w-full max-h-full">
-							{showBeforeAfter ? (
-								<div className="flex space-x-8">
-									<div className="text-center">
-										<div className="text-sm text-gray-400 mb-3">Before</div>
-										<div className="relative image-preview">
-											<img
-												src={previewState.original.src}
-												alt="Original"
-												className="w-80 h-60 object-contain bg-gray-700 rounded-lg"
-												onError={(e) => {
-													console.error(
-														"Image display error for:",
-														previewState.original.src,
-													);
-													const target = e.target as HTMLImageElement;
-													target.style.display = "none";
-													target.nextElementSibling?.classList.remove("hidden");
-												}}
-											/>
-											<div className="hidden w-80 h-60 bg-gray-700 rounded-lg flex items-center justify-center">
-												<span className="text-gray-500">
-													Failed to load image
-												</span>
+							<div className="text-center">
+								<div className="relative mb-4">
+									{previewState.isProcessing && (
+										<div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
+											<div className="flex items-center space-x-2 text-blue-400">
+												<div className="loading-spinner"></div>
+												<span>Processing...</span>
 											</div>
 										</div>
-									</div>
-									<div className="text-center">
-										<div className="text-sm text-gray-400 mb-3">After</div>
-										<div className="rounded-lg flex items-center justify-center">
-											{previewState.isProcessing ? (
-												<div className="flex items-center space-x-2 text-blue-400">
-													<div className="loading-spinner"></div>
-													<span>Processing...</span>
-												</div>
-											) : previewState.processed ? (
-												<img
-													src={previewState.processed.src}
-													alt="Processed"
-													className="w-full h-full object-contain"
-												/>
-											) : (
-												<div className="text-center text-gray-500">
-													<div className="text-4xl mb-2">⚡</div>
-													<div>Live Preview</div>
-													<div className="text-xs text-gray-600 mt-1">
-														Adjust settings to see changes
-													</div>
-												</div>
-											)}
-										</div>
-									</div>
-								</div>
-							) : (
-								<div className="text-center">
-									<div className="relative mb-4">
-										{previewState.isProcessing && (
-											<div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
-												<div className="flex items-center space-x-2 text-blue-400">
-													<div className="loading-spinner"></div>
-													<span>Processing...</span>
-												</div>
-											</div>
-										)}
-										{previewState.processed?.src ||
-										previewState.original.src ? (
-											<img
-												src={
+									)}
+									{previewState.processed?.src || previewState.original.src ? (
+										<img
+											src={
+												previewState.processed?.src || previewState.original.src
+											}
+											alt="Preview"
+											className="max-w-full max-h-96 object-contain"
+											style={{ maxHeight: "calc(100vh - 300px)" }}
+											onError={(e) => {
+												console.error(
+													"Preview image error for:",
 													previewState.processed?.src ||
-													previewState.original.src
-												}
-												alt="Preview"
-												className="max-w-full max-h-96 object-contain"
-												style={{ maxHeight: "calc(100vh - 300px)" }}
-												onError={(e) => {
-													console.error(
-														"Preview image error for:",
-														previewState.processed?.src ||
-															previewState.original.src,
-													);
-													const target = e.target as HTMLImageElement;
-													target.style.display = "none";
-													target.nextElementSibling?.classList.remove("hidden");
-												}}
-											/>
-										) : (
-											<div className="max-w-full flex items-center justify-center">
-												<div className="text-center text-gray-500">
-													<div className="text-6xl mb-4">⚠️</div>
-													<div className="text-lg mb-2">
-														Unable to Load Image
-													</div>
-													<div className="text-sm text-gray-400 max-w-md">
-														The selected image could not be loaded. This might
-														be due to:
-													</div>
-													<div className="text-xs text-gray-400 mt-2 space-y-1">
-														<div>• File permissions restrictions</div>
-														<div>• Unsupported image format</div>
-														<div>• File path contains special characters</div>
-														<div>• File has been moved or deleted</div>
-													</div>
-													<div className="text-xs text-blue-400 mt-3">
-														Check browser console for detailed error info
-													</div>
+														previewState.original.src,
+												);
+												const target = e.target as HTMLImageElement;
+												target.style.display = "none";
+												target.nextElementSibling?.classList.remove("hidden");
+											}}
+										/>
+									) : (
+										<div className="max-w-full flex items-center justify-center">
+											<div className="text-center text-gray-500">
+												<div className="text-6xl mb-4">⚠️</div>
+												<div className="text-lg mb-2">Unable to Load Image</div>
+												<div className="text-sm text-gray-400 max-w-md">
+													The selected image could not be loaded. This might be
+													due to:
+												</div>
+												<div className="text-xs text-gray-400 mt-2 space-y-1">
+													<div>• File permissions restrictions</div>
+													<div>• Unsupported image format</div>
+													<div>• File path contains special characters</div>
+													<div>• File has been moved or deleted</div>
+												</div>
+												<div className="text-xs text-blue-400 mt-3">
+													Check browser console for detailed error info
 												</div>
 											</div>
-										)}
-										<div className="hidden text-center py-20 text-gray-500">
-											<div className="text-4xl mb-2">❌</div>
-											<div>Failed to load image</div>
 										</div>
+									)}
+									<div className="hidden text-center py-20 text-gray-500">
+										<div className="text-4xl mb-2">❌</div>
+										<div>Failed to load image</div>
 									</div>
 								</div>
-							)}
+							</div>
 						</div>
 					) : (
 						<div className="text-center text-gray-500">
