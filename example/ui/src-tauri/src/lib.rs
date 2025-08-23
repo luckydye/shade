@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
+use log;
 use tokio::sync::Mutex;
 
 /// Shade process manager
@@ -192,14 +193,14 @@ async fn handle_incoming_messages(
       match stdout_lock.read_line(&mut line).await {
         Ok(bytes) => bytes,
         Err(e) => {
-          eprintln!("Failed to read from shade process: {}", e);
+          log::error!("Failed to read from shade process: {}", e);
           break;
         }
       }
     };
 
     if bytes_read == 0 {
-      eprintln!("Shade process stdout closed");
+      log::error!("Shade process stdout closed");
       break;
     }
 
@@ -210,6 +211,8 @@ async fn handle_incoming_messages(
 
     match serde_json::from_str::<JsonRpcMessage>(line) {
       Ok(message) => {
+        log::error!("{:?}", message);
+
         if let Some(id) = message.id {
           // This is a response to a request
           let mut process = state.lock().await;
@@ -221,15 +224,15 @@ async fn handle_incoming_messages(
             };
             let _ = sender.send(result);
           } else {
-            println!("Received response for unknown request ID: {}", id);
+            log::info!("Received response for unknown request ID: {}", id);
           }
         } else if let Some(method) = &message.method {
           // Handle notifications/events from server
-          println!("Received notification: {} - {:?}", method, message.params);
+          log::info!("Received notification: {} - {:?}", method, message.params);
         }
       }
       Err(e) => {
-        eprintln!("Failed to parse message from shade: {} - {}", e, line);
+        log::error!("Failed to parse message from shade: {} - {}", e, line);
       }
     }
   }
@@ -263,6 +266,8 @@ async fn send_request(
     error: None,
     binary_attachments: Vec::new(),
   };
+
+  log::info!("{:?}", message);
 
   let json = serde_json::to_string(&message)
     .map_err(|e| format!("Failed to serialize message: {}", e))?;
@@ -301,6 +306,8 @@ async fn process_image(
     .map_err(|e| format!("Failed to serialize request: {}", e))?;
 
   let result = send_request(state, "process_image", params).await?;
+
+  log::info!("Process image result{:?}", result);
 
   serde_json::from_value(result)
     .map_err(|e| format!("Failed to parse result: {}", e))
@@ -463,6 +470,8 @@ async fn get_shade_status(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  env_logger::builder().format_timestamp_millis().init();
+
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_dialog::init())
@@ -483,7 +492,7 @@ pub fn run() {
       tauri::async_runtime::spawn(async move {
         let state: State<Arc<Mutex<ShadeProcess>>> = app_handle.state();
         if let Err(e) = start_shade_process(state).await {
-          eprintln!("Failed to start shade process: {}", e);
+          log::info!("Failed to start shade process: {}", e);
         }
       });
       Ok(())

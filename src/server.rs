@@ -5,9 +5,9 @@ use std::io::{stdin, stdout};
 use crate::Performance;
 use crate::cli::{PipelineConfig, PipelineOperation, ProcessingConfig};
 use crate::protocol::{
-  BinaryAttachment, ImageInput, InitializeParams,
-  InitializeResult, Message, MessageTransport, ProcessImageParams,
-  ProcessImageResult, ResponseError, ServerCapabilities, ServerInfo,
+  BinaryAttachment, GetAttachmentParams, GetAttachmentResult, ImageInput, InitializeParams, InitializeResult, Message,
+  MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
+  ServerCapabilities, ServerInfo,
 };
 use anyhow::Result;
 use anyhow::anyhow;
@@ -32,6 +32,8 @@ pub struct ImageProcessingServer {
   cached_image: Option<CachedImage>,
   queue: Option<Queue>,
   device: Option<Device>,
+  /// Storage for binary attachments that can be retrieved later
+  attachments: HashMap<String, (Vec<u8>, String)>, // attachment_id -> (data, content_type)
 }
 
 impl ImageProcessingServer {
@@ -41,6 +43,7 @@ impl ImageProcessingServer {
       cached_image: None,
       queue: None,
       device: None,
+      attachments: HashMap::new(),
     }
   }
 
@@ -50,7 +53,7 @@ impl ImageProcessingServer {
     let stdout = stdout();
     let mut transport = MessageTransport::new(stdin, stdout);
 
-    log::info!("Image processing server started in socket mode");
+    log::error!("Image processing server started in socket mode");
 
     loop {
       match transport.read_message() {
@@ -68,7 +71,7 @@ impl ImageProcessingServer {
           }
 
           if should_shutdown {
-            log::info!("Shutting down gracefully");
+            log::error!("Shutting down gracefully");
             break;
           }
         }
@@ -87,6 +90,8 @@ impl ImageProcessingServer {
     &mut self,
     message: Message,
   ) -> Option<(Message, HashMap<String, Vec<u8>>)> {
+    log::error!("Handle message {:?}", message);
+
     match message.method.as_deref() {
       // Just sends capabilities to client
       Some("initialize") => {
@@ -98,9 +103,14 @@ impl ImageProcessingServer {
         let (response, binary_data) = self.handle_process_image(message).await;
         Some((response, binary_data))
       }
+      // retrieves a stored attachment as blob
+      Some("get_attachment") => {
+        let (response, binary_data) = self.handle_get_attachment(message).await;
+        Some((response, binary_data))
+      }
       // shotdown the process
       Some("shutdown") => {
-        log::info!("Shutdown requested");
+        log::error!("Shutdown requested");
         Some((
           Message::new_response(message.id.unwrap_or(0), serde_json::Value::Null),
           HashMap::new(),
@@ -180,6 +190,12 @@ impl ImageProcessingServer {
               "bmp".to_string(),
               "tiff".to_string(),
             ],
+            supported_methods: vec![
+              "initialize".to_string(),
+              "process_image".to_string(),
+              "get_attachment".to_string(),
+              "shutdown".to_string(),
+            ],
           };
 
           let result = InitializeResult {
@@ -230,7 +246,7 @@ impl ImageProcessingServer {
       );
     }
 
-    log::info!("{:?}", message.params);
+    log::error!("{:?}", message.params);
 
     match message.params {
       Some(params) => match serde_json::from_value::<ProcessImageParams>(params) {
@@ -242,6 +258,9 @@ impl ImageProcessingServer {
               content_type: "image/png".to_string(),
               size: binary_data.len(),
             };
+
+            // Store the attachment for later retrieval
+            self.attachments.insert(attachment_id.clone(), (binary_data.clone(), "image/png".to_string()));
 
             let mut binary_map = HashMap::new();
             binary_map.insert(attachment_id, binary_data);
@@ -316,7 +335,7 @@ impl ImageProcessingServer {
     };
 
     // load image
-    log::info!("Loading image: {:?}", config.input_path);
+    log::error!("Loading image: {:?}", config.input_path);
 
     let image_file = self
       .load_image_from_input(params.image)
@@ -358,7 +377,7 @@ impl ImageProcessingServer {
       .map_err(|e: String| anyhow!("Operation {}", e))?;
 
     actual_dims = (final_dimensions.0 as usize, final_dimensions.1 as usize);
-    log::info!(
+    log::error!(
       "Image processed through pipeline with final dimensions: {}x{}",
       actual_dims.0,
       actual_dims.1
@@ -416,7 +435,7 @@ impl ImageProcessingServer {
 
     let (image_data, (width, height)) = load_image(&image_file, None)?;
 
-    log::info!("Successfully loaded image: {}x{}", width, height);
+    log::error!("Successfully loaded image: {}x{}", width, height);
 
     Ok(CachedImage {
       dimensions: (width, height),
@@ -442,13 +461,13 @@ impl ImageProcessingServer {
     if let Some(cached_image) = self.cached_image.clone()
       && image_hash == cached_image.hash
     {
-      log::info!("Using cached loaded image");
+      log::error!("Using cached loaded image");
       return Ok(cached_image);
     }
 
     let (image_data, (width, height)) = load_image(&image_file, None)?;
 
-    log::info!("Successfully loaded image: {}x{}", width, height);
+    log::error!("Successfully loaded image: {}x{}", width, height);
 
     let loaded_image = CachedImage {
       dimensions: (width, height),
@@ -459,7 +478,7 @@ impl ImageProcessingServer {
     // Cache the loaded image
     self.cached_image = Some(loaded_image.clone());
 
-    log::info!("Image cached for future requests");
+    log::error!("Image cached for future requests");
 
     Ok(loaded_image)
   }
@@ -493,6 +512,96 @@ impl ImageProcessingServer {
     rgba_buffer.write_to(&mut cursor, image_format)?;
 
     Ok(cursor.into_inner())
+  }
+
+  /// Handle get_attachment request
+  ///
+  /// This method allows clients to retrieve previously processed images as binary blobs.
+  /// The typical workflow is:
+  /// 1. Client calls process_image which returns a ProcessImageResult with image_attachment_id
+  /// 2. Client can then call get_attachment with that attachment_id to retrieve the actual image data
+  /// 3. The server returns the binary image data along with metadata (content_type, size)
+  ///
+  /// Parameters:
+  /// - attachment_id: String identifier returned from process_image
+  ///
+  /// Returns:
+  /// - GetAttachmentResult with attachment metadata
+  /// - Binary data containing the actual image bytes
+  ///
+  /// Error cases:
+  /// - Server not initialized (-32002)
+  /// - Attachment not found (-32001)
+  /// - Invalid parameters (-32602)
+  async fn handle_get_attachment(
+    &mut self,
+    message: Message,
+  ) -> (Message, HashMap<String, Vec<u8>>) {
+    let id = message.id.unwrap_or(0);
+
+    if !self.initialized {
+      return (
+        Message::new_error_response(
+          Some(id),
+          ResponseError::new(-32002, "Server not initialized".to_string()),
+        ),
+        HashMap::new(),
+      );
+    }
+
+    match message.params {
+      Some(params) => match serde_json::from_value::<GetAttachmentParams>(params) {
+        Ok(get_params) => {
+          if let Some((binary_data, content_type)) = self.attachments.get(&get_params.attachment_id) {
+            let result = GetAttachmentResult {
+              attachment_id: get_params.attachment_id.clone(),
+              content_type: content_type.clone(),
+              size: binary_data.len(),
+            };
+
+            let attachment = BinaryAttachment {
+              id: get_params.attachment_id.clone(),
+              content_type: content_type.clone(),
+              size: binary_data.len(),
+            };
+
+            let mut binary_map = HashMap::new();
+            binary_map.insert(get_params.attachment_id, binary_data.clone());
+
+            (
+              Message::new_response_with_binary(
+                id,
+                serde_json::to_value(result).unwrap(),
+                vec![attachment],
+              ),
+              binary_map,
+            )
+          } else {
+            (
+              Message::new_error_response(
+                Some(id),
+                ResponseError::new(-32001, format!("Attachment not found: {}", get_params.attachment_id)),
+              ),
+              HashMap::new(),
+            )
+          }
+        }
+        Err(e) => (
+          Message::new_error_response(
+            Some(id),
+            ResponseError::invalid_params(format!("Invalid get_attachment params: {}", e)),
+          ),
+          HashMap::new(),
+        ),
+      },
+      None => (
+        Message::new_error_response(
+          Some(id),
+          ResponseError::invalid_params("Missing get_attachment parameters".to_string()),
+        ),
+        HashMap::new(),
+      ),
+    }
   }
 }
 

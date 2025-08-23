@@ -182,11 +182,12 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 	useEffect(() => {
 		const newOperations: OperationSpec[] = [];
 
-		// Basic adjustments - map to available operations
-		if (adjustments.brightness !== 1.0) {
-			newOperations.push(
-				ShadeAPI.operations.brightness(adjustments.brightness),
-			);
+		// Supported operations - map to available Shade operations
+		// Combine exposure and brightness into a single brightness operation
+		const combinedBrightness =
+			(1.0 + adjustments.exposure) * adjustments.brightness;
+		if (combinedBrightness !== 1.0) {
+			newOperations.push(ShadeAPI.operations.brightness(combinedBrightness));
 		}
 		if (adjustments.contrast !== 1.0) {
 			newOperations.push(ShadeAPI.operations.contrast(adjustments.contrast));
@@ -220,6 +221,34 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 			newOperations.push(ShadeAPI.operations.noise(adjustments.noise));
 		}
 
+		// Log unsupported adjustments for debugging
+		const unsupportedAdjustments = [];
+		if (adjustments.highlights !== 0.0)
+			unsupportedAdjustments.push("highlights");
+		if (adjustments.shadows !== 0.0) unsupportedAdjustments.push("shadows");
+		if (adjustments.whites !== 0.0) unsupportedAdjustments.push("whites");
+		if (adjustments.blacks !== 0.0) unsupportedAdjustments.push("blacks");
+		if (adjustments.vibrance !== 0.0) unsupportedAdjustments.push("vibrance");
+		if (adjustments.clarity !== 0.0) unsupportedAdjustments.push("clarity");
+		if (adjustments.dehaze !== 0.0) unsupportedAdjustments.push("dehaze");
+
+		if (unsupportedAdjustments.length > 0) {
+			console.warn(
+				"Unsupported adjustments ignored:",
+				unsupportedAdjustments.join(", "),
+			);
+		}
+
+		// Debug logging for operations
+		if (newOperations.length > 0) {
+			console.log(
+				"Operations created:",
+				newOperations.map(
+					(op) => `${op.operation}: ${JSON.stringify(op.params)}`,
+				),
+			);
+		}
+
 		setOperations(newOperations);
 	}, [adjustments]);
 
@@ -250,6 +279,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 		}
 
 		previewTimeoutRef.current = setTimeout(async () => {
+			console.log("Starting image processing with operations:", operations);
 			setPreviewState((prev) => ({ ...prev, isProcessing: true }));
 
 			try {
@@ -257,6 +287,10 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					selectedFile,
 					operations,
 					"png",
+				);
+				console.log(
+					"Image processing completed, attachment ID:",
+					result.image_attachment_id,
 				);
 
 				/**
@@ -289,6 +323,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 				// Generate real histogram from processed image pixels
 				generateHistogram(blobUrl).then(setHistogram);
 			} catch (err) {
+				console.error("Preview processing failed:", err);
 				setError(`Preview failed: ${err}`);
 				setPreviewState((prev) => ({ ...prev, isProcessing: false }));
 			}
@@ -858,6 +893,24 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 									<span className="text-white">
 										{shadeStatus.pending_requests}
 									</span>
+								</div>
+							)}
+
+							{operations.length > 0 && (
+								<div className="pt-1 border-t border-gray-700 mt-1">
+									<div className="text-xs text-gray-400 mb-1">
+										Current Operations
+									</div>
+									{operations.map((op, index) => (
+										<div key={index} className="text-xs text-gray-300">
+											{index + 1}. {op.operation}
+											{typeof op.params === "number"
+												? ` (${op.params.toFixed(2)})`
+												: op.params && typeof op.params === "object"
+													? ` (${JSON.stringify(op.params).substring(0, 20)}...)`
+													: ""}
+										</div>
+									))}
 								</div>
 							)}
 							<div className="flex justify-between">

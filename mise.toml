@@ -1,5 +1,5 @@
 [env]
-RUST_LOG="INFO,shade=DEBUG"
+RUST_LOG="INFO"
 
 [tools]
 bun = "1.2.19"

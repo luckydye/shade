@@ -7,6 +7,37 @@ use tokio::io::{
 
 use crate::cli::OperationType;
 
+/// # Usage Example: Process Image and Retrieve as Blob
+///
+/// This example shows the typical workflow for processing an image and then
+/// retrieving the processed result as a binary blob:
+///
+/// ```rust,no_run
+/// use serde_json::json;
+/// use shade::protocol::{Message, ProcessImageParams, ImageInput, OperationSpec, GetAttachmentParams};
+///
+/// // 1. First, process an image
+/// let process_request = Message::new_request(1, "process_image".to_string(), json!({
+///     "image": {"File": {"path": "input.jpg"}},
+///     "operations": [
+///         {"operation": "brightness", "params": 1.2},
+///         {"operation": "contrast", "params": 1.1}
+///     ],
+///     "output_format": "png"
+/// }));
+///
+/// // The server responds with ProcessImageResult containing image_attachment_id
+/// // Response: {"result": {"image_attachment_id": "processed_image", "width": 1920, "height": 1080, "format": "png"}}
+///
+/// // 2. Then, retrieve the processed image as a blob
+/// let get_attachment_request = Message::new_request(2, "get_attachment".to_string(), json!({
+///     "attachment_id": "processed_image"
+/// }));
+///
+/// // The server responds with the binary data and metadata
+/// // Response includes both JSON result and binary attachment
+/// ```
+
 /// Message ID for request/response correlation
 pub type MessageId = u64;
 
@@ -103,6 +134,7 @@ pub struct ServerCapabilities {
   pub supported_operations: Vec<String>,
   pub supported_input_formats: Vec<String>,
   pub supported_output_formats: Vec<String>,
+  pub supported_methods: Vec<String>,
 }
 
 /// Initialize request parameters
@@ -130,6 +162,31 @@ pub struct InitializeResult {
 pub struct ServerInfo {
   pub name: String,
   pub version: Option<String>,
+}
+
+/// Get attachment request parameters
+///
+/// Used to request a previously stored binary attachment (typically a processed image)
+/// by its attachment ID. The attachment ID is usually obtained from a previous
+/// process_image response.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetAttachmentParams {
+  /// The unique identifier for the attachment to retrieve
+  pub attachment_id: String,
+}
+
+/// Get attachment response result
+///
+/// Contains metadata about the retrieved attachment. The actual binary data
+/// is sent separately as a binary attachment in the message.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetAttachmentResult {
+  /// The attachment identifier that was requested
+  pub attachment_id: String,
+  /// MIME type of the attachment (e.g., "image/png", "image/jpeg")
+  pub content_type: String,
+  /// Size of the attachment in bytes
+  pub size: usize,
 }
 
 impl Message {
@@ -600,5 +657,47 @@ mod tests {
     // - Each message is a single line of JSON
     // - Binary attachments still follow after the JSON line
     // - Easy to debug and implement in any language
+  }
+
+  #[test]
+  fn test_get_attachment_params_serialization() {
+    let params = GetAttachmentParams {
+      attachment_id: "processed_image_123".to_string(),
+    };
+
+    let serialized = serde_json::to_value(params).unwrap();
+    let expected = serde_json::json!({
+      "attachment_id": "processed_image_123"
+    });
+
+    assert_eq!(serialized, expected);
+
+    // Test deserialization
+    let deserialized: GetAttachmentParams = serde_json::from_value(expected).unwrap();
+    assert_eq!(deserialized.attachment_id, "processed_image_123");
+  }
+
+  #[test]
+  fn test_get_attachment_result_serialization() {
+    let result = GetAttachmentResult {
+      attachment_id: "processed_image_123".to_string(),
+      content_type: "image/png".to_string(),
+      size: 1024,
+    };
+
+    let serialized = serde_json::to_value(result).unwrap();
+    let expected = serde_json::json!({
+      "attachment_id": "processed_image_123",
+      "content_type": "image/png",
+      "size": 1024
+    });
+
+    assert_eq!(serialized, expected);
+
+    // Test deserialization
+    let deserialized: GetAttachmentResult = serde_json::from_value(expected).unwrap();
+    assert_eq!(deserialized.attachment_id, "processed_image_123");
+    assert_eq!(deserialized.content_type, "image/png");
+    assert_eq!(deserialized.size, 1024);
   }
 }

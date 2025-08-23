@@ -183,22 +183,6 @@ export const ShadeAPI = {
 	},
 
 	/**
-	 * Convenience method to process an image from base64 data
-	 */
-	async processImageBase64(
-		base64Data: string,
-		operations: OperationSpec[],
-		outputFormat: string = "png",
-	): Promise<ProcessImageResult> {
-		const request: ProcessImageRequest = {
-			image: { type: "base64", data: base64Data },
-			operations,
-			output_format: outputFormat,
-		};
-		return ShadeAPI.processImage(request);
-	},
-
-	/**
 	 * Helper to create common operations
 	 */
 	operations: {

@@ -47,11 +47,12 @@ impl Performance {
 }
 
 pub fn main() -> Result<()> {
+  env_logger::builder().format_timestamp_millis().init();
+
   let run_start = std::time::Instant::now();
 
   #[cfg(not(target_arch = "wasm32"))]
   {
-    env_logger::builder().format_timestamp_millis().init();
 
     // Check if we should run in socket mode
     let args: Vec<String> = std::env::args().collect();
