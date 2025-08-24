@@ -1,4 +1,3 @@
-use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -9,6 +8,7 @@ use tokio::process::{Child, Command};
 use log;
 use tokio::sync::Mutex;
 use tokio::io::AsyncReadExt;
+use tauri::ipc::Response;
 
 /// JSON-RPC 2.0 Message structure
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,7 +91,7 @@ pub struct ShadeProcess {
   child: Option<Child>,
   stdin: Option<Arc<Mutex<tokio::process::ChildStdin>>>,
   message_id_counter: u64,
-  pending_requests: HashMap<u64, tokio::sync::oneshot::Sender<JsonRpcMessage>>,
+  pending_requests: HashMap<u64, tokio::sync::oneshot::Sender<Vec<u8>>>,
 }
 
 impl ShadeProcess {
@@ -268,7 +268,13 @@ async fn handle_incoming_messages(
        if let Some(error) = message.error {
         log::error!("Found error in message {:?}", error);
       } else {
-        let _ = sender.send(message);
+        // TODO: send response in bytes, dont serialize big images
+
+        let first_attachment = message.binary_attachments.get_mut(0);
+
+        if first_attachment.is_some() {
+          let _ = sender.send(first_attachment.unwrap().data.clone().unwrap());
+        }
       }
     } else {
       log::error!("Received response for unknown request ID");
@@ -283,7 +289,7 @@ async fn shade(
   method: &str,
   state: State<'_, Arc<Mutex<ShadeProcess>>>,
   request: serde_json::Value,
-) -> Result<JsonRpcMessage, String> {
+) -> Result<Response, String> {
   let params = serde_json::to_value(request)
     .map_err(|e| format!("Failed to serialize request: {}", e))?;
 
@@ -340,9 +346,9 @@ async fn shade(
     Err(_) => Err("Request timed out".to_string()),
   }?;
 
-  log::info!("SHADE RPC RESPONSE {:?}", result.id);
+  log::info!("SHADE RPC RESPONSE");
 
-  Ok(result)
+  Ok(tauri::ipc::Response::new(result))
 }
 
 

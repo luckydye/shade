@@ -415,6 +415,9 @@ impl ImageLoader for StandardLoader {
         FileLoaderError::DecodeError(format!("Image decode error: {}", e))
       })?;
 
+      // TODO: load full res images
+      let img = img.resize(2560, 2560, image::imageops::FilterType::CatmullRom);
+
       let rgba_img = img.to_rgba8();
       let (width, height) = rgba_img.dimensions();
       let data = rgba_img.into_raw();

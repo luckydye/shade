@@ -5,7 +5,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ShadeStatus, OperationSpec } from "../lib/shade-api";
 import { ShadeAPI } from "../lib/shade-api";
 
-function debounce<T>(callback: (arg: T) => void, ms = 24) {
+function debounce<T>(callback: (arg: T) => void, ms = 80) {
 	let timeout: ReturnType<typeof setTimeout> | null = null;
 
 	return (arg: T) => {
@@ -250,7 +250,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					 * 3. Create object URL for display in img elements
 					 * 4. Store URL for cleanup later
 					 */
-					const binaryData = new Uint8Array(result.binary_attachments[0].data);
+					const binaryData = new Uint8Array(result);
 
 					const blob = new Blob([binaryData]);
 					const blobUrl = URL.createObjectURL(blob);
