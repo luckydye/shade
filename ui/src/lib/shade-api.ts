@@ -19,10 +19,12 @@ export interface ProcessImageRequest {
 }
 
 export interface ProcessImageResult {
-	image_attachment_id: string;
-	width: number;
-	height: number;
-	format: string;
+	binary_attachments: {
+		id: string;
+		content_type: string;
+		size: number;
+		data: number[];
+	}[];
 }
 
 export interface ShadeStatus {

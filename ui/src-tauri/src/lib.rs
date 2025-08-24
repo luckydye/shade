@@ -340,7 +340,7 @@ async fn shade(
     Err(_) => Err("Request timed out".to_string()),
   }?;
 
-  log::info!("SHADE RPC RESPONSE {:?}", result);
+  log::info!("SHADE RPC RESPONSE {:?}", result.id);
 
   Ok(result)
 }

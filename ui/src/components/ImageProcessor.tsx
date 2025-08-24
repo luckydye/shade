@@ -297,13 +297,9 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 				 * 3. Create object URL for display in img elements
 				 * 4. Store URL for cleanup later
 				 */
-				const binaryData = await ShadeAPI.getAttachment(
-					result.image_attachment_id,
-				);
+				const binaryData = new Uint8Array(result.binary_attachments[0].data);
 
-				console.log("Data", binaryData);
-
-				const blob = new Blob([binaryData], { type: `image/${result.format}` });
+				const blob = new Blob([binaryData]);
 				const blobUrl = URL.createObjectURL(blob);
 
 				setPreviewState((prev) => ({
@@ -312,8 +308,8 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 						? {
 								...prev.original,
 								src: blobUrl,
-								width: result.width,
-								height: result.height,
+								// width: result.width,
+								// height: result.height,
 								name: `processed_${prev.original.name}`,
 							}
 						: null,
