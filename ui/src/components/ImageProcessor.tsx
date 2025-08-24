@@ -5,17 +5,20 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ShadeStatus, OperationSpec } from "../lib/shade-api";
 import { ShadeAPI } from "../lib/shade-api";
 
-function debounce<T>(callback: (arg: T) => void, ms = 80) {
-	let timeout: ReturnType<typeof setTimeout>;
+function debounce<T>(callback: (arg: T) => void, ms = 24) {
+	let timeout: ReturnType<typeof setTimeout> | null = null;
 
 	return (arg: T) => {
 		return new Promise<void>((resolve) => {
 			if (!timeout) {
+				console.log("without delay");
 				resolve(callback(arg));
+			} else {
+				clearTimeout(timeout);
 			}
 
-			clearTimeout(timeout);
 			timeout = setTimeout(() => {
+				timeout = null;
 				resolve(callback(arg));
 			}, ms);
 		});
@@ -216,16 +219,6 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 			console.warn(
 				"Unsupported adjustments ignored:",
 				unsupportedAdjustments.join(", "),
-			);
-		}
-
-		// Debug logging for operations
-		if (newOperations.length > 0) {
-			console.log(
-				"Operations created:",
-				newOperations.map(
-					(op) => `${op.operation}: ${JSON.stringify(op.params)}`,
-				),
 			);
 		}
 
@@ -583,13 +576,6 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 						<div className="relative max-w-full max-h-full">
 							<div className="text-center">
 								<div className="relative mb-4">
-									{previewState.isProcessing && (
-										<div className="absolute inset-0 bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
-											<div className="flex items-center space-x-2 text-black">
-												<span>Processing...</span>
-											</div>
-										</div>
-									)}
 									{previewState.processed?.src || previewState.original.src ? (
 										<img
 											src={
