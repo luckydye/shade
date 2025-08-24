@@ -300,6 +300,9 @@ impl ImageLoader for RawLoader {
       FileLoaderError::DecodeError("Failed to convert to dynamic image".to_string())
     })?;
 
+    // TODO: load full res images
+    let img = img.resize(2560, 2560, image::imageops::FilterType::CatmullRom);
+
     // Apply orientation correction
     let corrected_img = apply_orientation(img, orientation);
 
