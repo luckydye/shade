@@ -288,10 +288,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					operations,
 					"png",
 				);
-				console.log(
-					"Image processing completed, attachment ID:",
-					result.image_attachment_id,
-				);
+				console.log("Image processing completed, attachment ID:", result);
 
 				/**
 				 * Binary Attachment Processing:
@@ -965,9 +962,8 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 							<div className="text-center">
 								<div className="relative mb-4">
 									{previewState.isProcessing && (
-										<div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
-											<div className="flex items-center space-x-2 text-blue-400">
-												<div className="loading-spinner"></div>
+										<div className="absolute inset-0 bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
+											<div className="flex items-center space-x-2 text-black">
 												<span>Processing...</span>
 											</div>
 										</div>

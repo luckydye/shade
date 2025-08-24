@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use wgpu::hal::Attachment;
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use tokio::io::{
@@ -464,18 +465,22 @@ impl<R: Read, W: Write> MessageTransport<R, W> {
     self.writer.write_all(&json_len_bytes.to_le_bytes())?;
 
     // Write the JSON payload
-    writeln!(self.writer, "{}", json)?;
+    self.writer.write_all(json.as_bytes())?;
+
+    let attachment_count = message.binary_attachments.len();
+    self.writer.write_all(&(attachment_count as u64).to_le_bytes())?;
 
     // Write binary attachments if any
-    // for attachment in &message.binary_attachments {
-    //   if let Some(data) = binary_data.get(&attachment.id) {
-    //     // Write the size of the attachment as a u64 in little-endian format
-    //     let size_bytes = attachment.size.to_le_bytes();
-    //     self.writer.write_all(&size_bytes)?;
-    //     // Write the actual binary data
-    //     self.writer.write_all(data)?;
-    //   }
-    // }
+    for attachment in &message.binary_attachments {
+      if let Some(data) = binary_data.get(&attachment.id) {
+        log::info!("WRITING ATTACHMENT {:?} of length {:?}", attachment.id, attachment.size);
+
+        // Write the size of the attachment as a u64 in little-endian format
+        self.writer.write_all(&(attachment.size as u64).to_le_bytes())?;
+        // Write the actual binary data
+        self.writer.write_all(data)?;
+      }
+    }
 
     self.writer.flush()?;
     Ok(())
