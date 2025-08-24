@@ -13,6 +13,7 @@ function debounce<T>(callback: (arg: T) => void, ms = 24) {
 			if (!timeout) {
 				console.log("without delay");
 				resolve(callback(arg));
+				return;
 			} else {
 				clearTimeout(timeout);
 			}
@@ -660,27 +661,23 @@ const ImageProcessor: React.FC<ImageProcessorProps> = () => {
 					>
 						📁 Import Image
 					</button>
-				</div>
 
-				{/* Image Info */}
-				{previewState.original && (
-					<div className="p-4 border-b border-gray-700">
-						<h3 className="font-medium mb-2">Image Info</h3>
-						<div className="space-y-1 text-sm text-gray-400">
+					{/* Image Info */}
+					{previewState.original && (
+						<div className="space-y-1 text-sm text-gray-400 mt-4">
 							<div>Name: {previewState.original.name}</div>
 							<div>
 								Size: {previewState.original.width} ×{" "}
 								{previewState.original.height}
 							</div>
-							<div>Operations: {operations.length}</div>
 							<div>
 								Format:{" "}
 								{previewState.original.name.split(".").pop()?.toUpperCase() ||
 									"Unknown"}
 							</div>
 						</div>
-					</div>
-				)}
+					)}
+				</div>
 
 				{/* Panel Navigation */}
 				<div className="p-4 border-b border-gray-700">

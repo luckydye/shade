@@ -386,12 +386,12 @@ impl ImageProcessingServer {
       actual_dims.1
     );
 
+    timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
+    let time = std::time::Instant::now();
+
     // Convert processed data to output format
     let output_format = params.output_format.unwrap_or_else(|| "png".to_string());
     let binary_data = self.convert_to_binary(&processed_data, final_dimensions)?;
-
-    timing.processing_ms = time.elapsed().as_secs_f64() * 1000.0;
-    timing.print_all();
 
     let result = ProcessImageResult {
       image_attachment_id: "processed_image".to_string(),
@@ -399,6 +399,9 @@ impl ImageProcessingServer {
       height: actual_dims.1 as u32,
       format: output_format,
     };
+
+    timing.output_ms = time.elapsed().as_secs_f64() * 1000.0;
+    timing.print_all();
 
     Ok((result, binary_data))
   }
