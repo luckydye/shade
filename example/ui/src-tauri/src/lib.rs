@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use log;
 use tokio::sync::Mutex;
+use tokio::io::AsyncReadExt;
 
 /// Shade process manager
 pub struct ShadeProcess {
@@ -119,7 +120,6 @@ async fn start_shade_process(state: State<'_, Arc<Mutex<ShadeProcess>>>) -> Resu
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::inherit())
-    .kill_on_drop(true) // Automatically kill child when dropped
     .spawn()
     .map_err(|e| format!("Failed to start shade process: {}", e))?;
 
@@ -133,12 +133,11 @@ async fn start_shade_process(state: State<'_, Arc<Mutex<ShadeProcess>>>) -> Resu
   process.stdin = Some(stdin.clone());
   process.child = Some(child);
 
-  drop(process); // Release the lock before spawning the reader task
-
   // Spawn a task to handle incoming messages
   let state_clone = state.inner().clone();
   tokio::spawn(async move {
     handle_incoming_messages(stdout, state_clone).await;
+    log::error!("MESSAGE READING ERROR; killed");
   });
 
   Ok(())
@@ -149,58 +148,165 @@ async fn handle_incoming_messages(
   stdout: Arc<Mutex<BufReader<tokio::process::ChildStdout>>>,
   state: Arc<Mutex<ShadeProcess>>,
 ) {
+  let mut buffer: Vec<u8> = Vec::new();
+  let mut handshake_buf = [0u8; 3]; // For "SHD"
+  let mut len_buf = [0u8; 8]; // For u64 length
+
   loop {
-    let mut line = String::new();
+    // Lock the stdout reader for the duration of reading a full message
+    let mut stdout_reader = stdout.lock().await;
 
-    let bytes_read = {
-      let mut stdout_lock = stdout.lock().await;
-      match stdout_lock.read_line(&mut line).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-          log::error!("Failed to read from shade process: {}", e);
-          break;
-        }
-      }
-    };
+    log::info!("TRY READING MESSAGE");
 
-    if bytes_read == 0 {
-      log::error!("Shade process stdout closed");
-      break;
-    }
-
-    let line = line.trim();
-    if line.is_empty() {
+    // 1. Read the "SHADE" prefix
+    if let Err(e) = stdout_reader.read_exact(&mut handshake_buf).await {
+      log::error!("Failed to read handshake prefix from shade process: {}", e);
       continue;
     }
 
-    log::error!("Response Message {:?}", line);
+    log::info!("READING MESSAGE {:?}", handshake_buf);
 
-    match serde_json::from_str::<JsonRpcMessage>(line) {
-      Ok(message) => {
-        log::error!("{:?}", message);
-
-        if let Some(id) = message.id {
-          // This is a response to a request
-          let mut process = state.lock().await;
-          if let Some(sender) = process.pending_requests.remove(&id) {
-            let result = if let Some(error) = message.error {
-              serde_json::json!({ "error": error })
-            } else {
-              message.result.unwrap_or(serde_json::Value::Null)
-            };
-            let _ = sender.send(result);
-          } else {
-            log::info!("Received response for unknown request ID: {}", id);
-          }
-        } else if let Some(method) = &message.method {
-          // Handle notifications/events from server
-          log::info!("Received notification: {} - {:?}", method, message.params);
-        }
-      }
-      Err(e) => {
-        log::error!("Failed to parse message from shade: {} - {}", e, line);
-      }
+    if &handshake_buf != b"SHD" {
+      log::error!("Invalid handshake prefix received from shade process");
+      continue;
     }
+
+    log::info!("READING VALID MESSAGE");
+
+    // Read just the JSON length first
+    if let Err(e) = stdout_reader.read_exact(&mut len_buf).await {
+      log::error!("Failed to read JSON length from shade process: {}", e);
+      continue;
+    }
+    let json_len = u64::from_le_bytes(len_buf);
+
+    log::info!("MESSAGE JSON LEN {}", json_len);
+
+    // // Read the JSON section
+    buffer.resize(json_len as usize, 0);
+
+    if let Err(e) = stdout_reader.read_exact(&mut buffer).await {
+      log::error!("Failed to read JSON section from shade process: {}", e);
+      continue;
+    }
+
+    log::info!("JSON BUF {:?}", buffer);
+
+    let json_str = match String::from_utf8(buffer.clone()) {
+      Ok(s) => s,
+      Err(e) => {
+        log::error!("Failed to decode UTF-8 from shade process JSON: {}", e);
+        continue;
+      }
+    };
+
+    log::info!("JSON STR {:?}", json_str);
+
+    // log::error!("HANDLE INCOMING MSG");
+
+    // // Lock the stdout reader for the duration of reading a full message
+    // let mut stdout_reader = stdout.lock().await;
+
+
+    // // 2. Read the length of the JSON section
+    // if let Err(e) = stdout_reader.read_exact(&mut len_buf).await {
+    //   log::error!("Failed to read JSON length from shade process: {}", e);
+    //   break;
+    // }
+    // let json_len = u64::from_le_bytes(len_buf);
+    // log::error!("JSON LEN {}", json_len);
+
+    // // 3. Read the JSON section
+    // buffer.resize(json_len as usize, 0);
+    // if let Err(e) = stdout_reader.read_exact(&mut buffer).await {
+    //   log::error!("Failed to read JSON section from shade process: {}", e);
+    //   break;
+    // }
+
+    // let json_str = match String::from_utf8(buffer.clone()) {
+    //   Ok(s) => s,
+    //   Err(e) => {
+    //     log::error!("Failed to decode UTF-8 from shade process JSON: {}", e);
+    //     continue;
+    //   }
+    // };
+
+    // // 4. Read attachments
+    // let mut attachments = Vec::new();
+    // loop {
+    //   // Try to read attachment length
+    //   let mut attachment_len_buf = [0u8; 8];
+    //   match stdout_reader.read_exact(&mut attachment_len_buf).await {
+    //     Ok(len) => {
+    //       let attachment_len = u64::from_le_bytes(attachment_len_buf);
+
+    //       if attachment_len == 0 {
+    //         break; // End of attachments
+    //       }
+
+    //       let mut attachment_data = vec![0u8; attachment_len as usize];
+    //       if let Err(e) = stdout_reader.read_exact(&mut attachment_data).await {
+    //         log::error!("Failed to read attachment data from shade process: {}", e);
+    //         break;
+    //       }
+    //       log::info!("Received attachment of size: {}", attachment_len);
+    //       attachments.push(attachment_data);
+    //     }
+    //     Err(e) => {
+    //       if e.kind() == std::io::ErrorKind::UnexpectedEof {
+    //         break; // No more attachments
+    //       }
+    //       log::error!("Failed to read attachment length from shade process: {}", e);
+    //       break;
+    //     }
+    //   }
+    // }
+
+    // // Clear buffer for next message
+    // buffer.clear();
+
+    // match serde_json::from_str::<JsonRpcMessage>(&json_str) {
+    //   Ok(mut message) => {
+    //     // Associate attachments with message if they match
+    //     if !attachments.is_empty() && !message.binary_attachments.is_empty() && attachments.len() == message.binary_attachments.len() {
+    //       for (i, attachment_info) in message.binary_attachments.iter_mut().enumerate() {
+    //         log::info!("Mapping attachment '{}' to received data.", attachment_info.id);
+    //         // In a real scenario, you'd likely store this attachment data somewhere accessible,
+    //         // perhaps in a separate structure keyed by attachment_info.id.
+    //         // For this example, we'll just log that it's mapped.
+    //       }
+    //     } else if !attachments.is_empty() && message.binary_attachments.is_empty() {
+    //       log::warn!("Received binary data but no corresponding binary_attachments in JSON.");
+    //     } else if attachments.len() != message.binary_attachments.len() {
+    //       log::warn!("Mismatch between number of attachments received ({}) and expected ({}) in JSON.", attachments.len(), message.binary_attachments.len());
+    //     }
+
+
+    //     if let Some(id) = message.id {
+    //       // This is a response to a request
+    //       let mut process = state.lock().await;
+    //       if let Some(sender) = process.pending_requests.remove(&id) {
+    //         let result = if let Some(error) = message.error {
+    //           // Wrap error in a JSON object for consistency
+    //           serde_json::json!({ "error": error })
+    //         } else {
+    //           // Use result if available, otherwise null
+    //           message.result.unwrap_or(serde_json::Value::Null)
+    //         };
+    //         // Attempt to send the result, ignore if the receiver is dropped
+    //         let _ = sender.send(result);
+    //       } else {
+    //         log::info!("Received response for unknown request ID: {}", id);
+    //       }
+    //     } else if let Some(method) = &message.method {
+    //       // Handle notifications/events from server
+    //       log::info!("Received notification: {} - {:?}", method, message.params);
+    //     }
+    //   }
+    //   Err(e) => {
+    //     log::error!("Failed to parse message from shade: {} - {}", e, json_str);
+    //   }
+    // }
   }
 }
 
@@ -213,7 +319,7 @@ async fn shade(
   let params = serde_json::to_value(request)
     .map_err(|e| format!("Failed to serialize request: {}", e))?;
 
-  log::info!("Shade request {} {:?}", method, params);
+  log::info!("RPC Shade Request {} {:?}", method, params);
 
   let (sender, receiver) = tokio::sync::oneshot::channel();
   let message_id;
@@ -260,7 +366,7 @@ async fn shade(
   }
 
   // Wait for response with timeout
-  let result = match tokio::time::timeout(std::time::Duration::from_secs(30), receiver).await {
+  let result = match tokio::time::timeout(std::time::Duration::from_secs(3000), receiver).await {
     Ok(Ok(result)) => Ok(result),
     Ok(Err(_)) => Err("Request was cancelled".to_string()),
     Err(_) => Err("Request timed out".to_string()),
@@ -321,9 +427,6 @@ async fn stop_shade(
         let _ = stdin.flush().await;
       }
     }
-
-    // Give it a moment to shutdown gracefully
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // Force kill if still running
     let _ = child.kill().await;

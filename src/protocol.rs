@@ -448,98 +448,36 @@ impl<R: Read, W: Write> MessageTransport<R, W> {
     message: &Message,
     binary_data: &HashMap<String, Vec<u8>>,
   ) -> io::Result<()> {
+    log::info!("RESPONSE {:?}", message);
+
     let json = serde_json::to_string(message)
       .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
+    // Write a magic byte sequence to identify the start of a message
+    self.writer.write_all(b"SHD")?;
+
+    // Write the length of the JSON payload as a u64 in little-endian format
+    let json_len_bytes = json.len() as u64;
+
+    log::info!("WRITE REPSONSE; JSON LEN: {}", json_len_bytes);
+
+    self.writer.write_all(&json_len_bytes.to_le_bytes())?;
+
+    // Write the JSON payload
     writeln!(self.writer, "{}", json)?;
 
-    // Write binary attachments
-    for attachment in &message.binary_attachments {
-      if let Some(data) = binary_data.get(&attachment.id) {
-        self.writer.write_all(data)?;
-      }
-    }
+    // Write binary attachments if any
+    // for attachment in &message.binary_attachments {
+    //   if let Some(data) = binary_data.get(&attachment.id) {
+    //     // Write the size of the attachment as a u64 in little-endian format
+    //     let size_bytes = attachment.size.to_le_bytes();
+    //     self.writer.write_all(&size_bytes)?;
+    //     // Write the actual binary data
+    //     self.writer.write_all(data)?;
+    //   }
+    // }
 
     self.writer.flush()?;
-    Ok(())
-  }
-}
-
-/// Async message transport layer for reading/writing line-delimited JSON messages
-pub struct AsyncMessageTransport<R, W> {
-  reader: TokioBufReader<R>,
-  writer: W,
-}
-
-impl<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin> AsyncMessageTransport<R, W> {
-  pub fn new(reader: R, writer: W) -> Self {
-    Self {
-      reader: TokioBufReader::new(reader),
-      writer,
-    }
-  }
-
-  /// Read a message from the input stream asynchronously
-  pub async fn read_message(&mut self) -> io::Result<MessageWithBinary> {
-    let mut line = String::new();
-    let bytes_read = self.reader.read_line(&mut line).await?;
-
-    if bytes_read == 0 {
-      return Err(io::Error::new(
-        io::ErrorKind::UnexpectedEof,
-        "Unexpected EOF while reading message",
-      ));
-    }
-
-    let line = line.trim();
-    if line.is_empty() {
-      return Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "Empty message line",
-      ));
-    }
-
-    let message: Message = serde_json::from_str(line).map_err(|e| {
-      io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("Failed to parse JSON: {}", e),
-      )
-    })?;
-
-    // Read binary attachments if any
-    let mut binary_data = HashMap::new();
-    for attachment in &message.binary_attachments {
-      let mut buffer = vec![0; attachment.size];
-      self.reader.read_exact(&mut buffer).await?;
-      binary_data.insert(attachment.id.clone(), buffer);
-    }
-
-    Ok(MessageWithBinary {
-      message,
-      binary_data,
-    })
-  }
-
-  /// Write a message with binary data to the output stream asynchronously
-  pub async fn write_message(
-    &mut self,
-    message: &Message,
-    binary_data: &HashMap<String, Vec<u8>>,
-  ) -> io::Result<()> {
-    let json = serde_json::to_string(message)
-      .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    self.writer.write_all(json.as_bytes()).await?;
-    self.writer.write_all(b"\n").await?;
-
-    // Write binary attachments
-    for attachment in &message.binary_attachments {
-      if let Some(data) = binary_data.get(&attachment.id) {
-        self.writer.write_all(data).await?;
-      }
-    }
-
-    self.writer.flush().await?;
     Ok(())
   }
 }

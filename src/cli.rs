@@ -477,19 +477,19 @@ impl ProcessingConfig {
 
   /// Print pipeline information
   pub fn print_pipeline_info(&self) {
-    println!("Image Processing Pipeline Configuration:");
+    eprintln!("Image Processing Pipeline Configuration:");
     if let Some(input) = &self.input_path {
-      println!("Input:  {}", input.display());
+      eprintln!("Input:  {}", input.display());
     }
     if let Some(output) = &self.output_path {
-      println!("Output: {}", output.display());
+      eprintln!("Output: {}", output.display());
     }
-    println!();
+    eprintln!();
 
     if self.pipeline_config.operations.is_empty() {
-      println!("No operations specified - image will be passed through unchanged.");
+      eprintln!("No operations specified - image will be passed through unchanged.");
     } else {
-      println!("Operations to apply (in command-line order):");
+      eprintln!("Operations to apply (in command-line order):");
       for (i, operation) in self.pipeline_config.operations.iter().enumerate() {
         let description = match &operation.op_type {
           OperationType::Brightness(value) => format!("Brightness: {:.2}", value),
@@ -524,10 +524,10 @@ impl ProcessingConfig {
             (None, None) => "Resize: no change".to_string(),
           },
         };
-        println!("  {}. {}", i + 1, description);
+        eprintln!("  {}. {}", i + 1, description);
       }
     }
-    println!();
+    eprintln!();
   }
 }
 
@@ -731,66 +731,66 @@ fn build_cli() -> Command {
 pub fn print_supported_formats() {
   use crate::file_loaders::get_supported_extensions;
 
-  println!("Supported Image Formats:");
-  println!("========================");
+  eprintln!("Supported Image Formats:");
+  eprintln!("========================");
 
   let formats = get_supported_extensions();
   for (loader_name, extensions) in formats {
-    println!("{}: {}", loader_name, extensions.join(", "));
+    eprintln!("{}: {}", loader_name, extensions.join(", "));
   }
 
-  println!("\nNotes:");
-  println!("- OpenEXR files support HDR/wide color gamut processing");
-  println!("- Camera raw files are processed with automatic development");
-  println!("- Standard formats are converted to 32-bit float for processing");
+  eprintln!("\nNotes:");
+  eprintln!("- OpenEXR files support HDR/wide color gamut processing");
+  eprintln!("- Camera raw files are processed with automatic development");
+  eprintln!("- Standard formats are converted to 32-bit float for processing");
 }
 
 pub fn print_examples() {
-  println!("Usage Examples:");
-  println!();
-  println!("Using configuration files:");
-  println!("  shade --config my_settings.ini");
-  println!("  shade --config /path/to/custom.ini");
-  println!("  shade  # Uses default params.ini if present");
-  println!();
-  println!("Basic color grading:");
-  println!("  shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1");
-  println!();
-  println!("Enhance photo saturation and add sharpening:");
-  println!("  shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8");
-  println!();
-  println!("Apply blur effect:");
-  println!("  shade -i image.jpg -o blurred.jpg --blur 2.5");
-  println!();
-  println!("White balance correction:");
-  println!("  shade -i portrait.jpg -o corrected.jpg --auto-white-balance");
-  println!();
-  println!("Manual white balance adjustment:");
-  println!("  shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1");
-  println!();
-  println!("Complex processing chain:");
-  println!("  shade -i original.png -o processed.png \\");
-  println!("        --brightness 0.1 --contrast 1.2 --saturation 1.1 \\");
-  println!("        --gamma 0.9 --sharpen 0.5");
-  println!();
-  println!("Resize operations:");
-  println!(
+  eprintln!("Usage Examples:");
+  eprintln!();
+  eprintln!("Using configuration files:");
+  eprintln!("  shade --config my_settings.ini");
+  eprintln!("  shade --config /path/to/custom.ini");
+  eprintln!("  shade  # Uses default params.ini if present");
+  eprintln!();
+  eprintln!("Basic color grading:");
+  eprintln!("  shade -i input.jpg -o output.jpg --brightness 0.2 --contrast 1.1");
+  eprintln!();
+  eprintln!("Enhance photo saturation and add sharpening:");
+  eprintln!("  shade -i photo.png -o enhanced.png --saturation 1.3 --sharpen 0.8");
+  eprintln!();
+  eprintln!("Apply blur effect:");
+  eprintln!("  shade -i image.jpg -o blurred.jpg --blur 2.5");
+  eprintln!();
+  eprintln!("White balance correction:");
+  eprintln!("  shade -i portrait.jpg -o corrected.jpg --auto-white-balance");
+  eprintln!();
+  eprintln!("Manual white balance adjustment:");
+  eprintln!("  shade -i sunset.jpg -o warmer.jpg --wb-temperature 0.3 --wb-tint -0.1");
+  eprintln!();
+  eprintln!("Complex processing chain:");
+  eprintln!("  shade -i original.png -o processed.png \\");
+  eprintln!("        --brightness 0.1 --contrast 1.2 --saturation 1.1 \\");
+  eprintln!("        --gamma 0.9 --sharpen 0.5");
+  eprintln!();
+  eprintln!("Resize operations:");
+  eprintln!(
     "  shade -i large.jpg -o small.jpg --resize-width 800  # Maintain aspect ratio"
   );
-  println!(
+  eprintln!(
     "  shade -i photo.png -o thumbnail.png --resize-width 300 --resize-height 200"
   );
-  println!(
+  eprintln!(
     "  shade -i input.jpg -o output.jpg --resize-height 1080  # HD height, auto width"
   );
-  println!();
-  println!("OpenEXR HDR processing:");
-  println!("  shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files");
-  println!("  shade -i hdr.exr -o display.png --gamma 2.2");
-  println!();
-  println!("High quality processing:");
-  println!("  shade -i input.jpg -o output.png  # Automatic format detection");
-  println!();
+  eprintln!();
+  eprintln!("OpenEXR HDR processing:");
+  eprintln!("  shade -i input.exr -o output.exr --brightness 0.5  # Process HDR files");
+  eprintln!("  shade -i hdr.exr -o display.png --gamma 2.2");
+  eprintln!();
+  eprintln!("High quality processing:");
+  eprintln!("  shade -i input.jpg -o output.png  # Automatic format detection");
+  eprintln!();
 }
 
 /// Validate CLI configuration

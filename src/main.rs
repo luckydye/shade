@@ -37,23 +37,22 @@ struct Performance {
 
 impl Performance {
   fn print_all(&self) {
-    log::debug!("[Perf] image_load_ms: {:.2}", self.image_load_ms);
-    log::debug!("[Perf] image_decode_ms: {:.2}", self.image_decode_ms);
-    log::debug!("[Perf] gpu_setup_ms: {:.2}", self.gpu_setup_ms);
-    log::debug!("[Perf] processing_ms: {:.2}", self.processing_ms);
-    log::debug!("[Perf] output_ms: {:.2}", self.output_ms);
-    log::debug!("[Perf] total_ms: {:.2}", self.total_ms);
+    log::info!("[Perf] image_load_ms: {:.2}", self.image_load_ms);
+    log::info!("[Perf] image_decode_ms: {:.2}", self.image_decode_ms);
+    log::info!("[Perf] gpu_setup_ms: {:.2}", self.gpu_setup_ms);
+    log::info!("[Perf] processing_ms: {:.2}", self.processing_ms);
+    log::info!("[Perf] output_ms: {:.2}", self.output_ms);
+    log::info!("[Perf] total_ms: {:.2}", self.total_ms);
   }
 }
 
 pub fn main() -> Result<()> {
-  env_logger::builder().format_timestamp_millis().init();
+  env_logger::builder().format_timestamp_millis().format_source_path(true).init();
 
   let run_start = std::time::Instant::now();
 
   #[cfg(not(target_arch = "wasm32"))]
   {
-
     // Check if we should run in socket mode
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "--socket" {
@@ -103,7 +102,7 @@ pub fn main() -> Result<()> {
           if final_config.clear_cache {
             match cache.clear_cache() {
               Ok(()) => {
-                println!("Cache cleared successfully");
+                eprintln!("Cache cleared successfully");
               }
               Err(e) => {
                 eprintln!("Failed to clear cache: {}", e);
@@ -121,9 +120,9 @@ pub fn main() -> Result<()> {
                   .parent()
                   .map(|p| p.to_path_buf())
                   .unwrap_or_else(|| std::path::PathBuf::from(""));
-                println!("Cache location: {}", cache_dir.display());
-                println!("Cache size: {:.2} MB ({} bytes)", size_mb, size);
-                println!("Cache dir: {:?}", cache.cache_dir);
+                eprintln!("Cache location: {}", cache_dir.display());
+                eprintln!("Cache size: {:.2} MB ({} bytes)", size_mb, size);
+                eprintln!("Cache dir: {:?}", cache.cache_dir);
               }
               Err(e) => {
                 eprintln!("Failed to get cache info: {}", e);

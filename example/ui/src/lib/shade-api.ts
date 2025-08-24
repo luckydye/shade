@@ -71,7 +71,7 @@ export const ShadeAPI = {
 		return invoke("shade", {
 			method: "get_attachment",
 			request: {
-				image_attachment_id: attachment_id,
+				attachment_id: attachment_id,
 			},
 		});
 	},

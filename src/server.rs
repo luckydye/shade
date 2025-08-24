@@ -5,9 +5,9 @@ use std::io::{stdin, stdout};
 use crate::Performance;
 use crate::cli::{PipelineConfig, PipelineOperation, ProcessingConfig};
 use crate::protocol::{
-  BinaryAttachment, GetAttachmentParams, GetAttachmentResult, ImageInput, InitializeParams, InitializeResult, Message,
-  MessageTransport, ProcessImageParams, ProcessImageResult, ResponseError,
-  ServerCapabilities, ServerInfo,
+  BinaryAttachment, GetAttachmentParams, GetAttachmentResult, ImageInput,
+  InitializeParams, InitializeResult, Message, MessageTransport, ProcessImageParams,
+  ProcessImageResult, ResponseError, ServerCapabilities, ServerInfo,
 };
 use anyhow::Result;
 use anyhow::anyhow;
@@ -90,7 +90,7 @@ impl ImageProcessingServer {
     &mut self,
     message: Message,
   ) -> Option<(Message, HashMap<String, Vec<u8>>)> {
-    log::error!("Handle message {:?}", message);
+    log::error!("REQUEST {:?}", message);
 
     match message.method.as_deref() {
       // Just sends capabilities to client
@@ -248,8 +248,6 @@ impl ImageProcessingServer {
       );
     }
 
-    log::error!("{:?}", message.params);
-
     match message.params {
       Some(params) => match serde_json::from_value::<ProcessImageParams>(params) {
         Ok(process_params) => match self.process_image_internal(process_params).await {
@@ -262,7 +260,10 @@ impl ImageProcessingServer {
             };
 
             // Store the attachment for later retrieval
-            self.attachments.insert(attachment_id.clone(), (binary_data.clone(), "image/png".to_string()));
+            self.attachments.insert(
+              attachment_id.clone(),
+              (binary_data.clone(), "image/png".to_string()),
+            );
 
             let mut binary_map = HashMap::new();
             binary_map.insert(attachment_id, binary_data);
@@ -554,7 +555,9 @@ impl ImageProcessingServer {
     match message.params {
       Some(params) => match serde_json::from_value::<GetAttachmentParams>(params) {
         Ok(get_params) => {
-          if let Some((binary_data, content_type)) = self.attachments.get(&get_params.attachment_id) {
+          if let Some((binary_data, content_type)) =
+            self.attachments.get(&get_params.attachment_id)
+          {
             let result = GetAttachmentResult {
               attachment_id: get_params.attachment_id.clone(),
               content_type: content_type.clone(),
@@ -582,7 +585,10 @@ impl ImageProcessingServer {
             (
               Message::new_error_response(
                 Some(id),
-                ResponseError::new(-32001, format!("Attachment not found: {}", get_params.attachment_id)),
+                ResponseError::new(
+                  -32001,
+                  format!("Attachment not found: {}", get_params.attachment_id),
+                ),
               ),
               HashMap::new(),
             )
@@ -591,7 +597,10 @@ impl ImageProcessingServer {
         Err(e) => (
           Message::new_error_response(
             Some(id),
-            ResponseError::invalid_params(format!("Invalid get_attachment params: {}", e)),
+            ResponseError::invalid_params(format!(
+              "Invalid get_attachment params: {}",
+              e
+            )),
           ),
           HashMap::new(),
         ),
