@@ -2,7 +2,7 @@ use wgpu::*;
 use crate::context::GpuContext;
 use shade_core::{ColorSpace, ColorMatrix3x3};
 
-const SHADER: &str = include_str!("../../../shaders/color_transform.wgsl");
+const SHADER: &str = include_str!("../../shaders/color_transform.wgsl");
 
 /// GPU parameters matching the WGSL ColorTransformParams struct.
 #[repr(C)]

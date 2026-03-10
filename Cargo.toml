@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/shade-core", "crates/shade-gpu", "crates/shade-io", "crates/shade-cli", "crates/shade-tauri", "crates/shade-wasm"]
+members = ["shade-core", "shade-gpu", "shade-io", "shade-cli", "shade-tauri", "shade-wasm"]
 resolver = "2"
 
 [workspace.dependencies]

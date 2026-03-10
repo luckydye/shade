@@ -2,8 +2,8 @@
 # Requires: wasm-pack (https://rustwasm.github.io/wasm-pack/installer/)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-wasm-pack build crates/shade-wasm \
+wasm-pack build shade-wasm \
   --target web \
-  --out-dir ../../ui/wasm \
+  --out-dir ../ui/wasm \
   --dev
 echo "WASM dev build complete → ui/wasm/"

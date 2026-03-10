@@ -4,7 +4,7 @@ use wgpu::*;
 use crate::context::GpuContext;
 use shade_core::{ToneParams, ColorParams};
 
-const SHADER: &str = include_str!("../../../shaders/basic_adjust.wgsl");
+const SHADER: &str = include_str!("../../shaders/basic_adjust.wgsl");
 
 /// GPU-side representation of ToneParams — must be Pod + have repr(C).
 /// ToneParams is 5×f32 = 20 bytes; pad to 32 bytes (next multiple of 16).

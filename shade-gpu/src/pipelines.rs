@@ -11,11 +11,11 @@ use wgpu::{
 
 use crate::GpuContext;
 
-const CURVES_WGSL: &str = include_str!("../../../shaders/curves.wgsl");
-const COLOR_WGSL: &str = include_str!("../../../shaders/color.wgsl");
-const VIGNETTE_WGSL: &str = include_str!("../../../shaders/vignette.wgsl");
-const SHARPEN_WGSL: &str = include_str!("../../../shaders/sharpen.wgsl");
-const GRAIN_WGSL: &str = include_str!("../../../shaders/grain.wgsl");
+const CURVES_WGSL: &str = include_str!("../../shaders/curves.wgsl");
+const COLOR_WGSL: &str = include_str!("../../shaders/color.wgsl");
+const VIGNETTE_WGSL: &str = include_str!("../../shaders/vignette.wgsl");
+const SHARPEN_WGSL: &str = include_str!("../../shaders/sharpen.wgsl");
+const GRAIN_WGSL: &str = include_str!("../../shaders/grain.wgsl");
 
 // ─── Uniform structs ──────────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@ use wgpu::{
 
 use crate::GpuContext;
 
-const COMPOSITE_WGSL: &str = include_str!("../../../shaders/composite.wgsl");
+const COMPOSITE_WGSL: &str = include_str!("../../shaders/composite.wgsl");
 
 /// GPU uniform matching the WGSL `CompositeParams` struct (16 bytes).
 #[repr(C)]
@@ -324,7 +324,7 @@ pub fn upload_mask_texture(
 
 // ─── BrushStampPipeline ───────────────────────────────────────────────────────
 
-const BRUSH_STAMP_WGSL: &str = include_str!("../../../shaders/brush_stamp.wgsl");
+const BRUSH_STAMP_WGSL: &str = include_str!("../../shaders/brush_stamp.wgsl");
 
 /// GPU uniform matching the WGSL `BrushParams` struct (32 bytes).
 #[repr(C)]
