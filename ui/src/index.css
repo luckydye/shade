@@ -1,6 +1,10 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-panel: #1e1e1e;
+  --color-toolbar: #2d2d2d;
+  --color-accent: #3b82f6;
+}
 
 body {
   @apply bg-panel text-gray-200 overflow-hidden;
