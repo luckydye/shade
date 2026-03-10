@@ -1,9 +1,9 @@
 // This worker loads the Shade WASM module and processes commands
 // from the main thread. The OffscreenCanvas is transferred here.
+// The WASM module is built separately via `scripts/build-wasm.sh` (wasm-pack).
 
-import type * as ShadeWasm from "../../wasm/shade_wasm";
-
-let wasm: typeof ShadeWasm | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let wasm: any = null;
 
 // Message protocol:
 // { type: "init" } → { type: "ready" }
@@ -17,9 +17,10 @@ self.onmessage = async (e: MessageEvent) => {
   switch (msg.type) {
     case "init": {
       try {
-        // Dynamic import of the WASM module
-        wasm = await import("../../wasm/shade_wasm.js");
-        await (wasm as any).default?.();  // call init if present
+        // Dynamic import of the WASM module (built via scripts/build-wasm.sh).
+        // @vite-ignore suppresses Vite's static resolution — the file is generated at build time.
+        wasm = await import(/* @vite-ignore */ "../../wasm/shade_wasm.js");
+        await wasm.default?.();
         self.postMessage({ type: "ready" });
       } catch (err) {
         self.postMessage({ type: "error", message: String(err) });
