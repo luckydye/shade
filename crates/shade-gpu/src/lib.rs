@@ -8,6 +8,7 @@ pub mod timestamp;
 pub mod basic_adjust;
 pub mod sharpen2;
 pub mod texture_cache;
+pub mod color_transform;
 
 pub use context::GpuContext;
 pub use pipeline::TonePipeline;
@@ -23,3 +24,4 @@ pub use profiler::{GpuProfiler, PassTiming};
 pub use basic_adjust::BasicAdjustPipeline;
 pub use sharpen2::SharpenTwoPassPipeline;
 pub use texture_cache::TextureCache;
+pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};

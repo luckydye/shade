@@ -280,6 +280,129 @@ impl LayerStack {
     }
 }
 
+/// Known colour spaces with their chromaticities.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ColorSpace {
+    /// Standard sRGB (IEC 61966-2-1). Gamma ≈ 2.2 (piecewise).
+    Srgb,
+    /// Linear sRGB — same primaries as sRGB but no gamma. Used as internal working space.
+    LinearSrgb,
+    /// Adobe RGB (1998). Wider gamut, gamma 2.2.
+    AdobeRgb,
+    /// Display P3 (DCI-P3 with D65 white point). Used in Apple displays.
+    DisplayP3,
+    /// ProPhoto RGB. Very wide gamut, gamma 1.8.
+    ProPhotoRgb,
+    /// Custom ICC profile stored as raw bytes.
+    Custom(Vec<u8>),
+    /// Untagged — treat as sRGB.
+    Unknown,
+}
+
+impl Default for ColorSpace {
+    fn default() -> Self { ColorSpace::Srgb }
+}
+
+impl ColorSpace {
+    /// Human-readable name.
+    pub fn name(&self) -> &str {
+        match self {
+            ColorSpace::Srgb => "sRGB",
+            ColorSpace::LinearSrgb => "Linear sRGB",
+            ColorSpace::AdobeRgb => "Adobe RGB (1998)",
+            ColorSpace::DisplayP3 => "Display P3",
+            ColorSpace::ProPhotoRgb => "ProPhoto RGB",
+            ColorSpace::Custom(_) => "Custom ICC",
+            ColorSpace::Unknown => "Unknown (sRGB)",
+        }
+    }
+
+    /// Whether this space uses a gamma transfer function (vs linear).
+    pub fn is_gamma_encoded(&self) -> bool {
+        !matches!(self, ColorSpace::LinearSrgb)
+    }
+}
+
+/// A 3×3 colour transform matrix (row-major, applied as: out = M * in).
+/// Transforms linear RGB values between colour spaces.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColorMatrix3x3 {
+    pub m: [[f32; 3]; 3],
+}
+
+impl ColorMatrix3x3 {
+    pub const IDENTITY: Self = Self {
+        m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    };
+
+    /// Apply matrix to an RGB triple.
+    pub fn apply(&self, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+        let out_r = self.m[0][0]*r + self.m[0][1]*g + self.m[0][2]*b;
+        let out_g = self.m[1][0]*r + self.m[1][1]*g + self.m[1][2]*b;
+        let out_b = self.m[2][0]*r + self.m[2][1]*g + self.m[2][2]*b;
+        (out_r, out_g, out_b)
+    }
+
+    /// Adobe RGB (1998) → linear sRGB matrix.
+    /// Derived from Bradford-adapted primaries.
+    pub const ADOBE_RGB_TO_LINEAR_SRGB: Self = Self {
+        m: [
+            [ 1.3985,  -0.3086, -0.0908],  // R row
+            [-0.0827,   1.1316, -0.0489],  // G row
+            [ 0.0172,  -0.0603,  1.0431],  // B row
+        ],
+    };
+
+    /// Display P3 → linear sRGB matrix.
+    pub const DISPLAY_P3_TO_LINEAR_SRGB: Self = Self {
+        m: [
+            [ 1.2249,  -0.2247,  0.0000],
+            [-0.0420,   1.0419,  0.0000],
+            [-0.0197,  -0.0786,  1.0983],
+        ],
+    };
+
+    /// ProPhoto RGB → linear sRGB matrix.
+    pub const PROPHOTO_TO_LINEAR_SRGB: Self = Self {
+        m: [
+            [ 1.3460,  -0.2556, -0.0511],
+            [-0.5446,   1.5082,  0.0205],
+            [ 0.0000,   0.0000,  1.2152],
+        ],
+    };
+
+    /// linear sRGB → Display P3 matrix (inverse of DISPLAY_P3_TO_LINEAR_SRGB).
+    pub const LINEAR_SRGB_TO_DISPLAY_P3: Self = Self {
+        m: [
+            [ 0.8225,   0.1774,  0.0000],
+            [ 0.0332,   0.9669,  0.0000],
+            [ 0.0171,   0.0724,  0.9105],
+        ],
+    };
+}
+
+/// Project-level colour settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectColorSettings {
+    /// Internal working colour space (always LinearSrgb in practice).
+    pub working_space: ColorSpace,
+    /// Display colour space (for viewport tone-mapping).
+    pub display_space: ColorSpace,
+    /// Export colour space (for final file output).
+    pub export_space: ColorSpace,
+}
+
+impl Default for ProjectColorSettings {
+    fn default() -> Self {
+        Self {
+            working_space: ColorSpace::LinearSrgb,
+            display_space: ColorSpace::Srgb,
+            export_space: ColorSpace::Srgb,
+        }
+    }
+}
+
 /// The main edit graph: an ordered list of layers plus a generation counter
 /// for dirty tracking.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

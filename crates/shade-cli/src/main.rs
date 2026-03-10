@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use shade_core::{
-    AdjustmentOp, BlendMode, ColorParams, GrainParams, LayerStack, SharpenParams, ToneParams,
-    VignetteParams,
+    AdjustmentOp, BlendMode, ColorParams, ColorSpace, GrainParams, LayerStack, SharpenParams,
+    ToneParams, VignetteParams,
 };
 use shade_gpu::Renderer;
-use shade_io::{load_image, save_image};
+use shade_io::{load_image, load_image_with_colorspace, save_image, to_linear_srgb, from_linear_srgb};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -101,6 +101,16 @@ enum Commands {
         /// Grain size factor (1.0 = pixel-level, 4.0 = coarser)
         #[arg(long)]
         grain_size: Option<f32>,
+
+        // ── Colour management ─────────────────────────────────────────────────
+
+        /// Source colour space: srgb, adobergb, p3, prophoto (default: auto-detect from embedded profile)
+        #[arg(long)]
+        color_space: Option<String>,
+
+        /// Output/display colour space: srgb, p3 (default: srgb)
+        #[arg(long)]
+        display_space: Option<String>,
     },
 
     /// Test the layer compositor: base Image layer + Adjustment layer.
@@ -152,10 +162,41 @@ async fn main() -> Result<()> {
             sharpen_threshold,
             grain,
             grain_size,
+            color_space,
+            display_space,
         } => {
+            // ── Resolve colour spaces ─────────────────────────────────────────
+            let parse_color_space = |s: &str| -> ColorSpace {
+                match s.to_lowercase().as_str() {
+                    "srgb" | "sRGB" => ColorSpace::Srgb,
+                    "linear" | "linearsrgb" => ColorSpace::LinearSrgb,
+                    "adobergb" | "adobe" => ColorSpace::AdobeRgb,
+                    "p3" | "displayp3" => ColorSpace::DisplayP3,
+                    "prophoto" => ColorSpace::ProPhotoRgb,
+                    _ => ColorSpace::Srgb,
+                }
+            };
+
+            let display_cs: ColorSpace = display_space
+                .as_deref()
+                .map(parse_color_space)
+                .unwrap_or(ColorSpace::Srgb);
+
             log::info!("Loading image: {}", input.display());
-            let (pixels, width, height) = load_image(&input)?;
+            let (mut pixels, width, height, detected_cs) = load_image_with_colorspace(&input)?;
             log::info!("Image loaded: {}×{} px", width, height);
+
+            // Override detected colour space if the user provided one explicitly.
+            let src_cs: ColorSpace = color_space
+                .as_deref()
+                .map(parse_color_space)
+                .unwrap_or(detected_cs.clone());
+
+            log::info!("Source colour space: {}", src_cs.name());
+            log::info!("Display colour space: {}", display_cs.name());
+
+            // Convert source pixels to linear sRGB (internal working space).
+            to_linear_srgb(&mut pixels, &src_cs);
 
             let mut ops: Vec<AdjustmentOp> = Vec::new();
 
@@ -228,9 +269,12 @@ async fn main() -> Result<()> {
             let renderer = Renderer::new().await?;
 
             log::info!("Running {} pipeline op(s)…", ops.len());
-            let result = renderer
+            let mut result = renderer
                 .render_with_ops(&pixels, width, height, &ops)
                 .await?;
+
+            // Apply display/export colour space transform (linear sRGB → display_cs).
+            from_linear_srgb(&mut result, &display_cs);
 
             log::info!("Saving output: {}", output.display());
             save_image(&output, &result, width, height)?;

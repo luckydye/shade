@@ -9,6 +9,7 @@ use wgpu::{
 
 use crate::{
     basic_adjust::BasicAdjustPipeline,
+    color_transform::{ColorTransformPipeline, ColorTransformUniform},
     composite::{
         create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
         CompositePipeline, CompositeUniform,
@@ -33,6 +34,7 @@ pub struct Renderer {
     pub basic_adjust_pipeline: BasicAdjustPipeline,
     pub sharpen2_pipeline: SharpenTwoPassPipeline,
     pub texture_cache: TextureCache,
+    pub color_transform_pipeline: ColorTransformPipeline,
 }
 
 impl Renderer {
@@ -50,6 +52,7 @@ impl Renderer {
         let basic_adjust_pipeline = BasicAdjustPipeline::new(&ctx);
         let sharpen2_pipeline = SharpenTwoPassPipeline::new(&ctx);
         let texture_cache = TextureCache::new();
+        let color_transform_pipeline = ColorTransformPipeline::new(&ctx);
         Ok(Self {
             ctx,
             tone_pipeline,
@@ -63,6 +66,7 @@ impl Renderer {
             basic_adjust_pipeline,
             sharpen2_pipeline,
             texture_cache,
+            color_transform_pipeline,
         })
     }
 
@@ -475,6 +479,16 @@ impl Renderer {
         }
 
         Ok(())
+    }
+
+    /// Apply a GPU colour transform to an existing texture.
+    /// Use for viewport display: after compositing, transform linear sRGB → display space.
+    pub fn apply_color_transform(
+        &self,
+        input_tex: &wgpu::Texture,
+        uniform: ColorTransformUniform,
+    ) -> wgpu::Texture {
+        self.color_transform_pipeline.process(&self.ctx, input_tex, uniform)
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
