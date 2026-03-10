@@ -122,7 +122,9 @@ export async function refreshPreview() {
     if (frame.kind === "rgba") {
       if (frame.width === 0 || frame.height === 0) return;
       replaceBitmap(setPreviewBitmap, previewBitmap, null);
-      setPreviewFrame(new ImageData(frame.pixels, frame.width, frame.height));
+      const pixels = new Uint8ClampedArray(frame.pixels.length);
+      pixels.set(frame.pixels);
+      setPreviewFrame(new ImageData(pixels, frame.width, frame.height));
       return;
     }
     if (!frame.dataUrl) return;

@@ -73,7 +73,7 @@ export interface StackInfo {
 }
 
 export type PreviewFrame =
-  | { kind: "rgba"; pixels: Uint8ClampedArray; width: number; height: number }
+  | { kind: "rgba"; pixels: Uint8Array; width: number; height: number }
   | { kind: "data-url"; dataUrl: string };
 
 export async function renderPreview(): Promise<PreviewFrame> {
@@ -84,9 +84,14 @@ export async function renderPreview(): Promise<PreviewFrame> {
       width: number;
       height: number;
     };
+    const pixels = result.pixels instanceof Uint8Array
+      ? result.pixels
+      : result.pixels instanceof ArrayBuffer
+        ? new Uint8Array(result.pixels)
+        : Uint8Array.from(result.pixels);
     return {
       kind: "rgba",
-      pixels: new Uint8ClampedArray(result.pixels),
+      pixels,
       width: result.width,
       height: result.height,
     };

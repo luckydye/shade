@@ -7,10 +7,11 @@ const Canvas: Component = () => {
 
   // Redraw whenever a new source image arrives.
   createEffect(() => {
+    if (!canvasRef) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
     const frame = previewFrame();
-    if (frame && canvasRef) {
+    if (frame) {
       canvasRef.width = frame.width;
       canvasRef.height = frame.height;
       ctx.putImageData(frame, 0, 0);
