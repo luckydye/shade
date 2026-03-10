@@ -1,11 +1,9 @@
 import { Component, For } from "solid-js";
-import { state, selectLayer, setLayerVisible, refreshLayerStack } from "../store/editor";
-import { invoke } from "@tauri-apps/api/core";
+import { state, selectLayer, setLayerVisible, refreshLayerStack, addLayer } from "../store/editor";
 
 const LayerPanel: Component = () => {
   const addAdjustmentLayer = async () => {
-    await invoke("add_layer", { kind: "adjustment" });
-    await refreshLayerStack();
+    await addLayer("adjustment");
   };
 
   return (

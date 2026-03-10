@@ -1,9 +1,14 @@
 [workspace]
-members = ["crates/shade-core", "crates/shade-gpu", "crates/shade-io", "crates/shade-cli", "crates/shade-tauri"]
+members = ["crates/shade-core", "crates/shade-gpu", "crates/shade-io", "crates/shade-cli", "crates/shade-tauri", "crates/shade-wasm"]
 resolver = "2"
 
 [workspace.dependencies]
 wgpu = { version = "23", features = ["wgsl"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
 image = { version = "0.25", features = ["jpeg", "png", "tiff", "webp"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

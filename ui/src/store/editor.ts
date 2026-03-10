@@ -1,11 +1,11 @@
 import { createStore } from "solid-js/store";
-import { invoke } from "@tauri-apps/api/core";
+import * as bridge from "../bridge/index";
 
 export interface LayerInfo {
   kind: "image" | "adjustment";
   visible: boolean;
   opacity: number;
-  blend_mode: string;
+  blend_mode?: string;
 }
 
 export interface EditorState {
@@ -14,6 +14,7 @@ export interface EditorState {
   canvasHeight: number;
   selectedLayerIdx: number;
   isLoading: boolean;
+  webgpuAvailable: boolean;
 }
 
 const [state, setState] = createStore<EditorState>({
@@ -22,6 +23,7 @@ const [state, setState] = createStore<EditorState>({
   canvasHeight: 0,
   selectedLayerIdx: -1,
   isLoading: false,
+  webgpuAvailable: true,
 });
 
 export { state };
@@ -29,10 +31,7 @@ export { state };
 export async function openImage(path: string) {
   setState("isLoading", true);
   try {
-    const info = await invoke<{ layer_count: number; canvas_width: number; canvas_height: number }>(
-      "open_image",
-      { path }
-    );
+    const info = await bridge.openImage(path);
     setState({ canvasWidth: info.canvas_width, canvasHeight: info.canvas_height });
     await refreshLayerStack();
   } finally {
@@ -41,30 +40,33 @@ export async function openImage(path: string) {
 }
 
 export async function refreshLayerStack() {
-  const info = await invoke<{
-    layers: LayerInfo[];
-    canvas_width: number;
-    canvas_height: number;
-    generation: number;
-  }>("get_layer_stack");
-  setState({ layers: info.layers, canvasWidth: info.canvas_width, canvasHeight: info.canvas_height });
+  const info = await bridge.getLayerStack();
+  setState({
+    layers: info.layers as LayerInfo[],
+    canvasWidth: info.canvas_width,
+    canvasHeight: info.canvas_height,
+  });
 }
 
 export async function setLayerVisible(idx: number, visible: boolean) {
-  await invoke("set_layer_visible", { params: { layer_idx: idx, visible } });
+  await bridge.setLayerVisible(idx, visible);
   await refreshLayerStack();
 }
 
 export async function setLayerOpacity(idx: number, opacity: number) {
-  await invoke("set_layer_opacity", { params: { layer_idx: idx, opacity } });
+  await bridge.setLayerOpacity(idx, opacity);
   await refreshLayerStack();
 }
 
 export async function applyEdit(params: Record<string, unknown>) {
-  await invoke("apply_edit", { params });
-  // In a real app, trigger re-render of the viewport here
+  await bridge.applyEdit(params);
 }
 
 export function selectLayer(idx: number) {
   setState("selectedLayerIdx", idx);
+}
+
+export async function addLayer(kind: string) {
+  await bridge.addLayer(kind);
+  await refreshLayerStack();
 }
