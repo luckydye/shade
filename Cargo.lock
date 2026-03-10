@@ -4081,6 +4081,7 @@ dependencies = [
  "shade-gpu",
  "shade-io",
  "tauri",
+ "tauri-build",
  "tokio",
 ]
 
