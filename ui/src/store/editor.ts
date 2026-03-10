@@ -8,6 +8,8 @@ const [sourceBitmap, setSourceBitmap] = createSignal<ImageBitmap | null>(null);
 export { sourceBitmap };
 const [previewBitmap, setPreviewBitmap] = createSignal<ImageBitmap | null>(null);
 export { previewBitmap };
+const [previewFrame, setPreviewFrame] = createSignal<ImageData | null>(null);
+export { previewFrame };
 
 function replaceBitmap(
   setter: (bitmap: ImageBitmap | null) => void,
@@ -49,6 +51,7 @@ export async function openImage(path: string) {
   setState("isLoading", true);
   replaceBitmap(setSourceBitmap, sourceBitmap, null);
   replaceBitmap(setPreviewBitmap, previewBitmap, null);
+  setPreviewFrame(null);
   try {
     const info = await bridge.openImage(path);
     setState({ canvasWidth: info.canvas_width, canvasHeight: info.canvas_height });
@@ -64,6 +67,7 @@ export async function openImageFile(file: File) {
   const bitmap = await createImageBitmap(file);
   replaceBitmap(setSourceBitmap, sourceBitmap, bitmap);
   replaceBitmap(setPreviewBitmap, previewBitmap, null);
+  setPreviewFrame(null);
 
   setState("isLoading", true);
   try {
@@ -114,9 +118,16 @@ export async function addLayer(kind: string) {
 
 export async function refreshPreview() {
   try {
-    const dataUrl = await bridge.renderPreview();
-    if (!dataUrl) return;
-    const response = await fetch(dataUrl);
+    const frame = await bridge.renderPreview();
+    if (frame.kind === "rgba") {
+      if (frame.width === 0 || frame.height === 0) return;
+      replaceBitmap(setPreviewBitmap, previewBitmap, null);
+      setPreviewFrame(new ImageData(frame.pixels, frame.width, frame.height));
+      return;
+    }
+    if (!frame.dataUrl) return;
+    setPreviewFrame(null);
+    const response = await fetch(frame.dataUrl);
     const bitmap = await createImageBitmap(await response.blob());
     replaceBitmap(setPreviewBitmap, previewBitmap, bitmap);
   } catch (error) {

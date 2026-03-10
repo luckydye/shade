@@ -91,16 +91,29 @@ pub async fn open_image_bytes(
     Ok(LayerInfoResponse { layer_count: st.stack.layers.len(), canvas_width: width, canvas_height: height })
 }
 
-/// Run the full GPU render pipeline and return the result as a PNG data URL.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PreviewFrameResponse {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Run the full GPU render pipeline and return raw RGBA8 pixels.
 #[tauri::command]
 pub async fn render_preview(
     renderer: tauri::State<'_, crate::RendererState>,
     state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<String, String> {
+) -> Result<PreviewFrameResponse, String> {
     // Snapshot state without holding the lock during GPU work.
     let (stack, sources, w, h) = {
         let st = state.lock().unwrap();
-        if st.canvas_width == 0 { return Ok(String::new()); }
+        if st.canvas_width == 0 {
+            return Ok(PreviewFrameResponse {
+                pixels: Vec::new(),
+                width: 0,
+                height: 0,
+            });
+        }
         (st.stack.clone(), st.image_sources.clone(), st.canvas_width, st.canvas_height)
     };
 
@@ -109,17 +122,7 @@ pub async fn render_preview(
 
     let pixels = r.render_stack(&stack, &sources, w, h)
         .await.map_err(|e| e.to_string())?;
-
-    // Encode to PNG and return as a data URL.
-    let img = image::RgbaImage::from_raw(w, h, pixels)
-        .ok_or("invalid pixel buffer dimensions")?;
-    let mut buf = Vec::new();
-    image::DynamicImage::ImageRgba8(img)
-        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
-
-    use base64::{Engine, engine::general_purpose::STANDARD};
-    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&buf)))
+    Ok(PreviewFrameResponse { pixels, width: w, height: h })
 }
 
 #[tauri::command]

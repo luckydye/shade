@@ -8,8 +8,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
-image = { workspace = true }
-base64 = "0.22"
 shade-core = { path = "../shade-core" }
 shade-gpu = { path = "../shade-gpu" }
 shade-io = { path = "../shade-io" }

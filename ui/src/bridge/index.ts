@@ -72,17 +72,31 @@ export interface StackInfo {
   generation: number;
 }
 
-export async function renderPreview(): Promise<string> {
+export type PreviewFrame =
+  | { kind: "rgba"; pixels: Uint8ClampedArray; width: number; height: number }
+  | { kind: "data-url"; dataUrl: string };
+
+export async function renderPreview(): Promise<PreviewFrame> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("render_preview") as Promise<string>;
+    const result = await inv("render_preview") as {
+      pixels: number[] | Uint8Array | ArrayBuffer;
+      width: number;
+      height: number;
+    };
+    return {
+      kind: "rgba",
+      pixels: new Uint8ClampedArray(result.pixels),
+      width: result.width,
+      height: result.height,
+    };
   }
   await ensureWorkerReady();
   const result = await workerCall<{ dataUrl: string }>(
     { type: "render_preview" },
     "preview_rendered"
   );
-  return result.dataUrl;
+  return { kind: "data-url", dataUrl: result.dataUrl };
 }
 
 export async function openImage(path: string): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {

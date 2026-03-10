@@ -1,5 +1,5 @@
 import { Component, createEffect, createSignal } from "solid-js";
-import { openImageFile, previewBitmap, sourceBitmap, state } from "../store/editor";
+import { openImageFile, previewBitmap, previewFrame, sourceBitmap, state } from "../store/editor";
 
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
@@ -7,14 +7,21 @@ const Canvas: Component = () => {
 
   // Redraw whenever a new source image arrives.
   createEffect(() => {
+    const ctx = canvasRef.getContext("2d");
+    if (!ctx) return;
+    const frame = previewFrame();
+    if (frame && canvasRef) {
+      canvasRef.width = frame.width;
+      canvasRef.height = frame.height;
+      ctx.putImageData(frame, 0, 0);
+      return;
+    }
+
     const bitmap = previewBitmap() ?? sourceBitmap();
     if (!bitmap || !canvasRef) return;
 
     canvasRef.width = bitmap.width;
     canvasRef.height = bitmap.height;
-
-    const ctx = canvasRef.getContext("2d");
-    if (!ctx) return;
     ctx.drawImage(bitmap, 0, 0);
   });
 
