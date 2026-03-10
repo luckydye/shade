@@ -1,10 +1,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use shade_core::{
-    AdjustmentOp, ColorParams, GrainParams, SharpenParams, ToneParams, VignetteParams,
+    AdjustmentOp, BlendMode, ColorParams, GrainParams, LayerStack, SharpenParams, ToneParams,
+    VignetteParams,
 };
 use shade_gpu::Renderer;
 use shade_io::{load_image, save_image};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Shade — GPU-accelerated photo editor CLI
@@ -100,6 +102,28 @@ enum Commands {
         #[arg(long)]
         grain_size: Option<f32>,
     },
+
+    /// Test the layer compositor: base Image layer + Adjustment layer.
+    Stack {
+        /// Input image path (JPEG, PNG, TIFF, WebP, …)
+        input: PathBuf,
+
+        /// Output image path
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Exposure adjustment for the adjustment layer (default: 0.0)
+        #[arg(long, default_value_t = 0.0)]
+        exposure: f32,
+
+        /// Vignette amount for the adjustment layer (default: 0.0)
+        #[arg(long, default_value_t = 0.0)]
+        vignette: f32,
+
+        /// Saturation for the adjustment layer (default: 1.0)
+        #[arg(long, default_value_t = 1.0)]
+        saturation: f32,
+    },
 }
 
 #[tokio::main]
@@ -133,10 +157,8 @@ async fn main() -> Result<()> {
             let (pixels, width, height) = load_image(&input)?;
             log::info!("Image loaded: {}×{} px", width, height);
 
-            // Build the op list. Only add ops when at least one non-default value is requested.
             let mut ops: Vec<AdjustmentOp> = Vec::new();
 
-            // Always include a Tone op (covers the main tone adjustments).
             let tone_params = ToneParams {
                 exposure,
                 contrast,
@@ -153,7 +175,6 @@ async fn main() -> Result<()> {
                 shadows,
             });
 
-            // Color op — add if any color param is set.
             if saturation.is_some()
                 || vibrancy.is_some()
                 || temperature.is_some()
@@ -169,7 +190,6 @@ async fn main() -> Result<()> {
                 ops.push(AdjustmentOp::Color(color_params));
             }
 
-            // Vignette op — add if vignette amount is set.
             if vignette.is_some() {
                 let mut vig_params = VignetteParams::default();
                 if let Some(v) = vignette {
@@ -185,7 +205,6 @@ async fn main() -> Result<()> {
                 ops.push(AdjustmentOp::Vignette(vig_params));
             }
 
-            // Sharpen op — add if sharpen amount is set.
             if sharpen.is_some() {
                 let sharpen_params = SharpenParams {
                     amount: sharpen.unwrap_or(0.0),
@@ -195,7 +214,6 @@ async fn main() -> Result<()> {
                 ops.push(AdjustmentOp::Sharpen(sharpen_params));
             }
 
-            // Grain op — add if grain amount is set.
             if grain.is_some() {
                 let grain_params = GrainParams {
                     amount: grain.unwrap_or(0.0),
@@ -212,6 +230,78 @@ async fn main() -> Result<()> {
             log::info!("Running {} pipeline op(s)…", ops.len());
             let result = renderer
                 .render_with_ops(&pixels, width, height, &ops)
+                .await?;
+
+            log::info!("Saving output: {}", output.display());
+            save_image(&output, &result, width, height)?;
+            log::info!("Done.");
+        }
+
+        Commands::Stack {
+            input,
+            output,
+            exposure,
+            vignette,
+            saturation,
+        } => {
+            log::info!("Loading image: {}", input.display());
+            let (pixels, width, height) = load_image(&input)?;
+            log::info!("Image loaded: {}×{} px", width, height);
+
+            // Build a 2-layer stack:
+            //   Layer 0: Image layer (base image)
+            //   Layer 1: Adjustment layer (tone + optional vignette + color)
+            let mut stack = LayerStack::new();
+
+            // Image layer — texture_id = 0.
+            let base_texture_id: shade_core::TextureId = 0;
+            stack.add_image_layer(base_texture_id, width, height);
+
+            // Adjustment layer ops.
+            let mut adj_ops: Vec<AdjustmentOp> = Vec::new();
+
+            adj_ops.push(AdjustmentOp::Tone {
+                exposure,
+                contrast: 0.0,
+                blacks: 0.0,
+                highlights: 0.0,
+                shadows: 0.0,
+            });
+
+            if (saturation - 1.0).abs() > f32::EPSILON {
+                adj_ops.push(AdjustmentOp::Color(ColorParams {
+                    saturation,
+                    vibrancy: 0.0,
+                    temperature: 0.0,
+                    tint: 0.0,
+                }));
+            }
+
+            if vignette.abs() > f32::EPSILON {
+                adj_ops.push(AdjustmentOp::Vignette(VignetteParams {
+                    amount: vignette,
+                    ..VignetteParams::default()
+                }));
+            }
+
+            stack.add_adjustment_layer(adj_ops);
+
+            // Set blend modes (Normal = 0, full opacity).
+            stack.layers[0].blend_mode = BlendMode::Normal;
+            stack.layers[0].opacity = 1.0;
+            stack.layers[1].blend_mode = BlendMode::Normal;
+            stack.layers[1].opacity = 1.0;
+
+            // Image sources map.
+            let mut image_sources = HashMap::new();
+            image_sources.insert(base_texture_id, (pixels, width, height));
+
+            log::info!("Initialising GPU renderer…");
+            let renderer = Renderer::new().await?;
+
+            log::info!("Compositing layer stack ({} layers)…", stack.layers.len());
+            let result = renderer
+                .render_stack(&stack, &image_sources, width, height)
                 .await?;
 
             log::info!("Saving output: {}", output.display());

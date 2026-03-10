@@ -1,12 +1,17 @@
 use anyhow::Result;
-use shade_core::{AdjustmentOp, ToneParams};
+use shade_core::{AdjustmentOp, Layer, LayerStack, TextureId, ToneParams};
+use std::collections::HashMap;
 use wgpu::{
-    BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture,
-    ImageDataLayout, MapMode, Origin3d, TextureAspect, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureUsages,
+    BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture, ImageDataLayout,
+    MapMode, Origin3d, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages,
 };
 
 use crate::{
+    composite::{
+        create_rw_mask_texture, upload_mask_texture, BrushStampUniform, BrushStampPipeline,
+        CompositePipeline, CompositeUniform,
+    },
     pipelines::{ColorPipeline, CurvesPipeline, GrainPipeline, SharpenPipeline, VignettePipeline},
     GpuContext, TonePipeline,
 };
@@ -20,6 +25,8 @@ pub struct Renderer {
     pub vignette_pipeline: VignettePipeline,
     pub sharpen_pipeline: SharpenPipeline,
     pub grain_pipeline: GrainPipeline,
+    pub composite_pipeline: CompositePipeline,
+    pub brush_stamp_pipeline: BrushStampPipeline,
 }
 
 impl Renderer {
@@ -32,6 +39,8 @@ impl Renderer {
         let vignette_pipeline = VignettePipeline::new(&ctx)?;
         let sharpen_pipeline = SharpenPipeline::new(&ctx)?;
         let grain_pipeline = GrainPipeline::new(&ctx)?;
+        let composite_pipeline = CompositePipeline::new(&ctx)?;
+        let brush_stamp_pipeline = BrushStampPipeline::new(&ctx)?;
         Ok(Self {
             ctx,
             tone_pipeline,
@@ -40,6 +49,8 @@ impl Renderer {
             vignette_pipeline,
             sharpen_pipeline,
             grain_pipeline,
+            composite_pipeline,
+            brush_stamp_pipeline,
         })
     }
 
@@ -114,8 +125,6 @@ impl Renderer {
 
         // ── 2. Apply each op sequentially, ping-ponging textures ─────────────
 
-        // We start with a reference to the uploaded input. Each op produces a new Texture;
-        // we keep them alive in a Vec so they aren't dropped while still needed.
         let mut current_tex: &wgpu::Texture = &input_tex;
         let mut owned_textures: Vec<wgpu::Texture> = Vec::new();
 
@@ -172,10 +181,6 @@ impl Renderer {
             current_tex = owned_textures.last().unwrap();
         }
 
-        // If no ops were applied, we need to handle the "passthrough" case by keeping
-        // input_tex as current. The final texture must be COPY_SRC.
-        // All pipeline output textures already have COPY_SRC. But input_tex does not.
-        // If ops is empty, we still need to copy. Create a trivial tone op for that case.
         let final_tex: &wgpu::Texture = if ops.is_empty() {
             let passthrough = self.tone_pipeline.process(
                 &self.ctx,
@@ -189,6 +194,265 @@ impl Renderer {
         };
 
         // ── 3. Read back the final texture to CPU ────────────────────────────
+        self.readback_texture(final_tex, width, height).await
+    }
+
+    /// Render a full `LayerStack` to a flat RGBA8 image.
+    ///
+    /// `image_sources`: map from TextureId → (pixels: Vec<u8>, width, height)
+    pub async fn render_stack(
+        &self,
+        stack: &LayerStack,
+        image_sources: &HashMap<TextureId, (Vec<u8>, u32, u32)>,
+        canvas_width: u32,
+        canvas_height: u32,
+    ) -> Result<Vec<u8>> {
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+
+        // 1. Create accumulator texture (black RGBA8).
+        let accum_tex = {
+            let t = device.create_texture(&TextureDescriptor {
+                label: Some("accumulator"),
+                size: Extent3d {
+                    width: canvas_width,
+                    height: canvas_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::STORAGE_BINDING
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            // Clear to black.
+            let black = vec![0u8; (canvas_width * canvas_height * 4) as usize];
+            queue.write_texture(
+                ImageCopyTexture {
+                    texture: &t,
+                    mip_level: 0,
+                    origin: Origin3d::ZERO,
+                    aspect: TextureAspect::All,
+                },
+                &black,
+                ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(canvas_width * 4),
+                    rows_per_image: Some(canvas_height),
+                },
+                Extent3d {
+                    width: canvas_width,
+                    height: canvas_height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            t
+        };
+
+        // We accumulate results via a mutable "current accumulator" Texture reference.
+        // Because wgpu textures aren't Clone, we keep a Vec and always work with the last.
+        let mut accum_owned: Vec<wgpu::Texture> = vec![accum_tex];
+
+        // 2. For each visible layer, composite it onto the accumulator.
+        for entry in &stack.layers {
+            if !entry.visible {
+                continue;
+            }
+
+            let current_accum = accum_owned.last().unwrap();
+
+            // 2a. Compute layer result texture.
+            let layer_result: wgpu::Texture = match &entry.layer {
+                Layer::Image { texture_id, .. } => {
+                    if let Some((pixels, w, h)) = image_sources.get(texture_id) {
+                        // Upload image as TEXTURE_BINDING texture.
+                        let img_tex = device.create_texture(&TextureDescriptor {
+                            label: Some("image layer texture"),
+                            size: Extent3d {
+                                width: *w,
+                                height: *h,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format: TextureFormat::Rgba8Unorm,
+                            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        });
+                        queue.write_texture(
+                            ImageCopyTexture {
+                                texture: &img_tex,
+                                mip_level: 0,
+                                origin: Origin3d::ZERO,
+                                aspect: TextureAspect::All,
+                            },
+                            pixels,
+                            ImageDataLayout {
+                                offset: 0,
+                                bytes_per_row: Some(*w * 4),
+                                rows_per_image: Some(*h),
+                            },
+                            Extent3d {
+                                width: *w,
+                                height: *h,
+                                depth_or_array_layers: 1,
+                            },
+                        );
+                        img_tex
+                    } else {
+                        // No source image: skip this layer.
+                        continue;
+                    }
+                }
+                Layer::Adjustment { ops } => {
+                    // Take current accumulator pixels and run adjustment ops on them.
+                    let accum_bytes = self
+                        .readback_texture(current_accum, canvas_width, canvas_height)
+                        .await?;
+                    let adj_tex_bytes = self
+                        .render_with_ops(&accum_bytes, canvas_width, canvas_height, ops)
+                        .await?;
+                    // Upload result back as a texture.
+                    let adj_tex = device.create_texture(&TextureDescriptor {
+                        label: Some("adjustment layer result"),
+                        size: Extent3d {
+                            width: canvas_width,
+                            height: canvas_height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: TextureFormat::Rgba8Unorm,
+                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    queue.write_texture(
+                        ImageCopyTexture {
+                            texture: &adj_tex,
+                            mip_level: 0,
+                            origin: Origin3d::ZERO,
+                            aspect: TextureAspect::All,
+                        },
+                        &adj_tex_bytes,
+                        ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: Some(canvas_width * 4),
+                            rows_per_image: Some(canvas_height),
+                        },
+                        Extent3d {
+                            width: canvas_width,
+                            height: canvas_height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                    adj_tex
+                }
+            };
+
+            // 2b. Optional mask texture.
+            let mask_tex_opt: Option<wgpu::Texture> =
+                if let Some(mask_id) = entry.mask {
+                    if let Some(mask_data) = stack.masks.get(&mask_id) {
+                        Some(upload_mask_texture(
+                            device,
+                            queue,
+                            &mask_data.pixels,
+                            mask_data.width,
+                            mask_data.height,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+            // 2c. Build composite params.
+            let has_mask = if mask_tex_opt.is_some() { 1u32 } else { 0u32 };
+            let composite_params = CompositeUniform {
+                opacity: entry.opacity,
+                blend_mode: entry.blend_mode.to_u32(),
+                has_mask,
+                _pad: 0.0,
+            };
+
+            // 2d. Composite.
+            let new_accum = self.composite_pipeline.process(
+                &self.ctx,
+                current_accum,
+                &layer_result,
+                mask_tex_opt.as_ref(),
+                composite_params,
+            )?;
+
+            accum_owned.push(new_accum);
+        }
+
+        // 3. Read back the final accumulator.
+        let final_accum = accum_owned.last().unwrap();
+        self.readback_texture(final_accum, canvas_width, canvas_height).await
+    }
+
+    /// Stamp a brush onto a mask pixel buffer in-place.
+    pub async fn apply_brush_stamp(
+        &self,
+        mask_pixels: &mut Vec<u8>,
+        width: u32,
+        height: u32,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        hardness: f32,
+        pressure: f32,
+        erase: bool,
+    ) -> Result<()> {
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+
+        // Upload current mask as a read-write Rgba8Unorm texture.
+        let mask_tex = create_rw_mask_texture(device, queue, mask_pixels, width, height);
+
+        let params = BrushStampUniform {
+            center_x,
+            center_y,
+            radius,
+            hardness,
+            pressure,
+            erase: if erase { 1 } else { 0 },
+            _pad0: 0.0,
+            _pad1: 0.0,
+        };
+
+        self.brush_stamp_pipeline.stamp(&self.ctx, &mask_tex, params)?;
+
+        // Read back — but the texture is Rgba8Unorm (4 bytes per pixel); extract R channel.
+        let rgba_bytes = self.readback_texture(&mask_tex, width, height).await?;
+        mask_pixels.clear();
+        mask_pixels.reserve((width * height) as usize);
+        for chunk in rgba_bytes.chunks_exact(4) {
+            mask_pixels.push(chunk[0]); // R channel = mask value
+        }
+
+        Ok(())
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /// Read back the pixels of a texture to CPU memory (RGBA8, no padding).
+    async fn readback_texture(
+        &self,
+        tex: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
 
         let unpadded_bytes_per_row = width * 4;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -209,7 +473,7 @@ impl Renderer {
 
         encoder.copy_texture_to_buffer(
             ImageCopyTexture {
-                texture: final_tex,
+                texture: tex,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
@@ -231,7 +495,6 @@ impl Renderer {
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        // Map the buffer and read the bytes.
         let buffer_slice = readback_buffer.slice(..);
         let (tx, rx) = tokio::sync::oneshot::channel();
         buffer_slice.map_async(MapMode::Read, move |result| {
@@ -243,7 +506,6 @@ impl Renderer {
 
         let mapped = buffer_slice.get_mapped_range();
 
-        // Strip padding: collect only the unpadded bytes per row.
         let mut result = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
         for row in 0..height {
             let row_start = (row * padded_bytes_per_row) as usize;

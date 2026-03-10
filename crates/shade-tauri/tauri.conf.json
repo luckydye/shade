@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0",
+  "productName": "Shade",
+  "version": "0.1.0",
+  "identifier": "com.shade.editor",
+  "build": {
+    "beforeDevCommand": "cd ui && pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "cd ui && pnpm build",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Shade",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
