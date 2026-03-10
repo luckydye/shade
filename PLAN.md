@@ -1,4 +1,4 @@
-# Cross-Platform GPU Photo Editor — Architecture & Implementation Plan
+# Shade — Cross-Platform GPU Photo Editor
 
 ## 1. Vision & Goals
 
@@ -69,15 +69,15 @@ All three targets share a single Rust processing library; only the thin UI and I
 ## 3. Rust Crate Structure
 
 ```
-photon-editor/
+shade/
 ├── crates/
-│   ├── photon-core/          # Edit graph, layer model, mask model, project serialisation
-│   ├── photon-gpu/           # wgpu device management, shader compilation, pipeline cache
-│   ├── photon-shaders/       # WGSL shader source files (build-time validated)
-│   ├── photon-io/            # Image decode/encode, RAW, ICC, EXIF
-│   ├── photon-cli/           # CLI binary (clap)
-│   ├── photon-wasm/          # wasm-bindgen entry point for browser target
-│   └── photon-tauri/         # Tauri app shell + IPC command handlers
+│   ├── shade-core/           # Edit graph, layer model, mask model, project serialisation
+│   ├── shade-gpu/            # wgpu device management, shader compilation, pipeline cache
+│   ├── shade-shaders/        # WGSL shader source files (build-time validated)
+│   ├── shade-io/             # Image decode/encode, RAW, ICC, EXIF
+│   ├── shade-cli/            # CLI binary (clap)
+│   ├── shade-wasm/           # wasm-bindgen entry point for browser target
+│   └── shade-tauri/          # Tauri app shell + IPC command handlers
 ├── ui/                       # Web frontend (Vite + framework of choice)
 │   ├── src/
 │   ├── public/
@@ -88,9 +88,9 @@ photon-editor/
 
 ### Key crate details
 
-**`photon-gpu`** owns the `wgpu::Device` and `Queue`. It exposes a `Renderer` that accepts an edit graph snapshot and produces a final composited texture. Internally it maintains a **pipeline cache** (keyed by shader + bind-group layout) and a **texture cache** (keyed by node ID + parameter hash) so only dirty nodes re-execute.
+**`shade-gpu`** owns the `wgpu::Device` and `Queue`. It exposes a `Renderer` that accepts an edit graph snapshot and produces a final composited texture. Internally it maintains a **pipeline cache** (keyed by shader + bind-group layout) and a **texture cache** (keyed by node ID + parameter hash) so only dirty nodes re-execute.
 
-**`photon-core`** is deliberately GPU-agnostic — it describes *what* to compute, not *how*. This makes it easy to unit-test on CPU and to serialise projects to disk.
+**`shade-core`** is deliberately GPU-agnostic — it describes *what* to compute, not *how*. This makes it easy to unit-test on CPU and to serialise projects to disk.
 
 ---
 
@@ -367,7 +367,7 @@ Each node stores its parameter hash and a `generation: u64`. The renderer diff-c
 │  │  <canvas> viewport     │──┼──── wgpu surface presented directly
 │  └────────────────────────┘  │     to a native window region
 │                              │
-│  Rust backend (same process) │  ← photon-core + photon-gpu
+│  Rust backend (same process) │  ← shade-core + shade-gpu
 └──────────────────────────────┘
 ```
 
@@ -390,14 +390,14 @@ Tauri commands are async Rust functions annotated with `#[tauri::command]`; the 
 └────────────────────────────────────────┘
 ```
 
-`photon-wasm` is compiled with `--target web`. wgpu's WebGPU backend maps directly to the browser's `navigator.gpu`. The WASM module is loaded in a **Web Worker** to keep the UI thread free; the viewport canvas is transferred to the worker via `OffscreenCanvas`.
+`shade-wasm` is compiled with `--target web`. wgpu's WebGPU backend maps directly to the browser's `navigator.gpu`. The WASM module is loaded in a **Web Worker** to keep the UI thread free; the viewport canvas is transferred to the worker via `OffscreenCanvas`.
 
 **Fallback**: if WebGPU is unavailable, the app can display a clear message. Optionally, a reduced-feature CPU path using `wgpu`'s WebGL2 backend could be provided, but at lower performance.
 
 ### 8.3 CLI
 
 ```bash
-photon-cli edit input.jpg \
+shade edit input.jpg \
   --exposure +1.2 \
   --contrast 15 \
   --curves curves.json \
@@ -408,10 +408,10 @@ photon-cli edit input.jpg \
   --crop 16:9 \
   --output result.tiff
 
-photon-cli batch edits.json ./photos/ --output ./processed/
+shade batch edits.json ./photos/ --output ./processed/
 ```
 
-The CLI binary links `photon-core` and `photon-gpu` directly. It creates a headless wgpu device (`instance.request_adapter` with `power_preference: HighPerformance` and no surface), runs the full pipeline, reads back the final texture, and encodes to the output format. Perfect for batch workflows and CI pipelines.
+The CLI binary links `shade-core` and `shade-gpu` directly. It creates a headless wgpu device (`instance.request_adapter` with `power_preference: HighPerformance` and no surface), runs the full pipeline, reads back the final texture, and encodes to the output format. Perfect for batch workflows and CI pipelines.
 
 ---
 
@@ -479,10 +479,10 @@ present the new frame.
 
 ## 10. Project File Format
 
-Projects are saved as a **single `.photon` file** (a ZIP archive):
+Projects are saved as a **single `.shade` file** (a ZIP archive):
 
 ```
-project.photon (ZIP)
+project.shade (ZIP)
 ├── manifest.json        # version, canvas size, color space, bit depth (16 or 32)
 ├── layers.json          # layer stack: order, params, blend modes, opacity
 ├── curves/              # curve control points per layer
@@ -497,6 +497,8 @@ project.photon (ZIP)
 ```
 
 This keeps projects self-contained, versionable, and inspectable with any ZIP tool.
+
+The `.shade` extension is registered with the OS on install so double-clicking opens the project directly.
 
 ---
 
@@ -543,7 +545,7 @@ This keeps projects self-contained, versionable, and inspectable with any ZIP to
 
 ### Phase 4 — Web Target (Weeks 19–22)
 
-- Compile `photon-wasm` with wasm-pack, integrate into Vite.
+- Compile `shade-wasm` with wasm-pack, integrate into Vite.
 - OffscreenCanvas worker architecture.
 - Adapt UI bridge from Tauri IPC to wasm-bindgen calls.
 - Test on Chrome and Firefox (WebGPU availability).
@@ -563,7 +565,7 @@ This keeps projects self-contained, versionable, and inspectable with any ZIP to
 
 ## 13. Testing Strategy
 
-**Shader correctness**: A CPU reference implementation (`photon-core` with a `CpuBackend` trait) produces expected output for each operation. GPU output is compared per-pixel with a tolerance (±1 in 16-bit) to catch driver-specific rounding.
+**Shader correctness**: A CPU reference implementation (`shade-core` with a `CpuBackend` trait) produces expected output for each operation. GPU output is compared per-pixel with a tolerance (±1 in 16-bit) to catch driver-specific rounding.
 
 **Integration tests**: The CLI is invoked with known input images and parameter sets; outputs are compared against golden reference files.
 
