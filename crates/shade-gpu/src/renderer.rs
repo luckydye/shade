@@ -8,11 +8,14 @@ use wgpu::{
 };
 
 use crate::{
+    basic_adjust::BasicAdjustPipeline,
     composite::{
-        create_rw_mask_texture, upload_mask_texture, BrushStampUniform, BrushStampPipeline,
+        create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
         CompositePipeline, CompositeUniform,
     },
     pipelines::{ColorPipeline, CurvesPipeline, GrainPipeline, SharpenPipeline, VignettePipeline},
+    sharpen2::SharpenTwoPassPipeline,
+    texture_cache::TextureCache,
     GpuContext, TonePipeline,
 };
 
@@ -27,6 +30,9 @@ pub struct Renderer {
     pub grain_pipeline: GrainPipeline,
     pub composite_pipeline: CompositePipeline,
     pub brush_stamp_pipeline: BrushStampPipeline,
+    pub basic_adjust_pipeline: BasicAdjustPipeline,
+    pub sharpen2_pipeline: SharpenTwoPassPipeline,
+    pub texture_cache: TextureCache,
 }
 
 impl Renderer {
@@ -41,6 +47,9 @@ impl Renderer {
         let grain_pipeline = GrainPipeline::new(&ctx)?;
         let composite_pipeline = CompositePipeline::new(&ctx)?;
         let brush_stamp_pipeline = BrushStampPipeline::new(&ctx)?;
+        let basic_adjust_pipeline = BasicAdjustPipeline::new(&ctx);
+        let sharpen2_pipeline = SharpenTwoPassPipeline::new(&ctx);
+        let texture_cache = TextureCache::new();
         Ok(Self {
             ctx,
             tone_pipeline,
@@ -51,6 +60,9 @@ impl Renderer {
             grain_pipeline,
             composite_pipeline,
             brush_stamp_pipeline,
+            basic_adjust_pipeline,
+            sharpen2_pipeline,
+            texture_cache,
         })
     }
 
@@ -76,6 +88,10 @@ impl Renderer {
 
     /// Apply a sequence of `AdjustmentOp`s to raw RGBA8 pixels, ping-ponging between textures,
     /// and return the final RGBA8 result.
+    ///
+    /// Optimisation: when a `Tone` op is immediately followed by a `Color` op, they are fused
+    /// into a single `BasicAdjustPipeline` pass. `Sharpen` always uses the two-pass separable
+    /// Gaussian pipeline.
     pub async fn render_with_ops(
         &self,
         input_data: &[u8],
@@ -128,8 +144,51 @@ impl Renderer {
         let mut current_tex: &wgpu::Texture = &input_tex;
         let mut owned_textures: Vec<wgpu::Texture> = Vec::new();
 
-        for op in ops {
-            let output = match op {
+        let mut i = 0;
+        while i < ops.len() {
+            // Check for Tone+Color fusion opportunity
+            let fused = if let AdjustmentOp::Tone {
+                exposure,
+                contrast,
+                blacks,
+                highlights,
+                shadows,
+            } = &ops[i]
+            {
+                if i + 1 < ops.len() {
+                    if let AdjustmentOp::Color(color_params) = &ops[i + 1] {
+                        let tone_params = ToneParams {
+                            exposure: *exposure,
+                            contrast: *contrast,
+                            blacks: *blacks,
+                            highlights: *highlights,
+                            shadows: *shadows,
+                        };
+                        let output = self.basic_adjust_pipeline.process(
+                            &self.ctx,
+                            current_tex,
+                            tone_params,
+                            *color_params,
+                        );
+                        owned_textures.push(output);
+                        current_tex = owned_textures.last().unwrap();
+                        i += 2; // consumed both Tone and Color
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if fused {
+                continue;
+            }
+
+            let output = match &ops[i] {
                 AdjustmentOp::Tone {
                     exposure,
                     contrast,
@@ -169,8 +228,8 @@ impl Renderer {
                         .process(&self.ctx, current_tex, *params)?
                 }
                 AdjustmentOp::Sharpen(params) => {
-                    self.sharpen_pipeline
-                        .process(&self.ctx, current_tex, *params)?
+                    self.sharpen2_pipeline
+                        .process(&self.ctx, current_tex, *params)
                 }
                 AdjustmentOp::Grain(params) => {
                     self.grain_pipeline.process(&self.ctx, current_tex, *params)?
@@ -179,6 +238,7 @@ impl Renderer {
 
             owned_textures.push(output);
             current_tex = owned_textures.last().unwrap();
+            i += 1;
         }
 
         let final_tex: &wgpu::Texture = if ops.is_empty() {
@@ -269,41 +329,30 @@ impl Renderer {
             let layer_result: wgpu::Texture = match &entry.layer {
                 Layer::Image { texture_id, .. } => {
                     if let Some((pixels, w, h)) = image_sources.get(texture_id) {
+                        // Use texture_cache to avoid re-uploading unchanged images.
+                        // texture_cache.get_or_upload requires &mut self, so we must use a
+                        // local cache via device/queue directly here.
                         // Upload image as TEXTURE_BINDING texture.
-                        let img_tex = device.create_texture(&TextureDescriptor {
-                            label: Some("image layer texture"),
-                            size: Extent3d {
-                                width: *w,
-                                height: *h,
-                                depth_or_array_layers: 1,
+                        use wgpu::util::DeviceExt;
+                        device.create_texture_with_data(
+                            queue,
+                            &TextureDescriptor {
+                                label: Some("image layer texture"),
+                                size: Extent3d {
+                                    width: *w,
+                                    height: *h,
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: TextureDimension::D2,
+                                format: TextureFormat::Rgba8Unorm,
+                                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                                view_formats: &[],
                             },
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: TextureDimension::D2,
-                            format: TextureFormat::Rgba8Unorm,
-                            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                            view_formats: &[],
-                        });
-                        queue.write_texture(
-                            ImageCopyTexture {
-                                texture: &img_tex,
-                                mip_level: 0,
-                                origin: Origin3d::ZERO,
-                                aspect: TextureAspect::All,
-                            },
+                            wgpu::util::TextureDataOrder::LayerMajor,
                             pixels,
-                            ImageDataLayout {
-                                offset: 0,
-                                bytes_per_row: Some(*w * 4),
-                                rows_per_image: Some(*h),
-                            },
-                            Extent3d {
-                                width: *w,
-                                height: *h,
-                                depth_or_array_layers: 1,
-                            },
-                        );
-                        img_tex
+                        )
                     } else {
                         // No source image: skip this layer.
                         continue;
@@ -318,60 +367,45 @@ impl Renderer {
                         .render_with_ops(&accum_bytes, canvas_width, canvas_height, ops)
                         .await?;
                     // Upload result back as a texture.
-                    let adj_tex = device.create_texture(&TextureDescriptor {
-                        label: Some("adjustment layer result"),
-                        size: Extent3d {
-                            width: canvas_width,
-                            height: canvas_height,
-                            depth_or_array_layers: 1,
+                    use wgpu::util::DeviceExt;
+                    device.create_texture_with_data(
+                        queue,
+                        &TextureDescriptor {
+                            label: Some("adjustment layer result"),
+                            size: Extent3d {
+                                width: canvas_width,
+                                height: canvas_height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format: TextureFormat::Rgba8Unorm,
+                            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                            view_formats: &[],
                         },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: TextureFormat::Rgba8Unorm,
-                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    });
-                    queue.write_texture(
-                        ImageCopyTexture {
-                            texture: &adj_tex,
-                            mip_level: 0,
-                            origin: Origin3d::ZERO,
-                            aspect: TextureAspect::All,
-                        },
+                        wgpu::util::TextureDataOrder::LayerMajor,
                         &adj_tex_bytes,
-                        ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(canvas_width * 4),
-                            rows_per_image: Some(canvas_height),
-                        },
-                        Extent3d {
-                            width: canvas_width,
-                            height: canvas_height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    adj_tex
+                    )
                 }
             };
 
             // 2b. Optional mask texture.
-            let mask_tex_opt: Option<wgpu::Texture> =
-                if let Some(mask_id) = entry.mask {
-                    if let Some(mask_data) = stack.masks.get(&mask_id) {
-                        Some(upload_mask_texture(
-                            device,
-                            queue,
-                            &mask_data.pixels,
-                            mask_data.width,
-                            mask_data.height,
-                        ))
-                    } else {
-                        None
-                    }
+            let mask_tex_opt: Option<wgpu::Texture> = if let Some(mask_id) = entry.mask {
+                if let Some(mask_data) = stack.masks.get(&mask_id) {
+                    Some(upload_mask_texture(
+                        device,
+                        queue,
+                        &mask_data.pixels,
+                        mask_data.width,
+                        mask_data.height,
+                    ))
                 } else {
                     None
-                };
+                }
+            } else {
+                None
+            };
 
             // 2c. Build composite params.
             let has_mask = if mask_tex_opt.is_some() { 1u32 } else { 0u32 };
@@ -396,7 +430,8 @@ impl Renderer {
 
         // 3. Read back the final accumulator.
         let final_accum = accum_owned.last().unwrap();
-        self.readback_texture(final_accum, canvas_width, canvas_height).await
+        self.readback_texture(final_accum, canvas_width, canvas_height)
+            .await
     }
 
     /// Stamp a brush onto a mask pixel buffer in-place.
