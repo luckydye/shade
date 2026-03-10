@@ -1,41 +1,76 @@
 use anyhow::Result;
-use shade_core::ToneParams;
+use shade_core::{AdjustmentOp, ToneParams};
 use wgpu::{
     BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture,
     ImageDataLayout, MapMode, Origin3d, TextureAspect, TextureDescriptor, TextureDimension,
     TextureFormat, TextureUsages,
 };
 
-use crate::{GpuContext, TonePipeline};
+use crate::{
+    pipelines::{ColorPipeline, CurvesPipeline, GrainPipeline, SharpenPipeline, VignettePipeline},
+    GpuContext, TonePipeline,
+};
 
-/// High-level renderer: owns the GPU context and tone pipeline.
+/// High-level renderer: owns the GPU context and all compute pipelines.
 pub struct Renderer {
     pub ctx: GpuContext,
     pub tone_pipeline: TonePipeline,
+    pub curves_pipeline: CurvesPipeline,
+    pub color_pipeline: ColorPipeline,
+    pub vignette_pipeline: VignettePipeline,
+    pub sharpen_pipeline: SharpenPipeline,
+    pub grain_pipeline: GrainPipeline,
 }
 
 impl Renderer {
-    /// Create a new headless renderer, initialising the GPU context and compiling shaders.
+    /// Create a new headless renderer, initialising the GPU context and compiling all shaders.
     pub async fn new() -> Result<Self> {
         let ctx = GpuContext::new_headless().await?;
         let tone_pipeline = TonePipeline::new(&ctx)?;
-        Ok(Self { ctx, tone_pipeline })
+        let curves_pipeline = CurvesPipeline::new(&ctx)?;
+        let color_pipeline = ColorPipeline::new(&ctx)?;
+        let vignette_pipeline = VignettePipeline::new(&ctx)?;
+        let sharpen_pipeline = SharpenPipeline::new(&ctx)?;
+        let grain_pipeline = GrainPipeline::new(&ctx)?;
+        Ok(Self {
+            ctx,
+            tone_pipeline,
+            curves_pipeline,
+            color_pipeline,
+            vignette_pipeline,
+            sharpen_pipeline,
+            grain_pipeline,
+        })
     }
 
     /// Apply tone adjustments to raw RGBA8 pixels and return the processed RGBA8 result.
     ///
-    /// # Arguments
-    /// * `input_data` — raw RGBA8 bytes (`width * height * 4`)
-    /// * `width`, `height` — image dimensions
-    /// * `params` — tone adjustment parameters
-    ///
-    /// Returns raw RGBA8 bytes of the same size.
+    /// Kept for backwards compatibility — wraps `render_with_ops`.
     pub async fn render(
         &self,
         input_data: &[u8],
         width: u32,
         height: u32,
         params: ToneParams,
+    ) -> Result<Vec<u8>> {
+        let op = AdjustmentOp::Tone {
+            exposure: params.exposure,
+            contrast: params.contrast,
+            blacks: params.blacks,
+            highlights: params.highlights,
+            shadows: params.shadows,
+        };
+        self.render_with_ops(input_data, width, height, &[op]).await
+    }
+
+    /// Apply a sequence of `AdjustmentOp`s to raw RGBA8 pixels, ping-ponging between textures,
+    /// and return the final RGBA8 result.
+    pub async fn render_with_ops(
+        &self,
+        input_data: &[u8],
+        width: u32,
+        height: u32,
+        ops: &[AdjustmentOp],
     ) -> Result<Vec<u8>> {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
@@ -77,13 +112,84 @@ impl Renderer {
             },
         );
 
-        // ── 2. Run tone pipeline ─────────────────────────────────────────────
+        // ── 2. Apply each op sequentially, ping-ponging textures ─────────────
 
-        let output_tex = self.tone_pipeline.process(&self.ctx, &input_tex, params)?;
+        // We start with a reference to the uploaded input. Each op produces a new Texture;
+        // we keep them alive in a Vec so they aren't dropped while still needed.
+        let mut current_tex: &wgpu::Texture = &input_tex;
+        let mut owned_textures: Vec<wgpu::Texture> = Vec::new();
 
-        // ── 3. Read back the output texture to CPU ────────────────────────────
+        for op in ops {
+            let output = match op {
+                AdjustmentOp::Tone {
+                    exposure,
+                    contrast,
+                    blacks,
+                    highlights,
+                    shadows,
+                } => {
+                    let params = ToneParams {
+                        exposure: *exposure,
+                        contrast: *contrast,
+                        blacks: *blacks,
+                        highlights: *highlights,
+                        shadows: *shadows,
+                    };
+                    self.tone_pipeline.process(&self.ctx, current_tex, params)?
+                }
+                AdjustmentOp::Curves {
+                    lut_r,
+                    lut_g,
+                    lut_b,
+                    lut_master,
+                    per_channel,
+                } => self.curves_pipeline.process(
+                    &self.ctx,
+                    current_tex,
+                    lut_r,
+                    lut_g,
+                    lut_b,
+                    lut_master,
+                    *per_channel,
+                )?,
+                AdjustmentOp::Color(params) => {
+                    self.color_pipeline.process(&self.ctx, current_tex, *params)?
+                }
+                AdjustmentOp::Vignette(params) => {
+                    self.vignette_pipeline
+                        .process(&self.ctx, current_tex, *params)?
+                }
+                AdjustmentOp::Sharpen(params) => {
+                    self.sharpen_pipeline
+                        .process(&self.ctx, current_tex, *params)?
+                }
+                AdjustmentOp::Grain(params) => {
+                    self.grain_pipeline.process(&self.ctx, current_tex, *params)?
+                }
+            };
 
-        // wgpu requires copy row stride to be aligned to COPY_BYTES_PER_ROW_ALIGNMENT (256).
+            owned_textures.push(output);
+            current_tex = owned_textures.last().unwrap();
+        }
+
+        // If no ops were applied, we need to handle the "passthrough" case by keeping
+        // input_tex as current. The final texture must be COPY_SRC.
+        // All pipeline output textures already have COPY_SRC. But input_tex does not.
+        // If ops is empty, we still need to copy. Create a trivial tone op for that case.
+        let final_tex: &wgpu::Texture = if ops.is_empty() {
+            let passthrough = self.tone_pipeline.process(
+                &self.ctx,
+                &input_tex,
+                ToneParams::default(),
+            )?;
+            owned_textures.push(passthrough);
+            owned_textures.last().unwrap()
+        } else {
+            current_tex
+        };
+
+        // ── 3. Read back the final texture to CPU ────────────────────────────
+
         let unpadded_bytes_per_row = width * 4;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
@@ -103,7 +209,7 @@ impl Renderer {
 
         encoder.copy_texture_to_buffer(
             ImageCopyTexture {
-                texture: &output_tex,
+                texture: final_tex,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
@@ -132,15 +238,13 @@ impl Renderer {
             let _ = tx.send(result);
         });
 
-        // Poll the device until the mapping is complete.
         device.poll(wgpu::Maintain::Wait);
         rx.await??;
 
         let mapped = buffer_slice.get_mapped_range();
 
         // Strip padding: collect only the unpadded bytes per row.
-        let mut result =
-            Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+        let mut result = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
         for row in 0..height {
             let row_start = (row * padded_bytes_per_row) as usize;
             let row_end = row_start + unpadded_bytes_per_row as usize;
