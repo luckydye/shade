@@ -60,6 +60,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let blended = apply_blend(base.rgb, layer.rgb, params.blend_mode);
     let alpha = mask_val * params.opacity;
-    let result = vec4<f32>(mix(base.rgb, blended, alpha), base.a);
+    let out_alpha = mix(base.a, layer.a, alpha);
+    let result = vec4<f32>(mix(base.rgb, blended, alpha), out_alpha);
     textureStore(output_tex, p, clamp(result, vec4<f32>(0.0), vec4<f32>(1.0)));
 }
