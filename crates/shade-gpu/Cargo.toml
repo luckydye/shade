@@ -1,0 +1,12 @@
+[package]
+name = "shade-gpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+shade-core = { path = "../shade-core" }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }

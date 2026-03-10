@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/shade-core", "crates/shade-gpu", "crates/shade-io", "crates/shade-cli"]
+resolver = "2"
+
+[workspace.dependencies]
+wgpu = { version = "23", features = ["wgsl"] }
+image = { version = "0.25", features = ["jpeg", "png", "tiff", "webp"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"

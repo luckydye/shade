@@ -1,0 +1,18 @@
+[package]
+name = "shade-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "shade-cli"
+path = "src/main.rs"
+
+[dependencies]
+shade-core = { path = "../shade-core" }
+shade-gpu = { path = "../shade-gpu" }
+shade-io = { path = "../shade-io" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
