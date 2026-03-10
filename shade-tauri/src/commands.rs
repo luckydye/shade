@@ -63,6 +63,33 @@ pub async fn open_image(
     })
 }
 
+/// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
+/// This avoids needing a file path — the JS side decodes the image via
+/// `createImageBitmap` and passes the pixel buffer directly.
+#[tauri::command]
+pub async fn open_image_bytes(
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<LayerInfoResponse, String> {
+    if pixels.len() != (width * height * 4) as usize {
+        return Err(format!("pixel buffer size mismatch: expected {}, got {}", width * height * 4, pixels.len()));
+    }
+    let mut st = state.lock().unwrap();
+    let tid = st.next_texture_id;
+    st.next_texture_id += 1;
+    st.image_sources.insert(tid, (pixels, width, height));
+    st.canvas_width = width;
+    st.canvas_height = height;
+    st.stack = shade_core::LayerStack::new();
+    st.stack.add_image_layer(tid, width, height);
+    st.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+        exposure: 0.0, contrast: 0.0, blacks: 0.0, highlights: 0.0, shadows: 0.0,
+    }]);
+    Ok(LayerInfoResponse { layer_count: st.stack.layers.len(), canvas_width: width, canvas_height: height })
+}
+
 #[tauri::command]
 pub async fn export_image(
     _path: String,

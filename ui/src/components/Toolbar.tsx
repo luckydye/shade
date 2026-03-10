@@ -1,42 +1,39 @@
 import { Component } from "solid-js";
-import { openImage } from "../store/editor";
+import { openImageFile } from "../store/editor";
+
+const ACCEPTED = "image/jpeg,image/png,image/tiff,image/webp,image/avif";
 
 const Toolbar: Component = () => {
-  const handleOpen = async () => {
-    // In a real Tauri app we'd use the dialog plugin.
-    // For now, use a simple prompt for scaffolding.
-    const path = prompt("Enter image path:");
-    if (path) await openImage(path);
-  };
+  let fileInputRef: HTMLInputElement | undefined;
 
-  const handleExport = async () => {
-    const path = prompt("Enter export path (e.g. output.png):");
-    if (!path) return;
-    // invoke("export_image", { path }) would go here
+  const handleFileChange = async (e: Event) => {
+    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    if (file) await openImageFile(file);
+    // Reset so the same file can be re-selected
+    if (fileInputRef) fileInputRef.value = "";
   };
 
   return (
     <div class="h-10 bg-toolbar border-b border-gray-700 flex items-center px-3 gap-2">
       <span class="text-white font-semibold text-sm mr-4">Shade</span>
+
+      {/* Hidden native file picker */}
+      <input ref={fileInputRef} type="file" accept={ACCEPTED} class="hidden" onChange={handleFileChange} />
+
       <button
-        onClick={handleOpen}
+        onClick={() => fileInputRef?.click()}
         class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors"
       >
         Open
       </button>
-      <button
-        onClick={handleExport}
-        class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors"
-      >
+      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">
         Export
       </button>
+
       <div class="flex-1" />
-      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">
-        Undo
-      </button>
-      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">
-        Redo
-      </button>
+
+      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">Undo</button>
+      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">Redo</button>
     </div>
   );
 };

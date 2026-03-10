@@ -6,6 +6,7 @@ pub fn run() {
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .invoke_handler(tauri::generate_handler![
             commands::open_image,
+            commands::open_image_bytes,
             commands::export_image,
             commands::apply_edit,
             commands::add_layer,

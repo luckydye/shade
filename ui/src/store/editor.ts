@@ -39,6 +39,17 @@ export async function openImage(path: string) {
   }
 }
 
+export async function openImageFile(file: File) {
+  setState("isLoading", true);
+  try {
+    const info = await bridge.openImageFile(file);
+    setState({ canvasWidth: info.canvas_width, canvasHeight: info.canvas_height });
+    await refreshLayerStack();
+  } finally {
+    setState("isLoading", false);
+  }
+}
+
 export async function refreshLayerStack() {
   const info = await bridge.getLayerStack();
   setState({

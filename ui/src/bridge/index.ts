@@ -69,20 +69,36 @@ export async function openImage(path: string): Promise<{ layer_count: number; ca
     const inv = await getTauriInvoke();
     return inv("open_image", { path }) as Promise<any>;
   }
-  // Web: fetch the file, decode to RGBA8, send to worker
   await ensureWorkerReady();
   const response = await fetch(path);
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
-  const offscreen = new OffscreenCanvas(bitmap.width, bitmap.height);
+  return _decodeAndSend(await response.blob());
+}
+
+/** Open an image from a File object — works for both file picker and drag-and-drop. */
+export async function openImageFile(file: File): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
+  return _decodeAndSend(file);
+}
+
+async function _decodeAndSend(source: Blob | File): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
+  const bitmap = await createImageBitmap(source);
+  const { width, height } = bitmap;
+  const offscreen = new OffscreenCanvas(width, height);
   const ctx2d = offscreen.getContext("2d")!;
   ctx2d.drawImage(bitmap, 0, 0);
-  const imageData = ctx2d.getImageData(0, 0, bitmap.width, bitmap.height);
+  bitmap.close();
+  const imageData = ctx2d.getImageData(0, 0, width, height);
+
+  if (IS_TAURI) {
+    const inv = await getTauriInvoke();
+    return inv("open_image_bytes", { pixels: Array.from(imageData.data), width, height }) as Promise<any>;
+  }
+
+  await ensureWorkerReady();
   const result = await workerCall<any>(
-    { type: "load_image", pixels: imageData.data, width: bitmap.width, height: bitmap.height },
+    { type: "load_image", pixels: imageData.data, width, height },
     "image_loaded"
   );
-  return { layer_count: result.layerCount, canvas_width: bitmap.width, canvas_height: bitmap.height };
+  return { layer_count: result.layerCount, canvas_width: width, canvas_height: height };
 }
 
 export async function getLayerStack(): Promise<StackInfo> {
