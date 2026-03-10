@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
+import terminal from "vite-plugin-terminal";
 
 export default defineConfig({
-  plugins: [solid(), tailwindcss()],
+  plugins: [solid(), tailwindcss(), terminal({ output: ['terminal', 'console'] })],
   clearScreen: false,
   server: {
     port: 5173,

@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.shade.editor",
   "build": {
-    "beforeDevCommand": "cd ../../.. && bun --cwd ui dev",
+    "beforeDevCommand": "task ui:dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd ../../.. && bun --cwd ui run build",
-    "frontendDist": "../../../ui/dist"
+    "beforeBuildCommand": "task ui:build",
+    "frontendDist": "../../ui/dist"
   },
   "app": {
     "windows": [

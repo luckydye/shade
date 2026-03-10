@@ -1,0 +1,17 @@
+version: "3"
+
+tasks:
+  ui:dev:
+    desc: Start the UI dev server
+    dir: ui
+    cmd: bun dev
+
+  ui:build:
+    desc: Build the UI for production
+    dir: ui
+    cmd: bun run build
+
+  dev:
+    desc: Start the Tauri dev environment
+    dir: crates/shade-tauri
+    cmd: cargo tauri dev
