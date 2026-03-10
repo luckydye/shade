@@ -3,15 +3,23 @@
  * falls back to WASM worker when running in the browser.
  */
 
-const IS_TAURI = typeof (window as any).__TAURI__ !== "undefined";
-
 // ── Tauri path ──────────────────────────────────────────────────────────────
-let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
+type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+type IsTauriFn = () => boolean;
+let _invoke: InvokeFn | null = null;
+let _isTauri: IsTauriFn | null = null;
+
+async function isTauriRuntime() {
+  if (_isTauri) return _isTauri();
+  const { isTauri } = await import("@tauri-apps/api/core");
+  _isTauri = isTauri as IsTauriFn;
+  return _isTauri();
+}
 
 async function getTauriInvoke() {
   if (!_invoke) {
     const { invoke } = await import("@tauri-apps/api/core");
-    _invoke = invoke as typeof _invoke;
+    _invoke = invoke as unknown as InvokeFn;
   }
   return _invoke!;
 }
@@ -64,8 +72,21 @@ export interface StackInfo {
   generation: number;
 }
 
+export async function renderPreview(): Promise<string> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("render_preview") as Promise<string>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ dataUrl: string }>(
+    { type: "render_preview" },
+    "preview_rendered"
+  );
+  return result.dataUrl;
+}
+
 export async function openImage(path: string): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("open_image", { path }) as Promise<any>;
   }
@@ -88,7 +109,7 @@ async function _decodeAndSend(source: Blob | File): Promise<{ layer_count: numbe
   bitmap.close();
   const imageData = ctx2d.getImageData(0, 0, width, height);
 
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("open_image_bytes", { pixels: Array.from(imageData.data), width, height }) as Promise<any>;
   }
@@ -102,7 +123,7 @@ async function _decodeAndSend(source: Blob | File): Promise<{ layer_count: numbe
 }
 
 export async function getLayerStack(): Promise<StackInfo> {
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("get_layer_stack") as Promise<StackInfo>;
   }
@@ -115,7 +136,7 @@ export async function getLayerStack(): Promise<StackInfo> {
 }
 
 export async function applyEdit(params: Record<string, unknown>): Promise<void> {
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("apply_edit", { params });
     return;
@@ -133,7 +154,7 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
 }
 
 export async function setLayerVisible(idx: number, visible: boolean): Promise<void> {
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("set_layer_visible", { params: { layer_idx: idx, visible } });
     return;
@@ -143,7 +164,7 @@ export async function setLayerVisible(idx: number, visible: boolean): Promise<vo
 }
 
 export async function setLayerOpacity(idx: number, opacity: number): Promise<void> {
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("set_layer_opacity", { params: { layer_idx: idx, opacity } });
     return;
@@ -153,7 +174,7 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
 }
 
 export async function addLayer(kind: string): Promise<number> {
-  if (IS_TAURI) {
+  if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("add_layer", { kind }) as Promise<number>;
   }

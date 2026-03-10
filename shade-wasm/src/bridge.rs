@@ -112,3 +112,8 @@ pub fn get_stack_json() -> String {
         }).to_string()
     })
 }
+
+#[wasm_bindgen]
+pub fn render_preview() -> String {
+    ENGINE.with(|e| e.borrow().render_preview_data_url())
+}

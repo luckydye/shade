@@ -27,6 +27,7 @@ impl WasmEngine {
     pub fn load_image_data(&mut self, pixels: Vec<u8>, width: u32, height: u32) -> u64 {
         let id = self.next_texture_id;
         self.next_texture_id += 1;
+        self.stack = LayerStack::new();
         self.image_sources.insert(id, (pixels, width, height));
         self.canvas_width = width;
         self.canvas_height = height;
@@ -76,5 +77,26 @@ impl WasmEngine {
 
     pub fn layer_count(&self) -> usize {
         self.stack.layers.len()
+    }
+
+    pub fn render_preview_data_url(&self) -> String {
+        let Some((pixels, width, height)) = self.image_sources.values().next() else {
+            return String::new();
+        };
+
+        let Some(image) = image::RgbaImage::from_raw(*width, *height, pixels.clone()) else {
+            return String::new();
+        };
+
+        let mut buf = Vec::new();
+        if image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .is_err()
+        {
+            return String::new();
+        }
+
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        format!("data:image/png;base64,{}", STANDARD.encode(&buf))
     }
 }

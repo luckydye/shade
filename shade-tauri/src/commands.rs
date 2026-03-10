@@ -44,6 +44,7 @@ pub async fn open_image(
     let mut st = state.lock().unwrap();
     let tid = st.next_texture_id;
     st.next_texture_id += 1;
+    st.stack = shade_core::LayerStack::new();
     st.image_sources.insert(tid, (pixels, w, h));
     st.canvas_width = w;
     st.canvas_height = h;
@@ -90,6 +91,37 @@ pub async fn open_image_bytes(
     Ok(LayerInfoResponse { layer_count: st.stack.layers.len(), canvas_width: width, canvas_height: height })
 }
 
+/// Run the full GPU render pipeline and return the result as a PNG data URL.
+#[tauri::command]
+pub async fn render_preview(
+    renderer: tauri::State<'_, crate::RendererState>,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<String, String> {
+    // Snapshot state without holding the lock during GPU work.
+    let (stack, sources, w, h) = {
+        let st = state.lock().unwrap();
+        if st.canvas_width == 0 { return Ok(String::new()); }
+        (st.stack.clone(), st.image_sources.clone(), st.canvas_width, st.canvas_height)
+    };
+
+    let guard = renderer.0.lock().await;
+    let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
+
+    let pixels = r.render_stack(&stack, &sources, w, h)
+        .await.map_err(|e| e.to_string())?;
+
+    // Encode to PNG and return as a data URL.
+    let img = image::RgbaImage::from_raw(w, h, pixels)
+        .ok_or("invalid pixel buffer dimensions")?;
+    let mut buf = Vec::new();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
+
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&buf)))
+}
+
 #[tauri::command]
 pub async fn export_image(
     _path: String,
@@ -130,33 +162,67 @@ pub async fn apply_edit(
     let layer = &mut st.stack.layers[params.layer_idx];
     match &mut layer.layer {
         shade_core::Layer::Adjustment { ops } => {
-            ops.clear();
             match params.op.as_str() {
-                "tone" => ops.push(AdjustmentOp::Tone {
-                    exposure: params.exposure.unwrap_or(0.0),
-                    contrast: params.contrast.unwrap_or(0.0),
-                    blacks: params.blacks.unwrap_or(0.0),
-                    highlights: params.highlights.unwrap_or(0.0),
-                    shadows: params.shadows.unwrap_or(0.0),
-                }),
-                "color" => ops.push(AdjustmentOp::Color(ColorParams {
-                    saturation: params.saturation.unwrap_or(1.0),
-                    vibrancy: params.vibrancy.unwrap_or(0.0),
-                    temperature: params.temperature.unwrap_or(0.0),
-                    tint: params.tint.unwrap_or(0.0),
-                })),
-                "vignette" => ops.push(AdjustmentOp::Vignette(VignetteParams {
-                    amount: params.vignette_amount.unwrap_or(0.0),
-                    ..Default::default()
-                })),
-                "sharpen" => ops.push(AdjustmentOp::Sharpen(SharpenParams {
-                    amount: params.sharpen_amount.unwrap_or(0.0),
-                    threshold: 0.1,
-                })),
-                "grain" => ops.push(AdjustmentOp::Grain(GrainParams {
-                    amount: params.grain_amount.unwrap_or(0.0),
-                    ..Default::default()
-                })),
+                "tone" => {
+                    let next = AdjustmentOp::Tone {
+                        exposure: params.exposure.unwrap_or(0.0),
+                        contrast: params.contrast.unwrap_or(0.0),
+                        blacks: params.blacks.unwrap_or(0.0),
+                        highlights: params.highlights.unwrap_or(0.0),
+                        shadows: params.shadows.unwrap_or(0.0),
+                    };
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Tone { .. })) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
+                "color" => {
+                    let next = AdjustmentOp::Color(ColorParams {
+                        saturation: params.saturation.unwrap_or(1.0),
+                        vibrancy: params.vibrancy.unwrap_or(0.0),
+                        temperature: params.temperature.unwrap_or(0.0),
+                        tint: params.tint.unwrap_or(0.0),
+                    });
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Color(_))) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
+                "vignette" => {
+                    let next = AdjustmentOp::Vignette(VignetteParams {
+                        amount: params.vignette_amount.unwrap_or(0.0),
+                        ..Default::default()
+                    });
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Vignette(_))) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
+                "sharpen" => {
+                    let next = AdjustmentOp::Sharpen(SharpenParams {
+                        amount: params.sharpen_amount.unwrap_or(0.0),
+                        threshold: 0.1,
+                    });
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Sharpen(_))) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
+                "grain" => {
+                    let next = AdjustmentOp::Grain(GrainParams {
+                        amount: params.grain_amount.unwrap_or(0.0),
+                        ..Default::default()
+                    });
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Grain(_))) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
                 _ => return Err(format!("unknown op: {}", params.op)),
             }
             st.stack.generation += 1;

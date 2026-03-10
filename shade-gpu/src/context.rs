@@ -35,16 +35,17 @@ impl GpuContext {
             adapter.get_info().backend
         );
 
-        // We need TEXTURE_BINDING_ARRAY is NOT required; what we need is the
-        // ability to use rgba8unorm as a storage texture. This is a core wgpu
-        // feature on all backends that support compute.
+        // Enable backend-specific texture format features when available so
+        // native backends can use read-write storage textures for mask stamping.
+        let optional_features = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
         let required_features = wgpu::Features::empty();
+        let enabled_features = required_features | (adapter.features() & optional_features);
 
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("shade-gpu device"),
-                    required_features,
+                    required_features: enabled_features,
                     required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::default(),
                 },

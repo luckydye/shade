@@ -1,21 +1,21 @@
-import { Component, createSignal, onMount } from "solid-js";
-import { openImageFile, state } from "../store/editor";
+import { Component, createEffect, createSignal } from "solid-js";
+import { openImageFile, previewBitmap, sourceBitmap, state } from "../store/editor";
 
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
 
-  onMount(() => {
-    if (!canvasRef) return;
+  // Redraw whenever a new source image arrives.
+  createEffect(() => {
+    const bitmap = previewBitmap() ?? sourceBitmap();
+    if (!bitmap || !canvasRef) return;
+
+    canvasRef.width = bitmap.width;
+    canvasRef.height = bitmap.height;
+
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
-    const size = 16;
-    for (let y = 0; y < canvasRef.height; y += size) {
-      for (let x = 0; x < canvasRef.width; x += size) {
-        ctx.fillStyle = ((x / size + y / size) % 2 === 0) ? "#2a2a2a" : "#222";
-        ctx.fillRect(x, y, size, size);
-      }
-    }
+    ctx.drawImage(bitmap, 0, 0);
   });
 
   const onDragOver = (e: DragEvent) => {
@@ -51,8 +51,7 @@ const Canvas: Component = () => {
         ref={canvasRef}
         width="800"
         height="600"
-        class="border border-gray-700 shadow-lg"
-        style="image-rendering: pixelated;"
+        class="max-w-full max-h-full border border-gray-700 shadow-lg object-contain"
       />
 
       {/* Drop overlay */}

@@ -30,7 +30,7 @@ pub struct Renderer {
     pub sharpen_pipeline: SharpenPipeline,
     pub grain_pipeline: GrainPipeline,
     pub composite_pipeline: CompositePipeline,
-    pub brush_stamp_pipeline: BrushStampPipeline,
+    pub brush_stamp_pipeline: Option<BrushStampPipeline>,
     pub basic_adjust_pipeline: BasicAdjustPipeline,
     pub sharpen2_pipeline: SharpenTwoPassPipeline,
     pub texture_cache: TextureCache,
@@ -48,7 +48,15 @@ impl Renderer {
         let sharpen_pipeline = SharpenPipeline::new(&ctx)?;
         let grain_pipeline = GrainPipeline::new(&ctx)?;
         let composite_pipeline = CompositePipeline::new(&ctx)?;
-        let brush_stamp_pipeline = BrushStampPipeline::new(&ctx)?;
+        let brush_stamp_pipeline = if ctx
+            .device
+            .features()
+            .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+        {
+            Some(BrushStampPipeline::new(&ctx)?)
+        } else {
+            None
+        };
         let basic_adjust_pipeline = BasicAdjustPipeline::new(&ctx);
         let sharpen2_pipeline = SharpenTwoPassPipeline::new(&ctx);
         let texture_cache = TextureCache::new();
@@ -451,6 +459,10 @@ impl Renderer {
         pressure: f32,
         erase: bool,
     ) -> Result<()> {
+        let brush_stamp_pipeline = self
+            .brush_stamp_pipeline
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("brush stamping is unavailable on this GPU backend"))?;
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
 
@@ -468,7 +480,7 @@ impl Renderer {
             _pad1: 0.0,
         };
 
-        self.brush_stamp_pipeline.stamp(&self.ctx, &mask_tex, params)?;
+        brush_stamp_pipeline.stamp(&self.ctx, &mask_tex, params)?;
 
         // Read back — but the texture is Rgba8Unorm (4 bytes per pixel); extract R channel.
         let rgba_bytes = self.readback_texture(&mask_tex, width, height).await?;

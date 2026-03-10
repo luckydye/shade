@@ -71,6 +71,13 @@ self.onmessage = async (e: MessageEvent) => {
       break;
     }
 
+    case "render_preview": {
+      if (!wasm) return;
+      const dataUrl = wasm.render_preview();
+      self.postMessage({ type: "preview_rendered", dataUrl });
+      break;
+    }
+
     default:
       self.postMessage({ type: "error", message: `unknown message type: ${msg.type}` });
   }

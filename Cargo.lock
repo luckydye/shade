@@ -4097,7 +4097,9 @@ name = "shade-tauri"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "env_logger",
+ "image",
  "log",
  "serde",
  "serde_json",
@@ -4114,8 +4116,10 @@ name = "shade-wasm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "console_error_panic_hook",
  "getrandom 0.2.17",
+ "image",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
