@@ -25,6 +25,7 @@ export interface LayerInfo {
   visible: boolean;
   opacity: number;
   blend_mode?: string;
+  adjustments?: bridge.AdjustmentValues | null;
 }
 
 export interface EditorState {
@@ -103,6 +104,7 @@ export async function setLayerOpacity(idx: number, opacity: number) {
 
 export async function applyEdit(params: Record<string, unknown>) {
   await bridge.applyEdit(params);
+  await refreshLayerStack();
   await refreshPreview();
 }
 

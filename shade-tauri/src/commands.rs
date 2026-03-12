@@ -308,6 +308,47 @@ pub struct LayerEntryInfo {
     pub visible: bool,
     pub opacity: f32,
     pub blend_mode: String,
+    pub adjustments: Option<AdjustmentValues>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct AdjustmentValues {
+    pub tone: Option<ToneValues>,
+    pub color: Option<ColorValues>,
+    pub vignette: Option<VignetteValues>,
+    pub sharpen: Option<SharpenValues>,
+    pub grain: Option<GrainValues>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ToneValues {
+    pub exposure: f32,
+    pub contrast: f32,
+    pub blacks: f32,
+    pub highlights: f32,
+    pub shadows: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ColorValues {
+    pub saturation: f32,
+    pub temperature: f32,
+    pub tint: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VignetteValues {
+    pub amount: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SharpenValues {
+    pub amount: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GrainValues {
+    pub amount: f32,
 }
 
 #[tauri::command]
@@ -327,6 +368,55 @@ pub async fn get_layer_stack(
             visible: l.visible,
             opacity: l.opacity,
             blend_mode: format!("{:?}", l.blend_mode),
+            adjustments: match &l.layer {
+                shade_core::Layer::Image { .. } => None,
+                shade_core::Layer::Adjustment { ops } => {
+                    let mut adjustments = AdjustmentValues::default();
+                    for op in ops {
+                        match op {
+                            AdjustmentOp::Tone {
+                                exposure,
+                                contrast,
+                                blacks,
+                                highlights,
+                                shadows,
+                            } => {
+                                adjustments.tone = Some(ToneValues {
+                                    exposure: *exposure,
+                                    contrast: *contrast,
+                                    blacks: *blacks,
+                                    highlights: *highlights,
+                                    shadows: *shadows,
+                                });
+                            }
+                            AdjustmentOp::Color(params) => {
+                                adjustments.color = Some(ColorValues {
+                                    saturation: params.saturation,
+                                    temperature: params.temperature,
+                                    tint: params.tint,
+                                });
+                            }
+                            AdjustmentOp::Vignette(params) => {
+                                adjustments.vignette = Some(VignetteValues {
+                                    amount: params.amount,
+                                });
+                            }
+                            AdjustmentOp::Sharpen(params) => {
+                                adjustments.sharpen = Some(SharpenValues {
+                                    amount: params.amount,
+                                });
+                            }
+                            AdjustmentOp::Grain(params) => {
+                                adjustments.grain = Some(GrainValues {
+                                    amount: params.amount,
+                                });
+                            }
+                            AdjustmentOp::Curves { .. } => {}
+                        }
+                    }
+                    Some(adjustments)
+                }
+            },
         })
         .collect();
     Ok(LayerStackInfo {

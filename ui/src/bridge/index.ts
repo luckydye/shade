@@ -66,10 +66,40 @@ async function ensureWorkerReady() {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface StackInfo {
-  layers: Array<{ kind: string; visible: boolean; opacity: number }>;
+  layers: LayerInfo[];
   canvas_width: number;
   canvas_height: number;
   generation: number;
+}
+
+export interface ToneValues {
+  exposure: number;
+  contrast: number;
+  blacks: number;
+  highlights: number;
+  shadows: number;
+}
+
+export interface ColorValues {
+  saturation: number;
+  temperature: number;
+  tint: number;
+}
+
+export interface AdjustmentValues {
+  tone: ToneValues | null;
+  color: ColorValues | null;
+  vignette: { amount: number } | null;
+  sharpen: { amount: number } | null;
+  grain: { amount: number } | null;
+}
+
+export interface LayerInfo {
+  kind: string;
+  visible: boolean;
+  opacity: number;
+  blend_mode?: string;
+  adjustments?: AdjustmentValues | null;
 }
 
 export type PreviewFrame =
