@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(cargo build:*)",
-      "Bash(/root/source/shade/target/debug/shade-cli --help)"
+      "Bash(/root/source/shade/target/debug/shade-cli --help)",
+      "Bash(task --list-all 2>/dev/null | head -20)",
+      "Bash(cargo tauri:*)"
     ]
   }
 }

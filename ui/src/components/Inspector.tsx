@@ -1,7 +1,7 @@
 import { Component, JSX, Show, createEffect, createSignal } from "solid-js";
 import { addLayer, applyEdit, selectLayer, setLayerVisible, state } from "../store/editor";
 
-type MobileTab = "brightness" | "contrast" | "saturation" | "curves" | "grain";
+type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen";
 
 interface SliderProps {
   label: string;
@@ -147,25 +147,26 @@ const ToneIcon = () => (
   </svg>
 );
 
-const tabGlyphs: Record<MobileTab, JSX.Element> = {
-  brightness: <SparkIcon />,
-  contrast: <CircleIcon />,
-  saturation: <DropletIcon />,
+const focusGlyphs: Record<MobileLayerFocus, JSX.Element> = {
+  tone: <SparkIcon />,
   curves: <CurveIcon />,
   grain: <GrainIcon />,
+  vignette: <CircleIcon />,
+  sharpen: <DropletIcon />,
 };
 
-const tabLabels: Record<MobileTab, string> = {
-  brightness: "Brightness",
-  contrast: "Contrast",
-  saturation: "Saturation",
+const focusLabels: Record<MobileLayerFocus, string> = {
+  tone: "Tone",
   curves: "Curves",
   grain: "Grain",
+  vignette: "Vignette",
+  sharpen: "Sharpen",
 };
 
 const Inspector: Component = () => {
-  const [activeTab, setActiveTab] = createSignal<MobileTab>("brightness");
-  let previousSelectedIdx = -1;
+  const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);
+  const [layerFocusTypes, setLayerFocusTypes] = createSignal(new Map<number, MobileLayerFocus>());
+  const [isPickerOpen, setIsPickerOpen] = createSignal(false);
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
   const selectedAdjustmentLayer = () => {
@@ -226,12 +227,19 @@ const Inspector: Component = () => {
 
   const curveSamples = () => CURVE_SAMPLE_INDICES.map((idx) => curves().lut_master[idx]);
 
-  createEffect(() => {
-    const currentIdx = state.selectedLayerIdx;
-    if (currentIdx === previousSelectedIdx) return;
-    previousSelectedIdx = currentIdx;
-    setActiveTab(selectedAdjustmentLayer()?.adjustments?.curves ? "curves" : "brightness");
-  });
+  const adjustmentLayers = () =>
+    state.layers.map((layer, idx) => ({ layer, idx })).filter(({ layer }) => layer.kind === "adjustment");
+
+  const selectedFocus = (): MobileLayerFocus =>
+    layerFocusTypes().get(state.selectedLayerIdx) ?? "tone";
+
+  const handleAddLayer = async (focus: MobileLayerFocus) => {
+    setIsPickerOpen(false);
+    await addLayer("adjustment");
+    const newIdx = state.selectedLayerIdx;
+    setLayerFocusTypes((prev) => new Map(prev).set(newIdx, focus));
+    setIsDrawerOpen(true);
+  };
 
   const renderCurves = () => (
     <div class="py-1">
@@ -298,55 +306,42 @@ const Inspector: Component = () => {
     </div>
   );
 
-  const renderMobileBody = () => {
-    switch (activeTab()) {
-      case "brightness":
+  const renderLayerBody = () => {
+    switch (selectedFocus()) {
+      case "tone":
         return (
-          <Slider
-            label="Brightness"
-            icon={<SparkIcon />}
-            value={tone().exposure}
-            defaultValue={DEFAULT_TONE.exposure}
-            valueLabel={valueLabel(tone().exposure, 40)}
-            min={-3}
-            max={3}
-            onChange={(value) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyTone({ exposure: value });
-            }}
-          />
-        );
-      case "contrast":
-        return (
-          <Slider
-            label="Contrast"
-            icon={<CircleIcon />}
-            value={tone().contrast}
-            defaultValue={DEFAULT_TONE.contrast}
-            valueLabel={valueLabel(tone().contrast)}
-            min={-1}
-            max={1}
-            onChange={(value) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyTone({ contrast: value });
-            }}
-          />
-        );
-      case "saturation":
-        return (
-          <Slider
-            label="Saturation"
-            icon={<DropletIcon />}
-            value={color().saturation}
-            defaultValue={DEFAULT_COLOR.saturation}
-            valueLabel={valueLabel(color().saturation)}
-            min={0}
-            max={2}
-            onChange={(value) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyColor({ saturation: value });
-            }}
-          />
+          <div class="space-y-4">
+            <Slider
+              label="Brightness"
+              icon={<SparkIcon />}
+              value={tone().exposure}
+              defaultValue={DEFAULT_TONE.exposure}
+              valueLabel={valueLabel(tone().exposure, 40)}
+              min={-3}
+              max={3}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ exposure: value }); }}
+            />
+            <Slider
+              label="Contrast"
+              icon={<CircleIcon />}
+              value={tone().contrast}
+              defaultValue={DEFAULT_TONE.contrast}
+              valueLabel={valueLabel(tone().contrast)}
+              min={-1}
+              max={1}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ contrast: value }); }}
+            />
+            <Slider
+              label="Saturation"
+              icon={<DropletIcon />}
+              value={color().saturation}
+              defaultValue={DEFAULT_COLOR.saturation}
+              valueLabel={valueLabel(color().saturation)}
+              min={0}
+              max={2}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyColor({ saturation: value }); }}
+            />
+          </div>
         );
       case "curves":
         return renderCurves();
@@ -366,11 +361,43 @@ const Inspector: Component = () => {
             }}
           />
         );
+      case "vignette":
+        return (
+          <Slider
+            label="Vignette"
+            icon={<CircleIcon />}
+            value={vignette().amount}
+            defaultValue={DEFAULT_VIGNETTE.amount}
+            valueLabel={valueLabel(vignette().amount)}
+            min={0}
+            max={1}
+            onChange={(value) => {
+              selectedAdjustmentLayerOrThrow();
+              void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
+            }}
+          />
+        );
+      case "sharpen":
+        return (
+          <Slider
+            label="Sharpen"
+            icon={<DropletIcon />}
+            value={sharpen().amount}
+            defaultValue={DEFAULT_SHARPEN.amount}
+            valueLabel={valueLabel(sharpen().amount)}
+            min={0}
+            max={1}
+            onChange={(value) => {
+              selectedAdjustmentLayerOrThrow();
+              void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
+            }}
+          />
+        );
     }
   };
 
   return (
-    <aside class="lg:w-[340px] lg:flex-none">
+    <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
         <div class="flex-1 overflow-y-auto px-4 py-4">
           <div class="mb-4">
@@ -548,44 +575,80 @@ const Inspector: Component = () => {
         </div>
       </div>
 
-      <div class="border-t border-white/6 bg-[linear-gradient(180deg,rgba(17,17,17,0.98),rgba(14,14,14,0.98))] px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 shadow-[0_-24px_60px_rgba(0,0,0,0.42)] lg:hidden">
-        <div class="mx-auto mb-4 h-1.5 w-14 rounded-full bg-white/14" />
-        <Show
-          when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-          fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}
+      {/* Mobile: drawer overlay */}
+      <div
+        class={`fixed bottom-0 left-0 right-0 z-30 border-t border-white/30 bg-black/50 transition-transform duration-300 ease-out lg:hidden ${
+          isDrawerOpen() ? "translate-y-0" : "translate-y-[calc(100%-4.5rem)]"
+        }`}
+      >
+        <div
+          class="flex cursor-pointer flex-col items-center px-4 pt-3 pb-1"
+          onClick={() => setIsDrawerOpen((v) => !v)}
         >
-          <div class="px-1">
-            <div class="mb-5 flex items-center justify-between">
-              <div>
-                <div class="text-[30px] font-semibold tracking-[-0.04em] text-white">{tabLabels[activeTab()]}</div>
-                <div class="text-sm text-white/38">Selected layer reacts live as you drag.</div>
+          <div class="mb-2 h-1.5 w-14 rounded-full bg-white/14" />
+        </div>
+
+        <Show when={isDrawerOpen()}>
+          <div class="px-4 pb-4">
+            <Show
+              when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+              fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}
+            >
+              <div class="px-1">
+                <div class="pb-4">{renderLayerBody()}</div>
               </div>
-              <span class="bg-black px-4 py-2 text-sm font-semibold text-white/80">
-                {activeTab() === "brightness" && valueLabel(tone().exposure, 40)}
-                {activeTab() === "contrast" && valueLabel(tone().contrast)}
-                {activeTab() === "saturation" && valueLabel(color().saturation)}
-                {activeTab() === "curves" && "CURVE"}
-                {activeTab() === "grain" && valueLabel(grain().amount)}
-              </span>
-            </div>
-            <div class="pb-6">{renderMobileBody()}</div>
+            </Show>
           </div>
         </Show>
 
-        <div class="mt-2 grid grid-cols-5 gap-1 border-t border-white/6 pt-4">
-          {(["brightness", "contrast", "saturation", "curves", "grain"] as const).map((tab) => (
-            <button
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              class={`flex flex-col items-center gap-1 px-0.5 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
-                activeTab() === tab ? "text-stone-100" : "text-white/34"
-              }`}
-            >
-              <span class="[&>svg]:h-5 [&>svg]:w-5">{tabGlyphs[tab]}</span>
-              <span>{tabLabels[tab]}</span>
-            </button>
-          ))}
+        {/* Layer tabs + add button */}
+        <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3">
+          {adjustmentLayers().map(({ idx }) => {
+            const focus = () => layerFocusTypes().get(idx) ?? "tone";
+            const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
+            return (
+              <button
+                type="button"
+                onClick={() => { selectLayer(idx); setIsDrawerOpen(true); setIsPickerOpen(false); }}
+                class={`flex min-w-[3.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+                  isActive() ? "text-stone-100" : "text-white/34"
+                }`}
+              >
+                <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]}</span>
+                <span>{focusLabels[focus()]}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setIsPickerOpen((v) => !v)}
+            class={`ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+              isPickerOpen() ? "text-stone-100" : "text-white/34"
+            }`}
+          >
+            <span class="flex h-5 w-5 items-center justify-center text-lg leading-none">+</span>
+            <span>Add</span>
+          </button>
         </div>
+
+        {/* Layer type picker */}
+        <Show when={isPickerOpen()}>
+          <div class="border-t border-white/10 px-4 py-3">
+            <div class="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Add adjustment layer</div>
+            <div class="flex gap-2 overflow-x-auto">
+              {(["tone", "curves", "grain", "vignette", "sharpen"] as const).map((focus) => (
+                <button
+                  type="button"
+                  onClick={() => void handleAddLayer(focus)}
+                  class="flex min-w-[3.5rem] flex-col items-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 active:bg-white/10"
+                >
+                  <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]}</span>
+                  <span>{focusLabels[focus]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Show>
       </div>
     </aside>
   );

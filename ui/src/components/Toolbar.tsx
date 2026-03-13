@@ -85,7 +85,7 @@ const Toolbar: Component = () => {
     <header class="flex items-center gap-4 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5">
       <div class="flex items-center gap-3">
         <div class="flex flex-col">
-          <span class="hidden text-[11px] text-white/40 lg:block">
+          <span class="block text-[11px] text-white/40">
             {statusText()}
           </span>
         </div>
