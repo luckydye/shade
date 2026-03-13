@@ -5,6 +5,7 @@ import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    registerPlugin(PhotosPlugin::class.java)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
   }

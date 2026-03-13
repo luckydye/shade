@@ -95,10 +95,24 @@ pub struct LayerInfoResponse {
 }
 
 #[tauri::command]
-pub async fn open_image(
+#[allow(unused_variables)]
+pub async fn open_image<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        let bytes = app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .get_image_data(&path)
+            .await?;
+        let (image, info) =
+            shade_io::load_image_bytes_f32_with_info(&bytes, None).map_err(|e| e.to_string())?;
+        let mut st = state.lock().unwrap();
+        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth));
+    }
+
     #[cfg(target_os = "ios")]
     if !path.starts_with('/') {
         let bytes = tokio::task::spawn_blocking(move || {
@@ -593,7 +607,18 @@ pub struct GrainValues {
 }
 
 #[tauri::command]
-pub async fn get_thumbnail(path: String) -> Result<Vec<u8>, String> {
+pub async fn get_thumbnail<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        return app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .get_thumbnail(&path)
+            .await;
+    }
+
     #[cfg(target_os = "ios")]
     if !path.starts_with('/') {
         return tokio::task::spawn_blocking(move || {
@@ -649,7 +674,15 @@ pub async fn get_thumbnail(path: String) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub async fn list_pictures() -> Result<Vec<String>, String> {
+pub async fn list_pictures<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    return app
+        .state::<crate::photos::PhotosHandle<R>>()
+        .list_photos()
+        .await;
+
     #[cfg(target_os = "ios")]
     return tokio::task::spawn_blocking(|| {
         let ptr = unsafe { ios_list_photos() };
@@ -666,7 +699,7 @@ pub async fn list_pictures() -> Result<Vec<String>, String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         let search_dir = std::env::var("HOME").ok()
             .map(|h| std::path::PathBuf::from(h).join("Pictures"));

@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod commands;
+mod photos;
 
 /// Lazily-initialised GPU renderer, shared across all command invocations.
 pub struct RendererState(pub tokio::sync::Mutex<Option<shade_gpu::Renderer>>);
@@ -8,6 +9,7 @@ pub struct RendererState(pub tokio::sync::Mutex<Option<shade_gpu::Renderer>>);
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(photos::init())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RendererState(tokio::sync::Mutex::new(None)))
         .setup(|app| {

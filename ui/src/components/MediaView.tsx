@@ -93,7 +93,7 @@ export const MediaView: Component = () => {
   const [images] = createResource(listPictures);
 
   return (
-    <div class="flex flex-1 flex-col overflow-hidden mt-[calc(env(safe-area-inset-top)+3.5rem)]">
+    <div class="flex flex-1 flex-col overflow-hidden mt-[calc(env(safe-area-inset-top)+3.5rem)] md:mt-0">
       <div class="border-b border-white/6 px-6 py-4">
         <h1 class="text-sm font-medium text-white/80">Pictures</h1>
       </div>
