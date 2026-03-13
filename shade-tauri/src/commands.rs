@@ -551,6 +551,32 @@ pub struct GrainValues {
 }
 
 #[tauri::command]
+pub async fn list_pictures() -> Result<Vec<String>, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let pictures_dir = std::path::PathBuf::from(home).join("Pictures");
+    const IMAGE_EXTENSIONS: &[&str] = &[
+        "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
+        "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
+    ];
+    let mut paths = Vec::new();
+    let entries = std::fs::read_dir(&pictures_dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                    if let Some(s) = path.to_str() {
+                        paths.push(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+#[tauri::command]
 pub async fn get_layer_stack(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerStackInfo, String> {

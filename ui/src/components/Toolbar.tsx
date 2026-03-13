@@ -58,7 +58,7 @@ const SaveIcon = () => (
   </svg>
 );
 
-const Toolbar: Component = () => {
+export const Toolbar: Component = () => {
   let fileInputRef: HTMLInputElement | undefined;
 
   const statusText = () => {
@@ -105,4 +105,3 @@ const Toolbar: Component = () => {
   );
 };
 
-export default Toolbar;

@@ -299,6 +299,14 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
   await workerCall({ type: "set_layer_opacity", layerIdx: idx, opacity }, "layer_updated");
 }
 
+export async function listPictures(): Promise<string[]> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_pictures") as Promise<string[]>;
+  }
+  return [];
+}
+
 export async function addLayer(kind: string): Promise<number> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
