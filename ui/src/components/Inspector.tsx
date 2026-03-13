@@ -147,12 +147,12 @@ const ToneIcon = () => (
   </svg>
 );
 
-const focusGlyphs: Record<MobileLayerFocus, JSX.Element> = {
-  tone: <SparkIcon />,
-  curves: <CurveIcon />,
-  grain: <GrainIcon />,
-  vignette: <CircleIcon />,
-  sharpen: <DropletIcon />,
+const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
+  tone: () => <SparkIcon />,
+  curves: () => <CurveIcon />,
+  grain: () => <GrainIcon />,
+  vignette: () => <CircleIcon />,
+  sharpen: () => <DropletIcon />,
 };
 
 const focusLabels: Record<MobileLayerFocus, string> = {
@@ -588,21 +588,19 @@ const Inspector: Component = () => {
           <div class="mb-2 h-1.5 w-14 rounded-full bg-white/14" />
         </div>
 
-        <Show when={isDrawerOpen()}>
-          <div class="px-4 pb-4">
-            <Show
-              when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-              fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}
-            >
-              <div class="px-1">
-                <div class="pb-4">{renderLayerBody()}</div>
-              </div>
-            </Show>
-          </div>
-        </Show>
+        <div class="px-4 pb-4">
+          <Show
+            when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+            fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}
+          >
+            <div class="px-1">
+              <div class="pb-4">{renderLayerBody()}</div>
+            </div>
+          </Show>
+        </div>
 
         {/* Layer tabs + add button */}
-        <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3">
+        <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-3">
           {adjustmentLayers().map(({ idx }) => {
             const focus = () => layerFocusTypes().get(idx) ?? "tone";
             const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
@@ -614,7 +612,7 @@ const Inspector: Component = () => {
                   isActive() ? "text-stone-100" : "text-white/34"
                 }`}
               >
-                <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]}</span>
+                <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
                 <span>{focusLabels[focus()]}</span>
               </button>
             );
@@ -631,25 +629,34 @@ const Inspector: Component = () => {
           </button>
         </div>
 
-        {/* Layer type picker */}
-        <Show when={isPickerOpen()}>
-          <div class="border-t border-white/10 px-4 py-3">
-            <div class="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Add adjustment layer</div>
-            <div class="flex gap-2 overflow-x-auto">
+      </div>
+
+      {/* Add layer dialog */}
+      <Show when={isPickerOpen()}>
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center lg:hidden"
+          onClick={() => setIsPickerOpen(false)}
+        >
+          <div
+            class="mx-6 w-full max-w-xs rounded-2xl border border-white/10 bg-[#111111] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div class="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Add adjustment layer</div>
+            <div class="grid grid-rows-5 gap-2">
               {(["tone", "curves", "grain", "vignette", "sharpen"] as const).map((focus) => (
                 <button
                   type="button"
                   onClick={() => void handleAddLayer(focus)}
-                  class="flex min-w-[3.5rem] flex-col items-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 active:bg-white/10"
+                  class="flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 active:bg-white/10"
                 >
-                  <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]}</span>
+                  <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]()}</span>
                   <span>{focusLabels[focus]}</span>
                 </button>
               ))}
             </div>
           </div>
-        </Show>
-      </div>
+        </div>
+      </Show>
     </aside>
   );
 };
