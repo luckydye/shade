@@ -175,7 +175,11 @@ pub fn load_image_bytes_f32_with_info(
         let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
             .context("RAW decode failed")?;
         let bit_depth = format!("{}-bit RAW", raw_image.bps);
-        let rgba = develop_raw_image(&raw_image)?.to_rgba32f();
+        let rgba = apply_orientation(
+            develop_raw_image(&raw_image)?,
+            raw_orientation_to_exif(raw_image.orientation),
+        )
+        .to_rgba32f();
         let (width, height) = rgba.dimensions();
         return Ok((
             FloatImage {
@@ -699,6 +703,13 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/_MGC3030.CR3");
         let (_, width, height) = load_image(&path).expect("fixture should decode");
         assert_eq!((width, height), (3648, 5472));
+    }
+
+    #[test]
+    fn applies_orientation_to_cr3_fixture_in_f32_info_path() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/_MGC3030.CR3");
+        let (image, _) = load_image_f32_with_info(&path).expect("fixture should decode");
+        assert_eq!((image.width, image.height), (3648, 5472));
     }
 
     #[test]
