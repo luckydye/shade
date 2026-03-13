@@ -206,6 +206,8 @@ async fn main() -> Result<()> {
                 highlights,
                 shadows,
                 gamma: 1.0,
+                black_point: 0.0,
+                white_point: 1.0,
             };
             log::info!("Tone params: {:?}", tone_params);
             ops.push(AdjustmentOp::Tone {
@@ -215,6 +217,8 @@ async fn main() -> Result<()> {
                 highlights,
                 shadows,
                 gamma: 1.0,
+                black_point: 0.0,
+                white_point: 1.0,
             });
 
             if saturation.is_some() || vibrancy.is_some() || temperature.is_some() || tint.is_some()
@@ -309,6 +313,8 @@ async fn main() -> Result<()> {
                 highlights: 0.0,
                 shadows: 0.0,
                 gamma: 1.0,
+                black_point: 0.0,
+                white_point: 1.0,
             });
 
             if (saturation - 1.0).abs() > f32::EPSILON {

@@ -5,6 +5,8 @@ struct ToneParams {
     highlights: f32,
     shadows: f32,
     gamma: f32,
+    black_point: f32,
+    white_point: f32,
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -17,6 +19,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
 
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
+
+    // Input levels: remap [black_point, white_point] → [0, 1].
+    c = vec4<f32>((c.rgb - vec3<f32>(params.black_point)) / max(params.white_point - params.black_point, 0.001), c.a);
 
     // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
     c = vec4<f32>(c.rgb * pow(2.0, params.exposure), c.a);

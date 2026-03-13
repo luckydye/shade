@@ -105,6 +105,8 @@ impl Renderer {
             highlights: params.highlights,
             shadows: params.shadows,
             gamma: params.gamma,
+            black_point: params.black_point,
+            white_point: params.white_point,
         };
         self.render_with_ops(input_data, width, height, &[op]).await
     }
@@ -158,6 +160,8 @@ impl Renderer {
                 highlights,
                 shadows,
                 gamma,
+                black_point,
+                white_point,
             } = &ops[i]
             {
                 if let Some(AdjustmentOp::Color(color_params)) = ops.get(i + 1) {
@@ -171,6 +175,8 @@ impl Renderer {
                             highlights: *highlights,
                             shadows: *shadows,
                             gamma: *gamma,
+                            black_point: *black_point,
+                            white_point: *white_point,
                         },
                         *color_params,
                     );
@@ -195,6 +201,8 @@ impl Renderer {
                     highlights,
                     shadows,
                     gamma,
+                    black_point,
+                    white_point,
                 } => self.tone_pipeline.process(
                     &self.ctx,
                     current_tex,
@@ -205,6 +213,8 @@ impl Renderer {
                         highlights: *highlights,
                         shadows: *shadows,
                         gamma: *gamma,
+                        black_point: *black_point,
+                        white_point: *white_point,
                     },
                 )?,
                 AdjustmentOp::Curves {
@@ -1112,6 +1122,8 @@ mod tests {
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
+            black_point: 0.0,
+            white_point: 1.0,
         }]);
         stack.add_adjustment_layer(Vec::new());
 

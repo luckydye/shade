@@ -17,6 +17,10 @@ pub struct ToneParams {
     pub shadows: f32,
     /// Gamma exponent applied as pow(rgb, gamma). 1.0 = no change.
     pub gamma: f32,
+    /// Input black point: values at or below this map to 0. 0.0 = no change.
+    pub black_point: f32,
+    /// Input white point: values at or above this map to 1. 1.0 = no change.
+    pub white_point: f32,
 }
 
 impl Default for ToneParams {
@@ -28,6 +32,8 @@ impl Default for ToneParams {
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
+            black_point: 0.0,
+            white_point: 1.0,
         }
     }
 }
@@ -111,6 +117,8 @@ pub enum AdjustmentOp {
         highlights: f32,
         shadows: f32,
         gamma: f32,
+        black_point: f32,
+        white_point: f32,
     },
     Curves {
         lut_r: Vec<f32>,

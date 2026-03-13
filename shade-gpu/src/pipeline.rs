@@ -17,6 +17,7 @@ use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 const TONE_WGSL: &str = include_str!("../../shaders/tone.wgsl");
 
 /// GPU-side representation of ToneParams — must be Pod + have repr(C).
+/// 8 × f32 = 32 bytes (no padding needed).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct ToneParamsGpu {
@@ -26,8 +27,8 @@ struct ToneParamsGpu {
     highlights: f32,
     shadows: f32,
     gamma: f32,
-    // Pad to 32 bytes (6 × f32 = 24 bytes, nearest multiple of 16 = 32 → 2 floats of padding).
-    _pad: [f32; 2],
+    black_point: f32,
+    white_point: f32,
 }
 
 impl From<ToneParams> for ToneParamsGpu {
@@ -39,7 +40,8 @@ impl From<ToneParams> for ToneParamsGpu {
             highlights: p.highlights,
             shadows: p.shadows,
             gamma: p.gamma,
-            _pad: [0.0; 2],
+            black_point: p.black_point,
+            white_point: p.white_point,
         }
     }
 }

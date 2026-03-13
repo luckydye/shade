@@ -79,6 +79,8 @@ impl EditorState {
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
+            black_point: 0.0,
+            white_point: 1.0,
         }]);
         LayerInfoResponse {
             layer_count: self.stack.layers.len(),
@@ -354,6 +356,8 @@ pub struct EditParams {
     pub highlights: Option<f32>,
     pub shadows: Option<f32>,
     pub gamma: Option<f32>,
+    pub black_point: Option<f32>,
+    pub white_point: Option<f32>,
     pub lut_r: Option<Vec<f32>>,
     pub lut_g: Option<Vec<f32>>,
     pub lut_b: Option<Vec<f32>>,
@@ -389,6 +393,8 @@ pub async fn apply_edit(
                         highlights: params.highlights.unwrap_or(0.0),
                         shadows: params.shadows.unwrap_or(0.0),
                         gamma: params.gamma.unwrap_or(1.0),
+                        black_point: params.black_point.unwrap_or(0.0),
+                        white_point: params.white_point.unwrap_or(1.0),
                     };
                     if let Some(op) = ops
                         .iter_mut()
@@ -497,6 +503,8 @@ pub async fn add_layer(
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
+            black_point: 0.0,
+            white_point: 1.0,
         }]),
         "curves" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Curves {
             lut_r: linear_lut(),
@@ -585,6 +593,8 @@ pub struct ToneValues {
     pub highlights: f32,
     pub shadows: f32,
     pub gamma: f32,
+    pub black_point: f32,
+    pub white_point: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -774,6 +784,8 @@ pub async fn get_layer_stack(
                                 highlights,
                                 shadows,
                                 gamma,
+                                black_point,
+                                white_point,
                             } => {
                                 adjustments.tone = Some(ToneValues {
                                     exposure: *exposure,
@@ -782,6 +794,8 @@ pub async fn get_layer_stack(
                                     highlights: *highlights,
                                     shadows: *shadows,
                                     gamma: *gamma,
+                                    black_point: *black_point,
+                                    white_point: *white_point,
                                 });
                             }
                             AdjustmentOp::Color(params) => {
