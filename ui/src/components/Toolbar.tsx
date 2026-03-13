@@ -70,13 +70,9 @@ const Toolbar: Component = () => {
   return (
     <header class="flex items-center gap-4 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5">
       <div class="flex items-center gap-3">
-        <div class="inline-flex h-8 w-8 items-center justify-center rounded-[0.85rem] bg-stone-100 text-stone-950 shadow-[0_12px_28px_rgba(0,0,0,0.28)]">
-          <BrandIcon />
-        </div>
         <div class="flex flex-col">
-          <span class="text-[15px] font-semibold tracking-[-0.02em] text-white">PixelForge</span>
           <span class="hidden text-[11px] text-white/40 lg:block">
-            {state.canvasWidth > 0 ? `${state.canvasWidth} × ${state.canvasHeight}` : "Desktop editor"}
+            {state.canvasWidth > 0 ? `${state.canvasWidth} × ${state.canvasHeight}` : "No image loaded"}
           </span>
         </div>
       </div>
@@ -90,8 +86,6 @@ const Toolbar: Component = () => {
           </span>
         )}
         <ActionButton label="Open" icon={<UploadIcon />} onClick={() => fileInputRef?.click()} />
-        <ActionButton label="Reset" icon={<ResetIcon />} disabled />
-        <ActionButton label="Save" icon={<SaveIcon />} disabled primary />
       </div>
     </header>
   );

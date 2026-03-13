@@ -1,9 +1,22 @@
-import { Component, createEffect, createSignal } from "solid-js";
-import { openImageFile, previewBitmap, previewFrame, sourceBitmap, state } from "../store/editor";
+import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import {
+  getPreviewDisplaySize,
+  openImageFile,
+  panPreview,
+  previewBitmap,
+  previewFrame,
+  resetPreviewViewport,
+  setPreviewViewportSize,
+  sourceBitmap,
+  state,
+  zoomPreview,
+} from "../store/editor";
 
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
+  let stageRef: HTMLDivElement | undefined;
   const [dragging, setDragging] = createSignal(false);
+  let panStart: { x: number; y: number } | null = null;
 
   createEffect(() => {
     if (!canvasRef) return;
@@ -23,6 +36,16 @@ const Canvas: Component = () => {
     canvasRef.height = bitmap.height;
     ctx.clearRect(0, 0, canvasRef.width, canvasRef.height);
     ctx.drawImage(bitmap, 0, 0);
+  });
+
+  onMount(() => {
+    const stage = stageRef;
+    if (!stage) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setPreviewViewportSize(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(stage);
+    onCleanup(() => observer.disconnect());
   });
 
   const onDragOver = (e: DragEvent) => {
@@ -46,13 +69,41 @@ const Canvas: Component = () => {
     }
   };
 
+  const onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    zoomPreview(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+  };
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (state.previewZoom <= 1) return;
+    panStart = { x: e.clientX, y: e.clientY };
+  };
+
+  const onPointerMove = (e: PointerEvent) => {
+    if (!panStart) return;
+    panPreview(e.clientX - panStart.x, e.clientY - panStart.y);
+    panStart = { x: e.clientX, y: e.clientY };
+  };
+
+  const onPointerUp = () => {
+    panStart = null;
+  };
+
+  const displaySize = () => getPreviewDisplaySize();
+
   return (
     <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
       <div
+        ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
+        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
@@ -61,7 +112,12 @@ const Canvas: Component = () => {
             ref={canvasRef}
             width="800"
             height="600"
-            class={`max-h-full max-w-full bg-[#111111] object-contain ${
+            onDblClick={() => resetPreviewViewport()}
+            style={{
+              width: `${displaySize().width}px`,
+              height: `${displaySize().height}px`,
+            }}
+            class={`bg-[#111111] object-contain ${
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />

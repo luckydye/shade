@@ -20,6 +20,14 @@ use crate::{
     GpuContext, TonePipeline,
 };
 
+#[derive(Clone, Debug)]
+pub struct PreviewCrop {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// High-level renderer: owns the GPU context and all compute pipelines.
 pub struct Renderer {
     pub ctx: GpuContext,
@@ -279,16 +287,41 @@ impl Renderer {
         canvas_width: u32,
         canvas_height: u32,
     ) -> Result<Vec<u8>> {
+        self.render_stack_preview(
+            stack,
+            image_sources,
+            canvas_width,
+            canvas_height,
+            canvas_width,
+            canvas_height,
+            None,
+        )
+        .await
+    }
+
+    pub async fn render_stack_preview(
+        &self,
+        stack: &LayerStack,
+        image_sources: &HashMap<TextureId, (Vec<u8>, u32, u32)>,
+        canvas_width: u32,
+        canvas_height: u32,
+        target_width: u32,
+        target_height: u32,
+        crop: Option<PreviewCrop>,
+    ) -> Result<Vec<u8>> {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
+        assert!(target_width > 0, "preview target_width must be > 0");
+        assert!(target_height > 0, "preview target_height must be > 0");
+        let crop = normalize_preview_crop(crop, canvas_width, canvas_height);
 
         // 1. Create accumulator texture (black RGBA8).
         let accum_tex = {
             let t = device.create_texture(&TextureDescriptor {
                 label: Some("accumulator"),
                 size: Extent3d {
-                    width: canvas_width,
-                    height: canvas_height,
+                    width: target_width,
+                    height: target_height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -302,7 +335,7 @@ impl Renderer {
                 view_formats: &[],
             });
             // Clear to black.
-            let black = vec![0u8; (canvas_width * canvas_height * 4) as usize];
+            let black = vec![0u8; (target_width * target_height * 4) as usize];
             queue.write_texture(
                 ImageCopyTexture {
                     texture: &t,
@@ -313,12 +346,12 @@ impl Renderer {
                 &black,
                 ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(canvas_width * 4),
-                    rows_per_image: Some(canvas_height),
+                    bytes_per_row: Some(target_width * 4),
+                    rows_per_image: Some(target_height),
                 },
                 Extent3d {
-                    width: canvas_width,
-                    height: canvas_height,
+                    width: target_width,
+                    height: target_height,
                     depth_or_array_layers: 1,
                 },
             );
@@ -341,6 +374,14 @@ impl Renderer {
             let layer_result: wgpu::Texture = match &entry.layer {
                 Layer::Image { texture_id, .. } => {
                     if let Some((pixels, w, h)) = image_sources.get(texture_id) {
+                        let scaled = resample_rgba_region(
+                            pixels,
+                            *w,
+                            *h,
+                            target_width,
+                            target_height,
+                            &crop,
+                        );
                         // Use texture_cache to avoid re-uploading unchanged images.
                         // texture_cache.get_or_upload requires &mut self, so we must use a
                         // local cache via device/queue directly here.
@@ -351,8 +392,8 @@ impl Renderer {
                             &TextureDescriptor {
                                 label: Some("image layer texture"),
                                 size: Extent3d {
-                                    width: *w,
-                                    height: *h,
+                                    width: target_width,
+                                    height: target_height,
                                     depth_or_array_layers: 1,
                                 },
                                 mip_level_count: 1,
@@ -363,7 +404,7 @@ impl Renderer {
                                 view_formats: &[],
                             },
                             wgpu::util::TextureDataOrder::LayerMajor,
-                            pixels,
+                            &scaled,
                         )
                     } else {
                         // No source image: skip this layer.
@@ -373,10 +414,10 @@ impl Renderer {
                 Layer::Adjustment { ops } => {
                     // Take current accumulator pixels and run adjustment ops on them.
                     let accum_bytes = self
-                        .readback_texture(current_accum, canvas_width, canvas_height)
+                        .readback_texture(current_accum, target_width, target_height)
                         .await?;
                     let adj_tex_bytes = self
-                        .render_with_ops(&accum_bytes, canvas_width, canvas_height, ops)
+                        .render_with_ops(&accum_bytes, target_width, target_height, ops)
                         .await?;
                     // Upload result back as a texture.
                     use wgpu::util::DeviceExt;
@@ -385,8 +426,8 @@ impl Renderer {
                         &TextureDescriptor {
                             label: Some("adjustment layer result"),
                             size: Extent3d {
-                                width: canvas_width,
-                                height: canvas_height,
+                                width: target_width,
+                                height: target_height,
                                 depth_or_array_layers: 1,
                             },
                             mip_level_count: 1,
@@ -405,12 +446,20 @@ impl Renderer {
             // 2b. Optional mask texture.
             let mask_tex_opt: Option<wgpu::Texture> = if let Some(mask_id) = entry.mask {
                 if let Some(mask_data) = stack.masks.get(&mask_id) {
-                    Some(upload_mask_texture(
-                        device,
-                        queue,
+                    let scaled = resample_mask_region(
                         &mask_data.pixels,
                         mask_data.width,
                         mask_data.height,
+                        target_width,
+                        target_height,
+                        &crop,
+                    );
+                    Some(upload_mask_texture(
+                        device,
+                        queue,
+                        &scaled,
+                        target_width,
+                        target_height,
                     ))
                 } else {
                     None
@@ -442,7 +491,7 @@ impl Renderer {
 
         // 3. Read back the final accumulator.
         let final_accum = accum_owned.last().unwrap();
-        self.readback_texture(final_accum, canvas_width, canvas_height)
+        self.readback_texture(final_accum, target_width, target_height)
             .await
     }
 
@@ -578,6 +627,187 @@ impl Renderer {
         readback_buffer.unmap();
 
         Ok(result)
+    }
+}
+
+fn normalize_preview_crop(
+    crop: Option<PreviewCrop>,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> PreviewCrop {
+    let max_width = canvas_width as f32;
+    let max_height = canvas_height as f32;
+    let mut crop = crop.unwrap_or(PreviewCrop {
+        x: 0.0,
+        y: 0.0,
+        width: max_width,
+        height: max_height,
+    });
+    crop.width = crop.width.clamp(1.0, max_width);
+    crop.height = crop.height.clamp(1.0, max_height);
+    crop.x = crop.x.clamp(0.0, max_width - crop.width);
+    crop.y = crop.y.clamp(0.0, max_height - crop.height);
+    crop
+}
+
+fn resample_rgba_region(
+    pixels: &[u8],
+    source_width: u32,
+    source_height: u32,
+    target_width: u32,
+    target_height: u32,
+    crop: &PreviewCrop,
+) -> Vec<u8> {
+    let mut output = vec![0u8; (target_width * target_height * 4) as usize];
+    for y in 0..target_height {
+        let src_y = sample_position(y, target_height, crop.y, crop.height, source_height);
+        let y0 = src_y.floor() as u32;
+        let y1 = (y0 + 1).min(source_height - 1);
+        let wy = src_y - y0 as f32;
+        for x in 0..target_width {
+            let src_x = sample_position(x, target_width, crop.x, crop.width, source_width);
+            let x0 = src_x.floor() as u32;
+            let x1 = (x0 + 1).min(source_width - 1);
+            let wx = src_x - x0 as f32;
+            let top_left = rgba_at(pixels, source_width, x0, y0);
+            let top_right = rgba_at(pixels, source_width, x1, y0);
+            let bottom_left = rgba_at(pixels, source_width, x0, y1);
+            let bottom_right = rgba_at(pixels, source_width, x1, y1);
+            let index = ((y * target_width + x) * 4) as usize;
+            for channel in 0..4 {
+                let top = lerp(top_left[channel], top_right[channel], wx);
+                let bottom = lerp(bottom_left[channel], bottom_right[channel], wx);
+                output[index + channel] = lerp(top, bottom, wy).round() as u8;
+            }
+        }
+    }
+    output
+}
+
+fn resample_mask_region(
+    pixels: &[u8],
+    source_width: u32,
+    source_height: u32,
+    target_width: u32,
+    target_height: u32,
+    crop: &PreviewCrop,
+) -> Vec<u8> {
+    let mut output = vec![0u8; (target_width * target_height) as usize];
+    for y in 0..target_height {
+        let src_y = sample_position(y, target_height, crop.y, crop.height, source_height);
+        let y0 = src_y.round().clamp(0.0, (source_height - 1) as f32) as u32;
+        for x in 0..target_width {
+            let src_x = sample_position(x, target_width, crop.x, crop.width, source_width);
+            let x0 = src_x.round().clamp(0.0, (source_width - 1) as f32) as u32;
+            output[(y * target_width + x) as usize] = pixels[(y0 * source_width + x0) as usize];
+        }
+    }
+    output
+}
+
+fn sample_position(
+    output_index: u32,
+    output_size: u32,
+    crop_start: f32,
+    crop_size: f32,
+    source_size: u32,
+) -> f32 {
+    if output_size == 1 {
+        return (crop_start + crop_size * 0.5).clamp(0.0, (source_size - 1) as f32);
+    }
+    let t = (output_index as f32 + 0.5) / output_size as f32;
+    (crop_start + t * crop_size - 0.5).clamp(0.0, (source_size - 1) as f32)
+}
+
+fn rgba_at(pixels: &[u8], width: u32, x: u32, y: u32) -> [f32; 4] {
+    let index = ((y * width + x) * 4) as usize;
+    [
+        pixels[index] as f32,
+        pixels[index + 1] as f32,
+        pixels[index + 2] as f32,
+        pixels[index + 3] as f32,
+    ]
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalize_preview_crop, resample_mask_region, resample_rgba_region, PreviewCrop,
+    };
+
+    #[test]
+    fn normalize_preview_crop_clamps_to_canvas() {
+        let crop = normalize_preview_crop(
+            Some(PreviewCrop {
+                x: -50.0,
+                y: 90.0,
+                width: 400.0,
+                height: 50.0,
+            }),
+            200,
+            100,
+        );
+
+        assert_eq!(crop.x, 0.0);
+        assert_eq!(crop.y, 50.0);
+        assert_eq!(crop.width, 200.0);
+        assert_eq!(crop.height, 50.0);
+    }
+
+    #[test]
+    fn resample_rgba_region_reads_only_selected_crop() {
+        let pixels = vec![
+            10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255,
+            50, 0, 0, 255, 60, 0, 0, 255, 70, 0, 0, 255, 80, 0, 0, 255,
+        ];
+        let output = resample_rgba_region(
+            &pixels,
+            4,
+            2,
+            2,
+            2,
+            &PreviewCrop {
+                x: 2.0,
+                y: 0.0,
+                width: 2.0,
+                height: 2.0,
+            },
+        );
+
+        assert_eq!(
+            output,
+            vec![
+                30, 0, 0, 255, 40, 0, 0, 255,
+                70, 0, 0, 255, 80, 0, 0, 255,
+            ]
+        );
+    }
+
+    #[test]
+    fn resample_mask_region_reads_only_selected_crop() {
+        let pixels = vec![
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+        ];
+        let output = resample_mask_region(
+            &pixels,
+            4,
+            2,
+            2,
+            2,
+            &PreviewCrop {
+                x: 0.0,
+                y: 0.0,
+                width: 2.0,
+                height: 2.0,
+            },
+        );
+
+        assert_eq!(output, vec![1, 2, 5, 6]);
     }
 }
 

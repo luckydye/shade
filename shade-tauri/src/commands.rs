@@ -98,9 +98,25 @@ pub struct PreviewFrameResponse {
     pub height: u32,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PreviewCrop {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PreviewRenderRequest {
+    pub target_width: u32,
+    pub target_height: u32,
+    pub crop: Option<PreviewCrop>,
+}
+
 /// Run the full GPU render pipeline and return raw RGBA8 pixels.
 #[tauri::command]
 pub async fn render_preview(
+    request: Option<PreviewRenderRequest>,
     renderer: tauri::State<'_, crate::RendererState>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameResponse, String> {
@@ -120,9 +136,31 @@ pub async fn render_preview(
     let guard = renderer.0.lock().await;
     let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
 
-    let pixels = r.render_stack(&stack, &sources, w, h)
+    let request = request.unwrap_or(PreviewRenderRequest {
+        target_width: w,
+        target_height: h,
+        crop: None,
+    });
+    let pixels = r.render_stack_preview(
+        &stack,
+        &sources,
+        w,
+        h,
+        request.target_width,
+        request.target_height,
+        request.crop.map(|crop| shade_gpu::PreviewCrop {
+            x: crop.x,
+            y: crop.y,
+            width: crop.width,
+            height: crop.height,
+        }),
+    )
         .await.map_err(|e| e.to_string())?;
-    Ok(PreviewFrameResponse { pixels, width: w, height: h })
+    Ok(PreviewFrameResponse {
+        pixels,
+        width: request.target_width,
+        height: request.target_height,
+    })
 }
 
 #[tauri::command]

@@ -19,7 +19,7 @@ pub use composite::{
     BrushStampPipeline, BrushStampUniform, CompositePipeline, CompositeUniform,
     create_rw_mask_texture, upload_mask_texture,
 };
-pub use renderer::Renderer;
+pub use renderer::{PreviewCrop, Renderer};
 pub use profiler::{GpuProfiler, PassTiming};
 pub use basic_adjust::BasicAdjustPipeline;
 pub use sharpen2::SharpenTwoPassPipeline;

@@ -115,10 +115,23 @@ export type PreviewFrame =
   | { kind: "rgba"; pixels: Uint8Array; width: number; height: number }
   | { kind: "data-url"; dataUrl: string };
 
-export async function renderPreview(): Promise<PreviewFrame> {
+export interface PreviewCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PreviewRequest {
+  target_width: number;
+  target_height: number;
+  crop?: PreviewCrop;
+}
+
+export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    const result = await inv("render_preview") as {
+    const result = await inv("render_preview", { request }) as {
       pixels: number[] | Uint8Array | ArrayBuffer;
       width: number;
       height: number;
@@ -137,7 +150,7 @@ export async function renderPreview(): Promise<PreviewFrame> {
   }
   await ensureWorkerReady();
   const result = await workerCall<{ dataUrl: string }>(
-    { type: "render_preview" },
+    { type: "render_preview", request },
     "preview_rendered"
   );
   return { kind: "data-url", dataUrl: result.dataUrl };
