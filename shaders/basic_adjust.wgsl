@@ -25,18 +25,25 @@ struct ColorParams {
 @group(0) @binding(3) var<uniform> color: ColorParams;
 
 // ── Tone helpers ──────────────────────────────────────────────────────────────
+fn luminance(rgb: vec3<f32>) -> f32 {
+    return dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
 fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
     // Input levels: remap [black_point, white_point] → [0, 1].
     var rgb = (c.rgb - vec3<f32>(p.black_point)) / max(p.white_point - p.black_point, 0.001);
     // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
     rgb = rgb * pow(2.0, p.exposure);
-    // Contrast: pivot around mid-grey 0.18. Slope = 2^contrast (logarithmic scale).
-    let mid = vec3<f32>(0.18);
-    rgb = mid + (rgb - mid) * pow(2.0, p.contrast);
+    // Contrast: adjust luminance around mid-grey 0.18, then shift all channels
+    // by the same delta so hue stays stable.
+    let mid_luma = 0.18;
+    let luma = luminance(rgb);
+    let contrast_luma = mid_luma + (luma - mid_luma) * pow(2.0, p.contrast);
+    rgb = rgb + vec3<f32>(contrast_luma - luma);
     rgb = rgb + vec3<f32>(p.blacks);
-    let shadow_mask = 1.0 - smoothstep(0.0, 0.5, rgb.r);
+    let shadow_mask = 1.0 - smoothstep(0.0, 0.5, luminance(rgb));
     rgb = rgb + vec3<f32>(p.shadows * shadow_mask * 0.5);
-    let highlight_mask = smoothstep(0.5, 1.0, rgb.r);
+    let highlight_mask = smoothstep(0.5, 1.0, luminance(rgb));
     rgb = rgb * (1.0 - p.highlights * highlight_mask * 0.5);
     // Gamma: power curve (1.0 = no change). Use sign*pow(abs) to handle negative values
     // gracefully — preserves the sign so shadow detail isn't hard-clamped to 0.
