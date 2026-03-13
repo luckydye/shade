@@ -70,7 +70,7 @@ pub fn load_image_bytes_with_colorspace(
         let (pixels, width, height) = decode_exr(bytes)?;
         return Ok((pixels, width, height, ColorSpace::LinearSrgb));
     }
-    if is_camera_raw(name_hint) {
+    if is_camera_raw(name_hint, bytes) {
         let (pixels, width, height) = decode_camera_raw(bytes, name_hint)?;
         return Ok((pixels, width, height, ColorSpace::Srgb));
     }
@@ -101,7 +101,7 @@ pub fn load_image_bytes_f32_with_colorspace(
     if is_exr(name_hint, bytes) {
         return Ok((decode_exr_f32(bytes)?, ColorSpace::LinearSrgb));
     }
-    if is_camera_raw(name_hint) {
+    if is_camera_raw(name_hint, bytes) {
         return Ok((decode_camera_raw_f32(bytes, name_hint)?, ColorSpace::Srgb));
     }
 
@@ -344,15 +344,23 @@ fn is_exr(name_hint: Option<&str>, bytes: &[u8]) -> bool {
         || bytes.starts_with(&EXR_MAGIC)
 }
 
-fn is_camera_raw(name_hint: Option<&str>) -> bool {
-    name_hint
+fn is_camera_raw(name_hint: Option<&str>, bytes: &[u8]) -> bool {
+    let has_raw_extension = name_hint
         .and_then(|name| Path::new(name).extension())
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| {
             RAW_EXTENSIONS
                 .iter()
                 .any(|candidate| ext.eq_ignore_ascii_case(candidate))
-        })
+        });
+    has_raw_extension || is_cr3(bytes)
+}
+
+fn is_cr3(bytes: &[u8]) -> bool {
+    if bytes.len() < 12 {
+        return false;
+    }
+    bytes[4..8] == *b"ftyp" && matches!(&bytes[8..12], b"cr3 " | b"crx ")
 }
 
 fn decode_exr(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {

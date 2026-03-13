@@ -15,11 +15,9 @@ const INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO = 0.75;
 const FINAL_PREVIEW_DEVICE_PIXEL_RATIO = 1.25;
 const INTERACTIVE_PREVIEW_PIXEL_COUNT = 300_000;
 const FINAL_PREVIEW_PIXEL_COUNT = 1_500_000;
-const FINAL_PREVIEW_DEBOUNCE_MS = 120;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
-let previewSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
 function replaceBitmap(
   setter: (bitmap: ImageBitmap | null) => void,
@@ -277,8 +275,82 @@ export async function setLayerOpacity(idx: number, opacity: number) {
 }
 
 export async function applyEdit(params: Record<string, unknown>) {
+  const layerIdx = params.layer_idx;
+  if (typeof layerIdx !== "number") {
+    throw new Error("applyEdit requires a numeric layer_idx");
+  }
+  const layer = state.layers[layerIdx];
+  if (!layer) {
+    throw new Error("applyEdit target layer is out of bounds");
+  }
+  if (layer.kind !== "adjustment") {
+    throw new Error("applyEdit target layer must be an adjustment layer");
+  }
+  const adjustments = layer.adjustments ?? {
+    tone: null,
+    curves: null,
+    color: null,
+    vignette: null,
+    sharpen: null,
+    grain: null,
+  };
+  switch (params.op) {
+    case "tone":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        tone: {
+          exposure: params.exposure as number,
+          contrast: params.contrast as number,
+          blacks: params.blacks as number,
+          highlights: params.highlights as number,
+          shadows: params.shadows as number,
+        },
+      });
+      break;
+    case "color":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        color: {
+          saturation: params.saturation as number,
+          temperature: params.temperature as number,
+          tint: params.tint as number,
+        },
+      });
+      break;
+    case "curves":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        curves: {
+          lut_r: params.lut_r as number[],
+          lut_g: params.lut_g as number[],
+          lut_b: params.lut_b as number[],
+          lut_master: params.lut_master as number[],
+          per_channel: params.per_channel as boolean,
+        },
+      });
+      break;
+    case "vignette":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        vignette: { amount: params.vignette_amount as number },
+      });
+      break;
+    case "sharpen":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        sharpen: { amount: params.sharpen_amount as number },
+      });
+      break;
+    case "grain":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        grain: { amount: params.grain_amount as number },
+      });
+      break;
+    default:
+      throw new Error(`unknown edit op: ${String(params.op)}`);
+  }
   await bridge.applyEdit(params);
-  await refreshLayerStack();
   await refreshPreview();
 }
 
@@ -342,17 +414,8 @@ function queuePreviewRefresh(version: number, quality: PreviewQuality) {
 export function refreshPreview(mode: "progressive" | "final" = "progressive") {
   previewRefreshVersion += 1;
   const version = previewRefreshVersion;
-  if (previewSettleTimer) {
-    clearTimeout(previewSettleTimer);
-    previewSettleTimer = null;
-  }
   if (mode === "final") {
     return queuePreviewRefresh(version, "final");
   }
-  queuePreviewRefresh(version, "interactive");
-  previewSettleTimer = setTimeout(() => {
-    if (version !== previewRefreshVersion) return;
-    void queuePreviewRefresh(version, "final");
-  }, FINAL_PREVIEW_DEBOUNCE_MS);
-  return previewRefreshPromise ?? Promise.resolve();
+  return queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
 }
