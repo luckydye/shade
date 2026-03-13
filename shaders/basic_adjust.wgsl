@@ -83,9 +83,15 @@ fn hsl_to_rgb(hsl: vec3<f32>) -> vec3<f32> {
 
 fn apply_color(c: vec4<f32>, p: ColorParams) -> vec4<f32> {
     var rgb = c.rgb;
-    // Temperature / tint
-    rgb = vec3<f32>(rgb.r + p.temperature*0.1, rgb.g, rgb.b - p.temperature*0.1);
-    rgb = vec3<f32>(rgb.r + p.tint*0.05, rgb.g - p.tint*0.1, rgb.b + p.tint*0.05);
+    // Temperature: von Kries white balance along blue-yellow axis.
+    // Multiplicative in linear light — positive = warm (more red, less blue).
+    let temp_gain = pow(2.0, p.temperature * 0.5);
+    rgb = vec3<f32>(rgb.r * temp_gain, rgb.g, rgb.b / temp_gain);
+
+    // Tint: shift along green-magenta axis.
+    // Positive = magenta (reduce green). Multiplicative in linear light.
+    let tint_gain = pow(2.0, p.tint * 0.5);
+    rgb = vec3<f32>(rgb.r, rgb.g / tint_gain, rgb.b);
     // Saturation
     let hsl = rgb_to_hsl(rgb);
     let new_sat = clamp(hsl.y * p.saturation, 0.0, 1.0);

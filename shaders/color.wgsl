@@ -54,20 +54,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
 
-    // Temperature: shift blue-yellow axis
-    c = vec4<f32>(
-        c.r + params.temperature * 0.1,
-        c.g,
-        c.b - params.temperature * 0.1,
-        c.a
-    );
-    // Tint: green-magenta axis
-    c = vec4<f32>(
-        c.r + params.tint * 0.05,
-        c.g - params.tint * 0.1,
-        c.b + params.tint * 0.05,
-        c.a
-    );
+    // Temperature: von Kries white balance along blue-yellow axis.
+    // Multiplicative in linear light — positive = warm (more red, less blue).
+    let temp_gain = pow(2.0, params.temperature * 0.5);
+    c = vec4<f32>(c.r * temp_gain, c.g, c.b / temp_gain, c.a);
+
+    // Tint: shift along green-magenta axis.
+    // Positive = magenta (reduce green). Multiplicative in linear light.
+    let tint_gain = pow(2.0, params.tint * 0.5);
+    c = vec4<f32>(c.r, c.g / tint_gain, c.b, c.a);
 
     // Saturation
     let hsl = rgb_to_hsl(c.rgb);
