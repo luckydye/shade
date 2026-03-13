@@ -21,9 +21,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
     c = vec4<f32>(c.rgb * pow(2.0, params.exposure), c.a);
 
-    // Contrast: pivot around mid-grey 0.18
+    // Contrast: pivot around mid-grey 0.18. Slope = 2^contrast so each unit
+    // doubles/halves the contrast range, matching the EV scale of exposure.
+    // Out-of-range values are preserved as-is and handled by the gamma step below.
     let mid = vec3<f32>(0.18);
-    c = vec4<f32>(mid + (c.rgb - mid) * (1.0 + params.contrast), c.a);
+    c = vec4<f32>(mid + (c.rgb - mid) * pow(2.0, params.contrast), c.a);
 
     // Black level lift
     c = vec4<f32>(c.rgb + vec3<f32>(params.blacks), c.a);

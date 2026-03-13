@@ -26,8 +26,9 @@ struct ColorParams {
 fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
     // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
     var rgb = c.rgb * pow(2.0, p.exposure);
+    // Contrast: pivot around mid-grey 0.18. Slope = 2^contrast (logarithmic scale).
     let mid = vec3<f32>(0.18);
-    rgb = mid + (rgb - mid) * (1.0 + p.contrast);
+    rgb = mid + (rgb - mid) * pow(2.0, p.contrast);
     rgb = rgb + vec3<f32>(p.blacks);
     let shadow_mask = 1.0 - smoothstep(0.0, 0.5, rgb.r);
     rgb = rgb + vec3<f32>(p.shadows * shadow_mask * 0.5);
