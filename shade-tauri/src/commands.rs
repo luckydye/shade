@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use shade_core::{
     linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, LayerStack, SharpenParams,
     VignetteParams,

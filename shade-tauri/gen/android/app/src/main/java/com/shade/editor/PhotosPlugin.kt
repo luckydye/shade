@@ -5,8 +5,10 @@ import android.content.ContentUris
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import app.tauri.PermissionState
 import app.tauri.annotation.Command
 import app.tauri.annotation.Permission
+import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
@@ -28,16 +30,16 @@ class PhotosPlugin(private val activity: android.app.Activity) : Plugin(activity
 
     @Command
     fun listPhotos(invoke: Invoke) {
-        if (getPermissionState(permissionAlias) != app.tauri.plugin.PermissionState.GRANTED) {
+        if (getPermissionState(permissionAlias) != PermissionState.GRANTED) {
             requestPermissionForAlias(permissionAlias, invoke, "listPhotosWithPermission")
             return
         }
         resolveListPhotos(invoke)
     }
 
-    @app.tauri.annotation.PermissionCallback
+    @PermissionCallback
     fun listPhotosWithPermission(invoke: Invoke) {
-        if (getPermissionState(permissionAlias) != app.tauri.plugin.PermissionState.GRANTED) {
+        if (getPermissionState(permissionAlias) != PermissionState.GRANTED) {
             invoke.reject("Photo library permission denied")
             return
         }
@@ -73,7 +75,8 @@ class PhotosPlugin(private val activity: android.app.Activity) : Plugin(activity
 
     @Command
     fun getThumbnail(invoke: Invoke) {
-        val uriString = invoke.getString("uri") ?: run { invoke.reject("missing uri"); return }
+        val uriString = invoke.getArgs().getString("uri", null)
+            ?: run { invoke.reject("missing uri"); return }
         val uri = Uri.parse(uriString)
 
         try {
@@ -104,7 +107,8 @@ class PhotosPlugin(private val activity: android.app.Activity) : Plugin(activity
 
     @Command
     fun getImageData(invoke: Invoke) {
-        val uriString = invoke.getString("uri") ?: run { invoke.reject("missing uri"); return }
+        val uriString = invoke.getArgs().getString("uri", null)
+            ?: run { invoke.reject("missing uri"); return }
         val uri = Uri.parse(uriString)
 
         try {
