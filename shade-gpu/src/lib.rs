@@ -1,4 +1,3 @@
-pub mod basic_adjust;
 pub mod color_transform;
 pub mod composite;
 mod context;
@@ -12,7 +11,6 @@ pub mod timestamp;
 
 pub const INTERNAL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-pub use basic_adjust::BasicAdjustPipeline;
 pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};
 pub use composite::{
     create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,

@@ -38,7 +38,6 @@ impl WasmEngine {
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
-            _pad: 0.0,
         }]);
         id
     }

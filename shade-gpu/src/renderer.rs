@@ -10,7 +10,6 @@ use wgpu::{
 };
 
 use crate::{
-    basic_adjust::BasicAdjustPipeline,
     color_transform::{ColorTransformPipeline, ColorTransformUniform},
     composite::{
         create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
@@ -42,7 +41,6 @@ pub struct Renderer {
     pub hsl_pipeline: HslPipeline,
     pub composite_pipeline: CompositePipeline,
     pub brush_stamp_pipeline: Option<BrushStampPipeline>,
-    pub basic_adjust_pipeline: BasicAdjustPipeline,
     pub sharpen2_pipeline: SharpenTwoPassPipeline,
     pub texture_cache: TextureCache,
     pub color_transform_pipeline: ColorTransformPipeline,
@@ -69,7 +67,6 @@ impl Renderer {
         } else {
             None
         };
-        let basic_adjust_pipeline = BasicAdjustPipeline::new(&ctx);
         let sharpen2_pipeline = SharpenTwoPassPipeline::new(&ctx);
         let texture_cache = TextureCache::new();
         let color_transform_pipeline = ColorTransformPipeline::new(&ctx);
@@ -84,7 +81,6 @@ impl Renderer {
             hsl_pipeline,
             composite_pipeline,
             brush_stamp_pipeline,
-            basic_adjust_pipeline,
             sharpen2_pipeline,
             texture_cache,
             color_transform_pipeline,
@@ -153,48 +149,8 @@ impl Renderer {
     ) -> Result<wgpu::Texture> {
         let mut current_tex: &wgpu::Texture = input_tex;
         let mut owned_textures: Vec<wgpu::Texture> = Vec::new();
-        let mut i = 0;
-        while i < ops.len() {
-            let fused = if let AdjustmentOp::Tone {
-                exposure,
-                contrast,
-                blacks,
-                whites,
-                highlights,
-                shadows,
-                gamma,
-            } = &ops[i]
-            {
-                if let Some(AdjustmentOp::Color(color_params)) = ops.get(i + 1) {
-                    let output = self.basic_adjust_pipeline.process(
-                        &self.ctx,
-                        current_tex,
-                        ToneParams {
-                            exposure: *exposure,
-                            contrast: *contrast,
-                            blacks: *blacks,
-                            whites: *whites,
-                            highlights: *highlights,
-                            shadows: *shadows,
-                            gamma: *gamma,
-                            _pad: 0.0,
-                        },
-                        *color_params,
-                    );
-                    owned_textures.push(output);
-                    current_tex = owned_textures.last().unwrap();
-                    i += 2;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if fused {
-                continue;
-            }
-            let output = match &ops[i] {
+        for op in ops {
+            let output = match op {
                 AdjustmentOp::Tone {
                     exposure,
                     contrast,
@@ -254,7 +210,6 @@ impl Renderer {
             };
             owned_textures.push(output);
             current_tex = owned_textures.last().unwrap();
-            i += 1;
         }
         if let Some(texture) = owned_textures.pop() {
             Ok(texture)
