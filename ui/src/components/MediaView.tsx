@@ -1,4 +1,4 @@
-import { Component, createResource, createSignal, For, onCleanup, Suspense } from "solid-js";
+import { Component, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
 import { getThumbnail, listPictures } from "../bridge/index";
 import { openImage } from "../store/editor";
 
@@ -28,12 +28,25 @@ async function resolveSrc(path: string): Promise<string> {
 }
 
 const ImageTile: Component<{ path: string }> = (props) => {
-  const [src] = createResource(() => props.path, resolveSrc);
+  const [visible, setVisible] = createSignal(false);
+  const [src] = createResource(() => visible() ? props.path : undefined, resolveSrc);
   // PHAsset local identifiers (iOS) don't have a meaningful filename component.
   const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
   const [loadError, setLoadError] = createSignal(false);
+  let containerRef: HTMLButtonElement | undefined;
   let imgRef: HTMLImageElement | undefined;
   let errorTimer: ReturnType<typeof setTimeout> | undefined;
+
+  onMount(() => {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: "200px" });
+    if (containerRef) observer.observe(containerRef);
+    onCleanup(() => observer.disconnect());
+  });
 
   // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
@@ -63,6 +76,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
   return (
     <button
       type="button"
+      ref={containerRef}
       class={`group flex flex-col gap-1.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 ${
         loadError() ? "ring-1 ring-red-500/50" : "hover:bg-white/[0.06]"
       }`}
