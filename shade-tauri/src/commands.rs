@@ -4,7 +4,7 @@ use shade_core::{
     linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, LayerStack, SharpenParams,
     VignetteParams,
 };
-use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info};
+use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
 use std::sync::Mutex;
 
 #[cfg(target_os = "ios")]
@@ -49,11 +49,14 @@ impl Default for EditorState {
 impl EditorState {
     pub fn replace_with_image(
         &mut self,
-        pixels: Vec<f32>,
+        mut pixels: Vec<f32>,
         width: u32,
         height: u32,
         source_bit_depth: String,
+        color_space: shade_core::ColorSpace,
     ) -> LayerInfoResponse {
+        // Convert source pixels to linear sRGB (the internal working space).
+        to_linear_srgb_f32(&mut pixels, &color_space);
         let texture_id = self.next_texture_id;
         self.next_texture_id += 1;
         self.stack = LayerStack::new();
@@ -111,7 +114,7 @@ pub async fn open_image<R: tauri::Runtime>(
         let (image, info) =
             shade_io::load_image_bytes_f32_with_info(&bytes, None).map_err(|e| e.to_string())?;
         let mut st = state.lock().unwrap();
-        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth));
+        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space));
     }
 
     #[cfg(target_os = "ios")]
@@ -136,13 +139,13 @@ pub async fn open_image<R: tauri::Runtime>(
         let (image, info) =
             load_image_bytes_f32_with_info(&bytes, None).map_err(|e| e.to_string())?;
         let mut st = state.lock().unwrap();
-        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth));
+        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space));
     }
 
     let (image, info) =
         load_image_f32_with_info(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
 }
 
 #[tauri::command]
@@ -154,12 +157,14 @@ pub async fn open_image_encoded_bytes(
     let (image, info) =
         load_image_bytes_f32_with_info(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
 /// This avoids needing a file path — the JS side decodes the image via
 /// `createImageBitmap` and passes the pixel buffer directly.
+/// NOTE: pixels here are already decoded by the browser, which applies color management
+/// and outputs sRGB-encoded values.
 #[tauri::command]
 pub async fn open_image_bytes(
     pixels: Vec<u8>,
@@ -183,6 +188,7 @@ pub async fn open_image_bytes(
         width,
         height,
         "8-bit".into(),
+        shade_core::ColorSpace::Srgb,
     ))
 }
 

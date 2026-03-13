@@ -69,6 +69,7 @@ pub fn load_image_f32_with_colorspace(path: &Path) -> Result<(FloatImage, ColorS
 #[derive(Clone, Debug)]
 pub struct SourceImageInfo {
     pub bit_depth: String,
+    pub color_space: ColorSpace,
 }
 
 pub fn load_image_f32_with_info(path: &Path) -> Result<(FloatImage, SourceImageInfo)> {
@@ -164,6 +165,7 @@ pub fn load_image_bytes_f32_with_info(
             decode_exr_f32(bytes)?,
             SourceImageInfo {
                 bit_depth: detect_exr_bit_depth(bytes)?,
+                color_space: ColorSpace::LinearSrgb,
             },
         ));
     }
@@ -187,9 +189,24 @@ pub fn load_image_bytes_f32_with_info(
                 width,
                 height,
             },
-            SourceImageInfo { bit_depth },
+            SourceImageInfo {
+                bit_depth,
+                color_space: ColorSpace::Srgb,
+            },
         ));
     }
+
+    let ext = name_hint
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let color_space = match ext.as_str() {
+        "jpg" | "jpeg" => detect_jpeg_colorspace(bytes),
+        "png" => detect_png_colorspace(bytes),
+        _ => ColorSpace::Unknown,
+    };
 
     let decoder = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -211,6 +228,7 @@ pub fn load_image_bytes_f32_with_info(
         },
         SourceImageInfo {
             bit_depth: bit_depth.to_string(),
+            color_space,
         },
     ))
 }
@@ -235,7 +253,7 @@ fn apply_orientation(image: DynamicImage, orientation: Option<u32>) -> DynamicIm
         6 => image.rotate90(),
         7 => image.rotate270().fliph(),
         8 => image.rotate270(),
-        value => panic!("Unsupported EXIF orientation value: {value}"),
+        _ => image,
     }
 }
 
@@ -798,20 +816,19 @@ fn identify_icc_profile(icc: &[u8]) -> ColorSpace {
     }
     // Bytes 16..20: colour space signature
     let cs_sig = &icc[16..20];
-    // Bytes 4..8: CMM type (not useful here)
-    // Profile description is more reliable but requires tag table parsing
-    // Use a quick scan for known description strings instead
-    let profile_str = String::from_utf8_lossy(icc);
-    if profile_str.contains("Adobe RGB") || profile_str.contains("AdobeRGB") {
+    // ICC profile descriptions are often stored as UTF-16LE (null bytes between each char).
+    // Strip null bytes to get an ASCII-comparable string for common profile names.
+    let ascii: String = icc.iter().filter(|&&b| b != 0).map(|&b| b as char).collect();
+    if ascii.contains("Adobe RGB") || ascii.contains("AdobeRGB") {
         return ColorSpace::AdobeRgb;
     }
-    if profile_str.contains("Display P3") || profile_str.contains("P3 D65") {
+    if ascii.contains("Display P3") || ascii.contains("P3 D65") {
         return ColorSpace::DisplayP3;
     }
-    if profile_str.contains("ProPhoto") || profile_str.contains("ROMM") {
+    if ascii.contains("ProPhoto") || ascii.contains("ROMM") {
         return ColorSpace::ProPhotoRgb;
     }
-    if profile_str.contains("sRGB") || cs_sig == b"RGB " {
+    if ascii.contains("sRGB") || cs_sig == b"RGB " {
         return ColorSpace::Srgb;
     }
     // Default: sRGB
