@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		06A41DFD8396B29DE1A9DE40 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 334C98A3756776D5EA6ACDC6 /* assets */; };
 		203328568513A7C27725F0FD /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 115E18BB38F7AD09D9CEE3F4 /* LaunchScreen.storyboard */; };
+		2495D02DCBCF22C10417D7F1 /* PhotosHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 533A7A944AB33AB2291F73B3 /* PhotosHelper.swift */; };
+		28881AC09B849197E6CDBDBD /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C61B78932D7F157CC533276F /* Photos.framework */; };
 		3C6A04F56A2876EF026406B7 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9E7088856BE05164B9006A1F /* MetalKit.framework */; };
 		3FA949A5B6A59411D6C77632 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D7651124D35228AFDBB66C67 /* libapp.a */; };
 		46979AD4DBD13BAA11A0E93F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 302254801AC1018E7F70EFFB /* Assets.xcassets */; };
@@ -18,6 +20,7 @@
 		A26ACFFBCFFF3A5378609272 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C47C0582D769F97AE756765D /* UIKit.framework */; };
 		C931AC4D3AC90C336E51F807 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5E1F3414AF00816B97EB6044 /* Metal.framework */; };
 		D9530E84CC0F8CAECC836276 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = C2E4F211021C690D7DED7688 /* main.mm */; };
+		E541A8E440E75133D1DEA9DF /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 5EB98CB24F701CE7AF52C2DB /* libapp.a */; };
 		E5D204511F4F6E54E213FFBE /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1AA0EB6CD1690F8C29FE8C7D /* QuartzCore.framework */; };
 /* End PBXBuildFile section */
 
@@ -30,14 +33,17 @@
 		36C5CEB7812AD9A19C386FC4 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		372BACA4075C0D1CD807F216 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		42FDBA8E542962FC59153878 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		533A7A944AB33AB2291F73B3 /* PhotosHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosHelper.swift; sourceTree = "<group>"; };
 		55F03B542332E3E3BB964E6B /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		5E1F3414AF00816B97EB6044 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		5EB98CB24F701CE7AF52C2DB /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		68B148378D900BEE52EE5CC3 /* shade-tauri_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "shade-tauri_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6DA9D05DE1E1FC4BD192818E /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		75E1B2B398C2D68EB69D652D /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		9E7088856BE05164B9006A1F /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		C2E4F211021C690D7DED7688 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		C47C0582D769F97AE756765D /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		C61B78932D7F157CC533276F /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
 		D7651124D35228AFDBB66C67 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		EC6275A81D62DD94151F8C83 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		F116E63688557D1B05B51EBA /* shade-tauri_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "shade-tauri_iOS.entitlements"; sourceTree = "<group>"; };
@@ -56,6 +62,7 @@
 				4D0A1C7C1F71CC5F6A87C285 /* Security.framework in Frameworks */,
 				A26ACFFBCFFF3A5378609272 /* UIKit.framework in Frameworks */,
 				64E72D4708D6A92C6714F3C6 /* WebKit.framework in Frameworks */,
+				28881AC09B849197E6CDBDBD /* Photos.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,8 +88,17 @@
 		236CE1531379732175E2B2D4 /* Externals */ = {
 			isa = PBXGroup;
 			children = (
+				491F7753DA0C072C26751791 /* arm64 */,
 			);
 			path = Externals;
+			sourceTree = "<group>";
+		};
+		491F7753DA0C072C26751791 /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+				BEA451852F16565FF8222D7C /* debug */,
+			);
+			path = arm64;
 			sourceTree = "<group>";
 		};
 		57FC1B45E79105D630548C36 /* shade-tauri_iOS */ = {
@@ -98,6 +114,7 @@
 			isa = PBXGroup;
 			children = (
 				C2E4F211021C690D7DED7688 /* main.mm */,
+				533A7A944AB33AB2291F73B3 /* PhotosHelper.swift */,
 				14C272E4C98C31917DC2D950 /* bindings */,
 			);
 			path = "shade-tauri";
@@ -125,12 +142,21 @@
 				D7651124D35228AFDBB66C67 /* libapp.a */,
 				5E1F3414AF00816B97EB6044 /* Metal.framework */,
 				9E7088856BE05164B9006A1F /* MetalKit.framework */,
+				C61B78932D7F157CC533276F /* Photos.framework */,
 				1AA0EB6CD1690F8C29FE8C7D /* QuartzCore.framework */,
 				36C5CEB7812AD9A19C386FC4 /* Security.framework */,
 				C47C0582D769F97AE756765D /* UIKit.framework */,
 				42FDBA8E542962FC59153878 /* WebKit.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		BEA451852F16565FF8222D7C /* debug */ = {
+			isa = PBXGroup;
+			children = (
+				5EB98CB24F701CE7AF52C2DB /* libapp.a */,
+			);
+			path = debug;
 			sourceTree = "<group>";
 		};
 		F7ED8EAD85F07058E0793634 /* src */ = {
@@ -150,6 +176,13 @@
 				A1778E9431F9F535C81A1855 /* shade-tauri */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		"TEMP_C160D447-658A-4D3D-9DCE-DB51E958F040" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -213,6 +246,7 @@
 				46979AD4DBD13BAA11A0E93F /* Assets.xcassets in Resources */,
 				203328568513A7C27725F0FD /* LaunchScreen.storyboard in Resources */,
 				06A41DFD8396B29DE1A9DE40 /* assets in Resources */,
+				E541A8E440E75133D1DEA9DF /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -247,6 +281,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2495D02DCBCF22C10417D7F1 /* PhotosHelper.swift in Sources */,
 				D9530E84CC0F8CAECC836276 /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

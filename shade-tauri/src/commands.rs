@@ -6,6 +6,23 @@ use shade_core::{
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info};
 use std::sync::Mutex;
 
+#[cfg(target_os = "ios")]
+extern "C" {
+    fn ios_list_photos() -> *mut std::os::raw::c_char;
+    fn ios_get_thumbnail(
+        identifier: *const std::os::raw::c_char,
+        width: i32,
+        height: i32,
+        out_size: *mut i32,
+    ) -> *mut u8;
+    fn ios_get_image_data(
+        identifier: *const std::os::raw::c_char,
+        out_size: *mut i32,
+    ) -> *mut u8;
+    fn ios_free_buffer(ptr: *mut u8);
+    fn ios_free_string(ptr: *mut std::os::raw::c_char);
+}
+
 pub struct EditorState {
     pub stack: LayerStack,
     pub image_sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
@@ -82,6 +99,31 @@ pub async fn open_image(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    #[cfg(target_os = "ios")]
+    if !path.starts_with('/') {
+        let bytes = tokio::task::spawn_blocking(move || {
+            let c_id = std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
+            let mut out_size: i32 = 0;
+            let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
+            if ptr.is_null() {
+                return Err("failed to fetch image from photo library".to_string());
+            }
+            let bytes = unsafe {
+                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
+                ios_free_buffer(ptr);
+                v
+            };
+            Ok(bytes)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        let (image, info) =
+            load_image_bytes_f32_with_info(&bytes, None).map_err(|e| e.to_string())?;
+        let mut st = state.lock().unwrap();
+        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth));
+    }
+
     let (image, info) =
         load_image_f32_with_info(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
@@ -552,6 +594,26 @@ pub struct GrainValues {
 
 #[tauri::command]
 pub async fn get_thumbnail(path: String) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "ios")]
+    if !path.starts_with('/') {
+        return tokio::task::spawn_blocking(move || {
+            let c_id = std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
+            let mut out_size: i32 = 0;
+            let ptr = unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
+            if ptr.is_null() {
+                return Err("failed to get thumbnail from photo library".to_string());
+            }
+            let bytes = unsafe {
+                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
+                ios_free_buffer(ptr);
+                v
+            };
+            Ok(bytes)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
     use std::hash::{Hash, Hasher};
 
     let source = std::path::Path::new(&path);
@@ -588,31 +650,53 @@ pub async fn get_thumbnail(path: String) -> Result<Vec<u8>, String> {
 
 #[tauri::command]
 pub async fn list_pictures() -> Result<Vec<String>, String> {
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let pictures_dir = std::path::PathBuf::from(home).join("Pictures");
-    const IMAGE_EXTENSIONS: &[&str] = &[
-        "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
-        "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
-    ];
-    let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
-    let entries = std::fs::read_dir(&pictures_dir).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                    if let Some(s) = path.to_str() {
-                        let mtime = path.metadata().ok()
-                            .and_then(|m| m.modified().ok())
-                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        entries_with_mtime.push((mtime, s.to_string()));
+    #[cfg(target_os = "ios")]
+    return tokio::task::spawn_blocking(|| {
+        let ptr = unsafe { ios_list_photos() };
+        if ptr.is_null() {
+            return Ok(vec![]);
+        }
+        let json = unsafe {
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            ios_free_string(ptr);
+            s
+        };
+        serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        let search_dir = std::env::var("HOME").ok()
+            .map(|h| std::path::PathBuf::from(h).join("Pictures"));
+
+        const IMAGE_EXTENSIONS: &[&str] = &[
+            "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
+            "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
+        ];
+        let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
+        if let Some(dir) = search_dir {
+            let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(vec![]); };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        if IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                            if let Some(s) = path.to_str() {
+                                let mtime = path.metadata().ok()
+                                    .and_then(|m| m.modified().ok())
+                                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                                entries_with_mtime.push((mtime, s.to_string()));
+                            }
+                        }
                     }
                 }
             }
         }
+        entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(entries_with_mtime.into_iter().map(|(_, p)| p).collect())
     }
-    entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(entries_with_mtime.into_iter().map(|(_, p)| p).collect())
 }
 
 #[tauri::command]

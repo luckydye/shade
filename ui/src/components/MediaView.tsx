@@ -29,7 +29,8 @@ async function resolveSrc(path: string): Promise<string> {
 
 const ImageTile: Component<{ path: string }> = (props) => {
   const [src] = createResource(() => props.path, resolveSrc);
-  const name = () => props.path.split("/").pop() ?? props.path;
+  // PHAsset local identifiers (iOS) don't have a meaningful filename component.
+  const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
 
   // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
@@ -53,7 +54,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
           />
         </Suspense>
       </div>
-      <span class="truncate px-0.5 text-[11px] text-white/40">{name()}</span>
+      {name() && <span class="truncate px-0.5 text-[11px] text-white/40">{name()}</span>}
     </button>
   );
 };
