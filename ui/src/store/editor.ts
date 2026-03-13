@@ -10,10 +10,16 @@ const [previewBitmap, setPreviewBitmap] = createSignal<ImageBitmap | null>(null)
 export { previewBitmap };
 const [previewFrame, setPreviewFrame] = createSignal<ImageData | null>(null);
 export { previewFrame };
-const MAX_PREVIEW_DEVICE_PIXEL_RATIO = 1.25;
-const MAX_PREVIEW_PIXEL_COUNT = 1_500_000;
-let previewRefreshPending = false;
+type PreviewQuality = "interactive" | "final";
+const INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO = 0.75;
+const FINAL_PREVIEW_DEVICE_PIXEL_RATIO = 1.25;
+const INTERACTIVE_PREVIEW_PIXEL_COUNT = 300_000;
+const FINAL_PREVIEW_PIXEL_COUNT = 1_500_000;
+const FINAL_PREVIEW_DEBOUNCE_MS = 120;
+let previewRefreshVersion = 0;
+let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
+let previewSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
 function replaceBitmap(
   setter: (bitmap: ImageBitmap | null) => void,
@@ -89,11 +95,11 @@ function fitPreviewSize(containerWidth: number, containerHeight: number, imageWi
   };
 }
 
-function capPreviewRenderSize(width: number, height: number) {
+function capPreviewRenderSize(width: number, height: number, maxPixelCount: number) {
   if (width <= 0 || height <= 0) return { width: 0, height: 0 };
   const pixelCount = width * height;
-  if (pixelCount <= MAX_PREVIEW_PIXEL_COUNT) return { width, height };
-  const scale = Math.sqrt(MAX_PREVIEW_PIXEL_COUNT / pixelCount);
+  if (pixelCount <= maxPixelCount) return { width, height };
+  const scale = Math.sqrt(maxPixelCount / pixelCount);
   return {
     width: Math.max(1, Math.floor(width * scale)),
     height: Math.max(1, Math.floor(height * scale)),
@@ -109,15 +115,21 @@ function clampPreviewCenter(zoom: number, centerX: number, centerY: number) {
   };
 }
 
-function getPreviewRequest(): bridge.PreviewRequest | null {
+function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
+  const devicePixelRatio = quality === "interactive"
+    ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
+    : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
+  const maxPixelCount = quality === "interactive"
+    ? INTERACTIVE_PREVIEW_PIXEL_COUNT
+    : FINAL_PREVIEW_PIXEL_COUNT;
   const fitted = fitPreviewSize(
-    state.previewViewportWidth * Math.min(window.devicePixelRatio, MAX_PREVIEW_DEVICE_PIXEL_RATIO),
-    state.previewViewportHeight * Math.min(window.devicePixelRatio, MAX_PREVIEW_DEVICE_PIXEL_RATIO),
+    state.previewViewportWidth * Math.min(window.devicePixelRatio, devicePixelRatio),
+    state.previewViewportHeight * Math.min(window.devicePixelRatio, devicePixelRatio),
     state.canvasWidth,
     state.canvasHeight,
   );
-  const target = capPreviewRenderSize(fitted.width, fitted.height);
+  const target = capPreviewRenderSize(fitted.width, fitted.height, maxPixelCount);
   if (target.width <= 0 || target.height <= 0) return null;
   const cropWidth = state.canvasWidth / state.previewZoom;
   const cropHeight = state.canvasHeight / state.previewZoom;
@@ -279,12 +291,16 @@ export async function addLayer(kind: string) {
 }
 
 async function performPreviewRefresh() {
-  const request = getPreviewRequest();
+  const queued = previewRefreshQueued;
+  if (!queued) return;
+  previewRefreshQueued = null;
+  const request = getPreviewRequest(queued.quality);
   if (!request) return;
   const frame = await bridge.renderPreview(request);
+  if (queued.version !== previewRefreshVersion) return;
   if (frame.kind === "rgba") {
     if (frame.width === 0 || frame.height === 0) return;
-    replaceBitmap(setPreviewBitmap, previewBitmap, null);
+      replaceBitmap(setPreviewBitmap, previewBitmap, null);
     const pixels = new Uint8ClampedArray(frame.pixels.length);
     pixels.set(frame.pixels);
     setPreviewFrame(new ImageData(pixels, frame.width, frame.height));
@@ -294,18 +310,46 @@ async function performPreviewRefresh() {
   setPreviewFrame(null);
   const response = await fetch(frame.dataUrl);
   const bitmap = await createImageBitmap(await response.blob());
+  if (queued.version !== previewRefreshVersion) {
+    bitmap.close();
+    return;
+  }
   replaceBitmap(setPreviewBitmap, previewBitmap, bitmap);
 }
 
-export function refreshPreview() {
-  previewRefreshPending = true;
+function queuePreviewRefresh(version: number, quality: PreviewQuality) {
+  if (
+    previewRefreshQueued
+    && previewRefreshQueued.version === version
+    && previewRefreshQueued.quality === "final"
+  ) {
+    return;
+  }
+  previewRefreshQueued = { version, quality };
   if (previewRefreshPromise) return previewRefreshPromise;
   previewRefreshPromise = (async () => {
-    while (previewRefreshPending) {
-      previewRefreshPending = false;
+    while (previewRefreshQueued) {
       await performPreviewRefresh();
     }
     previewRefreshPromise = null;
   })();
   return previewRefreshPromise;
+}
+
+export function refreshPreview(mode: "progressive" | "final" = "progressive") {
+  previewRefreshVersion += 1;
+  const version = previewRefreshVersion;
+  if (previewSettleTimer) {
+    clearTimeout(previewSettleTimer);
+    previewSettleTimer = null;
+  }
+  if (mode === "final") {
+    return queuePreviewRefresh(version, "final");
+  }
+  queuePreviewRefresh(version, "interactive");
+  previewSettleTimer = setTimeout(() => {
+    if (version !== previewRefreshVersion) return;
+    void queuePreviewRefresh(version, "final");
+  }, FINAL_PREVIEW_DEBOUNCE_MS);
+  return previewRefreshPromise ?? Promise.resolve();
 }
