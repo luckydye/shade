@@ -594,7 +594,7 @@ pub async fn list_pictures() -> Result<Vec<String>, String> {
         "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
         "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
     ];
-    let mut paths = Vec::new();
+    let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
     let entries = std::fs::read_dir(&pictures_dir).map_err(|e| e.to_string())?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -602,14 +602,17 @@ pub async fn list_pictures() -> Result<Vec<String>, String> {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
                     if let Some(s) = path.to_str() {
-                        paths.push(s.to_string());
+                        let mtime = path.metadata().ok()
+                            .and_then(|m| m.modified().ok())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        entries_with_mtime.push((mtime, s.to_string()));
                     }
                 }
             }
         }
     }
-    paths.sort();
-    Ok(paths)
+    entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(entries_with_mtime.into_iter().map(|(_, p)| p).collect())
 }
 
 #[tauri::command]
