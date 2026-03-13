@@ -63,8 +63,6 @@ pub fn apply_tone(
     highlights: f32,
     shadows: f32,
     gamma: f32,
-    black_point: f32,
-    white_point: f32,
 ) {
     ENGINE.with(|e| {
         e.borrow_mut().apply_tone(
@@ -76,8 +74,6 @@ pub fn apply_tone(
                 highlights,
                 shadows,
                 gamma,
-                black_point,
-                white_point,
             },
         )
     });

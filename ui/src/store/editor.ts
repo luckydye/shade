@@ -308,8 +308,6 @@ export async function applyEdit(params: Record<string, unknown>) {
           highlights: params.highlights as number,
           shadows: params.shadows as number,
           gamma: params.gamma as number,
-          black_point: params.black_point as number,
-          white_point: params.white_point as number,
         },
       });
       break;

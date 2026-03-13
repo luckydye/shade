@@ -8,8 +8,6 @@ struct ToneParams {
     highlights: f32,
     shadows: f32,
     gamma: f32,
-    black_point: f32,
-    white_point: f32,
 };
 
 struct ColorParams {
@@ -30,9 +28,8 @@ fn luminance(rgb: vec3<f32>) -> f32 {
 }
 
 fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
-    // Input levels: remap [black_point, white_point] → [0, 1].
-    var rgb = (c.rgb - vec3<f32>(p.black_point)) / max(p.white_point - p.black_point, 0.001);
     // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
+    var rgb = c.rgb;
     rgb = rgb * pow(2.0, p.exposure);
     // Contrast: adjust luminance around mid-grey 0.18, then shift all channels
     // by the same delta so hue stays stable.

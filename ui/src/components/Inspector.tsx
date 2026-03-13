@@ -49,8 +49,6 @@ const DEFAULT_TONE = {
   highlights: 0,
   shadows: 0,
   gamma: 1,
-  black_point: 0,
-  white_point: 1,
 } as const;
 const DEFAULT_COLOR = {
   saturation: 1,
@@ -217,8 +215,6 @@ const Inspector: Component = () => {
       highlights: next.highlights ?? current.highlights,
       shadows: next.shadows ?? current.shadows,
       gamma: next.gamma ?? current.gamma,
-      black_point: next.black_point ?? current.black_point,
-      white_point: next.white_point ?? current.white_point,
     });
   };
 
@@ -412,24 +408,14 @@ const Inspector: Component = () => {
               onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ contrast: value }); }}
             />
             <Slider
-              label="Black Level"
+              label="Blacks"
               icon={<ToneIcon />}
-              value={tone().black_point}
-              defaultValue={DEFAULT_TONE.black_point}
-              min={0}
-              max={0.5}
-              step={0.005}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ black_point: value }); }}
-            />
-            <Slider
-              label="White Level"
-              icon={<ToneIcon />}
-              value={tone().white_point}
-              defaultValue={DEFAULT_TONE.white_point}
-              min={0.5}
-              max={1}
-              step={0.005}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ white_point: value }); }}
+              value={tone().blacks}
+              defaultValue={DEFAULT_TONE.blacks}
+              min={-0.05}
+              max={0.1}
+              step={0.001}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ blacks: value }); }}
             />
             <Slider
               label="Saturation"
@@ -606,29 +592,16 @@ const Inspector: Component = () => {
                 }}
               />
               <Slider
-                label="Black Level"
+                label="Blacks"
                 icon={<ToneIcon />}
-                value={tone().black_point}
-                defaultValue={DEFAULT_TONE.black_point}
-                min={0}
-                max={0.5}
-                step={0.005}
+                value={tone().blacks}
+                defaultValue={DEFAULT_TONE.blacks}
+                min={-0.05}
+                max={0.1}
+                step={0.001}
                 onChange={(value) => {
                   selectedAdjustmentLayerOrThrow();
-                  void applyTone({ black_point: value });
-                }}
-              />
-              <Slider
-                label="White Level"
-                icon={<ToneIcon />}
-                value={tone().white_point}
-                defaultValue={DEFAULT_TONE.white_point}
-                min={0.5}
-                max={1}
-                step={0.005}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyTone({ white_point: value });
+                  void applyTone({ blacks: value });
                 }}
               />
               <Slider
