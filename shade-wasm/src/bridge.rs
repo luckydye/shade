@@ -60,6 +60,7 @@ pub fn apply_tone(
     exposure: f32,
     contrast: f32,
     blacks: f32,
+    whites: f32,
     highlights: f32,
     shadows: f32,
     gamma: f32,
@@ -71,9 +72,11 @@ pub fn apply_tone(
                 exposure,
                 contrast,
                 blacks,
+                whites,
                 highlights,
                 shadows,
                 gamma,
+                _pad: 0.0,
             },
         )
     });

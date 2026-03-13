@@ -46,6 +46,7 @@ const DEFAULT_TONE = {
   exposure: 0,
   contrast: 0,
   blacks: 0,
+  whites: 0,
   highlights: 0,
   shadows: 0,
   gamma: 1,
@@ -212,6 +213,7 @@ const Inspector: Component = () => {
       exposure: next.exposure ?? current.exposure,
       contrast: next.contrast ?? current.contrast,
       blacks: next.blacks ?? current.blacks,
+      whites: next.whites ?? current.whites,
       highlights: next.highlights ?? current.highlights,
       shadows: next.shadows ?? current.shadows,
       gamma: next.gamma ?? current.gamma,
@@ -418,6 +420,16 @@ const Inspector: Component = () => {
               onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ blacks: value }); }}
             />
             <Slider
+              label="Whites"
+              icon={<ToneIcon />}
+              value={tone().whites}
+              defaultValue={DEFAULT_TONE.whites}
+              min={-0.1}
+              max={0.2}
+              step={0.001}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ whites: value }); }}
+            />
+            <Slider
               label="Saturation"
               icon={<DropletIcon />}
               value={color().saturation}
@@ -602,6 +614,19 @@ const Inspector: Component = () => {
                 onChange={(value) => {
                   selectedAdjustmentLayerOrThrow();
                   void applyTone({ blacks: value });
+                }}
+              />
+              <Slider
+                label="Whites"
+                icon={<ToneIcon />}
+                value={tone().whites}
+                defaultValue={DEFAULT_TONE.whites}
+                min={-0.1}
+                max={0.2}
+                step={0.001}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ whites: value });
                 }}
               />
               <Slider

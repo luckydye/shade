@@ -34,9 +34,11 @@ impl WasmEngine {
             exposure: 0.0,
             contrast: 0.0,
             blacks: 0.0,
+            whites: 0.0,
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
+            _pad: 0.0,
         }]);
         id
     }
@@ -48,6 +50,7 @@ impl WasmEngine {
                     exposure: params.exposure,
                     contrast: params.contrast,
                     blacks: params.blacks,
+                    whites: params.whites,
                     highlights: params.highlights,
                     shadows: params.shadows,
                     gamma: params.gamma,

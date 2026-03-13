@@ -5,9 +5,11 @@ struct ToneParams {
     exposure: f32,
     contrast: f32,
     blacks: f32,
+    whites: f32,
     highlights: f32,
     shadows: f32,
     gamma: f32,
+    _pad: f32,
 };
 
 struct ColorParams {
@@ -38,6 +40,8 @@ fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
     let contrast_luma = mid_luma + (luma - mid_luma) * pow(2.0, p.contrast);
     rgb = rgb + vec3<f32>(contrast_luma - luma);
     rgb = rgb + vec3<f32>(p.blacks);
+    let whites_mask = smoothstep(0.5, 1.0, luminance(rgb));
+    rgb = rgb + vec3<f32>(p.whites * whites_mask);
     let shadow_mask = 1.0 - smoothstep(0.0, 0.5, luminance(rgb));
     rgb = rgb + vec3<f32>(p.shadows * shadow_mask * 0.5);
     let highlight_mask = smoothstep(0.5, 1.0, luminance(rgb));

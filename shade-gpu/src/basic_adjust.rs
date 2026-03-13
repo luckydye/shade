@@ -7,16 +7,18 @@ use wgpu::*;
 const SHADER: &str = include_str!("../../shaders/basic_adjust.wgsl");
 
 /// GPU-side representation of ToneParams — must be Pod + have repr(C).
-/// 6 × f32 = 24 bytes (no padding needed).
+/// 8 × f32 = 32 bytes (no padding needed).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct ToneParamsGpu {
     exposure: f32,
     contrast: f32,
     blacks: f32,
+    whites: f32,
     highlights: f32,
     shadows: f32,
     gamma: f32,
+    _pad: f32,
 }
 
 impl From<ToneParams> for ToneParamsGpu {
@@ -25,9 +27,11 @@ impl From<ToneParams> for ToneParamsGpu {
             exposure: p.exposure,
             contrast: p.contrast,
             blacks: p.blacks,
+            whites: p.whites,
             highlights: p.highlights,
             shadows: p.shadows,
             gamma: p.gamma,
+            _pad: 0.0,
         }
     }
 }

@@ -305,6 +305,7 @@ export async function applyEdit(params: Record<string, unknown>) {
           exposure: params.exposure as number,
           contrast: params.contrast as number,
           blacks: params.blacks as number,
+          whites: params.whites as number,
           highlights: params.highlights as number,
           shadows: params.shadows as number,
           gamma: params.gamma as number,

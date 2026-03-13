@@ -44,6 +44,10 @@ enum Commands {
         #[arg(long, default_value_t = 0.0)]
         blacks: f32,
 
+        /// White ceiling lift for highlights (default: 0.0)
+        #[arg(long, default_value_t = 0.0)]
+        whites: f32,
+
         /// Highlights roll-off compression (default: 0.0)
         #[arg(long, default_value_t = 0.0)]
         highlights: f32,
@@ -146,6 +150,7 @@ async fn main() -> Result<()> {
             exposure,
             contrast,
             blacks,
+            whites,
             highlights,
             shadows,
             saturation,
@@ -203,15 +208,18 @@ async fn main() -> Result<()> {
                 exposure,
                 contrast,
                 blacks,
+                whites,
                 highlights,
                 shadows,
                 gamma: 1.0,
+                _pad: 0.0,
             };
             log::info!("Tone params: {:?}", tone_params);
             ops.push(AdjustmentOp::Tone {
                 exposure,
                 contrast,
                 blacks,
+                whites,
                 highlights,
                 shadows,
                 gamma: 1.0,
@@ -306,6 +314,7 @@ async fn main() -> Result<()> {
                 exposure,
                 contrast: 0.0,
                 blacks: 0.0,
+                whites: 0.0,
                 highlights: 0.0,
                 shadows: 0.0,
                 gamma: 1.0,

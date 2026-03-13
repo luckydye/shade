@@ -2,9 +2,11 @@ struct ToneParams {
     exposure: f32,
     contrast: f32,
     blacks: f32,
+    whites: f32,
     highlights: f32,
     shadows: f32,
     gamma: f32,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -34,6 +36,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Black level lift
     c = vec4<f32>(c.rgb + vec3<f32>(params.blacks), c.a);
+
+    // Whites: additive ceiling lift targeting highlights (mirrors blacks for the bright end).
+    let whites_mask = smoothstep(0.5, 1.0, luminance(c.rgb));
+    c = vec4<f32>(c.rgb + vec3<f32>(params.whites * whites_mask), c.a);
 
     // Shadows lift (low-end boost): apply to pixels below 0.5 luminance.
     let shadow_mask = 1.0 - smoothstep(0.0, 0.5, luminance(c.rgb));

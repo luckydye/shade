@@ -83,6 +83,7 @@ export interface ToneValues {
   exposure: number;
   contrast: number;
   blacks: number;
+  whites: number;
   highlights: number;
   shadows: number;
   gamma: number;

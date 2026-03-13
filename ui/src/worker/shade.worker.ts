@@ -44,7 +44,7 @@ self.onmessage = async (e: MessageEvent) => {
 
     case "apply_tone": {
       if (!wasm) return;
-      wasm.apply_tone(msg.layerIdx, msg.exposure, msg.contrast, msg.blacks, msg.highlights, msg.shadows, msg.gamma ?? 1.0);
+      wasm.apply_tone(msg.layerIdx, msg.exposure, msg.contrast, msg.blacks, msg.whites ?? 0.0, msg.highlights, msg.shadows, msg.gamma ?? 1.0);
       self.postMessage({ type: "tone_applied" });
       break;
     }

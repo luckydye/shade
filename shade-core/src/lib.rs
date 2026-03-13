@@ -11,12 +11,15 @@ pub struct ToneParams {
     pub contrast: f32,
     /// Black level lift.
     pub blacks: f32,
+    /// White ceiling lift (highlight-targeted additive, mirrors blacks).
+    pub whites: f32,
     /// Highlights compression amount.
     pub highlights: f32,
     /// Shadows lift amount.
     pub shadows: f32,
     /// Gamma exponent applied as pow(rgb, gamma). 1.0 = no change.
     pub gamma: f32,
+    pub _pad: f32,
 }
 
 impl Default for ToneParams {
@@ -25,9 +28,11 @@ impl Default for ToneParams {
             exposure: 0.0,
             contrast: 0.0,
             blacks: 0.0,
+            whites: 0.0,
             highlights: 0.0,
             shadows: 0.0,
             gamma: 1.0,
+            _pad: 0.0,
         }
     }
 }
@@ -123,6 +128,7 @@ pub enum AdjustmentOp {
         exposure: f32,
         contrast: f32,
         blacks: f32,
+        whites: f32,
         highlights: f32,
         shadows: f32,
         gamma: f32,
