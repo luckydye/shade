@@ -1,72 +1,54 @@
-use serde::{Deserialize, Serialize};
-use tauri::{plugin::Builder, Runtime};
+use serde::Deserialize;
+use tauri::{plugin::Builder, Manager, Runtime};
 
 #[derive(Deserialize)]
-pub struct ListResult {
-    pub uris: Vec<String>,
+struct ListResult {
+    uris: Vec<String>,
 }
 
 #[derive(Deserialize)]
-pub struct BytesResult {
-    pub bytes: Vec<u8>,
+struct BytesResult {
+    bytes: Vec<u8>,
 }
 
-/// Stored in app state on Android; used by commands to call into the Kotlin PhotosPlugin.
+/// Stored in app state on Android; wraps the registered PluginHandle for PhotosPlugin.
 #[cfg(target_os = "android")]
 pub struct PhotosHandle<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> PhotosHandle<R> {
     pub async fn list_photos(&self) -> Result<Vec<String>, String> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.0
-            .run("listPhotos", (), move |resp| {
-                let _ = tx.send(resp);
-            })
+        let r: ListResult = self
+            .0
+            .run_mobile_plugin_async("listPhotos", ())
+            .await
             .map_err(|e| e.to_string())?;
-        let resp = rx.await.map_err(|_| "channel closed".to_string())?;
-        if !resp.success {
-            return Err(resp.payload.to_string());
-        }
-        let r: ListResult = serde_json::from_value(resp.payload).map_err(|e| e.to_string())?;
         Ok(r.uris)
     }
 
     pub async fn get_thumbnail(&self, uri: &str) -> Result<Vec<u8>, String> {
-        #[derive(Serialize)]
+        #[derive(serde::Serialize)]
         struct Args<'a> {
             uri: &'a str,
         }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.0
-            .run("getThumbnail", Args { uri }, move |resp| {
-                let _ = tx.send(resp);
-            })
+        let r: BytesResult = self
+            .0
+            .run_mobile_plugin_async("getThumbnail", Args { uri })
+            .await
             .map_err(|e| e.to_string())?;
-        let resp = rx.await.map_err(|_| "channel closed".to_string())?;
-        if !resp.success {
-            return Err(resp.payload.to_string());
-        }
-        let r: BytesResult = serde_json::from_value(resp.payload).map_err(|e| e.to_string())?;
         Ok(r.bytes)
     }
 
     pub async fn get_image_data(&self, uri: &str) -> Result<Vec<u8>, String> {
-        #[derive(Serialize)]
+        #[derive(serde::Serialize)]
         struct Args<'a> {
             uri: &'a str,
         }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.0
-            .run("getImageData", Args { uri }, move |resp| {
-                let _ = tx.send(resp);
-            })
+        let r: BytesResult = self
+            .0
+            .run_mobile_plugin_async("getImageData", Args { uri })
+            .await
             .map_err(|e| e.to_string())?;
-        let resp = rx.await.map_err(|_| "channel closed".to_string())?;
-        if !resp.success {
-            return Err(resp.payload.to_string());
-        }
-        let r: BytesResult = serde_json::from_value(resp.payload).map_err(|e| e.to_string())?;
         Ok(r.bytes)
     }
 }

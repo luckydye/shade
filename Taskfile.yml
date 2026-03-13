@@ -4,7 +4,7 @@ tasks:
   ui:dev:
     desc: Start the UI dev server
     dir: ui
-    cmd: bun dev
+    cmd: bun run dev
 
   ui:build:
     desc: Build the UI for production
