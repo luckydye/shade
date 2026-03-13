@@ -290,11 +290,7 @@ impl Renderer {
         let mut pixels = self
             .readback_work_texture_to_f32(&final_accum, target_width, target_height)
             .await?;
-        encode_preview_pixels(
-            &mut pixels,
-            &ColorSpace::Srgb,
-            PreviewDynamicRange::Compress,
-        );
+        encode_preview_pixels(&mut pixels, &ColorSpace::Srgb);
         Ok(rgba_display_f32_to_u8(&pixels))
     }
 
@@ -320,11 +316,7 @@ impl Renderer {
         let mut pixels = self
             .readback_work_texture_to_f32(&final_accum, target_width, target_height)
             .await?;
-        encode_preview_pixels(
-            &mut pixels,
-            &ColorSpace::DisplayP3,
-            PreviewDynamicRange::Compress,
-        );
+        encode_preview_pixels(&mut pixels, &ColorSpace::DisplayP3);
         Ok(rgba_f32_to_f16_words(&pixels))
     }
 
@@ -916,34 +908,15 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-enum PreviewDynamicRange {
-    Compress,
-}
-
-fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace, dynamic_range: PreviewDynamicRange) {
+fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
     for pixel in pixels.chunks_exact_mut(4) {
-        let rgb = match dynamic_range {
-            PreviewDynamicRange::Compress => tonemap_preview_rgb([pixel[0], pixel[1], pixel[2]]),
-        };
+        let rgb = [pixel[0].max(0.0), pixel[1].max(0.0), pixel[2].max(0.0)];
         let encoded = encode_preview_rgb(rgb, dst);
         pixel[0] = encoded[0];
         pixel[1] = encoded[1];
         pixel[2] = encoded[2];
         pixel[3] = pixel[3].clamp(0.0, 1.0);
     }
-}
-
-fn tonemap_preview_rgb(rgb: [f32; 3]) -> [f32; 3] {
-    [
-        tonemap_preview_channel(rgb[0]),
-        tonemap_preview_channel(rgb[1]),
-        tonemap_preview_channel(rgb[2]),
-    ]
-}
-
-fn tonemap_preview_channel(value: f32) -> f32 {
-    let positive = value.max(0.0);
-    positive / (1.0 + positive)
 }
 
 fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
@@ -1014,10 +987,9 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 mod tests {
     use super::{
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        resample_rgba_f32_region, rgba_display_f32_to_u8, PreviewCrop, PreviewDynamicRange,
+        resample_rgba_f32_region, rgba_display_f32_to_u8, PreviewCrop,
     };
     use shade_core::ColorSpace;
-    use std::path::PathBuf;
 
     #[test]
     fn normalize_preview_crop_clamps_to_canvas() {
@@ -1087,37 +1059,25 @@ mod tests {
     }
 
     #[test]
-    fn desk_exr_highlight_preview_changes_with_exposure() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/Desk.exr");
-        let image = shade_io::load_image_f32(&fixture)
-            .unwrap_or_else(|err| panic!("failed to load {}: {err}", fixture.display()));
-        let sample = image
-            .pixels
-            .chunks_exact(4)
-            .flat_map(|pixel| pixel[..3].iter().copied())
-            .find(|value| {
-                value.is_finite()
-                    && *value > 2.0
-                    && hard_clipped_channel_to_u8(*value) == u8::MAX
-                    && hard_clipped_channel_to_u8(*value * 0.5) == u8::MAX
-                    && preview_channel_to_u8(*value) > preview_channel_to_u8(*value * 0.5)
-            })
-            .expect("Desk.exr should contain a recoverable HDR highlight");
+    fn display_preview_float_path_preserves_exposure_order() {
+        let mut bright = [4.0, 4.0, 4.0, 1.0];
+        let mut dimmer = [1.0, 1.0, 1.0, 1.0];
+        encode_preview_pixels(&mut bright, &ColorSpace::DisplayP3);
+        encode_preview_pixels(&mut dimmer, &ColorSpace::DisplayP3);
 
-        assert_eq!(hard_clipped_channel_to_u8(sample), u8::MAX);
-        assert_eq!(hard_clipped_channel_to_u8(sample * 0.5), u8::MAX);
-        assert!(preview_channel_to_u8(sample) < u8::MAX);
-        assert!(preview_channel_to_u8(sample) > preview_channel_to_u8(sample * 0.5));
+        assert!(bright[0] > dimmer[0]);
+        assert!(bright[1] > dimmer[1]);
+        assert!(bright[2] > dimmer[2]);
     }
 
-    fn hard_clipped_channel_to_u8(value: f32) -> u8 {
-        (value.clamp(0.0, 1.0) * 255.0).round() as u8
-    }
+    #[test]
+    fn display_preview_u8_path_only_clamps_at_quantization() {
+        let mut pixel = [0.25, 0.25, 0.25, 1.0];
+        encode_preview_pixels(&mut pixel, &ColorSpace::Srgb);
+        let encoded = rgba_display_f32_to_u8(&pixel);
 
-    fn preview_channel_to_u8(value: f32) -> u8 {
-        let mut pixel = [value, value, value, 1.0];
-        encode_preview_pixels(&mut pixel, &ColorSpace::Srgb, PreviewDynamicRange::Compress);
-        rgba_display_f32_to_u8(&pixel)[0]
+        assert!(pixel[0] > 0.25);
+        assert_eq!(encoded[3], 255);
     }
 }
 

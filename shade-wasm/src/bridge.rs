@@ -1,6 +1,7 @@
 use crate::engine::WasmEngine;
 use serde::Serialize;
 use shade_core::{ColorParams, ToneParams};
+use shade_io::source_bit_depth_label;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
@@ -10,11 +11,11 @@ thread_local! {
 }
 
 #[derive(Serialize)]
-#[wasm_bindgen]
 pub struct LayerInfo {
     pub layer_count: usize,
     pub canvas_width: u32,
     pub canvas_height: u32,
+    pub source_bit_depth: String,
 }
 
 /// Load raw RGBA8 image data into the engine.
@@ -38,6 +39,7 @@ pub fn load_image_encoded(bytes: &[u8], file_name: Option<String>) -> Result<JsV
             layer_count: engine.layer_count(),
             canvas_width: engine.canvas_width,
             canvas_height: engine.canvas_height,
+            source_bit_depth: source_bit_depth_label(file_name.as_deref()).to_string(),
         })
         .map_err(|err| JsValue::from_str(&err.to_string()))
     })

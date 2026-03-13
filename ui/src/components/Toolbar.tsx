@@ -61,6 +61,19 @@ const SaveIcon = () => (
 const Toolbar: Component = () => {
   let fileInputRef: HTMLInputElement | undefined;
 
+  const statusText = () => {
+    if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return "No image loaded";
+    const previewResolution = state.previewRenderWidth > 0 && state.previewRenderHeight > 0
+      ? `${state.previewRenderWidth} × ${state.previewRenderHeight}`
+      : "Pending";
+    return [
+      `${state.canvasWidth} × ${state.canvasHeight}`,
+      `Preview ${previewResolution}`,
+      state.previewDisplayColorSpace,
+      state.sourceBitDepth,
+    ].join(" · ");
+  };
+
   const handleFileChange = async (e: Event) => {
     const file = (e.currentTarget as HTMLInputElement).files?.[0];
     if (file) await openImageFile(file);
@@ -72,7 +85,7 @@ const Toolbar: Component = () => {
       <div class="flex items-center gap-3">
         <div class="flex flex-col">
           <span class="hidden text-[11px] text-white/40 lg:block">
-            {state.canvasWidth > 0 ? `${state.canvasWidth} × ${state.canvasHeight}` : "No image loaded"}
+            {statusText()}
           </span>
         </div>
       </div>

@@ -37,6 +37,7 @@ self.onmessage = async (e: MessageEvent) => {
         layerCount: info.layer_count,
         canvasWidth: info.canvas_width,
         canvasHeight: info.canvas_height,
+        source_bit_depth: info.source_bit_depth,
       });
       break;
     }

@@ -3,7 +3,7 @@ use shade_core::{
     linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, LayerStack, SharpenParams,
     VignetteParams,
 };
-use shade_io::{load_image_bytes_f32, load_image_f32};
+use shade_io::{load_image_bytes_f32, load_image_f32, source_bit_depth_label};
 use std::sync::Mutex;
 
 pub struct EditorState {
@@ -12,6 +12,7 @@ pub struct EditorState {
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
+    pub source_bit_depth: String,
 }
 
 impl Default for EditorState {
@@ -22,6 +23,7 @@ impl Default for EditorState {
             canvas_width: 1920,
             canvas_height: 1080,
             next_texture_id: 1,
+            source_bit_depth: "Unknown".into(),
         }
     }
 }
@@ -32,6 +34,7 @@ impl EditorState {
         pixels: Vec<f32>,
         width: u32,
         height: u32,
+        source_bit_depth: String,
     ) -> LayerInfoResponse {
         let texture_id = self.next_texture_id;
         self.next_texture_id += 1;
@@ -46,6 +49,7 @@ impl EditorState {
         );
         self.canvas_width = width;
         self.canvas_height = height;
+        self.source_bit_depth = source_bit_depth.clone();
         self.stack.add_image_layer(texture_id, width, height);
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
@@ -58,6 +62,7 @@ impl EditorState {
             layer_count: self.stack.layers.len(),
             canvas_width: width,
             canvas_height: height,
+            source_bit_depth,
         }
     }
 }
@@ -69,6 +74,7 @@ pub struct LayerInfoResponse {
     pub layer_count: usize,
     pub canvas_width: u32,
     pub canvas_height: u32,
+    pub source_bit_depth: String,
 }
 
 #[tauri::command]
@@ -77,8 +83,9 @@ pub async fn open_image(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
     let image = load_image_f32(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let source_bit_depth = source_bit_depth_label(Some(&path)).to_string();
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, source_bit_depth))
 }
 
 #[tauri::command]
@@ -88,8 +95,9 @@ pub async fn open_image_encoded_bytes(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
     let image = load_image_bytes_f32(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
+    let source_bit_depth = source_bit_depth_label(file_name.as_deref()).to_string();
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, source_bit_depth))
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
@@ -117,6 +125,7 @@ pub async fn open_image_bytes(
             .collect(),
         width,
         height,
+        "8-bit".into(),
     ))
 }
 

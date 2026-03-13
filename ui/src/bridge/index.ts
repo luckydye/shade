@@ -72,6 +72,13 @@ export interface StackInfo {
   generation: number;
 }
 
+export interface OpenImageInfo {
+  layer_count: number;
+  canvas_width: number;
+  canvas_height: number;
+  source_bit_depth: string;
+}
+
 export interface ToneValues {
   exposure: number;
   contrast: number;
@@ -205,7 +212,7 @@ export async function renderPreview(request?: PreviewRequest): Promise<PreviewFr
   };
 }
 
-export async function openImage(path: string): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
+export async function openImage(path: string): Promise<OpenImageInfo> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("open_image", { path }) as Promise<any>;
@@ -216,7 +223,7 @@ export async function openImage(path: string): Promise<{ layer_count: number; ca
 }
 
 /** Open an image from a File object — works for both file picker and drag-and-drop. */
-export async function openImageFile(file: File): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
+export async function openImageFile(file: File): Promise<OpenImageInfo> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
@@ -228,8 +235,8 @@ export async function openImageFile(file: File): Promise<{ layer_count: number; 
 async function _loadEncodedBytes(
   bytes: Uint8Array,
   fileName?: string,
-): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
-  const result = await workerCall<{ layerCount: number; canvasWidth: number; canvasHeight: number }>(
+): Promise<OpenImageInfo> {
+  const result = await workerCall<{ layerCount: number; canvasWidth: number; canvasHeight: number; source_bit_depth?: string }>(
     { type: "load_image_encoded", bytes, fileName },
     "image_loaded"
   );
@@ -237,6 +244,7 @@ async function _loadEncodedBytes(
     layer_count: result.layerCount,
     canvas_width: result.canvasWidth,
     canvas_height: result.canvasHeight,
+    source_bit_depth: result.source_bit_depth ?? "Unknown",
   };
 }
 

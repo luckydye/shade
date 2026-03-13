@@ -25,6 +25,10 @@ export interface EditorState {
   layers: LayerInfo[];
   canvasWidth: number;
   canvasHeight: number;
+  sourceBitDepth: string;
+  previewDisplayColorSpace: string;
+  previewRenderWidth: number;
+  previewRenderHeight: number;
   selectedLayerIdx: number;
   isLoading: boolean;
   webgpuAvailable: boolean;
@@ -39,6 +43,10 @@ const [state, setState] = createStore<EditorState>({
   layers: [],
   canvasWidth: 0,
   canvasHeight: 0,
+  sourceBitDepth: "Unknown",
+  previewDisplayColorSpace: "Unknown",
+  previewRenderWidth: 0,
+  previewRenderHeight: 0,
   selectedLayerIdx: -1,
   isLoading: false,
   webgpuAvailable: true,
@@ -204,6 +212,7 @@ export async function openImage(path: string) {
   try {
     const info = await bridge.openImage(path);
     resetPreviewState(info.canvas_width, info.canvas_height);
+    setState("sourceBitDepth", info.source_bit_depth);
     await refreshLayerStack();
     await refreshPreview();
   } finally {
@@ -218,6 +227,7 @@ export async function openImageFile(file: File) {
   try {
     const info = await bridge.openImageFile(file);
     resetPreviewState(info.canvas_width, info.canvas_height);
+    setState("sourceBitDepth", info.source_bit_depth);
     await refreshLayerStack();
     await refreshPreview();
   } finally {
@@ -351,6 +361,11 @@ async function performPreviewRefresh() {
   if (queued.quality === "final" && queued.version !== previewRefreshVersion) return;
   if (frame.kind === "rgba-float16") {
     if (frame.width === 0 || frame.height === 0) return;
+    setState({
+      previewDisplayColorSpace: frame.colorSpace === "display-p3" ? "Display P3" : frame.colorSpace,
+      previewRenderWidth: frame.width,
+      previewRenderHeight: frame.height,
+    });
     setPreviewFrame(new ImageData(frame.pixels as any, frame.width, frame.height, {
       pixelFormat: "rgba-float16",
       colorSpace: frame.colorSpace,
@@ -359,6 +374,11 @@ async function performPreviewRefresh() {
   }
   if (frame.kind === "rgba") {
     if (frame.width === 0 || frame.height === 0) return;
+    setState({
+      previewDisplayColorSpace: "sRGB",
+      previewRenderWidth: frame.width,
+      previewRenderHeight: frame.height,
+    });
     const pixels = new Uint8ClampedArray(frame.pixels.length);
     pixels.set(frame.pixels);
     setPreviewFrame(new ImageData(pixels, frame.width, frame.height));

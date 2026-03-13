@@ -140,6 +140,26 @@ pub fn load_image_bytes_f32_with_colorspace(
     ))
 }
 
+pub fn source_bit_depth_label(name_hint: Option<&str>) -> &'static str {
+    let ext = name_hint
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "exr" => "32-bit float",
+        "cr2" | "cr3" | "dng" | "nef" | "arw" | "raf" | "rw2" | "orf" | "raw" | "iiq"
+        | "3fr" | "ari" | "crm" | "crw" | "dcr" | "dcs" | "erf" | "fff" | "kdc" | "mef"
+        | "mos" | "mrw" | "nrw" | "ori" | "pef" | "qtk" | "rwl" | "srw" | "x3f" => {
+            "RAW"
+        }
+        "tif" | "tiff" => "TIFF",
+        "png" => "PNG",
+        "jpg" | "jpeg" | "webp" | "avif" => "8-bit",
+        _ => "Unknown",
+    }
+}
+
 fn read_orientation<R: std::io::BufRead + std::io::Seek>(reader: &mut R) -> Result<Option<u32>> {
     match exif::Reader::new().read_from_container(reader) {
         Ok(exif) => Ok(exif
