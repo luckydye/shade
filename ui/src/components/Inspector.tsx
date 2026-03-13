@@ -404,9 +404,9 @@ const Inspector: Component = () => {
               icon={<CircleIcon />}
               value={tone().contrast}
               defaultValue={DEFAULT_TONE.contrast}
-              min={-1.5}
-              max={1.5}
-              step={0.05}
+              min={-1.0}
+              max={1.0}
+              step={0.01}
               onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ contrast: value }); }}
             />
             <Slider
@@ -595,9 +595,9 @@ const Inspector: Component = () => {
                 icon={<CircleIcon />}
                 value={tone().contrast}
                 defaultValue={DEFAULT_TONE.contrast}
-                min={-3}
-                max={3}
-                step={0.05}
+                min={-1.0}
+                max={1.0}
+                step={0.01}
                 onChange={(value) => {
                   selectedAdjustmentLayerOrThrow();
                   void applyTone({ contrast: value });
