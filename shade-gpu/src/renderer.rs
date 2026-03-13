@@ -126,6 +126,19 @@ impl Renderer {
             .await
     }
 
+    pub async fn render_with_ops_f32(
+        &self,
+        input_data: &[f32],
+        width: u32,
+        height: u32,
+        ops: &[AdjustmentOp],
+    ) -> Result<Vec<f32>> {
+        let input_tex = self.upload_float_texture(input_data, width, height, "input texture");
+        let final_tex = self.render_texture_with_ops(&input_tex, ops)?;
+        self.readback_work_texture_to_f32(&final_tex, width, height)
+            .await
+    }
+
     fn render_texture_with_ops(
         &self,
         input_tex: &wgpu::Texture,
@@ -626,6 +639,68 @@ impl Renderer {
 
         Ok(rgba_f16_bytes_to_u8(&raw))
     }
+
+    async fn readback_work_texture_to_f32(
+        &self,
+        tex: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<f32>> {
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+
+        let unpadded_bytes_per_row = width * 8;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
+        let readback_buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("readback float buffer"),
+            size: (padded_bytes_per_row * height) as u64,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("readback float encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            ImageCopyTexture {
+                texture: tex,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            ImageCopyBuffer {
+                buffer: &readback_buffer,
+                layout: ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        let buffer_slice = readback_buffer.slice(..);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        buffer_slice.map_async(MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        device.poll(wgpu::Maintain::Wait);
+        rx.await??;
+        let mapped = buffer_slice.get_mapped_range();
+        let mut raw = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+        for row in 0..height {
+            let row_start = (row * padded_bytes_per_row) as usize;
+            let row_end = row_start + unpadded_bytes_per_row as usize;
+            raw.extend_from_slice(&mapped[row_start..row_end]);
+        }
+        drop(mapped);
+        readback_buffer.unmap();
+        Ok(rgba_f16_bytes_to_f32(&raw))
+    }
 }
 
 fn normalize_preview_crop(
@@ -735,18 +810,30 @@ fn u8_rgba_to_f32(pixels: &[u8]) -> Vec<f32> {
 }
 
 fn rgba_f32_to_f16_bytes(pixels: &[f32]) -> Vec<u8> {
-    let half_pixels: Vec<u16> = pixels
-        .iter()
-        .map(|channel| f16::from_f32(*channel).to_bits())
-        .collect();
-    bytemuck::cast_vec(half_pixels)
+    let mut bytes = Vec::with_capacity(pixels.len() * 2);
+    for channel in pixels {
+        bytes.extend_from_slice(&f16::from_f32(*channel).to_bits().to_ne_bytes());
+    }
+    bytes
 }
 
 fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
-    let half_pixels: &[u16] = bytemuck::cast_slice(bytes);
-    half_pixels
-        .iter()
-        .map(|channel| (f16::from_bits(*channel).to_f32().clamp(0.0, 1.0) * 255.0).round() as u8)
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            let bits = u16::from_ne_bytes([chunk[0], chunk[1]]);
+            (f16::from_bits(bits).to_f32().clamp(0.0, 1.0) * 255.0).round() as u8
+        })
+        .collect()
+}
+
+fn rgba_f16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            let bits = u16::from_ne_bytes([chunk[0], chunk[1]]);
+            f16::from_bits(bits).to_f32()
+        })
         .collect()
 }
 

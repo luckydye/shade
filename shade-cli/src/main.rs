@@ -6,7 +6,8 @@ use shade_core::{
 };
 use shade_gpu::Renderer;
 use shade_io::{
-    from_linear_srgb, load_image, load_image_with_colorspace, save_image, to_linear_srgb,
+    from_linear_srgb_f32, load_image, load_image_f32_with_colorspace, quantize_rgba_f32,
+    save_image, to_linear_srgb_f32,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -179,7 +180,9 @@ async fn main() -> Result<()> {
                 .unwrap_or(ColorSpace::Srgb);
 
             log::info!("Loading image: {}", input.display());
-            let (mut pixels, width, height, detected_cs) = load_image_with_colorspace(&input)?;
+            let (mut image, detected_cs) = load_image_f32_with_colorspace(&input)?;
+            let width = image.width;
+            let height = image.height;
             log::info!("Image loaded: {}×{} px", width, height);
 
             // Override detected colour space if the user provided one explicitly.
@@ -192,7 +195,7 @@ async fn main() -> Result<()> {
             log::info!("Display colour space: {}", display_cs.name());
 
             // Convert source pixels to linear sRGB (internal working space).
-            to_linear_srgb(&mut pixels, &src_cs);
+            to_linear_srgb_f32(&mut image.pixels, &src_cs);
 
             let mut ops: Vec<AdjustmentOp> = Vec::new();
 
@@ -263,14 +266,14 @@ async fn main() -> Result<()> {
 
             log::info!("Running {} pipeline op(s)…", ops.len());
             let mut result = renderer
-                .render_with_ops(&pixels, width, height, &ops)
+                .render_with_ops_f32(&image.pixels, width, height, &ops)
                 .await?;
 
             // Apply display/export colour space transform (linear sRGB → display_cs).
-            from_linear_srgb(&mut result, &display_cs);
+            from_linear_srgb_f32(&mut result, &display_cs);
 
             log::info!("Saving output: {}", output.display());
-            save_image(&output, &result, width, height)?;
+            save_image(&output, &quantize_rgba_f32(&result), width, height)?;
             log::info!("Done.");
         }
 
