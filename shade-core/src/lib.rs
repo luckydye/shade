@@ -107,6 +107,21 @@ pub fn linear_lut() -> Vec<f32> {
     (0u32..256).map(|i| i as f32 / 255.0).collect()
 }
 
+/// Per-color HSL adjustment parameters (red, green, blue ranges).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct HslParams {
+    /// Hue shift for reds (-1 to 1, scaled to ±180° in the shader).
+    pub red_hue: f32,
+    pub red_sat: f32,
+    pub red_lum: f32,
+    pub green_hue: f32,
+    pub green_sat: f32,
+    pub green_lum: f32,
+    pub blue_hue: f32,
+    pub blue_sat: f32,
+    pub blue_lum: f32,
+}
+
 /// Adjustment operations that can be applied to a layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AdjustmentOp {
@@ -131,6 +146,7 @@ pub enum AdjustmentOp {
     Vignette(VignetteParams),
     Sharpen(SharpenParams),
     Grain(GrainParams),
+    Hsl(HslParams),
 }
 
 /// A unique identifier for a texture resource.

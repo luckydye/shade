@@ -1,4 +1,4 @@
-use shade_core::{AdjustmentOp, ColorParams, LayerStack, TextureId, ToneParams};
+use shade_core::{AdjustmentOp, ColorParams, HslParams, LayerStack, TextureId, ToneParams};
 use std::collections::HashMap;
 
 /// Holds the in-memory editor state for the WASM context.
@@ -76,6 +76,20 @@ impl WasmEngine {
                     *op = AdjustmentOp::Color(params);
                 } else {
                     ops.push(AdjustmentOp::Color(params));
+                }
+                self.stack.generation += 1;
+            }
+        }
+    }
+
+    pub fn apply_hsl(&mut self, layer_idx: usize, params: HslParams) {
+        if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
+            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+                let new_op = AdjustmentOp::Hsl(params);
+                if let Some(op) = ops.iter_mut().find(|o| matches!(o, AdjustmentOp::Hsl(_))) {
+                    *op = new_op;
+                } else {
+                    ops.push(new_op);
                 }
                 self.stack.generation += 1;
             }

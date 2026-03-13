@@ -1,7 +1,7 @@
 import { Component, JSX, Show, createEffect, createSignal } from "solid-js";
 import { addLayer, applyEdit, isDrawerOpen, selectLayer, setIsDrawerOpen, setLayerVisible, state } from "../store/editor";
 
-type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen";
+type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen" | "hsl";
 
 interface SliderProps {
   label: string;
@@ -66,6 +66,11 @@ const DEFAULT_CURVES = {
   lut_b: IDENTITY_LUT,
   lut_master: IDENTITY_LUT,
   per_channel: false,
+} as const;
+const DEFAULT_HSL = {
+  red_hue: 0, red_sat: 0, red_lum: 0,
+  green_hue: 0, green_sat: 0, green_lum: 0,
+  blue_hue: 0, blue_sat: 0, blue_lum: 0,
 } as const;
 
 function clamp(value: number, min: number, max: number) {
@@ -150,12 +155,20 @@ const ToneIcon = () => (
   </svg>
 );
 
+const HslIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <circle cx="9" cy="9" r="4" />
+    <circle cx="15" cy="15" r="4" />
+  </svg>
+);
+
 const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
   tone: () => <SparkIcon />,
   curves: () => <CurveIcon />,
   grain: () => <GrainIcon />,
   vignette: () => <CircleIcon />,
   sharpen: () => <DropletIcon />,
+  hsl: () => <HslIcon />,
 };
 
 const focusLabels: Record<MobileLayerFocus, string> = {
@@ -164,6 +177,7 @@ const focusLabels: Record<MobileLayerFocus, string> = {
   grain: "Grain",
   vignette: "Vignette",
   sharpen: "Sharpen",
+  hsl: "HSL",
 };
 
 const Inspector: Component = () => {
@@ -189,6 +203,7 @@ const Inspector: Component = () => {
   const vignette = () => selectedAdjustmentLayer()?.adjustments?.vignette ?? DEFAULT_VIGNETTE;
   const sharpen = () => selectedAdjustmentLayer()?.adjustments?.sharpen ?? DEFAULT_SHARPEN;
   const grain = () => selectedAdjustmentLayer()?.adjustments?.grain ?? DEFAULT_GRAIN;
+  const hsl = () => selectedAdjustmentLayer()?.adjustments?.hsl ?? DEFAULT_HSL;
 
   const applyTone = (next: Partial<ReturnType<typeof tone>>) => {
     const current = tone();
@@ -230,6 +245,23 @@ const Inspector: Component = () => {
     });
   };
 
+  const applyHsl = (next: Partial<ReturnType<typeof hsl>>) => {
+    const current = hsl();
+    return applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "hsl",
+      red_hue:   next.red_hue   ?? current.red_hue,
+      red_sat:   next.red_sat   ?? current.red_sat,
+      red_lum:   next.red_lum   ?? current.red_lum,
+      green_hue: next.green_hue ?? current.green_hue,
+      green_sat: next.green_sat ?? current.green_sat,
+      green_lum: next.green_lum ?? current.green_lum,
+      blue_hue:  next.blue_hue  ?? current.blue_hue,
+      blue_sat:  next.blue_sat  ?? current.blue_sat,
+      blue_lum:  next.blue_lum  ?? current.blue_lum,
+    });
+  };
+
   const curveSamples = () => CURVE_SAMPLE_INDICES.map((idx) => curves().lut_master[idx]);
 
   const adjustmentLayers = () =>
@@ -240,7 +272,11 @@ const Inspector: Component = () => {
 
   const handleAddLayer = async (focus: MobileLayerFocus) => {
     setIsPickerOpen(false);
-    await addLayer("adjustment");
+    if (focus === "curves") {
+      await addLayer("curves");
+    } else {
+      await addLayer("adjustment");
+    }
     const newIdx = state.selectedLayerIdx;
     setLayerFocusTypes((prev) => new Map(prev).set(newIdx, focus));
     setIsDrawerOpen(true);
@@ -427,6 +463,23 @@ const Inspector: Component = () => {
             }}
           />
         );
+      case "hsl":
+        return (
+          <div class="space-y-4">
+            <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-red-400/70">Red</div>
+            <Slider label="Hue" icon={<HslIcon />} value={hsl().red_hue} defaultValue={DEFAULT_HSL.red_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_hue: v }); }} />
+            <Slider label="Saturation" icon={<DropletIcon />} value={hsl().red_sat} defaultValue={DEFAULT_HSL.red_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_sat: v }); }} />
+            <Slider label="Luminance" icon={<ToneIcon />} value={hsl().red_lum} defaultValue={DEFAULT_HSL.red_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_lum: v }); }} />
+            <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-green-400/70">Green</div>
+            <Slider label="Hue" icon={<HslIcon />} value={hsl().green_hue} defaultValue={DEFAULT_HSL.green_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_hue: v }); }} />
+            <Slider label="Saturation" icon={<DropletIcon />} value={hsl().green_sat} defaultValue={DEFAULT_HSL.green_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_sat: v }); }} />
+            <Slider label="Luminance" icon={<ToneIcon />} value={hsl().green_lum} defaultValue={DEFAULT_HSL.green_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_lum: v }); }} />
+            <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400/70">Blue</div>
+            <Slider label="Hue" icon={<HslIcon />} value={hsl().blue_hue} defaultValue={DEFAULT_HSL.blue_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_hue: v }); }} />
+            <Slider label="Saturation" icon={<DropletIcon />} value={hsl().blue_sat} defaultValue={DEFAULT_HSL.blue_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_sat: v }); }} />
+            <Slider label="Luminance" icon={<ToneIcon />} value={hsl().blue_lum} defaultValue={DEFAULT_HSL.blue_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_lum: v }); }} />
+          </div>
+        );
     }
   };
 
@@ -603,6 +656,19 @@ const Inspector: Component = () => {
                 }}
               />
               {renderCurves()}
+              <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
+              <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-red-400/70">Red</div>
+              <Slider label="Hue" icon={<HslIcon />} value={hsl().red_hue} defaultValue={DEFAULT_HSL.red_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_hue: v }); }} />
+              <Slider label="Saturation" icon={<DropletIcon />} value={hsl().red_sat} defaultValue={DEFAULT_HSL.red_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_sat: v }); }} />
+              <Slider label="Luminance" icon={<ToneIcon />} value={hsl().red_lum} defaultValue={DEFAULT_HSL.red_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_lum: v }); }} />
+              <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-green-400/70">Green</div>
+              <Slider label="Hue" icon={<HslIcon />} value={hsl().green_hue} defaultValue={DEFAULT_HSL.green_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_hue: v }); }} />
+              <Slider label="Saturation" icon={<DropletIcon />} value={hsl().green_sat} defaultValue={DEFAULT_HSL.green_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_sat: v }); }} />
+              <Slider label="Luminance" icon={<ToneIcon />} value={hsl().green_lum} defaultValue={DEFAULT_HSL.green_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_lum: v }); }} />
+              <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400/70">Blue</div>
+              <Slider label="Hue" icon={<HslIcon />} value={hsl().blue_hue} defaultValue={DEFAULT_HSL.blue_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_hue: v }); }} />
+              <Slider label="Saturation" icon={<DropletIcon />} value={hsl().blue_sat} defaultValue={DEFAULT_HSL.blue_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_sat: v }); }} />
+              <Slider label="Luminance" icon={<ToneIcon />} value={hsl().blue_lum} defaultValue={DEFAULT_HSL.blue_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_lum: v }); }} />
               <Slider
                 label="Vignette"
                 icon={<CircleIcon />}
@@ -714,8 +780,8 @@ const Inspector: Component = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div class="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Add adjustment layer</div>
-            <div class="grid grid-rows-5 gap-2">
-              {(["tone", "curves", "grain", "vignette", "sharpen"] as const).map((focus) => (
+            <div class="grid grid-rows-6 gap-2">
+              {(["tone", "curves", "grain", "vignette", "sharpen", "hsl"] as const).map((focus) => (
                 <button
                   type="button"
                   onClick={() => void handleAddLayer(focus)}

@@ -16,7 +16,7 @@ use crate::{
         create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
         CompositePipeline, CompositeUniform,
     },
-    pipelines::{ColorPipeline, CurvesPipeline, GrainPipeline, SharpenPipeline, VignettePipeline},
+    pipelines::{ColorPipeline, CurvesPipeline, GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline},
     sharpen2::SharpenTwoPassPipeline,
     texture_cache::TextureCache,
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
@@ -39,6 +39,7 @@ pub struct Renderer {
     pub vignette_pipeline: VignettePipeline,
     pub sharpen_pipeline: SharpenPipeline,
     pub grain_pipeline: GrainPipeline,
+    pub hsl_pipeline: HslPipeline,
     pub composite_pipeline: CompositePipeline,
     pub brush_stamp_pipeline: Option<BrushStampPipeline>,
     pub basic_adjust_pipeline: BasicAdjustPipeline,
@@ -57,6 +58,7 @@ impl Renderer {
         let vignette_pipeline = VignettePipeline::new(&ctx)?;
         let sharpen_pipeline = SharpenPipeline::new(&ctx)?;
         let grain_pipeline = GrainPipeline::new(&ctx)?;
+        let hsl_pipeline = HslPipeline::new(&ctx)?;
         let composite_pipeline = CompositePipeline::new(&ctx)?;
         let brush_stamp_pipeline = if ctx
             .device
@@ -79,6 +81,7 @@ impl Renderer {
             vignette_pipeline,
             sharpen_pipeline,
             grain_pipeline,
+            hsl_pipeline,
             composite_pipeline,
             brush_stamp_pipeline,
             basic_adjust_pipeline,
@@ -247,6 +250,9 @@ impl Renderer {
                 AdjustmentOp::Grain(params) => {
                     self.grain_pipeline
                         .process(&self.ctx, current_tex, *params)?
+                }
+                AdjustmentOp::Hsl(params) => {
+                    self.hsl_pipeline.process(&self.ctx, current_tex, *params)?
                 }
             };
             owned_textures.push(output);

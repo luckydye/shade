@@ -21,7 +21,7 @@ pub use composite::{
 pub use context::GpuContext;
 pub use pipeline::TonePipeline;
 pub use pipelines::{
-    ColorPipeline, CurvesPipeline, GrainPipeline, SharpenPipeline, VignettePipeline,
+    ColorPipeline, CurvesPipeline, GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
 };
 pub use profiler::{GpuProfiler, PassTiming};
 pub use renderer::{PreviewCrop, Renderer};

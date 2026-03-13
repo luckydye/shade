@@ -96,6 +96,12 @@ export interface ColorValues {
   tint: number;
 }
 
+export interface HslValues {
+  red_hue: number; red_sat: number; red_lum: number;
+  green_hue: number; green_sat: number; green_lum: number;
+  blue_hue: number; blue_sat: number; blue_lum: number;
+}
+
 export interface AdjustmentValues {
   tone: ToneValues | null;
   curves: CurvesValues | null;
@@ -103,6 +109,7 @@ export interface AdjustmentValues {
   vignette: { amount: number } | null;
   sharpen: { amount: number } | null;
   grain: { amount: number } | null;
+  hsl: HslValues | null;
 }
 
 export interface CurvesValues {
@@ -278,6 +285,9 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
       break;
     case "color":
       await workerCall({ type: "apply_color", layerIdx: layer_idx, ...rest }, "color_applied");
+      break;
+    case "hsl":
+      await workerCall({ type: "apply_hsl", layerIdx: layer_idx, ...rest }, "hsl_applied");
       break;
   }
 }

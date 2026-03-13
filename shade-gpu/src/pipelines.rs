@@ -16,6 +16,7 @@ const COLOR_WGSL: &str = include_str!("../../shaders/color.wgsl");
 const VIGNETTE_WGSL: &str = include_str!("../../shaders/vignette.wgsl");
 const SHARPEN_WGSL: &str = include_str!("../../shaders/sharpen.wgsl");
 const GRAIN_WGSL: &str = include_str!("../../shaders/grain.wgsl");
+const HSL_WGSL: &str = include_str!("../../shaders/hsl_adjust.wgsl");
 
 // ─── Uniform structs ──────────────────────────────────────────────────────────
 
@@ -674,6 +675,73 @@ impl GrainPipeline {
             "grain pass",
         );
 
+        Ok(output_tex)
+    }
+}
+
+// ─── HslPipeline ──────────────────────────────────────────────────────────────
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct HslParamsGpu {
+    red:   [f32; 4],  // hue, sat, lum, 0
+    green: [f32; 4],
+    blue:  [f32; 4],
+}
+
+impl From<shade_core::HslParams> for HslParamsGpu {
+    fn from(p: shade_core::HslParams) -> Self {
+        Self {
+            red:   [p.red_hue,   p.red_sat,   p.red_lum,   0.0],
+            green: [p.green_hue, p.green_sat, p.green_lum, 0.0],
+            blue:  [p.blue_hue,  p.blue_sat,  p.blue_lum,  0.0],
+        }
+    }
+}
+
+pub struct HslPipeline {
+    pipeline: ComputePipeline,
+    bind_group_layout: BindGroupLayout,
+}
+
+impl HslPipeline {
+    pub fn new(ctx: &GpuContext) -> Result<Self> {
+        let device = &ctx.device;
+        let bind_group_layout = make_simple_bind_group_layout(device, "hsl bind group layout");
+        let pipeline = make_simple_pipeline(
+            device,
+            HSL_WGSL,
+            "hsl_adjust.wgsl",
+            "hsl pipeline layout",
+            "hsl compute pipeline",
+            &bind_group_layout,
+        );
+        Ok(Self { pipeline, bind_group_layout })
+    }
+
+    pub fn process(&self, ctx: &GpuContext, input_tex: &Texture, params: shade_core::HslParams) -> Result<Texture> {
+        let device = &ctx.device;
+        let size = input_tex.size();
+        let (width, height) = (size.width, size.height);
+        let output_tex = create_output_texture(device, width, height, "hsl output texture");
+        let gpu = HslParamsGpu::from(params);
+        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("hsl params uniform"),
+            contents: bytemuck::bytes_of(&gpu),
+            usage: BufferUsages::UNIFORM,
+        });
+        let input_view  = input_tex.create_view(&TextureViewDescriptor::default());
+        let output_view = output_tex.create_view(&TextureViewDescriptor::default());
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("hsl bind group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&input_view) },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&output_view) },
+                BindGroupEntry { binding: 2, resource: uniform_buf.as_entire_binding() },
+            ],
+        });
+        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "hsl pass");
         Ok(output_tex)
     }
 }

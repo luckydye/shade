@@ -295,6 +295,7 @@ export async function applyEdit(params: Record<string, unknown>) {
     vignette: null,
     sharpen: null,
     grain: null,
+    hsl: null,
   };
   switch (params.op) {
     case "tone":
@@ -350,6 +351,22 @@ export async function applyEdit(params: Record<string, unknown>) {
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
         grain: { amount: params.grain_amount as number },
+      });
+      break;
+    case "hsl":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        hsl: {
+          red_hue: params.red_hue as number,
+          red_sat: params.red_sat as number,
+          red_lum: params.red_lum as number,
+          green_hue: params.green_hue as number,
+          green_sat: params.green_sat as number,
+          green_lum: params.green_lum as number,
+          blue_hue: params.blue_hue as number,
+          blue_sat: params.blue_sat as number,
+          blue_lum: params.blue_lum as number,
+        },
       });
       break;
     default:

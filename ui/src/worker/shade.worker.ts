@@ -56,6 +56,18 @@ self.onmessage = async (e: MessageEvent) => {
       break;
     }
 
+    case "apply_hsl": {
+      if (!wasm) return;
+      wasm.apply_hsl(
+        msg.layerIdx,
+        msg.red_hue ?? 0, msg.red_sat ?? 0, msg.red_lum ?? 0,
+        msg.green_hue ?? 0, msg.green_sat ?? 0, msg.green_lum ?? 0,
+        msg.blue_hue ?? 0, msg.blue_sat ?? 0, msg.blue_lum ?? 0,
+      );
+      self.postMessage({ type: "hsl_applied" });
+      break;
+    }
+
     case "set_layer_visible": {
       if (!wasm) return;
       wasm.set_layer_visible(msg.layerIdx, msg.visible);

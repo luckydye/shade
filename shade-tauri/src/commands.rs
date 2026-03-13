@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use shade_core::{
-    linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, LayerStack, SharpenParams,
-    VignetteParams,
+    linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, HslParams, LayerStack,
+    SharpenParams, VignetteParams,
 };
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
 use std::sync::Mutex;
@@ -370,6 +370,15 @@ pub struct EditParams {
     pub vignette_amount: Option<f32>,
     pub sharpen_amount: Option<f32>,
     pub grain_amount: Option<f32>,
+    pub red_hue: Option<f32>,
+    pub red_sat: Option<f32>,
+    pub red_lum: Option<f32>,
+    pub green_hue: Option<f32>,
+    pub green_sat: Option<f32>,
+    pub green_lum: Option<f32>,
+    pub blue_hue: Option<f32>,
+    pub blue_sat: Option<f32>,
+    pub blue_lum: Option<f32>,
 }
 
 #[tauri::command]
@@ -480,6 +489,24 @@ pub async fn apply_edit(
                         ops.push(next);
                     }
                 }
+                "hsl" => {
+                    let next = AdjustmentOp::Hsl(HslParams {
+                        red_hue:   params.red_hue.unwrap_or(0.0),
+                        red_sat:   params.red_sat.unwrap_or(0.0),
+                        red_lum:   params.red_lum.unwrap_or(0.0),
+                        green_hue: params.green_hue.unwrap_or(0.0),
+                        green_sat: params.green_sat.unwrap_or(0.0),
+                        green_lum: params.green_lum.unwrap_or(0.0),
+                        blue_hue:  params.blue_hue.unwrap_or(0.0),
+                        blue_sat:  params.blue_sat.unwrap_or(0.0),
+                        blue_lum:  params.blue_lum.unwrap_or(0.0),
+                    });
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Hsl(_))) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
                 _ => return Err(format!("unknown op: {}", params.op)),
             }
             st.stack.generation += 1;
@@ -583,6 +610,7 @@ pub struct AdjustmentValues {
     pub vignette: Option<VignetteValues>,
     pub sharpen: Option<SharpenValues>,
     pub grain: Option<GrainValues>,
+    pub hsl: Option<HslValues>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -626,6 +654,13 @@ pub struct SharpenValues {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GrainValues {
     pub amount: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HslValues {
+    pub red_hue: f32, pub red_sat: f32, pub red_lum: f32,
+    pub green_hue: f32, pub green_sat: f32, pub green_lum: f32,
+    pub blue_hue: f32, pub blue_sat: f32, pub blue_lum: f32,
 }
 
 #[tauri::command]
@@ -833,6 +868,13 @@ pub async fn get_layer_stack(
                             AdjustmentOp::Grain(params) => {
                                 adjustments.grain = Some(GrainValues {
                                     amount: params.amount,
+                                });
+                            }
+                            AdjustmentOp::Hsl(params) => {
+                                adjustments.hsl = Some(HslValues {
+                                    red_hue: params.red_hue, red_sat: params.red_sat, red_lum: params.red_lum,
+                                    green_hue: params.green_hue, green_sat: params.green_sat, green_lum: params.green_lum,
+                                    blue_hue: params.blue_hue, blue_sat: params.blue_sat, blue_lum: params.blue_lum,
                                 });
                             }
                         }

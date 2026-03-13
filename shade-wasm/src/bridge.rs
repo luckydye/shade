@@ -1,6 +1,6 @@
 use crate::engine::WasmEngine;
 use serde::Serialize;
-use shade_core::{ColorParams, ToneParams};
+use shade_core::{ColorParams, HslParams, ToneParams};
 use shade_io::load_image_bytes_f32_with_info;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
@@ -96,6 +96,23 @@ pub fn apply_color(layer_idx: usize, saturation: f32, vibrancy: f32, temperature
                 tint,
             },
         )
+    });
+}
+
+/// Apply HSL adjustments to a layer.
+#[wasm_bindgen]
+pub fn apply_hsl(
+    layer_idx: usize,
+    red_hue: f32, red_sat: f32, red_lum: f32,
+    green_hue: f32, green_sat: f32, green_lum: f32,
+    blue_hue: f32, blue_sat: f32, blue_lum: f32,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_hsl(layer_idx, HslParams {
+            red_hue, red_sat, red_lum,
+            green_hue, green_sat, green_lum,
+            blue_hue, blue_sat, blue_lum,
+        })
     });
 }
 
