@@ -372,7 +372,7 @@ async function performPreviewRefresh() {
   const request = getPreviewRequest(queued.quality);
   if (!request) return;
   const frame = await bridge.renderPreview(request);
-  if (queued.version !== previewRefreshVersion) return;
+  if (queued.quality === "final" && queued.version !== previewRefreshVersion) return;
   if (frame.kind === "rgba") {
     if (frame.width === 0 || frame.height === 0) return;
       replaceBitmap(setPreviewBitmap, previewBitmap, null);
@@ -385,7 +385,7 @@ async function performPreviewRefresh() {
   setPreviewFrame(null);
   const response = await fetch(frame.dataUrl);
   const bitmap = await createImageBitmap(await response.blob());
-  if (queued.version !== previewRefreshVersion) {
+  if (queued.quality === "final" && queued.version !== previewRefreshVersion) {
     bitmap.close();
     return;
   }
