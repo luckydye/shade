@@ -9,7 +9,7 @@ struct ColorTransformParams {
     //   2 = sRGB → linear sRGB (gamma decode, for source linearisation)
     //   3 = matrix transform only (linear → linear, no gamma)
     //   4 = decode gamma then matrix (e.g. AdobeRGB → linear sRGB)
-    //   5 = matrix then encode gamma (e.g. linear sRGB → Display P3)
+    //   5 = matrix then encode sRGB transfer (e.g. linear sRGB → Display P3)
     mode: u32,
     gamma: f32,        // source gamma for modes 4/5 (e.g. 2.2)
     _pad0: f32,
@@ -33,10 +33,6 @@ fn srgb_to_linear(v: f32) -> f32 {
 fn linear_to_srgb(v: f32) -> f32 {
     let c = max(v, 0.0);
     return select(c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055, c > 0.0031308);
-}
-
-fn linear_to_gamma(v: f32, gamma: f32) -> f32 {
-    return pow(max(v, 0.0), 1.0 / gamma);
 }
 
 fn apply_matrix(rgb: vec3<f32>, p: ColorTransformParams) -> vec3<f32> {
@@ -79,13 +75,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             rgb = apply_matrix(rgb, params);
         }
         case 5u: {
-            // matrix then encode gamma (e.g. linear sRGB → Display P3)
+            // matrix then encode sRGB transfer (e.g. linear sRGB → Display P3)
             rgb = apply_matrix(rgb, params);
-            rgb = vec3<f32>(
-                linear_to_gamma(rgb.r, params.gamma),
-                linear_to_gamma(rgb.g, params.gamma),
-                linear_to_gamma(rgb.b, params.gamma)
-            );
+            rgb = vec3<f32>(linear_to_srgb(rgb.r), linear_to_srgb(rgb.g), linear_to_srgb(rgb.b));
         }
         default: {}
     }

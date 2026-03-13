@@ -290,7 +290,11 @@ impl Renderer {
         let mut pixels = self
             .readback_work_texture_to_f32(&final_accum, target_width, target_height)
             .await?;
-        encode_preview_pixels(&mut pixels, &ColorSpace::Srgb);
+        encode_preview_pixels(
+            &mut pixels,
+            &ColorSpace::Srgb,
+            PreviewDynamicRange::Compress,
+        );
         Ok(rgba_display_f32_to_u8(&pixels))
     }
 
@@ -316,7 +320,11 @@ impl Renderer {
         let mut pixels = self
             .readback_work_texture_to_f32(&final_accum, target_width, target_height)
             .await?;
-        encode_preview_pixels(&mut pixels, &ColorSpace::DisplayP3);
+        encode_preview_pixels(
+            &mut pixels,
+            &ColorSpace::DisplayP3,
+            PreviewDynamicRange::Compress,
+        );
         Ok(rgba_f32_to_f16_words(&pixels))
     }
 
@@ -908,9 +916,15 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
+enum PreviewDynamicRange {
+    Compress,
+}
+
+fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace, dynamic_range: PreviewDynamicRange) {
     for pixel in pixels.chunks_exact_mut(4) {
-        let rgb = tonemap_preview_rgb([pixel[0], pixel[1], pixel[2]]);
+        let rgb = match dynamic_range {
+            PreviewDynamicRange::Compress => tonemap_preview_rgb([pixel[0], pixel[1], pixel[2]]),
+        };
         let encoded = encode_preview_rgb(rgb, dst);
         pixel[0] = encoded[0];
         pixel[1] = encoded[1];
@@ -935,7 +949,7 @@ fn tonemap_preview_channel(value: f32) -> f32 {
 fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
     match dst {
         ColorSpace::DisplayP3 => {
-            encode_linear_rgb_with_gamma(rgb, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3, 2.2)
+            encode_linear_rgb_to_display_p3(rgb, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3)
         }
         _ => [
             linear_to_srgb_display(rgb[0]),
@@ -945,17 +959,13 @@ fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
     }
 }
 
-fn encode_linear_rgb_with_gamma(rgb: [f32; 3], matrix: &ColorMatrix3x3, gamma: f32) -> [f32; 3] {
+fn encode_linear_rgb_to_display_p3(rgb: [f32; 3], matrix: &ColorMatrix3x3) -> [f32; 3] {
     let (r, g, b) = matrix.apply(rgb[0], rgb[1], rgb[2]);
     [
-        encode_gamma_display(r, gamma),
-        encode_gamma_display(g, gamma),
-        encode_gamma_display(b, gamma),
+        linear_to_srgb_display(r),
+        linear_to_srgb_display(g),
+        linear_to_srgb_display(b),
     ]
-}
-
-fn encode_gamma_display(value: f32, gamma: f32) -> f32 {
-    value.max(0.0).powf(1.0 / gamma)
 }
 
 fn linear_to_srgb_display(value: f32) -> f32 {
@@ -1004,7 +1014,7 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 mod tests {
     use super::{
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        resample_rgba_f32_region, rgba_display_f32_to_u8, PreviewCrop,
+        resample_rgba_f32_region, rgba_display_f32_to_u8, PreviewCrop, PreviewDynamicRange,
     };
     use shade_core::ColorSpace;
     use std::path::PathBuf;
@@ -1106,7 +1116,7 @@ mod tests {
 
     fn preview_channel_to_u8(value: f32) -> u8 {
         let mut pixel = [value, value, value, 1.0];
-        encode_preview_pixels(&mut pixel, &ColorSpace::Srgb);
+        encode_preview_pixels(&mut pixel, &ColorSpace::Srgb, PreviewDynamicRange::Compress);
         rgba_display_f32_to_u8(&pixel)[0]
     }
 }
