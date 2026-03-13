@@ -36,6 +36,7 @@ impl WasmEngine {
             blacks: 0.0,
             highlights: 0.0,
             shadows: 0.0,
+            gamma: 1.0,
         }]);
         id
     }
@@ -49,6 +50,7 @@ impl WasmEngine {
                     blacks: params.blacks,
                     highlights: params.highlights,
                     shadows: params.shadows,
+                    gamma: params.gamma,
                 };
                 if let Some(op) = ops
                     .iter_mut()

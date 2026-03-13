@@ -36,8 +36,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let highlight_mask = smoothstep(0.5, 1.0, c.r);
     c = vec4<f32>(c.rgb * (1.0 - params.highlights * highlight_mask * 0.5), c.a);
 
-    // Gamma: power curve (1.0 = no change)
-    c = vec4<f32>(pow(max(c.rgb, vec3<f32>(0.0)), vec3<f32>(params.gamma)), c.a);
+    // Gamma: power curve (1.0 = no change). Use sign*pow(abs) to handle negative values
+    // gracefully — preserves the sign so shadow detail isn't hard-clamped to 0.
+    let signs = sign(c.rgb);
+    c = vec4<f32>(signs * pow(abs(c.rgb), vec3<f32>(params.gamma)), c.a);
 
     textureStore(output_tex, vec2<i32>(gid.xy), c);
 }

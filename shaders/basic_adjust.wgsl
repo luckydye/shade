@@ -32,8 +32,10 @@ fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
     rgb = rgb + vec3<f32>(p.shadows * shadow_mask * 0.5);
     let highlight_mask = smoothstep(0.5, 1.0, rgb.r);
     rgb = rgb * (1.0 - p.highlights * highlight_mask * 0.5);
-    // Gamma: power curve (1.0 = no change)
-    rgb = pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(p.gamma));
+    // Gamma: power curve (1.0 = no change). Use sign*pow(abs) to handle negative values
+    // gracefully — preserves the sign so shadow detail isn't hard-clamped to 0.
+    let signs = sign(rgb);
+    rgb = signs * pow(abs(rgb), vec3<f32>(p.gamma));
     return vec4<f32>(rgb, c.a);
 }
 
