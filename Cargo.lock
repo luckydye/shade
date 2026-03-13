@@ -4501,6 +4501,7 @@ dependencies = [
  "half",
  "log",
  "shade-core",
+ "shade-io",
  "tokio",
  "wgpu",
 ]

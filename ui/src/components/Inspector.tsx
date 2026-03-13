@@ -7,6 +7,7 @@ interface SliderProps {
   label: string;
   icon: JSX.Element;
   value: number;
+  defaultValue: number;
   min: number;
   max: number;
   step?: number;
@@ -33,6 +34,7 @@ const Slider: Component<SliderProps> = (props) => (
       step={props.step ?? 0.01}
       value={props.value}
       onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))}
+      onDblClick={() => props.onChange(props.defaultValue)}
       class="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/18 accent-white"
     />
   </div>
@@ -40,6 +42,28 @@ const Slider: Component<SliderProps> = (props) => (
 
 const CURVE_SAMPLE_INDICES = [64, 128, 192] as const;
 const IDENTITY_LUT = Array.from({ length: 256 }, (_, idx) => idx / 255);
+const DEFAULT_TONE = {
+  exposure: 0,
+  contrast: 0,
+  blacks: 0,
+  highlights: 0,
+  shadows: 0,
+} as const;
+const DEFAULT_COLOR = {
+  saturation: 1,
+  temperature: 0,
+  tint: 0,
+} as const;
+const DEFAULT_VIGNETTE = { amount: 0 } as const;
+const DEFAULT_SHARPEN = { amount: 0 } as const;
+const DEFAULT_GRAIN = { amount: 0 } as const;
+const DEFAULT_CURVES = {
+  lut_r: IDENTITY_LUT,
+  lut_g: IDENTITY_LUT,
+  lut_b: IDENTITY_LUT,
+  lut_master: IDENTITY_LUT,
+  per_channel: false,
+} as const;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -155,27 +179,13 @@ const Inspector: Component = () => {
   };
 
   const tone = () => selectedAdjustmentLayer()?.adjustments?.tone ?? {
-    exposure: 0,
-    contrast: 0,
-    blacks: 0,
-    highlights: 0,
-    shadows: 0,
+    ...DEFAULT_TONE,
   };
-  const curves = () => selectedAdjustmentLayer()?.adjustments?.curves ?? {
-    lut_r: IDENTITY_LUT,
-    lut_g: IDENTITY_LUT,
-    lut_b: IDENTITY_LUT,
-    lut_master: IDENTITY_LUT,
-    per_channel: false,
-  };
-  const color = () => selectedAdjustmentLayer()?.adjustments?.color ?? {
-    saturation: 1,
-    temperature: 0,
-    tint: 0,
-  };
-  const vignette = () => selectedAdjustmentLayer()?.adjustments?.vignette ?? { amount: 0 };
-  const sharpen = () => selectedAdjustmentLayer()?.adjustments?.sharpen ?? { amount: 0 };
-  const grain = () => selectedAdjustmentLayer()?.adjustments?.grain ?? { amount: 0 };
+  const curves = () => selectedAdjustmentLayer()?.adjustments?.curves ?? DEFAULT_CURVES;
+  const color = () => selectedAdjustmentLayer()?.adjustments?.color ?? DEFAULT_COLOR;
+  const vignette = () => selectedAdjustmentLayer()?.adjustments?.vignette ?? DEFAULT_VIGNETTE;
+  const sharpen = () => selectedAdjustmentLayer()?.adjustments?.sharpen ?? DEFAULT_SHARPEN;
+  const grain = () => selectedAdjustmentLayer()?.adjustments?.grain ?? DEFAULT_GRAIN;
 
   const applyTone = (next: Partial<ReturnType<typeof tone>>) => {
     const current = tone();
@@ -243,6 +253,7 @@ const Inspector: Component = () => {
           label="Shadows"
           icon={<SparkIcon />}
           value={curveSamples()[0]}
+          defaultValue={IDENTITY_LUT[CURVE_SAMPLE_INDICES[0]]}
           valueLabel={valueLabel(curveSamples()[0])}
           min={0}
           max={1}
@@ -257,6 +268,7 @@ const Inspector: Component = () => {
           label="Midtones"
           icon={<ToneIcon />}
           value={curveSamples()[1]}
+          defaultValue={IDENTITY_LUT[CURVE_SAMPLE_INDICES[1]]}
           valueLabel={valueLabel(curveSamples()[1])}
           min={0}
           max={1}
@@ -271,6 +283,7 @@ const Inspector: Component = () => {
           label="Highlights"
           icon={<CircleIcon />}
           value={curveSamples()[2]}
+          defaultValue={IDENTITY_LUT[CURVE_SAMPLE_INDICES[2]]}
           valueLabel={valueLabel(curveSamples()[2])}
           min={0}
           max={1}
@@ -293,6 +306,7 @@ const Inspector: Component = () => {
             label="Brightness"
             icon={<SparkIcon />}
             value={tone().exposure}
+            defaultValue={DEFAULT_TONE.exposure}
             valueLabel={valueLabel(tone().exposure, 40)}
             min={-3}
             max={3}
@@ -308,6 +322,7 @@ const Inspector: Component = () => {
             label="Contrast"
             icon={<CircleIcon />}
             value={tone().contrast}
+            defaultValue={DEFAULT_TONE.contrast}
             valueLabel={valueLabel(tone().contrast)}
             min={-1}
             max={1}
@@ -323,6 +338,7 @@ const Inspector: Component = () => {
             label="Saturation"
             icon={<DropletIcon />}
             value={color().saturation}
+            defaultValue={DEFAULT_COLOR.saturation}
             valueLabel={valueLabel(color().saturation)}
             min={0}
             max={2}
@@ -340,6 +356,7 @@ const Inspector: Component = () => {
             label="Grain"
             icon={<GrainIcon />}
             value={grain().amount}
+            defaultValue={DEFAULT_GRAIN.amount}
             valueLabel={valueLabel(grain().amount)}
             min={0}
             max={1}
@@ -425,6 +442,7 @@ const Inspector: Component = () => {
                 label="Brightness"
                 icon={<SparkIcon />}
                 value={tone().exposure}
+                defaultValue={DEFAULT_TONE.exposure}
                 valueLabel={valueLabel(tone().exposure, 40)}
                 min={-3}
                 max={3}
@@ -437,6 +455,7 @@ const Inspector: Component = () => {
                 label="Contrast"
                 icon={<CircleIcon />}
                 value={tone().contrast}
+                defaultValue={DEFAULT_TONE.contrast}
                 valueLabel={valueLabel(tone().contrast)}
                 min={-1}
                 max={1}
@@ -449,6 +468,7 @@ const Inspector: Component = () => {
                 label="Saturation"
                 icon={<DropletIcon />}
                 value={color().saturation}
+                defaultValue={DEFAULT_COLOR.saturation}
                 valueLabel={valueLabel(color().saturation)}
                 min={0}
                 max={2}
@@ -461,6 +481,7 @@ const Inspector: Component = () => {
                 label="Temperature"
                 icon={<ToneIcon />}
                 value={color().temperature}
+                defaultValue={DEFAULT_COLOR.temperature}
                 valueLabel={valueLabel(color().temperature)}
                 min={-1}
                 max={1}
@@ -473,6 +494,7 @@ const Inspector: Component = () => {
                 label="Tint"
                 icon={<ToneIcon />}
                 value={color().tint}
+                defaultValue={DEFAULT_COLOR.tint}
                 valueLabel={valueLabel(color().tint)}
                 min={-1}
                 max={1}
@@ -486,6 +508,7 @@ const Inspector: Component = () => {
                 label="Vignette"
                 icon={<CircleIcon />}
                 value={vignette().amount}
+                defaultValue={DEFAULT_VIGNETTE.amount}
                 valueLabel={valueLabel(vignette().amount)}
                 min={0}
                 max={1}
@@ -498,6 +521,7 @@ const Inspector: Component = () => {
                 label="Sharpen"
                 icon={<ToneIcon />}
                 value={sharpen().amount}
+                defaultValue={DEFAULT_SHARPEN.amount}
                 valueLabel={valueLabel(sharpen().amount)}
                 min={0}
                 max={2}
@@ -510,6 +534,7 @@ const Inspector: Component = () => {
                 label="Grain"
                 icon={<GrainIcon />}
                 value={grain().amount}
+                defaultValue={DEFAULT_GRAIN.amount}
                 valueLabel={valueLabel(grain().amount)}
                 min={0}
                 max={1}

@@ -818,13 +818,18 @@ fn rgba_f32_to_f16_bytes(pixels: &[f32]) -> Vec<u8> {
 }
 
 fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
-    bytes
-        .chunks_exact(2)
-        .map(|chunk| {
-            let bits = u16::from_ne_bytes([chunk[0], chunk[1]]);
-            (f16::from_bits(bits).to_f32().clamp(0.0, 1.0) * 255.0).round() as u8
-        })
-        .collect()
+    let mut rgba = Vec::with_capacity(bytes.len() / 2);
+    for pixel in bytes.chunks_exact(8) {
+        let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
+        let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
+        let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
+        let a = f16::from_bits(u16::from_ne_bytes([pixel[6], pixel[7]])).to_f32();
+        rgba.push(preview_rgb_channel_to_u8(r));
+        rgba.push(preview_rgb_channel_to_u8(g));
+        rgba.push(preview_rgb_channel_to_u8(b));
+        rgba.push(preview_alpha_channel_to_u8(a));
+    }
+    rgba
 }
 
 fn rgba_f16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -841,11 +846,39 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
+fn preview_rgb_channel_to_u8(value: f32) -> u8 {
+    if value.is_nan() {
+        return 0;
+    }
+    if value.is_infinite() {
+        return u8::MAX;
+    }
+    let mapped = value.max(0.0) / (1.0 + value.max(0.0));
+    let encoded = if mapped <= 0.0031308 {
+        mapped * 12.92
+    } else {
+        1.055 * mapped.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round() as u8
+}
+
+fn preview_alpha_channel_to_u8(value: f32) -> u8 {
+    if value.is_nan() {
+        return 0;
+    }
+    if value.is_infinite() {
+        return u8::MAX;
+    }
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_preview_crop, resample_mask_region, resample_rgba_f32_region, PreviewCrop,
+        normalize_preview_crop, preview_rgb_channel_to_u8, resample_mask_region,
+        resample_rgba_f32_region, PreviewCrop,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn normalize_preview_crop_clamps_to_canvas() {
@@ -912,6 +945,34 @@ mod tests {
         );
 
         assert_eq!(output, vec![1, 2, 5, 6]);
+    }
+
+    #[test]
+    fn desk_exr_highlight_preview_changes_with_exposure() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/Desk.exr");
+        let image = shade_io::load_image_f32(&fixture)
+            .unwrap_or_else(|err| panic!("failed to load {}: {err}", fixture.display()));
+        let sample = image
+            .pixels
+            .chunks_exact(4)
+            .flat_map(|pixel| pixel[..3].iter().copied())
+            .find(|value| {
+                value.is_finite()
+                    && *value > 2.0
+                    && hard_clipped_channel_to_u8(*value) == u8::MAX
+                    && hard_clipped_channel_to_u8(*value * 0.5) == u8::MAX
+                    && preview_rgb_channel_to_u8(*value) > preview_rgb_channel_to_u8(*value * 0.5)
+            })
+            .expect("Desk.exr should contain a recoverable HDR highlight");
+
+        assert_eq!(hard_clipped_channel_to_u8(sample), u8::MAX);
+        assert_eq!(hard_clipped_channel_to_u8(sample * 0.5), u8::MAX);
+        assert!(preview_rgb_channel_to_u8(sample) < u8::MAX);
+        assert!(preview_rgb_channel_to_u8(sample) > preview_rgb_channel_to_u8(sample * 0.5));
+    }
+
+    fn hard_clipped_channel_to_u8(value: f32) -> u8 {
+        (value.clamp(0.0, 1.0) * 255.0).round() as u8
     }
 }
 
