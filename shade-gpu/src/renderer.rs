@@ -1,6 +1,8 @@
 use anyhow::Result;
 use half::f16;
-use shade_core::{AdjustmentOp, FloatImage, Layer, LayerStack, TextureId, ToneParams};
+use shade_core::{
+    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack, TextureId, ToneParams,
+};
 use std::collections::HashMap;
 use wgpu::{
     BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture, ImageDataLayout,
@@ -285,8 +287,11 @@ impl Renderer {
             target_height,
             crop,
         )?;
-        self.readback_work_texture_to_u8(&final_accum, target_width, target_height)
-            .await
+        let mut pixels = self
+            .readback_work_texture_to_f32(&final_accum, target_width, target_height)
+            .await?;
+        encode_preview_pixels(&mut pixels, &ColorSpace::Srgb);
+        Ok(rgba_display_f32_to_u8(&pixels))
     }
 
     pub async fn render_stack_preview_f16(
@@ -308,8 +313,11 @@ impl Renderer {
             target_height,
             crop,
         )?;
-        self.readback_work_texture_to_f16(&final_accum, target_width, target_height)
-            .await
+        let mut pixels = self
+            .readback_work_texture_to_f32(&final_accum, target_width, target_height)
+            .await?;
+        encode_preview_pixels(&mut pixels, &ColorSpace::DisplayP3);
+        Ok(rgba_f32_to_f16_words(&pixels))
     }
 
     fn render_stack_preview_texture(
@@ -748,68 +756,6 @@ impl Renderer {
         readback_buffer.unmap();
         Ok(rgba_f16_bytes_to_f32(&raw))
     }
-
-    async fn readback_work_texture_to_f16(
-        &self,
-        tex: &wgpu::Texture,
-        width: u32,
-        height: u32,
-    ) -> Result<Vec<u16>> {
-        let device = &self.ctx.device;
-        let queue = &self.ctx.queue;
-
-        let unpadded_bytes_per_row = width * 8;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
-        let readback_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("readback f16 buffer"),
-            size: (padded_bytes_per_row * height) as u64,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback f16 encoder"),
-        });
-        encoder.copy_texture_to_buffer(
-            ImageCopyTexture {
-                texture: tex,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            ImageCopyBuffer {
-                buffer: &readback_buffer,
-                layout: ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
-                    rows_per_image: Some(height),
-                },
-            },
-            Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit(std::iter::once(encoder.finish()));
-        let buffer_slice = readback_buffer.slice(..);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        buffer_slice.map_async(MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-        device.poll(wgpu::Maintain::Wait);
-        rx.await??;
-        let mapped = buffer_slice.get_mapped_range();
-        let mut raw = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
-        for row in 0..height {
-            let row_start = (row * padded_bytes_per_row) as usize;
-            let row_end = row_start + unpadded_bytes_per_row as usize;
-            raw.extend_from_slice(&mapped[row_start..row_end]);
-        }
-        drop(mapped);
-        readback_buffer.unmap();
-        Ok(rgba_f16_bytes_to_u16(&raw))
-    }
 }
 
 fn normalize_preview_crop(
@@ -951,15 +897,81 @@ fn rgba_f16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-fn rgba_f16_bytes_to_u16(bytes: &[u8]) -> Vec<u16> {
-    bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
+fn rgba_f32_to_f16_words(pixels: &[f32]) -> Vec<u16> {
+    pixels
+        .iter()
+        .map(|channel| f16::from_f32(*channel).to_bits())
         .collect()
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
+    for pixel in pixels.chunks_exact_mut(4) {
+        let rgb = tonemap_preview_rgb([pixel[0], pixel[1], pixel[2]]);
+        let encoded = encode_preview_rgb(rgb, dst);
+        pixel[0] = encoded[0];
+        pixel[1] = encoded[1];
+        pixel[2] = encoded[2];
+        pixel[3] = pixel[3].clamp(0.0, 1.0);
+    }
+}
+
+fn tonemap_preview_rgb(rgb: [f32; 3]) -> [f32; 3] {
+    [
+        tonemap_preview_channel(rgb[0]),
+        tonemap_preview_channel(rgb[1]),
+        tonemap_preview_channel(rgb[2]),
+    ]
+}
+
+fn tonemap_preview_channel(value: f32) -> f32 {
+    let positive = value.max(0.0);
+    positive / (1.0 + positive)
+}
+
+fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
+    match dst {
+        ColorSpace::DisplayP3 => {
+            encode_linear_rgb_with_gamma(rgb, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3, 2.2)
+        }
+        _ => [
+            linear_to_srgb_display(rgb[0]),
+            linear_to_srgb_display(rgb[1]),
+            linear_to_srgb_display(rgb[2]),
+        ],
+    }
+}
+
+fn encode_linear_rgb_with_gamma(rgb: [f32; 3], matrix: &ColorMatrix3x3, gamma: f32) -> [f32; 3] {
+    let (r, g, b) = matrix.apply(rgb[0], rgb[1], rgb[2]);
+    [
+        encode_gamma_display(r, gamma),
+        encode_gamma_display(g, gamma),
+        encode_gamma_display(b, gamma),
+    ]
+}
+
+fn encode_gamma_display(value: f32, gamma: f32) -> f32 {
+    value.max(0.0).powf(1.0 / gamma)
+}
+
+fn linear_to_srgb_display(value: f32) -> f32 {
+    let positive = value.max(0.0);
+    if positive <= 0.0031308 {
+        positive * 12.92
+    } else {
+        1.055 * positive.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+fn rgba_display_f32_to_u8(pixels: &[f32]) -> Vec<u8> {
+    pixels
+        .iter()
+        .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect()
 }
 
 fn preview_rgb_channel_to_u8(value: f32) -> u8 {
@@ -991,9 +1003,10 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_preview_crop, preview_rgb_channel_to_u8, resample_mask_region,
-        resample_rgba_f32_region, PreviewCrop,
+        encode_preview_pixels, normalize_preview_crop, resample_mask_region,
+        resample_rgba_f32_region, rgba_display_f32_to_u8, PreviewCrop,
     };
+    use shade_core::ColorSpace;
     use std::path::PathBuf;
 
     #[test]
@@ -1077,18 +1090,24 @@ mod tests {
                     && *value > 2.0
                     && hard_clipped_channel_to_u8(*value) == u8::MAX
                     && hard_clipped_channel_to_u8(*value * 0.5) == u8::MAX
-                    && preview_rgb_channel_to_u8(*value) > preview_rgb_channel_to_u8(*value * 0.5)
+                    && preview_channel_to_u8(*value) > preview_channel_to_u8(*value * 0.5)
             })
             .expect("Desk.exr should contain a recoverable HDR highlight");
 
         assert_eq!(hard_clipped_channel_to_u8(sample), u8::MAX);
         assert_eq!(hard_clipped_channel_to_u8(sample * 0.5), u8::MAX);
-        assert!(preview_rgb_channel_to_u8(sample) < u8::MAX);
-        assert!(preview_rgb_channel_to_u8(sample) > preview_rgb_channel_to_u8(sample * 0.5));
+        assert!(preview_channel_to_u8(sample) < u8::MAX);
+        assert!(preview_channel_to_u8(sample) > preview_channel_to_u8(sample * 0.5));
     }
 
     fn hard_clipped_channel_to_u8(value: f32) -> u8 {
         (value.clamp(0.0, 1.0) * 255.0).round() as u8
+    }
+
+    fn preview_channel_to_u8(value: f32) -> u8 {
+        let mut pixel = [value, value, value, 1.0];
+        encode_preview_pixels(&mut pixel, &ColorSpace::Srgb);
+        rgba_display_f32_to_u8(&pixel)[0]
     }
 }
 
