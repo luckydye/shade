@@ -1,4 +1,4 @@
-import { Component, JSX, Show, createEffect, createSignal } from "solid-js";
+import { Component, JSX, Show, createEffect, createSignal, on } from "solid-js";
 import { addLayer, applyEdit, isDrawerOpen, selectLayer, setIsDrawerOpen, setLayerVisible, state } from "../store/editor";
 
 type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen" | "hsl";
@@ -72,31 +72,93 @@ const DEFAULT_HSL = {
   blue_hue: 0, blue_sat: 0, blue_lum: 0,
 } as const;
 
+interface ControlPoint { x: number; y: number; }
+
+interface EditableControlPoint extends ControlPoint { id: number; }
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function buildMasterCurveLut(samples: readonly number[]) {
-  if (samples.length !== CURVE_SAMPLE_INDICES.length) {
-    throw new Error("invalid curve sample count");
-  }
-  const anchors = [
-    { x: 0, y: 0 },
-    ...CURVE_SAMPLE_INDICES.map((x, idx) => ({ x, y: clamp(samples[idx], 0, 1) })),
-    { x: 255, y: 1 },
-  ];
+function normalizePoints(points: readonly ControlPoint[]): ControlPoint[] {
+  return [...points]
+    .map(normalizePoint)
+    .sort((a, b) => a.x - b.x)
+    .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
+}
+
+function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
+  const sorted = normalizePoints(points);
+  const anchors = [{ x: 0, y: 0 }, ...sorted, { x: 255, y: 1 }];
   const lut = new Array<number>(256);
-  for (let segmentIdx = 0; segmentIdx < anchors.length - 1; segmentIdx += 1) {
-    const start = anchors[segmentIdx];
-    const end = anchors[segmentIdx + 1];
-    const span = end.x - start.x;
+  const delta = new Array<number>(anchors.length - 1);
+  const tangent = new Array<number>(anchors.length);
+  for (let i = 0; i < anchors.length - 1; i += 1) {
+    const span = anchors[i + 1].x - anchors[i].x;
     if (span <= 0) throw new Error("curve anchors must be strictly increasing");
+    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
+  }
+  tangent[0] = delta[0];
+  tangent[anchors.length - 1] = delta[delta.length - 1];
+  for (let i = 1; i < anchors.length - 1; i += 1) {
+    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
+  }
+  for (let i = 0; i < delta.length; i += 1) {
+    if (delta[i] === 0) {
+      tangent[i] = 0;
+      tangent[i + 1] = 0;
+      continue;
+    }
+    const a = tangent[i] / delta[i];
+    const b = tangent[i + 1] / delta[i];
+    const norm = Math.hypot(a, b);
+    if (norm > 3) {
+      const scale = 3 / norm;
+      tangent[i] = scale * a * delta[i];
+      tangent[i + 1] = scale * b * delta[i];
+    }
+  }
+  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
+    const start = anchors[seg];
+    const end = anchors[seg + 1];
+    const span = end.x - start.x;
     for (let x = start.x; x <= end.x; x += 1) {
       const t = (x - start.x) / span;
-      lut[x] = start.y + (end.y - start.y) * t;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1;
+      const h10 = t3 - 2 * t2 + t;
+      const h01 = -2 * t3 + 3 * t2;
+      const h11 = t3 - t2;
+      lut[x] = clamp(
+        h00 * start.y + h10 * span * tangent[seg] + h01 * end.y + h11 * span * tangent[seg + 1],
+        0,
+        1,
+      );
     }
   }
   return lut;
+}
+
+function normalizePoint(point: ControlPoint): ControlPoint {
+  return {
+    x: clamp(Math.round(point.x), 1, 254),
+    y: clamp(point.y, 0, 1),
+  };
+}
+
+function pointsFromLut(lut: readonly number[]): ControlPoint[] {
+  if (lut.length !== 256) throw new Error("invalid LUT length");
+  const points: ControlPoint[] = [];
+  let prevSlope = lut[1] - lut[0];
+  for (let x = 1; x < 255; x += 1) {
+    const nextSlope = lut[x + 1] - lut[x];
+    if (Math.abs(nextSlope - prevSlope) > 1e-6) {
+      points.push({ x, y: clamp(lut[x], 0, 1) });
+    }
+    prevSlope = nextSlope;
+  }
+  return points;
 }
 
 function curvePath(lut: readonly number[]) {
@@ -181,6 +243,7 @@ const focusLabels: Record<MobileLayerFocus, string> = {
 
 const Inspector: Component = () => {
   const [layerFocusTypes, setLayerFocusTypes] = createSignal(new Map<number, MobileLayerFocus>());
+  const [curvePointCache, setCurvePointCache] = createSignal(new Map<number, ControlPoint[]>());
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
 
@@ -194,6 +257,7 @@ const Inspector: Component = () => {
     if (!layer) throw new Error("selected layer is not an adjustment layer");
     return layer;
   };
+  const defaultCurvePoints = () => CURVE_SAMPLE_INDICES.map((x) => ({ x, y: IDENTITY_LUT[x] }));
 
   const tone = () => selectedAdjustmentLayer()?.adjustments?.tone ?? {
     ...DEFAULT_TONE,
@@ -231,8 +295,10 @@ const Inspector: Component = () => {
     });
   };
 
-  const applyCurves = (samples: readonly number[]) => {
-    const lutMaster = buildMasterCurveLut(samples);
+  const applyCurves = (points: readonly ControlPoint[]) => {
+    const normalizedPoints = normalizePoints(points);
+    const lutMaster = buildLutFromPoints(normalizedPoints);
+    setCurvePointCache((prev) => new Map(prev).set(state.selectedLayerIdx, normalizedPoints));
     return applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "curves",
@@ -261,12 +327,117 @@ const Inspector: Component = () => {
     });
   };
 
-  const curveSamples = () => CURVE_SAMPLE_INDICES.map((idx) => curves().lut_master[idx]);
-
   // Defined as a component (not a plain function) so SolidJS gives it a stable reactive
   // boundary. Plain function calls like {renderFn()} are wrapped in a single reactive
   // computation and replace their entire DOM subtree on any signal change — which kills
   // an active drag. A component (<HslSection />) gets fine-grained in-place updates.
+  const CurvesEditor: Component = () => {
+    const [draggingId, setDraggingId] = createSignal<number | null>(null);
+    const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
+    let svgRef!: SVGSVGElement;
+    let nextId = 0;
+    let lastTapTime = 0;
+    let lastTapId = -1;
+
+    createEffect(on(() => state.selectedLayerIdx, () => {
+      const points = curvePointCache().get(state.selectedLayerIdx) ?? pointsFromLut(curves().lut_master);
+      nextId = 0;
+      setPts((points.length === 0 ? defaultCurvePoints() : points).map((point) => ({ ...point, id: nextId++ })));
+      setDraggingId(null);
+    }, { defer: true }));
+
+    const lut = () => buildLutFromPoints(pts());
+
+    const svgCoords = (event: { clientX: number; clientY: number }) => {
+      const point = svgRef.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const ctm = svgRef.getScreenCTM();
+      if (!ctm) throw new Error("missing SVG screen transform");
+      const local = point.matrixTransform(ctm.inverse());
+      return {
+        x: clamp((local.x / 100) * 255, 1, 254),
+        y: clamp(1 - local.y / 100, 0, 1),
+      };
+    };
+
+    return (
+      <div class="py-1">
+        <div class="mb-2 flex items-center justify-between">
+          <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
+            <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4"><CurveIcon /></span>
+            <span>Curves</span>
+          </div>
+          <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">Master</span>
+        </div>
+        <svg
+          ref={svgRef!}
+          viewBox="0 0 100 100"
+          class="block h-40 w-full select-none"
+          style={{ cursor: draggingId() !== null ? "grabbing" : "crosshair" }}
+          onPointerDown={(e) => {
+            if (e.target !== svgRef) return;
+            const { x, y } = normalizePoint(svgCoords(e));
+            const id = nextId++;
+            const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
+            setPts(next);
+            selectedAdjustmentLayerOrThrow();
+            void applyCurves(next);
+            svgRef.setPointerCapture(e.pointerId);
+            setDraggingId(id);
+          }}
+          onPointerMove={(e) => {
+            const id = draggingId();
+            if (id === null) return;
+            const { x, y } = normalizePoint(svgCoords(e));
+            const next = pts().map(p => p.id === id ? { ...p, x, y } : p).sort((a, b) => a.x - b.x);
+            setPts(next);
+            selectedAdjustmentLayerOrThrow();
+            void applyCurves(next);
+          }}
+          onPointerUp={(e) => {
+            if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
+            setDraggingId(null);
+          }}
+          onPointerLeave={() => setDraggingId(null)}
+        >
+          <path d="M 0 100 L 100 0" stroke="#525252" stroke-width="0.8" fill="none" />
+          <path d={curvePath(lut())} stroke="#f5f5f4" stroke-width="1.5" fill="none" />
+          {pts().map((pt) => (
+            <circle
+              cx={(pt.x / 255) * 100}
+              cy={(1 - pt.y) * 100}
+              r="3.5"
+              fill="#f5f5f4"
+              stroke="#111111"
+              stroke-width="1.5"
+              style={{ cursor: draggingId() === pt.id ? "grabbing" : "grab" }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const now = Date.now();
+                if (now - lastTapTime < 300 && lastTapId === pt.id) {
+                  lastTapTime = 0;
+                  const next = pts().filter(p => p.id !== pt.id);
+                  setPts(next);
+                  selectedAdjustmentLayerOrThrow();
+                  void applyCurves(next);
+                  if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
+                  setDraggingId(null);
+                  return;
+                }
+                lastTapTime = now;
+                lastTapId = pt.id;
+                e.preventDefault();
+                svgRef.setPointerCapture(e.pointerId);
+                setDraggingId(pt.id);
+              }}
+            />
+          ))}
+        </svg>
+      </div>
+    );
+  };
+
   const HslSection: Component = () => {
     const tabColors = { red: "text-red-400 bg-red-500/15", green: "text-green-400 bg-green-500/15", blue: "text-blue-400 bg-blue-500/15" } as const;
     const hue = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_hue : t === "green" ? h.green_hue : h.blue_hue; };
@@ -310,70 +481,6 @@ const Inspector: Component = () => {
     setIsDrawerOpen(true);
   };
 
-  const renderCurves = () => (
-    <div class="py-1">
-      <div class="mb-1 flex items-center justify-between">
-        <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
-          <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4">
-            <CurveIcon />
-          </span>
-          <span>Curves</span>
-        </div>
-        <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">Master</span>
-      </div>
-      <svg viewBox="0 0 100 100" class="mb-2 block h-24 w-full bg-transparent">
-        <path d="M 0 100 L 100 0" stroke="#525252" stroke-width="1" fill="none" />
-        <path d={curvePath(curves().lut_master)} stroke="#f5f5f4" stroke-width="2" fill="none" />
-      </svg>
-      <div class="space-y-2">
-        <Slider
-          label="Shadows"
-          icon={<SparkIcon />}
-          value={curveSamples()[0]}
-          defaultValue={IDENTITY_LUT[CURVE_SAMPLE_INDICES[0]]}
-          valueLabel={valueLabel(curveSamples()[0])}
-          min={0}
-          max={1}
-          onChange={(value) => {
-            selectedAdjustmentLayerOrThrow();
-            const samples = curveSamples();
-            samples[0] = value;
-            void applyCurves(samples);
-          }}
-        />
-        <Slider
-          label="Midtones"
-          icon={<ToneIcon />}
-          value={curveSamples()[1]}
-          defaultValue={IDENTITY_LUT[CURVE_SAMPLE_INDICES[1]]}
-          valueLabel={valueLabel(curveSamples()[1])}
-          min={0}
-          max={1}
-          onChange={(value) => {
-            selectedAdjustmentLayerOrThrow();
-            const samples = curveSamples();
-            samples[1] = value;
-            void applyCurves(samples);
-          }}
-        />
-        <Slider
-          label="Highlights"
-          icon={<CircleIcon />}
-          value={curveSamples()[2]}
-          defaultValue={IDENTITY_LUT[CURVE_SAMPLE_INDICES[2]]}
-          valueLabel={valueLabel(curveSamples()[2])}
-          min={0}
-          max={1}
-          onChange={(value) => {
-            selectedAdjustmentLayerOrThrow();
-            const samples = curveSamples();
-            samples[2] = value;
-            void applyCurves(samples);
-          }}
-        />
-      </div>
-    </div>
-  );
 
   const renderLayerBody = () => {
     switch (selectedFocus()) {
@@ -442,7 +549,7 @@ const Inspector: Component = () => {
           </div>
         );
       case "curves":
-        return renderCurves();
+        return <CurvesEditor />;
       case "grain":
         return (
           <Slider
@@ -668,7 +775,7 @@ const Inspector: Component = () => {
                   void applyColor({ tint: value });
                 }}
               />
-              {renderCurves()}
+              <CurvesEditor />
               <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
               <HslSection />
               <Slider
