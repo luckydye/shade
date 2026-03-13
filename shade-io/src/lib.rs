@@ -3,7 +3,10 @@ use exif::{In, Tag};
 use exr::prelude::{ReadChannels, ReadLayers};
 use image::{DynamicImage, ImageFormat};
 use rawler::{
-    decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource, RawImage,
+    decoders::{Orientation as RawOrientation, RawDecodeParams},
+    imgop::develop::RawDevelop,
+    rawsource::RawSource,
+    RawImage,
 };
 use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
@@ -158,6 +161,20 @@ fn apply_orientation(image: DynamicImage, orientation: Option<u32>) -> DynamicIm
         7 => image.rotate270().fliph(),
         8 => image.rotate270(),
         value => panic!("Unsupported EXIF orientation value: {value}"),
+    }
+}
+
+fn raw_orientation_to_exif(orientation: RawOrientation) -> Option<u32> {
+    match orientation {
+        RawOrientation::Unknown => None,
+        RawOrientation::Normal => Some(1),
+        RawOrientation::HorizontalFlip => Some(2),
+        RawOrientation::Rotate180 => Some(3),
+        RawOrientation::VerticalFlip => Some(4),
+        RawOrientation::Transpose => Some(5),
+        RawOrientation::Rotate90 => Some(6),
+        RawOrientation::Transverse => Some(7),
+        RawOrientation::Rotate270 => Some(8),
     }
 }
 
@@ -438,7 +455,10 @@ fn decode_camera_raw(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, 
     };
     let raw_image =
         rawler::decode(&raw_source, &RawDecodeParams::default()).context("RAW decode failed")?;
-    let image = develop_raw_image(&raw_image)?;
+    let image = apply_orientation(
+        develop_raw_image(&raw_image)?,
+        raw_orientation_to_exif(raw_image.orientation),
+    );
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
     Ok((rgba.into_raw(), width, height))
@@ -485,7 +505,11 @@ fn decode_camera_raw_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatI
     };
     let raw_image =
         rawler::decode(&raw_source, &RawDecodeParams::default()).context("RAW decode failed")?;
-    let rgba = develop_raw_image(&raw_image)?.to_rgba32f();
+    let rgba = apply_orientation(
+        develop_raw_image(&raw_image)?,
+        raw_orientation_to_exif(raw_image.orientation),
+    )
+    .to_rgba32f();
     let (width, height) = rgba.dimensions();
     Ok(FloatImage {
         pixels: rgba.into_raw(),
@@ -559,6 +583,19 @@ fn apply_linear_matrix_and_gamma_f32(pixels: &mut [f32], matrix: &ColorMatrix3x3
         chunk[0] = or.max(0.0).powf(inv_gamma);
         chunk[1] = og.max(0.0).powf(inv_gamma);
         chunk[2] = ob.max(0.0).powf(inv_gamma);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_image;
+    use std::path::Path;
+
+    #[test]
+    fn applies_orientation_to_cr3_fixture() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/_MGC3030.CR3");
+        let (_, width, height) = load_image(&path).expect("fixture should decode");
+        assert_eq!((width, height), (3648, 5472));
     }
 }
 
