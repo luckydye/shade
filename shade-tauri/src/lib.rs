@@ -37,6 +37,7 @@ pub fn run() {
             commands::set_layer_opacity,
             commands::get_layer_stack,
             commands::list_pictures,
+            commands::get_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

@@ -1,10 +1,17 @@
-import { Component, createResource, For, Suspense } from "solid-js";
-import { listPictures } from "../bridge/index";
+import { Component, createResource, For, onCleanup, Suspense } from "solid-js";
+import { getThumbnail, listPictures } from "../bridge/index";
 import { openImage } from "../store/editor";
+
+// Formats the browser can display directly via the asset protocol.
+const NATIVE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
+
+function ext(path: string) {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
 
 let _convertFileSrc: ((path: string) => string) | null = null;
 
-async function loadConvertFileSrc() {
+async function getConvertFileSrc() {
   if (!_convertFileSrc) {
     const { convertFileSrc } = await import("@tauri-apps/api/core");
     _convertFileSrc = convertFileSrc;
@@ -12,13 +19,47 @@ async function loadConvertFileSrc() {
   return _convertFileSrc;
 }
 
-async function fetchImages() {
-  const [paths, convert] = await Promise.all([listPictures(), loadConvertFileSrc()]);
-  return paths.map((path) => ({ path, src: convert(path) }));
+async function resolveSrc(path: string): Promise<string> {
+  if (NATIVE_EXTENSIONS.has(ext(path))) {
+    const convert = await getConvertFileSrc();
+    return convert(path);
+  }
+  return getThumbnail(path);
 }
 
+const ImageTile: Component<{ path: string }> = (props) => {
+  const [src] = createResource(() => props.path, resolveSrc);
+  const name = () => props.path.split("/").pop() ?? props.path;
+
+  // Revoke blob URLs created for non-native formats.
+  onCleanup(() => {
+    const url = src();
+    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+  });
+
+  return (
+    <button
+      type="button"
+      class="group flex flex-col gap-1.5 rounded-xl text-left hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+      onClick={() => void openImage(props.path)}
+    >
+      <div class="aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
+        <Suspense fallback={<div class="h-full w-full animate-pulse bg-white/[0.06]" />}>
+          <img
+            src={src()}
+            alt={name()}
+            class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
+            loading="lazy"
+          />
+        </Suspense>
+      </div>
+      <span class="truncate px-0.5 text-[11px] text-white/40">{name()}</span>
+    </button>
+  );
+};
+
 export const MediaView: Component = () => {
-  const [images] = createResource(fetchImages);
+  const [images] = createResource(listPictures);
 
   return (
     <div class="flex flex-1 flex-col overflow-hidden">
@@ -32,23 +73,7 @@ export const MediaView: Component = () => {
               each={images()}
               fallback={<p class="col-span-full text-sm text-white/30">No images found in Pictures.</p>}
             >
-              {({ path, src }) => (
-                <button
-                  type="button"
-                  class="group flex flex-col gap-1.5 rounded-xl text-left transition-colors hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
-                  onClick={() => void openImage(path)}
-                >
-                  <div class="aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
-                    <img
-                      src={src}
-                      alt={path.split("/").pop()}
-                      class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
-                      loading="lazy"
-                    />
-                  </div>
-                  <span class="truncate px-0.5 text-[11px] text-white/40">{path.split("/").pop()}</span>
-                </button>
-              )}
+              {(path) => <ImageTile path={path} />}
             </For>
           </div>
         </Suspense>

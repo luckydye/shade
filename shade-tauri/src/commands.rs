@@ -551,6 +551,42 @@ pub struct GrainValues {
 }
 
 #[tauri::command]
+pub async fn get_thumbnail(path: String) -> Result<Vec<u8>, String> {
+    use std::hash::{Hash, Hasher};
+
+    let source = std::path::Path::new(&path);
+    let mtime = std::fs::metadata(source)
+        .and_then(|m| m.modified())
+        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+        .unwrap_or(0);
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    mtime.hash(&mut hasher);
+    let cache_key = hasher.finish();
+
+    let cache_dir = std::env::temp_dir().join("shade-thumbnails");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let cache_path = cache_dir.join(format!("{cache_key:016x}.jpg"));
+
+    if cache_path.exists() {
+        return std::fs::read(&cache_path).map_err(|e| e.to_string());
+    }
+
+    let (pixels, width, height) =
+        shade_io::load_image(source).map_err(|e| e.to_string())?;
+    let img = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or("failed to wrap pixels in RgbaImage")?;
+    let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
+    let mut jpeg: Vec<u8> = Vec::new();
+    thumb
+        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
+    Ok(jpeg)
+}
+
+#[tauri::command]
 pub async fn list_pictures() -> Result<Vec<String>, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
     let pictures_dir = std::path::PathBuf::from(home).join("Pictures");

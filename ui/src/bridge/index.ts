@@ -299,6 +299,21 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
   await workerCall({ type: "set_layer_opacity", layerIdx: idx, opacity }, "layer_updated");
 }
 
+/** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
+export async function getThumbnail(path: string): Promise<string> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    const result = await inv("get_thumbnail", { path }) as number[] | Uint8Array | ArrayBuffer;
+    const bytes = result instanceof Uint8Array
+      ? result
+      : result instanceof ArrayBuffer
+        ? new Uint8Array(result)
+        : Uint8Array.from(result as number[]);
+    return URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+  }
+  return "";
+}
+
 export async function listPictures(): Promise<string[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
