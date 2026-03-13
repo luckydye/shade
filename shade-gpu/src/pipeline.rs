@@ -6,11 +6,11 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
     ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor, ShaderStages,
-    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureUsages,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
-use crate::GpuContext;
+use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 // The tone.wgsl shader is embedded at compile time.
 // Path is relative to crates/shade-gpu/src/: go up 3 levels to shade/, then shaders/tone.wgsl.
@@ -81,7 +81,7 @@ impl TonePipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: INTERNAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -147,7 +147,7 @@ impl TonePipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
+            format: INTERNAL_TEXTURE_FORMAT,
             usage: TextureUsages::STORAGE_BINDING
                 | TextureUsages::COPY_SRC
                 | TextureUsages::TEXTURE_BINDING,

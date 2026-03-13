@@ -6,7 +6,7 @@ struct ColorParams {
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: ColorParams;
 
 fn rgb_to_hsl(c: vec3<f32>) -> vec3<f32> {
@@ -80,6 +80,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let vib_sat = clamp(hsl2.y + vibrancy_boost * 0.5, 0.0, 1.0);
     rgb_new = hsl_to_rgb(vec3<f32>(hsl2.x, vib_sat, hsl2.z));
 
-    c = clamp(vec4<f32>(rgb_new, c.a), vec4<f32>(0.0), vec4<f32>(1.0));
+    c = vec4<f32>(rgb_new, c.a);
     textureStore(output_tex, vec2<i32>(gid.xy), c);
 }

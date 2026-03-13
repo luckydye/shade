@@ -1,13 +1,21 @@
 use anyhow::{anyhow, Context, Result};
 use exr::prelude::{ReadChannels, ReadLayers};
 use image::{DynamicImage, ImageFormat};
-use shade_core::{ColorMatrix3x3, ColorSpace};
+use rawler::{
+    decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource, RawImage,
+};
+use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
 // ── Public image loading ───────────────────────────────────────────────────────
 
 const EXR_MAGIC: [u8; 4] = [0x76, 0x2f, 0x31, 0x01];
+const RAW_EXTENSIONS: &[&str] = &[
+    "3fr", "ari", "arw", "cr2", "cr3", "crm", "crw", "dcr", "dcs", "dng", "erf", "fff", "iiq",
+    "kdc", "mef", "mos", "mrw", "nef", "nrw", "orf", "ori", "pef", "qtk", "raf", "raw", "rw2",
+    "rwl", "srw", "x3f",
+];
 
 /// Load an image from disk and return raw RGBA8 bytes along with dimensions.
 /// Pixels are returned as-is (still in the source colour space / gamma).
@@ -27,12 +35,29 @@ pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8
     Ok((pixels, width, height))
 }
 
+pub fn load_image_f32(path: &Path) -> Result<FloatImage> {
+    let (image, _) = load_image_f32_with_colorspace(path)?;
+    Ok(image)
+}
+
+pub fn load_image_bytes_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatImage> {
+    let (image, _) = load_image_bytes_f32_with_colorspace(bytes, name_hint)?;
+    Ok(image)
+}
+
 /// Load an image and also detect its embedded colour space.
 /// Returns (pixels_rgba8, width, height, detected_color_space).
 pub fn load_image_with_colorspace(path: &Path) -> Result<(Vec<u8>, u32, u32, ColorSpace)> {
     let bytes =
         std::fs::read(path).with_context(|| format!("Cannot read file: {}", path.display()))?;
     load_image_bytes_with_colorspace(&bytes, path.file_name().and_then(|name| name.to_str()))
+        .with_context(|| format!("Failed to decode image: {}", path.display()))
+}
+
+pub fn load_image_f32_with_colorspace(path: &Path) -> Result<(FloatImage, ColorSpace)> {
+    let bytes =
+        std::fs::read(path).with_context(|| format!("Cannot read file: {}", path.display()))?;
+    load_image_bytes_f32_with_colorspace(&bytes, path.file_name().and_then(|name| name.to_str()))
         .with_context(|| format!("Failed to decode image: {}", path.display()))
 }
 
@@ -44,6 +69,10 @@ pub fn load_image_bytes_with_colorspace(
     if is_exr(name_hint, bytes) {
         let (pixels, width, height) = decode_exr(bytes)?;
         return Ok((pixels, width, height, ColorSpace::LinearSrgb));
+    }
+    if is_camera_raw(name_hint) {
+        let (pixels, width, height) = decode_camera_raw(bytes, name_hint)?;
+        return Ok((pixels, width, height, ColorSpace::Srgb));
     }
 
     let ext = name_hint
@@ -63,6 +92,43 @@ pub fn load_image_bytes_with_colorspace(
     let (width, height) = rgba.dimensions();
 
     Ok((rgba.into_raw(), width, height, color_space))
+}
+
+pub fn load_image_bytes_f32_with_colorspace(
+    bytes: &[u8],
+    name_hint: Option<&str>,
+) -> Result<(FloatImage, ColorSpace)> {
+    if is_exr(name_hint, bytes) {
+        return Ok((decode_exr_f32(bytes)?, ColorSpace::LinearSrgb));
+    }
+    if is_camera_raw(name_hint) {
+        return Ok((decode_camera_raw_f32(bytes, name_hint)?, ColorSpace::Srgb));
+    }
+
+    let ext = name_hint
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let color_space = match ext.as_str() {
+        "jpg" | "jpeg" => detect_jpeg_colorspace(bytes),
+        "png" => detect_png_colorspace(bytes),
+        _ => ColorSpace::Unknown,
+    };
+
+    let rgba = image::load_from_memory(bytes)
+        .context("Failed to decode image bytes")?
+        .to_rgba32f();
+    let (width, height) = rgba.dimensions();
+    Ok((
+        FloatImage {
+            pixels: rgba.into_raw(),
+            width,
+            height,
+        },
+        color_space,
+    ))
 }
 
 /// Convert RGBA8 pixels from `src_space` to **linear sRGB** in-place.
@@ -150,6 +216,60 @@ pub fn from_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
     }
 }
 
+pub fn to_linear_srgb_f32(pixels: &mut [f32], color_space: &ColorSpace) {
+    match color_space {
+        ColorSpace::LinearSrgb => {}
+        ColorSpace::Srgb | ColorSpace::Unknown => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk[0] = srgb_to_linear(chunk[0]);
+                chunk[1] = srgb_to_linear(chunk[1]);
+                chunk[2] = srgb_to_linear(chunk[2]);
+            }
+        }
+        ColorSpace::AdobeRgb => {
+            apply_matrix_and_linearise_f32(pixels, 2.2, &ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB)
+        }
+        ColorSpace::DisplayP3 => {
+            apply_matrix_and_linearise_f32(pixels, 2.2, &ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB)
+        }
+        ColorSpace::ProPhotoRgb => {
+            apply_matrix_and_linearise_f32(pixels, 1.8, &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB)
+        }
+        ColorSpace::Custom(_) => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk[0] = srgb_to_linear(chunk[0]);
+                chunk[1] = srgb_to_linear(chunk[1]);
+                chunk[2] = srgb_to_linear(chunk[2]);
+            }
+        }
+    }
+}
+
+pub fn from_linear_srgb_f32(pixels: &mut [f32], color_space: &ColorSpace) {
+    match color_space {
+        ColorSpace::LinearSrgb => {}
+        ColorSpace::Srgb | ColorSpace::Unknown => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk[0] = linear_to_srgb(chunk[0]);
+                chunk[1] = linear_to_srgb(chunk[1]);
+                chunk[2] = linear_to_srgb(chunk[2]);
+            }
+        }
+        ColorSpace::DisplayP3 => apply_linear_matrix_and_gamma_f32(
+            pixels,
+            &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3,
+            2.2,
+        ),
+        _ => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk[0] = linear_to_srgb(chunk[0]);
+                chunk[1] = linear_to_srgb(chunk[1]);
+                chunk[2] = linear_to_srgb(chunk[2]);
+            }
+        }
+    }
+}
+
 /// Save raw RGBA8 bytes to a file.
 pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<()> {
     let expected = (width * height * 4) as usize;
@@ -224,6 +344,17 @@ fn is_exr(name_hint: Option<&str>, bytes: &[u8]) -> bool {
         || bytes.starts_with(&EXR_MAGIC)
 }
 
+fn is_camera_raw(name_hint: Option<&str>) -> bool {
+    name_hint
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            RAW_EXTENSIONS
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+        })
+}
+
 fn decode_exr(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     struct ExrPixels {
         width: usize,
@@ -262,11 +393,86 @@ fn decode_exr(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     Ok((rgba, width, height))
 }
 
+fn decode_camera_raw(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+    let raw_source = match name_hint {
+        Some(name) => RawSource::new_from_slice(bytes).with_path(name),
+        None => RawSource::new_from_slice(bytes),
+    };
+    let raw_image =
+        rawler::decode(&raw_source, &RawDecodeParams::default()).context("RAW decode failed")?;
+    let image = develop_raw_image(&raw_image)?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok((rgba.into_raw(), width, height))
+}
+
+fn decode_exr_f32(bytes: &[u8]) -> Result<FloatImage> {
+    struct ExrPixels {
+        width: usize,
+        data: Vec<f32>,
+    }
+
+    let image = exr::prelude::read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .rgba_channels(
+            |resolution, _channels| ExrPixels {
+                width: resolution.width(),
+                data: vec![0.0; resolution.area() * 4],
+            },
+            |pixels: &mut ExrPixels, position, (r, g, b, a): (f32, f32, f32, f32)| {
+                let base = (position.y() * pixels.width + position.x()) * 4;
+                pixels.data[base] = r;
+                pixels.data[base + 1] = g;
+                pixels.data[base + 2] = b;
+                pixels.data[base + 3] = a;
+            },
+        )
+        .first_valid_layer()
+        .all_attributes()
+        .from_buffered(Cursor::new(bytes))
+        .context("EXR decode failed")?;
+
+    Ok(FloatImage {
+        pixels: image.layer_data.channel_data.pixels.data,
+        width: u32::try_from(image.layer_data.size.width()).context("EXR width exceeds u32")?,
+        height: u32::try_from(image.layer_data.size.height()).context("EXR height exceeds u32")?,
+    })
+}
+
+fn decode_camera_raw_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatImage> {
+    let raw_source = match name_hint {
+        Some(name) => RawSource::new_from_slice(bytes).with_path(name),
+        None => RawSource::new_from_slice(bytes),
+    };
+    let raw_image =
+        rawler::decode(&raw_source, &RawDecodeParams::default()).context("RAW decode failed")?;
+    let rgba = develop_raw_image(&raw_image)?.to_rgba32f();
+    let (width, height) = rgba.dimensions();
+    Ok(FloatImage {
+        pixels: rgba.into_raw(),
+        width,
+        height,
+    })
+}
+
+fn develop_raw_image(raw_image: &RawImage) -> Result<DynamicImage> {
+    RawDevelop::default()
+        .develop_intermediate(raw_image)
+        .context("RAW development failed")?
+        .to_dynamic_image()
+        .ok_or_else(|| anyhow!("RAW development produced an invalid image buffer"))
+}
+
 fn float_to_u8(value: f32) -> u8 {
     if value.is_nan() {
         return 0;
     }
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+pub fn quantize_rgba_f32(pixels: &[f32]) -> Vec<u8> {
+    pixels.iter().map(|channel| float_to_u8(*channel)).collect()
 }
 
 /// Decode gamma, apply matrix, result is linear sRGB.
@@ -293,6 +499,28 @@ fn apply_linear_matrix_and_gamma(pixels: &mut Vec<u8>, matrix: &ColorMatrix3x3, 
         chunk[0] = (or.clamp(0.0, 1.0).powf(inv_gamma) * 255.0).round() as u8;
         chunk[1] = (og.clamp(0.0, 1.0).powf(inv_gamma) * 255.0).round() as u8;
         chunk[2] = (ob.clamp(0.0, 1.0).powf(inv_gamma) * 255.0).round() as u8;
+    }
+}
+
+fn apply_matrix_and_linearise_f32(pixels: &mut [f32], gamma: f32, matrix: &ColorMatrix3x3) {
+    for chunk in pixels.chunks_exact_mut(4) {
+        let r = chunk[0].max(0.0).powf(gamma);
+        let g = chunk[1].max(0.0).powf(gamma);
+        let b = chunk[2].max(0.0).powf(gamma);
+        let (or, og, ob) = matrix.apply(r, g, b);
+        chunk[0] = or;
+        chunk[1] = og;
+        chunk[2] = ob;
+    }
+}
+
+fn apply_linear_matrix_and_gamma_f32(pixels: &mut [f32], matrix: &ColorMatrix3x3, gamma: f32) {
+    let inv_gamma = 1.0 / gamma;
+    for chunk in pixels.chunks_exact_mut(4) {
+        let (or, og, ob) = matrix.apply(chunk[0], chunk[1], chunk[2]);
+        chunk[0] = or.max(0.0).powf(inv_gamma);
+        chunk[1] = og.max(0.0).powf(inv_gamma);
+        chunk[2] = ob.max(0.0).powf(inv_gamma);
     }
 }
 

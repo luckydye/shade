@@ -1,4 +1,4 @@
-use crate::context::GpuContext;
+use crate::{context::GpuContext, INTERNAL_TEXTURE_FORMAT};
 use shade_core::{ColorMatrix3x3, ColorSpace};
 use wgpu::*;
 
@@ -135,7 +135,7 @@ impl ColorTransformPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: INTERNAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -189,7 +189,7 @@ impl ColorTransformPipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
+            format: INTERNAL_TEXTURE_FORMAT,
             usage: TextureUsages::STORAGE_BINDING
                 | TextureUsages::COPY_SRC
                 | TextureUsages::TEXTURE_BINDING,

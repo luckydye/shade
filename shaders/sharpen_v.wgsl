@@ -6,7 +6,7 @@ struct SharpenParams {
 
 @group(0) @binding(0) var original_tex: texture_2d<f32>;
 @group(0) @binding(1) var blurred_h_tex: texture_2d<f32>;
-@group(0) @binding(2) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(2) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(3) var<uniform> params: SharpenParams;
 
 const KERNEL: array<f32, 7> = array<f32, 7>(
@@ -28,6 +28,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let edge = original - blur;
     let edge_mag = length(edge.rgb);
     let mask = smoothstep(0.0, params.threshold + 0.001, edge_mag);
-    let sharpened = clamp(original + edge * params.amount * mask, vec4<f32>(0.0), vec4<f32>(1.0));
+    let sharpened = original + edge * params.amount * mask;
     textureStore(output_tex, p, sharpened);
 }

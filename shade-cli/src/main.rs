@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use shade_core::{
-    AdjustmentOp, BlendMode, ColorParams, ColorSpace, GrainParams, LayerStack, SharpenParams,
-    ToneParams, VignetteParams,
+    AdjustmentOp, BlendMode, ColorParams, ColorSpace, FloatImage, GrainParams, LayerStack,
+    SharpenParams, ToneParams, VignetteParams,
 };
 use shade_gpu::Renderer;
 use shade_io::{
@@ -331,7 +331,17 @@ async fn main() -> Result<()> {
 
             // Image sources map.
             let mut image_sources = HashMap::new();
-            image_sources.insert(base_texture_id, (pixels, width, height));
+            image_sources.insert(
+                base_texture_id,
+                FloatImage {
+                    pixels: pixels
+                        .into_iter()
+                        .map(|channel| channel as f32 / 255.0)
+                        .collect(),
+                    width,
+                    height,
+                },
+            );
 
             log::info!("Initialising GPU renderer…");
             let renderer = Renderer::new().await?;

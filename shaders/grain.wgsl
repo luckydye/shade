@@ -6,7 +6,7 @@ struct GrainParams {
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: GrainParams;
 
 fn hash(p: vec2<f32>) -> f32 {
@@ -28,6 +28,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Modulate by roughness: add more grain to midtones, less to highlights/shadows
     let luma_weight = 1.0 - abs(luma - 0.5) * 2.0 * (1.0 - params.roughness);
     let grain_val = noise * params.amount * luma_weight;
-    c = clamp(vec4<f32>(c.rgb + vec3<f32>(grain_val), c.a), vec4<f32>(0.0), vec4<f32>(1.0));
+    c = vec4<f32>(c.rgb + vec3<f32>(grain_val), c.a);
     textureStore(output_tex, vec2<i32>(gid.xy), c);
 }

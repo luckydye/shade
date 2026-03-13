@@ -17,7 +17,7 @@ struct ColorParams {
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> tone: ToneParams;
 @group(0) @binding(3) var<uniform> color: ColorParams;
 
@@ -31,7 +31,7 @@ fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
     rgb = rgb + vec3<f32>(p.shadows * shadow_mask * 0.5);
     let highlight_mask = smoothstep(0.5, 1.0, rgb.r);
     rgb = rgb * (1.0 - p.highlights * highlight_mask * 0.5);
-    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), c.a);
+    return vec4<f32>(rgb, c.a);
 }
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ fn apply_color(c: vec4<f32>, p: ColorParams) -> vec4<f32> {
     let hsl2 = rgb_to_hsl(rgb);
     let vib_sat = clamp(hsl2.y + p.vibrancy*(1.0-hsl2.y)*0.5, 0.0, 1.0);
     rgb = hsl_to_rgb(vec3<f32>(hsl2.x, vib_sat, hsl2.z));
-    return clamp(vec4<f32>(rgb, c.a), vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec4<f32>(rgb, c.a);
 }
 
 @compute @workgroup_size(16, 16)

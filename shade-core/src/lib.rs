@@ -124,6 +124,14 @@ pub enum AdjustmentOp {
 /// A unique identifier for a texture resource.
 pub type TextureId = u64;
 
+/// Full-precision RGBA image data stored as linear or gamma-encoded `f32` samples.
+#[derive(Clone, Debug)]
+pub struct FloatImage {
+    pub pixels: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// A unique identifier for a mask resource.
 pub type MaskId = u64;
 

@@ -21,7 +21,7 @@ struct ColorTransformParams {
 };
 
 @group(0) @binding(0) var input_tex:  texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform>    params: ColorTransformParams;
 
 // ── Transfer functions ────────────────────────────────────────────────────────
@@ -82,5 +82,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         default: {}
     }
 
-    textureStore(output_tex, p, clamp(vec4<f32>(rgb, c.a), vec4<f32>(0.0), vec4<f32>(1.0)));
+    textureStore(output_tex, p, vec4<f32>(rgb, c.a));
 }

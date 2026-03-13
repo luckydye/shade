@@ -4,7 +4,7 @@ struct SharpenPassParams {
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 
 const KERNEL: array<f32, 7> = array<f32, 7>(
     0.0625, 0.125, 0.1875, 0.25, 0.1875, 0.125, 0.0625

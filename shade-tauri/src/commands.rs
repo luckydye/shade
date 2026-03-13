@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 use shade_core::{
-    linear_lut, AdjustmentOp, ColorParams, GrainParams, LayerStack, SharpenParams, VignetteParams,
+    linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, LayerStack, SharpenParams,
+    VignetteParams,
 };
-use shade_io::{load_image, load_image_bytes};
+use shade_io::{load_image_bytes_f32, load_image_f32};
 use std::sync::Mutex;
 
 pub struct EditorState {
     pub stack: LayerStack,
-    pub image_sources: std::collections::HashMap<shade_core::TextureId, (Vec<u8>, u32, u32)>,
+    pub image_sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
@@ -28,15 +29,21 @@ impl Default for EditorState {
 impl EditorState {
     pub fn replace_with_image(
         &mut self,
-        pixels: Vec<u8>,
+        pixels: Vec<f32>,
         width: u32,
         height: u32,
     ) -> LayerInfoResponse {
         let texture_id = self.next_texture_id;
         self.next_texture_id += 1;
         self.stack = LayerStack::new();
-        self.image_sources
-            .insert(texture_id, (pixels, width, height));
+        self.image_sources.insert(
+            texture_id,
+            FloatImage {
+                pixels,
+                width,
+                height,
+            },
+        );
         self.canvas_width = width;
         self.canvas_height = height;
         self.stack.add_image_layer(texture_id, width, height);
@@ -69,9 +76,9 @@ pub async fn open_image(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    let (pixels, w, h) = load_image(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let image = load_image_f32(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(pixels, w, h))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height))
 }
 
 #[tauri::command]
@@ -80,10 +87,9 @@ pub async fn open_image_encoded_bytes(
     file_name: Option<String>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    let (pixels, width, height) =
-        load_image_bytes(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
+    let image = load_image_bytes_f32(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(pixels, width, height))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height))
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
@@ -104,7 +110,14 @@ pub async fn open_image_bytes(
         ));
     }
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(pixels, width, height))
+    Ok(st.replace_with_image(
+        pixels
+            .into_iter()
+            .map(|channel| channel as f32 / 255.0)
+            .collect(),
+        width,
+        height,
+    ))
 }
 
 #[derive(Serialize, Deserialize, Debug)]

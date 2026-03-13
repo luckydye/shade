@@ -7,7 +7,7 @@ struct ToneParams {
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: ToneParams;
 
 @compute @workgroup_size(16, 16)
@@ -34,9 +34,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Highlights roll-off (compress high end): apply to pixels above 0.5
     let highlight_mask = smoothstep(0.5, 1.0, c.r);
     c = vec4<f32>(c.rgb * (1.0 - params.highlights * highlight_mask * 0.5), c.a);
-
-    // Clamp to [0, 1]
-    c = clamp(c, vec4<f32>(0.0), vec4<f32>(1.0));
 
     textureStore(output_tex, vec2<i32>(gid.xy), c);
 }

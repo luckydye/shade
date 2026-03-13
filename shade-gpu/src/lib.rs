@@ -10,6 +10,8 @@ pub mod sharpen2;
 pub mod texture_cache;
 pub mod timestamp;
 
+pub const INTERNAL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
 pub use basic_adjust::BasicAdjustPipeline;
 pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};
 pub use composite::{

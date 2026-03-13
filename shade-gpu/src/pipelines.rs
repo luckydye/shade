@@ -5,11 +5,11 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
     ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor, ShaderStages,
-    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureUsages,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
-use crate::GpuContext;
+use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 const CURVES_WGSL: &str = include_str!("../../shaders/curves.wgsl");
 const COLOR_WGSL: &str = include_str!("../../shaders/color.wgsl");
@@ -51,7 +51,7 @@ fn make_simple_bind_group_layout(device: &wgpu::Device, label: &str) -> BindGrou
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::WriteOnly,
-                    format: TextureFormat::Rgba8Unorm,
+                    format: INTERNAL_TEXTURE_FORMAT,
                     view_dimension: TextureViewDimension::D2,
                 },
                 count: None,
@@ -111,7 +111,7 @@ fn create_output_texture(device: &wgpu::Device, width: u32, height: u32, label: 
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
+        format: INTERNAL_TEXTURE_FORMAT,
         usage: TextureUsages::STORAGE_BINDING
             | TextureUsages::COPY_SRC
             | TextureUsages::TEXTURE_BINDING,
@@ -172,7 +172,7 @@ impl CurvesPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: INTERNAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,

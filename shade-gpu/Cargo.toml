@@ -10,3 +10,4 @@ bytemuck = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
+half = { workspace = true }

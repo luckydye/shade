@@ -8,7 +8,7 @@ struct CompositeParams {
 @group(0) @binding(0) var base_tex: texture_2d<f32>;
 @group(0) @binding(1) var layer_tex: texture_2d<f32>;
 @group(0) @binding(2) var mask_tex: texture_2d<f32>;
-@group(0) @binding(3) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(3) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(4) var<uniform> params: CompositeParams;
 
 fn blend_normal(base: vec3<f32>, layer: vec3<f32>) -> vec3<f32> { return layer; }
@@ -62,5 +62,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let alpha = mask_val * params.opacity;
     let out_alpha = mix(base.a, layer.a, alpha);
     let result = vec4<f32>(mix(base.rgb, blended, alpha), out_alpha);
-    textureStore(output_tex, p, clamp(result, vec4<f32>(0.0), vec4<f32>(1.0)));
+    textureStore(output_tex, p, result);
 }

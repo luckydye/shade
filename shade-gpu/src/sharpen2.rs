@@ -1,5 +1,5 @@
 // Two-pass separable Gaussian unsharp mask pipeline
-use crate::context::GpuContext;
+use crate::{context::GpuContext, INTERNAL_TEXTURE_FORMAT};
 use bytemuck::{Pod, Zeroable};
 use shade_core::SharpenParams;
 use wgpu::*;
@@ -41,7 +41,7 @@ impl SharpenTwoPassPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: INTERNAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -95,7 +95,7 @@ impl SharpenTwoPassPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: INTERNAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -150,7 +150,7 @@ impl SharpenTwoPassPipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
+            format: INTERNAL_TEXTURE_FORMAT,
             usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -165,7 +165,7 @@ impl SharpenTwoPassPipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
+            format: INTERNAL_TEXTURE_FORMAT,
             usage: TextureUsages::STORAGE_BINDING
                 | TextureUsages::COPY_SRC
                 | TextureUsages::TEXTURE_BINDING,

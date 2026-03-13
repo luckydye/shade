@@ -1,5 +1,5 @@
 // LUT-based curves: 256-entry float array per channel (R, G, B) plus master
-// Input: rgba8unorm texture, Output: rgba8unorm storage texture
+// Input: float texture, Output: rgba16float storage texture
 // Bindings: input_tex, output_tex, lut_r (array<f32,256>), lut_g, lut_b, lut_master
 
 struct CurvesParams {
@@ -7,7 +7,7 @@ struct CurvesParams {
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
-@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<storage, read> lut_r: array<f32, 256>;
 @group(0) @binding(3) var<storage, read> lut_g: array<f32, 256>;
 @group(0) @binding(4) var<storage, read> lut_b: array<f32, 256>;
