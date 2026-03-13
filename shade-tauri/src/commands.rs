@@ -127,6 +127,13 @@ pub struct PreviewFrameResponse {
     pub height: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PreviewFrameFloat16Response {
+    pub pixels: Vec<u16>,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PreviewCrop {
     pub x: f32,
@@ -193,6 +200,61 @@ pub async fn render_preview(
         .await
         .map_err(|e| e.to_string())?;
     Ok(PreviewFrameResponse {
+        pixels,
+        width: request.target_width,
+        height: request.target_height,
+    })
+}
+
+#[tauri::command]
+pub async fn render_preview_float16(
+    request: Option<PreviewRenderRequest>,
+    renderer: tauri::State<'_, crate::RendererState>,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<PreviewFrameFloat16Response, String> {
+    let (stack, sources, w, h) = {
+        let st = state.lock().unwrap();
+        if st.canvas_width == 0 {
+            return Ok(PreviewFrameFloat16Response {
+                pixels: Vec::new(),
+                width: 0,
+                height: 0,
+            });
+        }
+        (
+            st.stack.clone(),
+            st.image_sources.clone(),
+            st.canvas_width,
+            st.canvas_height,
+        )
+    };
+
+    let guard = renderer.0.lock().await;
+    let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
+
+    let request = request.unwrap_or(PreviewRenderRequest {
+        target_width: w,
+        target_height: h,
+        crop: None,
+    });
+    let pixels = r
+        .render_stack_preview_f16(
+            &stack,
+            &sources,
+            w,
+            h,
+            request.target_width,
+            request.target_height,
+            request.crop.map(|crop| shade_gpu::PreviewCrop {
+                x: crop.x,
+                y: crop.y,
+                width: crop.width,
+                height: crop.height,
+            }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(PreviewFrameFloat16Response {
         pixels,
         width: request.target_width,
         height: request.target_height,

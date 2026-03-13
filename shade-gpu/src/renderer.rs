@@ -276,6 +276,52 @@ impl Renderer {
         target_height: u32,
         crop: Option<PreviewCrop>,
     ) -> Result<Vec<u8>> {
+        let final_accum = self.render_stack_preview_texture(
+            stack,
+            image_sources,
+            canvas_width,
+            canvas_height,
+            target_width,
+            target_height,
+            crop,
+        )?;
+        self.readback_work_texture_to_u8(&final_accum, target_width, target_height)
+            .await
+    }
+
+    pub async fn render_stack_preview_f16(
+        &self,
+        stack: &LayerStack,
+        image_sources: &HashMap<TextureId, FloatImage>,
+        canvas_width: u32,
+        canvas_height: u32,
+        target_width: u32,
+        target_height: u32,
+        crop: Option<PreviewCrop>,
+    ) -> Result<Vec<u16>> {
+        let final_accum = self.render_stack_preview_texture(
+            stack,
+            image_sources,
+            canvas_width,
+            canvas_height,
+            target_width,
+            target_height,
+            crop,
+        )?;
+        self.readback_work_texture_to_f16(&final_accum, target_width, target_height)
+            .await
+    }
+
+    fn render_stack_preview_texture(
+        &self,
+        stack: &LayerStack,
+        image_sources: &HashMap<TextureId, FloatImage>,
+        canvas_width: u32,
+        canvas_height: u32,
+        target_width: u32,
+        target_height: u32,
+        crop: Option<PreviewCrop>,
+    ) -> Result<wgpu::Texture> {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
         assert!(target_width > 0, "preview target_width must be > 0");
@@ -390,9 +436,10 @@ impl Renderer {
         }
 
         // 3. Read back the final accumulator.
-        let final_accum = accum_owned.last().unwrap();
-        self.readback_work_texture_to_u8(final_accum, target_width, target_height)
-            .await
+        let final_accum = accum_owned
+            .pop()
+            .expect("preview accumulator texture should exist");
+        Ok(final_accum)
     }
 
     /// Stamp a brush onto a mask pixel buffer in-place.
@@ -701,6 +748,68 @@ impl Renderer {
         readback_buffer.unmap();
         Ok(rgba_f16_bytes_to_f32(&raw))
     }
+
+    async fn readback_work_texture_to_f16(
+        &self,
+        tex: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u16>> {
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+
+        let unpadded_bytes_per_row = width * 8;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
+        let readback_buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("readback f16 buffer"),
+            size: (padded_bytes_per_row * height) as u64,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("readback f16 encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            ImageCopyTexture {
+                texture: tex,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            ImageCopyBuffer {
+                buffer: &readback_buffer,
+                layout: ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        let buffer_slice = readback_buffer.slice(..);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        buffer_slice.map_async(MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        device.poll(wgpu::Maintain::Wait);
+        rx.await??;
+        let mapped = buffer_slice.get_mapped_range();
+        let mut raw = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+        for row in 0..height {
+            let row_start = (row * padded_bytes_per_row) as usize;
+            let row_end = row_start + unpadded_bytes_per_row as usize;
+            raw.extend_from_slice(&mapped[row_start..row_end]);
+        }
+        drop(mapped);
+        readback_buffer.unmap();
+        Ok(rgba_f16_bytes_to_u16(&raw))
+    }
 }
 
 fn normalize_preview_crop(
@@ -839,6 +948,13 @@ fn rgba_f16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
             let bits = u16::from_ne_bytes([chunk[0], chunk[1]]);
             f16::from_bits(bits).to_f32()
         })
+        .collect()
+}
+
+fn rgba_f16_bytes_to_u16(bytes: &[u8]) -> Vec<u16> {
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
         .collect()
 }
 

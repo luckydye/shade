@@ -113,7 +113,7 @@ export interface LayerInfo {
 
 export type PreviewFrame =
   | { kind: "rgba"; pixels: Uint8Array; width: number; height: number }
-  | { kind: "data-url"; dataUrl: string };
+  | { kind: "rgba-float16"; pixels: unknown; width: number; height: number; colorSpace: "display-p3" };
 
 export interface PreviewCrop {
   x: number;
@@ -128,9 +128,53 @@ export interface PreviewRequest {
   crop?: PreviewCrop;
 }
 
+type Float16ArrayCtor = new (buffer: ArrayBufferLike) => unknown;
+
+let float16PreviewSupport: boolean | null = null;
+
+function supportsFloat16Preview() {
+  if (float16PreviewSupport !== null) return float16PreviewSupport;
+  const Float16 = (globalThis as any).Float16Array as Float16ArrayCtor | undefined;
+  if (typeof ImageData === "undefined" || !Float16) {
+    float16PreviewSupport = false;
+    return false;
+  }
+  try {
+    const probe = new Float16(new Uint16Array(4).buffer);
+    new ImageData(probe as any, 1, 1, {
+      pixelFormat: "rgba-float16",
+      colorSpace: "display-p3",
+    } as any);
+    float16PreviewSupport = true;
+  } catch {
+    float16PreviewSupport = false;
+  }
+  return float16PreviewSupport;
+}
+
 export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
+    if (supportsFloat16Preview()) {
+      const Float16 = (globalThis as any).Float16Array as Float16ArrayCtor;
+      const result = await inv("render_preview_float16", { request }) as {
+        pixels: number[] | Uint16Array | ArrayBuffer;
+        width: number;
+        height: number;
+      };
+      const words = result.pixels instanceof Uint16Array
+        ? result.pixels
+        : result.pixels instanceof ArrayBuffer
+          ? new Uint16Array(result.pixels)
+          : Uint16Array.from(result.pixels);
+      return {
+        kind: "rgba-float16",
+        pixels: new Float16(words.buffer.slice(0)),
+        width: result.width,
+        height: result.height,
+        colorSpace: "display-p3",
+      };
+    }
     const result = await inv("render_preview", { request }) as {
       pixels: number[] | Uint8Array | ArrayBuffer;
       width: number;
@@ -149,11 +193,16 @@ export async function renderPreview(request?: PreviewRequest): Promise<PreviewFr
     };
   }
   await ensureWorkerReady();
-  const result = await workerCall<{ dataUrl: string }>(
+  const result = await workerCall<{ pixels: Uint8Array | number[]; width: number; height: number }>(
     { type: "render_preview", request },
     "preview_rendered"
   );
-  return { kind: "data-url", dataUrl: result.dataUrl };
+  return {
+    kind: "rgba",
+    pixels: result.pixels instanceof Uint8Array ? result.pixels : Uint8Array.from(result.pixels),
+    width: result.width,
+    height: result.height,
+  };
 }
 
 export async function openImage(path: string): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
@@ -163,7 +212,7 @@ export async function openImage(path: string): Promise<{ layer_count: number; ca
   }
   await ensureWorkerReady();
   const response = await fetch(path);
-  return _decodeAndSend(await response.blob());
+  return _loadEncodedBytes(new Uint8Array(await response.arrayBuffer()), path);
 }
 
 /** Open an image from a File object — works for both file picker and drag-and-drop. */
@@ -173,29 +222,22 @@ export async function openImageFile(file: File): Promise<{ layer_count: number; 
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
     return inv("open_image_encoded_bytes", { bytes, file_name: file.name }) as Promise<any>;
   }
-  return _decodeAndSend(file);
+  return _loadEncodedBytes(new Uint8Array(await file.arrayBuffer()), file.name);
 }
 
-async function _decodeAndSend(source: Blob | File): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
-  const bitmap = await createImageBitmap(source);
-  const { width, height } = bitmap;
-  const offscreen = new OffscreenCanvas(width, height);
-  const ctx2d = offscreen.getContext("2d")!;
-  ctx2d.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  const imageData = ctx2d.getImageData(0, 0, width, height);
-
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return inv("open_image_bytes", { pixels: Array.from(imageData.data), width, height }) as Promise<any>;
-  }
-
-  await ensureWorkerReady();
-  const result = await workerCall<any>(
-    { type: "load_image", pixels: imageData.data, width, height },
+async function _loadEncodedBytes(
+  bytes: Uint8Array,
+  fileName?: string,
+): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
+  const result = await workerCall<{ layerCount: number; canvasWidth: number; canvasHeight: number }>(
+    { type: "load_image_encoded", bytes, fileName },
     "image_loaded"
   );
-  return { layer_count: result.layerCount, canvas_width: width, canvas_height: height };
+  return {
+    layer_count: result.layerCount,
+    canvas_width: result.canvasWidth,
+    canvas_height: result.canvasHeight,
+  };
 }
 
 export async function getLayerStack(): Promise<StackInfo> {

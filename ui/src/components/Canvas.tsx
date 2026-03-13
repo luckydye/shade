@@ -3,11 +3,9 @@ import {
   getPreviewDisplaySize,
   openImageFile,
   panPreview,
-  previewBitmap,
   previewFrame,
   resetPreviewViewport,
   setPreviewViewportSize,
-  sourceBitmap,
   state,
   zoomPreview,
 } from "../store/editor";
@@ -30,12 +28,7 @@ const Canvas: Component = () => {
       return;
     }
 
-    const bitmap = previewBitmap() ?? sourceBitmap();
-    if (!bitmap) return;
-    canvasRef.width = bitmap.width;
-    canvasRef.height = bitmap.height;
     ctx.clearRect(0, 0, canvasRef.width, canvasRef.height);
-    ctx.drawImage(bitmap, 0, 0);
   });
 
   onMount(() => {

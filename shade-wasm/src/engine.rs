@@ -1,4 +1,5 @@
 use shade_core::{AdjustmentOp, ColorParams, LayerStack, TextureId, ToneParams};
+use shade_io::load_image_bytes;
 use std::collections::HashMap;
 
 /// Holds the in-memory editor state for the WASM context.
@@ -38,6 +39,15 @@ impl WasmEngine {
             shadows: 0.0,
         }]);
         id
+    }
+
+    pub fn load_encoded_image(
+        &mut self,
+        bytes: &[u8],
+        name_hint: Option<&str>,
+    ) -> anyhow::Result<u64> {
+        let (pixels, width, height) = load_image_bytes(bytes, name_hint)?;
+        Ok(self.load_image_data(pixels, width, height))
     }
 
     pub fn apply_tone(&mut self, layer_idx: usize, params: ToneParams) {
@@ -99,5 +109,12 @@ impl WasmEngine {
 
         use base64::{engine::general_purpose::STANDARD, Engine};
         format!("data:image/png;base64,{}", STANDARD.encode(&buf))
+    }
+
+    pub fn render_preview_rgba(&self) -> Vec<u8> {
+        let Some((pixels, _, _)) = self.image_sources.values().next() else {
+            return Vec::new();
+        };
+        pixels.clone()
     }
 }

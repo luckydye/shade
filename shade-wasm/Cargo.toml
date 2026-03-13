@@ -32,6 +32,7 @@ wgpu = { version = "23", features = ["wgsl", "webgpu"] }
 anyhow = "1"
 image = { workspace = true }
 base64 = "0.22"
+shade-io = { path = "../shade-io" }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Oz", "--enable-mutable-globals"]

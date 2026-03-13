@@ -2,12 +2,6 @@ import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as bridge from "../bridge/index";
 
-// Holds the current image as an ImageBitmap so Canvas can draw it immediately
-// without a round-trip to the backend.
-const [sourceBitmap, setSourceBitmap] = createSignal<ImageBitmap | null>(null);
-export { sourceBitmap };
-const [previewBitmap, setPreviewBitmap] = createSignal<ImageBitmap | null>(null);
-export { previewBitmap };
 const [previewFrame, setPreviewFrame] = createSignal<ImageData | null>(null);
 export { previewFrame };
 type PreviewQuality = "interactive" | "final";
@@ -18,15 +12,6 @@ const FINAL_PREVIEW_PIXEL_COUNT = 1_500_000;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
-
-function replaceBitmap(
-  setter: (bitmap: ImageBitmap | null) => void,
-  current: () => ImageBitmap | null,
-  next: ImageBitmap | null,
-) {
-  current()?.close();
-  setter(next);
-}
 
 export interface LayerInfo {
   kind: "image" | "adjustment";
@@ -215,8 +200,6 @@ function resetPreviewState(canvasWidth: number, canvasHeight: number) {
 
 export async function openImage(path: string) {
   setState("isLoading", true);
-  replaceBitmap(setSourceBitmap, sourceBitmap, null);
-  replaceBitmap(setPreviewBitmap, previewBitmap, null);
   setPreviewFrame(null);
   try {
     const info = await bridge.openImage(path);
@@ -229,13 +212,6 @@ export async function openImage(path: string) {
 }
 
 export async function openImageFile(file: File) {
-  try {
-    const bitmap = await createImageBitmap(file);
-    replaceBitmap(setSourceBitmap, sourceBitmap, bitmap);
-  } catch {
-    replaceBitmap(setSourceBitmap, sourceBitmap, null);
-  }
-  replaceBitmap(setPreviewBitmap, previewBitmap, null);
   setPreviewFrame(null);
 
   setState("isLoading", true);
@@ -373,23 +349,21 @@ async function performPreviewRefresh() {
   if (!request) return;
   const frame = await bridge.renderPreview(request);
   if (queued.quality === "final" && queued.version !== previewRefreshVersion) return;
+  if (frame.kind === "rgba-float16") {
+    if (frame.width === 0 || frame.height === 0) return;
+    setPreviewFrame(new ImageData(frame.pixels as any, frame.width, frame.height, {
+      pixelFormat: "rgba-float16",
+      colorSpace: frame.colorSpace,
+    } as any));
+    return;
+  }
   if (frame.kind === "rgba") {
     if (frame.width === 0 || frame.height === 0) return;
-      replaceBitmap(setPreviewBitmap, previewBitmap, null);
     const pixels = new Uint8ClampedArray(frame.pixels.length);
     pixels.set(frame.pixels);
     setPreviewFrame(new ImageData(pixels, frame.width, frame.height));
     return;
   }
-  if (!frame.dataUrl) return;
-  setPreviewFrame(null);
-  const response = await fetch(frame.dataUrl);
-  const bitmap = await createImageBitmap(await response.blob());
-  if (queued.quality === "final" && queued.version !== previewRefreshVersion) {
-    bitmap.close();
-    return;
-  }
-  replaceBitmap(setPreviewBitmap, previewBitmap, bitmap);
 }
 
 function queuePreviewRefresh(version: number, quality: PreviewQuality) {

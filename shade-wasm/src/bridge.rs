@@ -1,12 +1,15 @@
 use crate::engine::WasmEngine;
+use serde::Serialize;
 use shade_core::{ColorParams, ToneParams};
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 
 thread_local! {
     static ENGINE: RefCell<WasmEngine> = RefCell::new(WasmEngine::new());
 }
 
+#[derive(Serialize)]
 #[wasm_bindgen]
 pub struct LayerInfo {
     pub layer_count: usize,
@@ -21,6 +24,22 @@ pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
     ENGINE.with(|e| {
         e.borrow_mut()
             .load_image_data(pixels.to_vec(), width, height)
+    })
+}
+
+#[wasm_bindgen]
+pub fn load_image_encoded(bytes: &[u8], file_name: Option<String>) -> Result<JsValue, JsValue> {
+    ENGINE.with(|e| {
+        let mut engine = e.borrow_mut();
+        engine
+            .load_encoded_image(bytes, file_name.as_deref())
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        serde_wasm_bindgen::to_value(&LayerInfo {
+            layer_count: engine.layer_count(),
+            canvas_width: engine.canvas_width,
+            canvas_height: engine.canvas_height,
+        })
+        .map_err(|err| JsValue::from_str(&err.to_string()))
     })
 }
 
@@ -136,4 +155,9 @@ pub fn get_stack_json() -> String {
 #[wasm_bindgen]
 pub fn render_preview() -> String {
     ENGINE.with(|e| e.borrow().render_preview_data_url())
+}
+
+#[wasm_bindgen]
+pub fn render_preview_rgba() -> Vec<u8> {
+    ENGINE.with(|e| e.borrow().render_preview_rgba())
 }

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use exif::{In, Tag};
 use exr::prelude::{ReadChannels, ReadLayers};
 use image::{DynamicImage, ImageFormat};
 use rawler::{
@@ -87,7 +88,10 @@ pub fn load_image_bytes_with_colorspace(
         _ => ColorSpace::Unknown,
     };
 
-    let img = image::load_from_memory(&bytes).context("Failed to decode image bytes")?;
+    let img = apply_orientation(
+        image::load_from_memory(&bytes).context("Failed to decode image bytes")?,
+        read_orientation(&mut Cursor::new(bytes))?,
+    );
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
 
@@ -117,9 +121,11 @@ pub fn load_image_bytes_f32_with_colorspace(
         _ => ColorSpace::Unknown,
     };
 
-    let rgba = image::load_from_memory(bytes)
-        .context("Failed to decode image bytes")?
-        .to_rgba32f();
+    let rgba = apply_orientation(
+        image::load_from_memory(bytes).context("Failed to decode image bytes")?,
+        read_orientation(&mut Cursor::new(bytes))?,
+    )
+    .to_rgba32f();
     let (width, height) = rgba.dimensions();
     Ok((
         FloatImage {
@@ -129,6 +135,30 @@ pub fn load_image_bytes_f32_with_colorspace(
         },
         color_space,
     ))
+}
+
+fn read_orientation<R: std::io::BufRead + std::io::Seek>(reader: &mut R) -> Result<Option<u32>> {
+    match exif::Reader::new().read_from_container(reader) {
+        Ok(exif) => Ok(exif
+            .get_field(Tag::Orientation, In::PRIMARY)
+            .and_then(|field| field.value.get_uint(0))),
+        Err(exif::Error::NotFound(_)) => Ok(None),
+        Err(err) => Err(anyhow!(err)).context("Failed to read EXIF orientation"),
+    }
+}
+
+fn apply_orientation(image: DynamicImage, orientation: Option<u32>) -> DynamicImage {
+    match orientation.unwrap_or(1) {
+        1 => image,
+        2 => image.fliph(),
+        3 => image.rotate180(),
+        4 => image.flipv(),
+        5 => image.rotate90().fliph(),
+        6 => image.rotate90(),
+        7 => image.rotate270().fliph(),
+        8 => image.rotate270(),
+        value => panic!("Unsupported EXIF orientation value: {value}"),
+    }
 }
 
 /// Convert RGBA8 pixels from `src_space` to **linear sRGB** in-place.

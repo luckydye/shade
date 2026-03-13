@@ -30,6 +30,7 @@ pub fn run() {
             commands::open_image_bytes,
             commands::export_image,
             commands::render_preview,
+            commands::render_preview_float16,
             commands::apply_edit,
             commands::add_layer,
             commands::set_layer_visible,

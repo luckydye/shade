@@ -7,7 +7,7 @@ let wasm: any = null;
 
 // Message protocol:
 // { type: "init" } → { type: "ready" }
-// { type: "load_image", pixels: Uint8Array, width: number, height: number } → { type: "image_loaded", layerCount: number }
+// { type: "load_image_encoded", bytes: Uint8Array, fileName?: string } → { type: "image_loaded", layerCount: number, canvasWidth: number, canvasHeight: number }
 // { type: "apply_tone", layerIdx: number, exposure: number, ... } → { type: "tone_applied" }
 // { type: "get_stack" } → { type: "stack", data: string }
 
@@ -29,11 +29,15 @@ self.onmessage = async (e: MessageEvent) => {
       break;
     }
 
-    case "load_image": {
+    case "load_image_encoded": {
       if (!wasm) { self.postMessage({ type: "error", message: "WASM not initialised" }); return; }
-      const id = wasm.load_image(msg.pixels, msg.width, msg.height);
-      const count = wasm.get_layer_count();
-      self.postMessage({ type: "image_loaded", textureId: id, layerCount: count });
+      const info = await wasm.load_image_encoded(msg.bytes, msg.fileName ?? null);
+      self.postMessage({
+        type: "image_loaded",
+        layerCount: info.layer_count,
+        canvasWidth: info.canvas_width,
+        canvasHeight: info.canvas_height,
+      });
       break;
     }
 
@@ -74,8 +78,9 @@ self.onmessage = async (e: MessageEvent) => {
 
     case "render_preview": {
       if (!wasm) return;
-      const dataUrl = wasm.render_preview();
-      self.postMessage({ type: "preview_rendered", dataUrl });
+      const [width, height] = wasm.get_canvas_size();
+      const pixels = wasm.render_preview_rgba();
+      self.postMessage({ type: "preview_rendered", pixels, width, height });
       break;
     }
 

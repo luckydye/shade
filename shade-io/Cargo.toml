@@ -9,3 +9,4 @@ image = { workspace = true }
 exr = { workspace = true }
 anyhow = { workspace = true }
 rawler = { workspace = true }
+kamadak-exif = "0.6"
