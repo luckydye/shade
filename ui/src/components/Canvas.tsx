@@ -3,51 +3,90 @@ import {
   isDrawerOpen,
   openImageFile,
   panPreview,
+  previewContextFrame,
   previewFrame,
   resetPreviewViewport,
   setPreviewViewportSize,
   state,
-  zoomPreview,
+  zoomPreviewDelta,
 } from "../store/editor";
 
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
   let scratchCanvas: HTMLCanvasElement | undefined;
+  let contextCanvas: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
   let panStart: { x: number; y: number } | null = null;
 
-  createEffect(() => {
-    state.previewViewportWidth;
-    state.previewViewportHeight;
+  function drawFrame() {
     if (!canvasRef || !stageRef) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
     const cssWidth = Math.max(1, Math.floor(stageRef.clientWidth));
     const cssHeight = Math.max(1, Math.floor(stageRef.clientHeight));
     const devicePixelRatio = window.devicePixelRatio || 1;
-    canvasRef.width = Math.max(1, Math.floor(cssWidth * devicePixelRatio));
-    canvasRef.height = Math.max(1, Math.floor(cssHeight * devicePixelRatio));
+    const pixelWidth = Math.max(1, Math.floor(cssWidth * devicePixelRatio));
+    const pixelHeight = Math.max(1, Math.floor(cssHeight * devicePixelRatio));
+    if (canvasRef.width !== pixelWidth || canvasRef.height !== pixelHeight) {
+      canvasRef.width = pixelWidth;
+      canvasRef.height = pixelHeight;
+    }
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
+    const fitScale = Math.min(cssWidth / state.canvasWidth, cssHeight / state.canvasHeight);
+    const imageScale = fitScale * state.previewZoom;
+    const imageX = cssWidth * 0.5 - state.previewCenterX * imageScale;
+    const imageY = cssHeight * 0.5 - state.previewCenterY * imageScale;
+    const contextFrame = previewContextFrame();
+    if (contextFrame) {
+      contextCanvas ??= document.createElement("canvas");
+      if (contextCanvas.width !== contextFrame.width || contextCanvas.height !== contextFrame.height) {
+        contextCanvas.width = contextFrame.width;
+        contextCanvas.height = contextFrame.height;
+      }
+      const contextScratch = contextCanvas.getContext("2d");
+      if (!contextScratch) {
+        throw new Error("context canvas 2d context is required");
+      }
+      contextScratch.putImageData(contextFrame, 0, 0);
+      ctx.drawImage(
+        contextCanvas,
+        imageX,
+        imageY,
+        state.canvasWidth * imageScale,
+        state.canvasHeight * imageScale,
+      );
+    }
     const frame = previewFrame();
     if (!frame) return;
     scratchCanvas ??= document.createElement("canvas");
-    scratchCanvas.width = frame.width;
-    scratchCanvas.height = frame.height;
+    if (scratchCanvas.width !== frame.image.width || scratchCanvas.height !== frame.image.height) {
+      scratchCanvas.width = frame.image.width;
+      scratchCanvas.height = frame.image.height;
+    }
     const scratchContext = scratchCanvas.getContext("2d");
     if (!scratchContext) {
       throw new Error("scratch canvas 2d context is required");
     }
-    scratchContext.putImageData(frame, 0, 0);
-    const scale = Math.min(cssWidth / frame.width, cssHeight / frame.height);
-    const drawWidth = frame.width * scale;
-    const drawHeight = frame.height * scale;
-    const drawX = (cssWidth - drawWidth) * 0.5;
-    const drawY = (cssHeight - drawHeight) * 0.5;
+    scratchContext.putImageData(frame.image, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(scratchCanvas, drawX, drawY, drawWidth, drawHeight);
+    ctx.drawImage(
+      scratchCanvas,
+      imageX + frame.crop.x * imageScale,
+      imageY + frame.crop.y * imageScale,
+      frame.crop.width * imageScale,
+      frame.crop.height * imageScale,
+    );
+  }
+
+  createEffect(() => {
+    state.previewViewportWidth;
+    state.previewViewportHeight;
+    previewContextFrame();
+    previewFrame();
+    drawFrame();
   });
 
   onMount(() => {
@@ -83,7 +122,14 @@ const Canvas: Component = () => {
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    zoomPreview(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    const deltaModeScale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? stageRef?.clientHeight ?? 1
+        : 1;
+    const delta = e.deltaY * deltaModeScale;
+    zoomPreviewDelta(delta, e.ctrlKey);
+    drawFrame();
   };
 
   const onPointerDown = (e: PointerEvent) => {
@@ -93,7 +139,10 @@ const Canvas: Component = () => {
 
   const onPointerMove = (e: PointerEvent) => {
     if (!panStart) return;
-    panPreview(e.clientX - panStart.x, e.clientY - panStart.y);
+    const dx = e.clientX - panStart.x;
+    const dy = e.clientY - panStart.y;
+    panPreview(dx, dy);
+    drawFrame();
     panStart = { x: e.clientX, y: e.clientY };
   };
 

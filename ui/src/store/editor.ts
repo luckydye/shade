@@ -2,8 +2,19 @@ import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as bridge from "../bridge/index";
 
-const [previewFrame, setPreviewFrame] = createSignal<ImageData | null>(null);
+export interface PreviewImage {
+  image: ImageData;
+  crop: bridge.PreviewCrop;
+  viewportX: number;
+  viewportY: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
+const [previewFrame, setPreviewFrame] = createSignal<PreviewImage | null>(null);
 export { previewFrame };
+const [previewContextFrame, setPreviewContextFrame] = createSignal<ImageData | null>(null);
+export { previewContextFrame };
 type PreviewQuality = "interactive" | "final";
 const INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO = 0.75;
 const FINAL_PREVIEW_DEVICE_PIXEL_RATIO = 1.25;
@@ -100,15 +111,106 @@ function capPreviewRenderSize(width: number, height: number, maxPixelCount: numb
 }
 
 function clampPreviewCenter(zoom: number, centerX: number, centerY: number) {
-  const cropWidth = state.canvasWidth / zoom;
-  const cropHeight = state.canvasHeight / zoom;
+  const { width: cropWidth, height: cropHeight } = getPreviewCropSize(zoom);
   return {
     x: clamp(centerX, cropWidth * 0.5, state.canvasWidth - cropWidth * 0.5),
     y: clamp(centerY, cropHeight * 0.5, state.canvasHeight - cropHeight * 0.5),
   };
 }
 
+function getPreviewCropSize(zoom: number) {
+  if (
+    state.canvasWidth <= 0
+    || state.canvasHeight <= 0
+    || state.previewViewportWidth <= 0
+    || state.previewViewportHeight <= 0
+  ) {
+    return { width: 0, height: 0 };
+  }
+  const fitScale = Math.min(
+    state.previewViewportWidth / state.canvasWidth,
+    state.previewViewportHeight / state.canvasHeight,
+  );
+  if (fitScale <= 0) {
+    throw new Error("preview fit scale must be positive");
+  }
+  const imageScale = fitScale * zoom;
+  return {
+    width: Math.min(state.canvasWidth, state.previewViewportWidth / imageScale),
+    height: Math.min(state.canvasHeight, state.previewViewportHeight / imageScale),
+  };
+}
+
+function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
+  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
+  if (state.previewViewportWidth <= 0 || state.previewViewportHeight <= 0) return null;
+  const fitScale = Math.min(
+    state.previewViewportWidth / state.canvasWidth,
+    state.previewViewportHeight / state.canvasHeight,
+  );
+  if (fitScale <= 0) {
+    throw new Error("preview fit scale must be positive");
+  }
+  const center = clampPreviewCenter(zoom, centerX, centerY);
+  const imageScale = fitScale * zoom;
+  const imageX = state.previewViewportWidth * 0.5 - center.x * imageScale;
+  const imageY = state.previewViewportHeight * 0.5 - center.y * imageScale;
+  const screenLeft = Math.max(0, imageX);
+  const screenTop = Math.max(0, imageY);
+  const screenRight = Math.min(state.previewViewportWidth, imageX + state.canvasWidth * imageScale);
+  const screenBottom = Math.min(state.previewViewportHeight, imageY + state.canvasHeight * imageScale);
+  if (screenRight <= screenLeft || screenBottom <= screenTop) {
+    throw new Error("visible preview must intersect the viewport");
+  }
+  return {
+    viewportX: screenLeft,
+    viewportY: screenTop,
+    viewportWidth: screenRight - screenLeft,
+    viewportHeight: screenBottom - screenTop,
+    crop: {
+      x: (screenLeft - imageX) / imageScale,
+      y: (screenTop - imageY) / imageScale,
+      width: (screenRight - screenLeft) / imageScale,
+      height: (screenBottom - screenTop) / imageScale,
+    },
+    screenWidth: screenRight - screenLeft,
+    screenHeight: screenBottom - screenTop,
+  };
+}
+
 function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
+  const visible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
+  if (!visible) return null;
+  const devicePixelRatio = quality === "interactive"
+    ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
+    : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
+  const maxPixelCount = quality === "interactive"
+    ? INTERACTIVE_PREVIEW_PIXEL_COUNT
+    : FINAL_PREVIEW_PIXEL_COUNT;
+  const target = capPreviewRenderSize(
+    Math.max(1, Math.floor(visible.screenWidth * Math.min(window.devicePixelRatio, devicePixelRatio))),
+    Math.max(1, Math.floor(visible.screenHeight * Math.min(window.devicePixelRatio, devicePixelRatio))),
+    maxPixelCount,
+  );
+  if (target.width <= 0 || target.height <= 0) return null;
+  return {
+    target_width: target.width,
+    target_height: target.height,
+    crop: visible.crop,
+  };
+}
+
+function previewCropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
+  const epsilon = 0.01;
+  return (
+    Math.abs(a.x - b.x) <= epsilon
+    && Math.abs(a.y - b.y) <= epsilon
+    && Math.abs(a.width - b.width) <= epsilon
+    && Math.abs(a.height - b.height) <= epsilon
+  );
+}
+
+function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
   const devicePixelRatio = quality === "interactive"
     ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
@@ -124,19 +226,22 @@ function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | nul
   );
   const target = capPreviewRenderSize(fitted.width, fitted.height, maxPixelCount);
   if (target.width <= 0 || target.height <= 0) return null;
-  const cropWidth = state.canvasWidth / state.previewZoom;
-  const cropHeight = state.canvasHeight / state.previewZoom;
-  const center = clampPreviewCenter(state.previewZoom, state.previewCenterX, state.previewCenterY);
   return {
     target_width: target.width,
     target_height: target.height,
-    crop: {
-      x: center.x - cropWidth * 0.5,
-      y: center.y - cropHeight * 0.5,
-      width: cropWidth,
-      height: cropHeight,
-    },
   };
+}
+
+function toImageData(frame: bridge.PreviewFrame) {
+  if (frame.kind === "rgba-float16") {
+    return new ImageData(frame.pixels as any, frame.width, frame.height, {
+      pixelFormat: "rgba-float16",
+      colorSpace: frame.colorSpace,
+    } as any);
+  }
+  const pixels = new Uint8ClampedArray(frame.pixels.length);
+  pixels.set(frame.pixels);
+  return new ImageData(pixels, frame.width, frame.height);
 }
 
 export function getPreviewDisplaySize() {
@@ -146,6 +251,25 @@ export function getPreviewDisplaySize() {
     state.canvasWidth,
     state.canvasHeight,
   );
+}
+
+export function getMaxPreviewZoom() {
+  if (
+    state.canvasWidth <= 0
+    || state.canvasHeight <= 0
+    || state.previewViewportWidth <= 0
+    || state.previewViewportHeight <= 0
+  ) {
+    return 1;
+  }
+  const fitScale = Math.min(
+    state.previewViewportWidth / state.canvasWidth,
+    state.previewViewportHeight / state.canvasHeight,
+  );
+  if (fitScale <= 0) {
+    throw new Error("preview fit scale must be positive");
+  }
+  return Math.max(1, 1 / fitScale);
 }
 
 export function resetPreviewViewport() {
@@ -168,9 +292,11 @@ export function setPreviewViewportSize(width: number, height: number) {
   void refreshPreview();
 }
 
-export function zoomPreview(multiplier: number) {
+export function zoomPreviewDelta(delta: number, pinch: boolean) {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return;
-  const zoom = clamp(state.previewZoom * multiplier, 1, 16);
+  const sensitivity = pinch ? 0.0025 : 0.0005;
+  const multiplier = Math.exp(-delta * sensitivity);
+  const zoom = clamp(state.previewZoom * multiplier, 1, getMaxPreviewZoom());
   const center = clampPreviewCenter(zoom, state.previewCenterX, state.previewCenterY);
   setState({
     previewZoom: zoom,
@@ -182,14 +308,18 @@ export function zoomPreview(multiplier: number) {
 
 export function panPreview(deltaX: number, deltaY: number) {
   if (state.previewZoom <= 1 || state.previewViewportWidth <= 0 || state.previewViewportHeight <= 0) return;
-  const display = getPreviewDisplaySize();
-  if (display.width <= 0 || display.height <= 0) return;
-  const cropWidth = state.canvasWidth / state.previewZoom;
-  const cropHeight = state.canvasHeight / state.previewZoom;
+  const fitScale = Math.min(
+    state.previewViewportWidth / state.canvasWidth,
+    state.previewViewportHeight / state.canvasHeight,
+  );
+  if (fitScale <= 0) {
+    throw new Error("preview fit scale must be positive");
+  }
+  const imageScale = fitScale * state.previewZoom;
   const center = clampPreviewCenter(
     state.previewZoom,
-    state.previewCenterX - (deltaX / display.width) * cropWidth,
-    state.previewCenterY - (deltaY / display.height) * cropHeight,
+    state.previewCenterX - deltaX / imageScale,
+    state.previewCenterY - deltaY / imageScale,
   );
   setState({
     previewCenterX: center.x,
@@ -210,6 +340,7 @@ function resetPreviewState(canvasWidth: number, canvasHeight: number) {
 
 export function closeImage() {
   setPreviewFrame(null);
+  setPreviewContextFrame(null);
   setState({
     layers: [],
     canvasWidth: 0,
@@ -225,6 +356,7 @@ export function closeImage() {
 export async function openImage(path: string) {
   setState("isLoading", true);
   setPreviewFrame(null);
+  setPreviewContextFrame(null);
   try {
     const info = await bridge.openImage(path);
     resetPreviewState(info.canvas_width, info.canvas_height);
@@ -238,6 +370,7 @@ export async function openImage(path: string) {
 
 export async function openImageFile(file: File) {
   setPreviewFrame(null);
+  setPreviewContextFrame(null);
 
   setState("isLoading", true);
   try {
@@ -391,34 +524,38 @@ async function performPreviewRefresh() {
   if (!queued) return;
   previewRefreshQueued = null;
   const request = getPreviewRequest(queued.quality);
-  if (!request) return;
+  const contextRequest = getContextPreviewRequest(queued.quality);
+  if (!request || !contextRequest) return;
   const frame = await bridge.renderPreview(request);
-  if (queued.quality === "final" && queued.version !== previewRefreshVersion) return;
-  if (frame.kind === "rgba-float16") {
-    if (frame.width === 0 || frame.height === 0) return;
-    setState({
-      previewDisplayColorSpace: frame.colorSpace === "display-p3" ? "Display P3" : frame.colorSpace,
-      previewRenderWidth: frame.width,
-      previewRenderHeight: frame.height,
-    });
-    setPreviewFrame(new ImageData(frame.pixels as any, frame.width, frame.height, {
-      pixelFormat: "rgba-float16",
-      colorSpace: frame.colorSpace,
-    } as any));
+  if (queued.version !== previewRefreshVersion) return;
+  if (frame.width === 0 || frame.height === 0) return;
+  const crop = request.crop;
+  const currentVisible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
+  if (!currentVisible) return;
+  const currentCrop = currentVisible.crop;
+  if (!previewCropMatches(crop, currentCrop)) {
+    void refreshPreview();
     return;
   }
-  if (frame.kind === "rgba") {
-    if (frame.width === 0 || frame.height === 0) return;
-    setState({
-      previewDisplayColorSpace: "sRGB",
-      previewRenderWidth: frame.width,
-      previewRenderHeight: frame.height,
-    });
-    const pixels = new Uint8ClampedArray(frame.pixels.length);
-    pixels.set(frame.pixels);
-    setPreviewFrame(new ImageData(pixels, frame.width, frame.height));
-    return;
-  }
+  setState({
+    previewDisplayColorSpace: frame.kind === "rgba-float16" ? (frame.colorSpace === "display-p3" ? "Display P3" : frame.colorSpace) : "sRGB",
+    previewRenderWidth: frame.width,
+    previewRenderHeight: frame.height,
+  });
+  setPreviewFrame({
+    image: toImageData(frame),
+    crop,
+    viewportX: currentVisible.viewportX,
+    viewportY: currentVisible.viewportY,
+    viewportWidth: currentVisible.viewportWidth,
+    viewportHeight: currentVisible.viewportHeight,
+  });
+  const contextFrame = request.crop && request.crop.width === state.canvasWidth && request.crop.height === state.canvasHeight
+    ? frame
+    : await bridge.renderPreview(contextRequest);
+  if (queued.version !== previewRefreshVersion) return;
+  if (contextFrame.width === 0 || contextFrame.height === 0) return;
+  setPreviewContextFrame(toImageData(contextFrame));
 }
 
 function queuePreviewRefresh(version: number, quality: PreviewQuality) {
