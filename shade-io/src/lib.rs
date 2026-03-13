@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use exif::{In, Tag};
+use exr::meta::{attribute::SampleType, MetaData};
 use exr::prelude::{ReadChannels, ReadLayers};
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use rawler::{
     decoders::{Orientation as RawOrientation, RawDecodeParams},
     imgop::develop::RawDevelop,
@@ -63,6 +64,20 @@ pub fn load_image_f32_with_colorspace(path: &Path) -> Result<(FloatImage, ColorS
         std::fs::read(path).with_context(|| format!("Cannot read file: {}", path.display()))?;
     load_image_bytes_f32_with_colorspace(&bytes, path.file_name().and_then(|name| name.to_str()))
         .with_context(|| format!("Failed to decode image: {}", path.display()))
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceImageInfo {
+    pub bit_depth: String,
+}
+
+pub fn load_image_f32_with_info(path: &Path) -> Result<(FloatImage, SourceImageInfo)> {
+    let bytes =
+        std::fs::read(path).with_context(|| format!("Cannot read file: {}", path.display()))?;
+    let (image, info) =
+        load_image_bytes_f32_with_info(&bytes, path.file_name().and_then(|name| name.to_str()))
+            .with_context(|| format!("Failed to decode image: {}", path.display()))?;
+    Ok((image, info))
 }
 
 /// Load an encoded image from memory and also detect its colour space.
@@ -140,24 +155,60 @@ pub fn load_image_bytes_f32_with_colorspace(
     ))
 }
 
-pub fn source_bit_depth_label(name_hint: Option<&str>) -> &'static str {
-    let ext = name_hint
-        .and_then(|name| Path::new(name).extension())
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "exr" => "32-bit float",
-        "cr2" | "cr3" | "dng" | "nef" | "arw" | "raf" | "rw2" | "orf" | "raw" | "iiq"
-        | "3fr" | "ari" | "crm" | "crw" | "dcr" | "dcs" | "erf" | "fff" | "kdc" | "mef"
-        | "mos" | "mrw" | "nrw" | "ori" | "pef" | "qtk" | "rwl" | "srw" | "x3f" => {
-            "RAW"
-        }
-        "tif" | "tiff" => "TIFF",
-        "png" => "PNG",
-        "jpg" | "jpeg" | "webp" | "avif" => "8-bit",
-        _ => "Unknown",
+pub fn load_image_bytes_f32_with_info(
+    bytes: &[u8],
+    name_hint: Option<&str>,
+) -> Result<(FloatImage, SourceImageInfo)> {
+    if is_exr(name_hint, bytes) {
+        return Ok((
+            decode_exr_f32(bytes)?,
+            SourceImageInfo {
+                bit_depth: detect_exr_bit_depth(bytes)?,
+            },
+        ));
     }
+    if is_camera_raw(name_hint, bytes) {
+        let raw_source = match name_hint {
+            Some(name) => RawSource::new_from_slice(bytes).with_path(name),
+            None => RawSource::new_from_slice(bytes),
+        };
+        let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
+            .context("RAW decode failed")?;
+        let bit_depth = format!("{}-bit RAW", raw_image.bps);
+        let rgba = develop_raw_image(&raw_image)?.to_rgba32f();
+        let (width, height) = rgba.dimensions();
+        return Ok((
+            FloatImage {
+                pixels: rgba.into_raw(),
+                width,
+                height,
+            },
+            SourceImageInfo { bit_depth },
+        ));
+    }
+
+    let decoder = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .context("Failed to guess image format")?
+        .into_decoder()
+        .context("Failed to create image decoder")?;
+    let bit_depth = decoder_color_type_label(decoder.color_type());
+    let rgba = apply_orientation(
+        image::load_from_memory(bytes).context("Failed to decode image bytes")?,
+        read_orientation(&mut Cursor::new(bytes))?,
+    )
+    .to_rgba32f();
+    let (width, height) = rgba.dimensions();
+    Ok((
+        FloatImage {
+            pixels: rgba.into_raw(),
+            width,
+            height,
+        },
+        SourceImageInfo {
+            bit_depth: bit_depth.to_string(),
+        },
+    ))
 }
 
 fn read_orientation<R: std::io::BufRead + std::io::Seek>(reader: &mut R) -> Result<Option<u32>> {
@@ -518,6 +569,28 @@ fn decode_exr_f32(bytes: &[u8]) -> Result<FloatImage> {
     })
 }
 
+fn detect_exr_bit_depth(bytes: &[u8]) -> Result<String> {
+    let meta = MetaData::read_from_buffered(Cursor::new(bytes), false)
+        .context("EXR metadata read failed")?;
+    let channels = &meta
+        .headers
+        .first()
+        .ok_or_else(|| anyhow!("EXR has no headers"))?
+        .channels;
+    let sample_type = channels.uniform_sample_type.unwrap_or_else(|| {
+        channels
+            .list
+            .first()
+            .map(|channel| channel.sample_type)
+            .unwrap_or(SampleType::F32)
+    });
+    Ok(match sample_type {
+        SampleType::F16 => "16-bit float".to_string(),
+        SampleType::F32 => "32-bit float".to_string(),
+        SampleType::U32 => "32-bit integer".to_string(),
+    })
+}
+
 fn decode_camera_raw_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatImage> {
     let raw_source = match name_hint {
         Some(name) => RawSource::new_from_slice(bytes).with_path(name),
@@ -544,6 +617,16 @@ fn develop_raw_image(raw_image: &RawImage) -> Result<DynamicImage> {
         .context("RAW development failed")?
         .to_dynamic_image()
         .ok_or_else(|| anyhow!("RAW development produced an invalid image buffer"))
+}
+
+fn decoder_color_type_label(color_type: image::ColorType) -> &'static str {
+    use image::ColorType::*;
+    match color_type {
+        L8 | La8 | Rgb8 | Rgba8 => "8-bit",
+        L16 | La16 | Rgb16 | Rgba16 => "16-bit",
+        Rgb32F | Rgba32F => "32-bit float",
+        _ => "Unknown",
+    }
 }
 
 fn float_to_u8(value: f32) -> u8 {

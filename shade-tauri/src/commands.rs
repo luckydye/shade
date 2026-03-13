@@ -3,7 +3,7 @@ use shade_core::{
     linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, LayerStack, SharpenParams,
     VignetteParams,
 };
-use shade_io::{load_image_bytes_f32, load_image_f32, source_bit_depth_label};
+use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info};
 use std::sync::Mutex;
 
 pub struct EditorState {
@@ -82,10 +82,10 @@ pub async fn open_image(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    let image = load_image_f32(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
-    let source_bit_depth = source_bit_depth_label(Some(&path)).to_string();
+    let (image, info) =
+        load_image_f32_with_info(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, source_bit_depth))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth))
 }
 
 #[tauri::command]
@@ -94,10 +94,10 @@ pub async fn open_image_encoded_bytes(
     file_name: Option<String>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    let image = load_image_bytes_f32(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
-    let source_bit_depth = source_bit_depth_label(file_name.as_deref()).to_string();
+    let (image, info) =
+        load_image_bytes_f32_with_info(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, source_bit_depth))
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth))
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).

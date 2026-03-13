@@ -236,7 +236,7 @@ async function _loadEncodedBytes(
   bytes: Uint8Array,
   fileName?: string,
 ): Promise<OpenImageInfo> {
-  const result = await workerCall<{ layerCount: number; canvasWidth: number; canvasHeight: number; source_bit_depth?: string }>(
+  const result = await workerCall<{ layerCount: number; canvasWidth: number; canvasHeight: number; source_bit_depth: string }>(
     { type: "load_image_encoded", bytes, fileName },
     "image_loaded"
   );
@@ -244,7 +244,7 @@ async function _loadEncodedBytes(
     layer_count: result.layerCount,
     canvas_width: result.canvasWidth,
     canvas_height: result.canvasHeight,
-    source_bit_depth: result.source_bit_depth ?? "Unknown",
+    source_bit_depth: result.source_bit_depth,
   };
 }
 

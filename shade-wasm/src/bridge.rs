@@ -1,7 +1,7 @@
 use crate::engine::WasmEngine;
 use serde::Serialize;
 use shade_core::{ColorParams, ToneParams};
-use shade_io::source_bit_depth_label;
+use shade_io::load_image_bytes_f32_with_info;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
@@ -32,14 +32,22 @@ pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
 pub fn load_image_encoded(bytes: &[u8], file_name: Option<String>) -> Result<JsValue, JsValue> {
     ENGINE.with(|e| {
         let mut engine = e.borrow_mut();
-        engine
-            .load_encoded_image(bytes, file_name.as_deref())
+        let (image, info) = load_image_bytes_f32_with_info(bytes, file_name.as_deref())
             .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        engine.load_image_data(
+            image
+                .pixels
+                .iter()
+                .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)
+                .collect(),
+            image.width,
+            image.height,
+        );
         serde_wasm_bindgen::to_value(&LayerInfo {
             layer_count: engine.layer_count(),
             canvas_width: engine.canvas_width,
             canvas_height: engine.canvas_height,
-            source_bit_depth: source_bit_depth_label(file_name.as_deref()).to_string(),
+            source_bit_depth: info.bit_depth,
         })
         .map_err(|err| JsValue::from_str(&err.to_string()))
     })
