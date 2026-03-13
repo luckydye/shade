@@ -1,5 +1,5 @@
-import { Component, JSX } from "solid-js";
-import { openImageFile, state } from "../store/editor";
+import { Component, JSX, Show } from "solid-js";
+import { closeImage, openImageFile, state } from "../store/editor";
 
 const ACCEPTED = "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
 
@@ -82,23 +82,41 @@ export const Toolbar: Component = () => {
   };
 
   return (
-    <header class="absolute lg:static top-0 w-full z-50 flex items-center gap-4 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5">
-      <div class="flex items-center gap-3">
+    <header class="absolute lg:static top-0 w-full z-50 grid grid-cols-[40px_1fr_40px] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5">
+      <div>
+        <Show when={state.canvasWidth > 0 || state.isLoading}>
+          <ActionButton
+            label="Back"
+            icon={
+              <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            }
+            onClick={() => {
+              if (document.startViewTransition) {
+                document.startViewTransition(closeImage);
+              } else {
+                closeImage();
+              }
+            }}
+          />
+        </Show>
+      </div>
+      
+      <div class="text-center">
         <div class="flex flex-col">
           <span class="block text-[11px] text-white/40">
-            {statusText()}
+            {state.isLoading && (
+              <span class="hidden rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] font-medium text-white/70 sm:inline-flex">
+                Processing
+              </span>
+            ) || statusText()}
           </span>
         </div>
       </div>
 
-      <input ref={fileInputRef} type="file" class="hidden" onChange={handleFileChange} />
-
-      <div class="ml-auto flex items-center gap-2">
-        {state.isLoading && (
-          <span class="hidden rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] font-medium text-white/70 sm:inline-flex">
-            Processing
-          </span>
-        )}
+      <div>
+        <input ref={fileInputRef} type="file" class="hidden" onChange={handleFileChange} />
         <ActionButton label="Open" icon={<UploadIcon />} onClick={() => fileInputRef?.click()} />
       </div>
     </header>

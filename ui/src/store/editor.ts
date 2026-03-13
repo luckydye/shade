@@ -208,6 +208,20 @@ function resetPreviewState(canvasWidth: number, canvasHeight: number) {
   });
 }
 
+export function closeImage() {
+  setPreviewFrame(null);
+  setState({
+    layers: [],
+    canvasWidth: 0,
+    canvasHeight: 0,
+    isLoading: false,
+    selectedLayerIdx: -1,
+    previewZoom: 1,
+    previewCenterX: 0,
+    previewCenterY: 0,
+  });
+}
+
 export async function openImage(path: string) {
   setState("isLoading", true);
   setPreviewFrame(null);

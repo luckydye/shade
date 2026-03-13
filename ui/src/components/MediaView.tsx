@@ -1,4 +1,4 @@
-import { Component, createResource, For, onCleanup, Suspense } from "solid-js";
+import { Component, createResource, createSignal, For, onCleanup, Suspense } from "solid-js";
 import { getThumbnail, listPictures } from "../bridge/index";
 import { openImage } from "../store/editor";
 
@@ -31,31 +31,44 @@ const ImageTile: Component<{ path: string }> = (props) => {
   const [src] = createResource(() => props.path, resolveSrc);
   // PHAsset local identifiers (iOS) don't have a meaningful filename component.
   const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
+  const [loadError, setLoadError] = createSignal(false);
   let imgRef: HTMLImageElement | undefined;
+  let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
   // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
     const url = src();
     if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    clearTimeout(errorTimer);
   });
 
   function handleClick() {
+    setLoadError(false);
     if (imgRef) imgRef.style.viewTransitionName = "active-media";
 
+    const handleError = () => {
+      setLoadError(true);
+      errorTimer = setTimeout(() => setLoadError(false), 4000);
+    };
+
+    // void the promise so startViewTransition captures the "after" state immediately
+    // (isLoading=true fires synchronously inside openImage), while still handling errors.
     if (document.startViewTransition) {
-      document.startViewTransition(() => void openImage(props.path));
+      document.startViewTransition(() => void openImage(props.path).catch(handleError));
     } else {
-      void openImage(props.path);
+      void openImage(props.path).catch(handleError);
     }
   }
 
   return (
     <button
       type="button"
-      class="group flex flex-col gap-1.5 rounded-xl text-left hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+      class={`group flex flex-col gap-1.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 ${
+        loadError() ? "ring-1 ring-red-500/50" : "hover:bg-white/[0.06]"
+      }`}
       onClick={handleClick}
     >
-      <div class="aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
+      <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
         <Suspense fallback={<div class="h-full w-full animate-pulse bg-white/[0.06]" />}>
           <img
             ref={imgRef}
@@ -65,6 +78,11 @@ const ImageTile: Component<{ path: string }> = (props) => {
             loading="lazy"
           />
         </Suspense>
+        {loadError() && (
+          <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
+            <span class="text-[11px] font-medium text-red-400">Failed to open</span>
+          </div>
+        )}
       </div>
       {name() && <span class="truncate px-0.5 text-[11px] text-white/40">{name()}</span>}
     </button>
@@ -76,7 +94,7 @@ export const MediaView: Component = () => {
 
   return (
     <div class="flex flex-1 flex-col overflow-hidden">
-      <div class="border-b border-white/6 px-6 py-4">
+      <div class="border-b border-white/6 px-6">
         <h1 class="text-sm font-medium text-white/80">Pictures</h1>
       </div>
       <div class="flex-1 overflow-y-auto p-6">
