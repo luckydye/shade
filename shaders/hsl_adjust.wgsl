@@ -59,7 +59,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if gid.x >= dims.x || gid.y >= dims.y { return; }
     let px = vec2<i32>(gid.xy);
     let c  = textureLoad(input_tex, px, 0);
-    let hsl = rgb_to_hsl(c.rgb);
+
+    // Normalize HDR pixels into [0,1] before HSL conversion so that the
+    // round-trip doesn't clip highlights. The scale factor is restored after.
+    let hdr_scale = max(max(c.r, max(c.g, c.b)), 1.0);
+    let hsl = rgb_to_hsl(c.rgb / hdr_scale);
 
     // Scale hue weights by saturation so achromatic pixels are unaffected.
     let sat_blend = smoothstep(0.0, 0.05, hsl.y);
@@ -74,8 +78,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let h_new = fract(hsl.x + dh);
     let s_new = clamp(hsl.y + ds, 0.0, 1.0);
-    let l_new = clamp(hsl.z + dl, 0.0, 1.0);
+    // Multiplicative luminance (EV stops): proportional in linear light so
+    // midtones aren't crushed by small slider movements. dl=0 → ×1, dl=-1 → ×0.5.
+    let l_new = clamp(hsl.z * pow(2.0, dl), 0.0, 1.0);
 
-    let rgb_out = hsl_to_rgb(vec3<f32>(h_new, s_new, l_new));
+    let rgb_out = hsl_to_rgb(vec3<f32>(h_new, s_new, l_new)) * hdr_scale;
     textureStore(output_tex, px, vec4<f32>(rgb_out, c.a));
 }

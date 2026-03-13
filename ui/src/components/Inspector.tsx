@@ -183,6 +183,7 @@ const focusLabels: Record<MobileLayerFocus, string> = {
 const Inspector: Component = () => {
   const [layerFocusTypes, setLayerFocusTypes] = createSignal(new Map<number, MobileLayerFocus>());
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
+  const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
   const selectedAdjustmentLayer = () => {
@@ -263,6 +264,35 @@ const Inspector: Component = () => {
   };
 
   const curveSamples = () => CURVE_SAMPLE_INDICES.map((idx) => curves().lut_master[idx]);
+
+  // Defined as a component (not a plain function) so SolidJS gives it a stable reactive
+  // boundary. Plain function calls like {renderFn()} are wrapped in a single reactive
+  // computation and replace their entire DOM subtree on any signal change — which kills
+  // an active drag. A component (<HslSection />) gets fine-grained in-place updates.
+  const HslSection: Component = () => {
+    const tabColors = { red: "text-red-400 bg-red-500/15", green: "text-green-400 bg-green-500/15", blue: "text-blue-400 bg-blue-500/15" } as const;
+    const hue = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_hue : t === "green" ? h.green_hue : h.blue_hue; };
+    const sat = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_sat : t === "green" ? h.green_sat : h.blue_sat; };
+    const lum = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_lum : t === "green" ? h.green_lum : h.blue_lum; };
+    return (
+      <div class="space-y-3">
+        <div class="flex gap-1">
+          {(["red", "green", "blue"] as const).map((c) => (
+            <button
+              type="button"
+              onClick={() => setHslTab(c)}
+              class={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors ${hslTab() === c ? tabColors[c] : "text-white/28 hover:text-white/50"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <Slider label="Hue"        icon={<HslIcon />}    value={hue()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_hue: v } : hslTab() === "green" ? { green_hue: v } : { blue_hue: v }); }} />
+        <Slider label="Saturation" icon={<DropletIcon />} value={sat()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_sat: v } : hslTab() === "green" ? { green_sat: v } : { blue_sat: v }); }} />
+        <Slider label="Luminance"  icon={<ToneIcon />}   value={lum()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_lum: v } : hslTab() === "green" ? { green_lum: v } : { blue_lum: v }); }} />
+      </div>
+    );
+  };
 
   const adjustmentLayers = () =>
     state.layers.map((layer, idx) => ({ layer, idx })).filter(({ layer }) => layer.kind === "adjustment");
@@ -376,8 +406,8 @@ const Inspector: Component = () => {
               icon={<CircleIcon />}
               value={tone().contrast}
               defaultValue={DEFAULT_TONE.contrast}
-              min={-3}
-              max={3}
+              min={-1.5}
+              max={1.5}
               step={0.05}
               onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ contrast: value }); }}
             />
@@ -464,22 +494,7 @@ const Inspector: Component = () => {
           />
         );
       case "hsl":
-        return (
-          <div class="space-y-4">
-            <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-red-400/70">Red</div>
-            <Slider label="Hue" icon={<HslIcon />} value={hsl().red_hue} defaultValue={DEFAULT_HSL.red_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_hue: v }); }} />
-            <Slider label="Saturation" icon={<DropletIcon />} value={hsl().red_sat} defaultValue={DEFAULT_HSL.red_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_sat: v }); }} />
-            <Slider label="Luminance" icon={<ToneIcon />} value={hsl().red_lum} defaultValue={DEFAULT_HSL.red_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_lum: v }); }} />
-            <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-green-400/70">Green</div>
-            <Slider label="Hue" icon={<HslIcon />} value={hsl().green_hue} defaultValue={DEFAULT_HSL.green_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_hue: v }); }} />
-            <Slider label="Saturation" icon={<DropletIcon />} value={hsl().green_sat} defaultValue={DEFAULT_HSL.green_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_sat: v }); }} />
-            <Slider label="Luminance" icon={<ToneIcon />} value={hsl().green_lum} defaultValue={DEFAULT_HSL.green_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_lum: v }); }} />
-            <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400/70">Blue</div>
-            <Slider label="Hue" icon={<HslIcon />} value={hsl().blue_hue} defaultValue={DEFAULT_HSL.blue_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_hue: v }); }} />
-            <Slider label="Saturation" icon={<DropletIcon />} value={hsl().blue_sat} defaultValue={DEFAULT_HSL.blue_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_sat: v }); }} />
-            <Slider label="Luminance" icon={<ToneIcon />} value={hsl().blue_lum} defaultValue={DEFAULT_HSL.blue_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_lum: v }); }} />
-          </div>
-        );
+        return <HslSection />;
     }
   };
 
@@ -657,18 +672,7 @@ const Inspector: Component = () => {
               />
               {renderCurves()}
               <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
-              <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-red-400/70">Red</div>
-              <Slider label="Hue" icon={<HslIcon />} value={hsl().red_hue} defaultValue={DEFAULT_HSL.red_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_hue: v }); }} />
-              <Slider label="Saturation" icon={<DropletIcon />} value={hsl().red_sat} defaultValue={DEFAULT_HSL.red_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_sat: v }); }} />
-              <Slider label="Luminance" icon={<ToneIcon />} value={hsl().red_lum} defaultValue={DEFAULT_HSL.red_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ red_lum: v }); }} />
-              <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-green-400/70">Green</div>
-              <Slider label="Hue" icon={<HslIcon />} value={hsl().green_hue} defaultValue={DEFAULT_HSL.green_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_hue: v }); }} />
-              <Slider label="Saturation" icon={<DropletIcon />} value={hsl().green_sat} defaultValue={DEFAULT_HSL.green_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_sat: v }); }} />
-              <Slider label="Luminance" icon={<ToneIcon />} value={hsl().green_lum} defaultValue={DEFAULT_HSL.green_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ green_lum: v }); }} />
-              <div class="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400/70">Blue</div>
-              <Slider label="Hue" icon={<HslIcon />} value={hsl().blue_hue} defaultValue={DEFAULT_HSL.blue_hue} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_hue: v }); }} />
-              <Slider label="Saturation" icon={<DropletIcon />} value={hsl().blue_sat} defaultValue={DEFAULT_HSL.blue_sat} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_sat: v }); }} />
-              <Slider label="Luminance" icon={<ToneIcon />} value={hsl().blue_lum} defaultValue={DEFAULT_HSL.blue_lum} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl({ blue_lum: v }); }} />
+              <HslSection />
               <Slider
                 label="Vignette"
                 icon={<CircleIcon />}
