@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use shade_core::{
-    LayerStack, AdjustmentOp, ColorParams, VignetteParams, SharpenParams, GrainParams,
+    LayerStack, AdjustmentOp, ColorParams, VignetteParams, SharpenParams, GrainParams, linear_lut,
 };
 use shade_io::load_image;
 use serde::{Deserialize, Serialize};
@@ -138,12 +138,17 @@ pub async fn export_image(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EditParams {
     pub layer_idx: usize,
-    pub op: String,     // "tone", "color", "vignette", "sharpen", "grain"
+    pub op: String,     // "tone", "curves", "color", "vignette", "sharpen", "grain"
     pub exposure: Option<f32>,
     pub contrast: Option<f32>,
     pub blacks: Option<f32>,
     pub highlights: Option<f32>,
     pub shadows: Option<f32>,
+    pub lut_r: Option<Vec<f32>>,
+    pub lut_g: Option<Vec<f32>>,
+    pub lut_b: Option<Vec<f32>>,
+    pub lut_master: Option<Vec<f32>>,
+    pub per_channel: Option<bool>,
     pub saturation: Option<f32>,
     pub vibrancy: Option<f32>,
     pub temperature: Option<f32>,
@@ -188,6 +193,20 @@ pub async fn apply_edit(
                         tint: params.tint.unwrap_or(0.0),
                     });
                     if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Color(_))) {
+                        *op = next;
+                    } else {
+                        ops.push(next);
+                    }
+                }
+                "curves" => {
+                    let next = AdjustmentOp::Curves {
+                        lut_r: params.lut_r.ok_or("missing lut_r")?,
+                        lut_g: params.lut_g.ok_or("missing lut_g")?,
+                        lut_b: params.lut_b.ok_or("missing lut_b")?,
+                        lut_master: params.lut_master.ok_or("missing lut_master")?,
+                        per_channel: params.per_channel.unwrap_or(false),
+                    };
+                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Curves { .. })) {
                         *op = next;
                     } else {
                         ops.push(next);
@@ -248,6 +267,13 @@ pub async fn add_layer(
             blacks: 0.0,
             highlights: 0.0,
             shadows: 0.0,
+        }]),
+        "curves" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Curves {
+            lut_r: linear_lut(),
+            lut_g: linear_lut(),
+            lut_b: linear_lut(),
+            lut_master: linear_lut(),
+            per_channel: false,
         }]),
         _ => return Err(format!("unknown layer kind: {kind}")),
     };
@@ -314,6 +340,7 @@ pub struct LayerEntryInfo {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AdjustmentValues {
     pub tone: Option<ToneValues>,
+    pub curves: Option<CurvesValues>,
     pub color: Option<ColorValues>,
     pub vignette: Option<VignetteValues>,
     pub sharpen: Option<SharpenValues>,
@@ -327,6 +354,15 @@ pub struct ToneValues {
     pub blacks: f32,
     pub highlights: f32,
     pub shadows: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CurvesValues {
+    pub lut_r: Vec<f32>,
+    pub lut_g: Vec<f32>,
+    pub lut_b: Vec<f32>,
+    pub lut_master: Vec<f32>,
+    pub per_channel: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -396,6 +432,21 @@ pub async fn get_layer_stack(
                                     tint: params.tint,
                                 });
                             }
+                            AdjustmentOp::Curves {
+                                lut_r,
+                                lut_g,
+                                lut_b,
+                                lut_master,
+                                per_channel,
+                            } => {
+                                adjustments.curves = Some(CurvesValues {
+                                    lut_r: lut_r.clone(),
+                                    lut_g: lut_g.clone(),
+                                    lut_b: lut_b.clone(),
+                                    lut_master: lut_master.clone(),
+                                    per_channel: *per_channel,
+                                });
+                            }
                             AdjustmentOp::Vignette(params) => {
                                 adjustments.vignette = Some(VignetteValues {
                                     amount: params.amount,
@@ -411,7 +462,6 @@ pub async fn get_layer_stack(
                                     amount: params.amount,
                                 });
                             }
-                            AdjustmentOp::Curves { .. } => {}
                         }
                     }
                     Some(adjustments)

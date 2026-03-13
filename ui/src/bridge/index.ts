@@ -88,10 +88,19 @@ export interface ColorValues {
 
 export interface AdjustmentValues {
   tone: ToneValues | null;
+  curves: CurvesValues | null;
   color: ColorValues | null;
   vignette: { amount: number } | null;
   sharpen: { amount: number } | null;
   grain: { amount: number } | null;
+}
+
+export interface CurvesValues {
+  lut_r: number[];
+  lut_g: number[];
+  lut_b: number[];
+  lut_master: number[];
+  per_channel: boolean;
 }
 
 export interface LayerInfo {

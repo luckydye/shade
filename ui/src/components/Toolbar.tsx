@@ -31,9 +31,6 @@ const Toolbar: Component = () => {
       </button>
 
       <div class="flex-1" />
-
-      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">Undo</button>
-      <button class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition-colors">Redo</button>
     </div>
   );
 };

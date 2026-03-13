@@ -6,6 +6,10 @@ const LayerPanel: Component = () => {
     await addLayer("adjustment");
   };
 
+  const addCurvesLayer = async () => {
+    await addLayer("curves");
+  };
+
   return (
     <div class="w-48 bg-panel border-r border-gray-700 flex flex-col">
       <div class="p-2 border-b border-gray-700 text-xs font-semibold text-gray-400 uppercase tracking-wider">
@@ -43,6 +47,12 @@ const LayerPanel: Component = () => {
           class="w-full text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
         >
           + Add Adjustment
+        </button>
+        <button
+          onClick={addCurvesLayer}
+          class="w-full mt-2 text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+        >
+          + Add Curves
         </button>
       </div>
     </div>
