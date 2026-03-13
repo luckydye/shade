@@ -17,6 +17,9 @@
         "height": 900,
         "minWidth": 900,
         "minHeight": 600,
+        "theme": "Dark",
+        "titleBarStyle": "Transparent",
+        "backgroundColor": "#000000",
         "decorations": true,
         "resizable": true
       }
