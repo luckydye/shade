@@ -122,13 +122,17 @@ const Canvas: Component = () => {
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    if (!stageRef) {
+      throw new Error("preview stage is required for wheel zoom");
+    }
     const deltaModeScale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
       ? 16
       : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
         ? stageRef?.clientHeight ?? 1
         : 1;
     const delta = e.deltaY * deltaModeScale;
-    zoomPreviewDelta(delta, e.ctrlKey);
+    const rect = stageRef.getBoundingClientRect();
+    zoomPreviewDelta(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
     drawFrame();
   };
 

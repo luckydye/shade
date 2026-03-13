@@ -292,12 +292,36 @@ export function setPreviewViewportSize(width: number, height: number) {
   void refreshPreview();
 }
 
-export function zoomPreviewDelta(delta: number, pinch: boolean) {
-  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return;
-  const sensitivity = pinch ? 0.0025 : 0.0005;
+export function zoomPreviewDelta(delta: number, pinch: boolean, anchorX: number, anchorY: number) {
+  if (
+    state.canvasWidth <= 0
+    || state.canvasHeight <= 0
+    || state.previewViewportWidth <= 0
+    || state.previewViewportHeight <= 0
+  ) {
+    return;
+  }
+  const sensitivity = pinch ? 0.0005 : 0.001;
   const multiplier = Math.exp(-delta * sensitivity);
+  const fitScale = Math.min(
+    state.previewViewportWidth / state.canvasWidth,
+    state.previewViewportHeight / state.canvasHeight,
+  );
+  if (fitScale <= 0) {
+    throw new Error("preview fit scale must be positive");
+  }
+  const oldImageScale = fitScale * state.previewZoom;
   const zoom = clamp(state.previewZoom * multiplier, 1, getMaxPreviewZoom());
-  const center = clampPreviewCenter(zoom, state.previewCenterX, state.previewCenterY);
+  const newImageScale = fitScale * zoom;
+  const viewportCenterX = state.previewViewportWidth * 0.5;
+  const viewportCenterY = state.previewViewportHeight * 0.5;
+  const anchoredImageX = state.previewCenterX + (anchorX - viewportCenterX) / oldImageScale;
+  const anchoredImageY = state.previewCenterY + (anchorY - viewportCenterY) / oldImageScale;
+  const center = clampPreviewCenter(
+    zoom,
+    anchoredImageX - (anchorX - viewportCenterX) / newImageScale,
+    anchoredImageY - (anchorY - viewportCenterY) / newImageScale,
+  );
   setState({
     previewZoom: zoom,
     previewCenterX: center.x,
