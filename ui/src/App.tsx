@@ -1,35 +1,15 @@
-import { Component, Show } from "solid-js";
-import { state } from "./store/editor";
+import { Component } from "solid-js";
 import Toolbar from "./components/Toolbar";
-import LayerPanel from "./components/LayerPanel";
 import Inspector from "./components/Inspector";
 import Canvas from "./components/Canvas";
 
 const App: Component = () => {
   return (
-    <div class="flex flex-col h-screen w-screen select-none">
-      {/* Toolbar */}
+    <div class="flex h-screen w-screen select-none flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.06),_transparent_24%),linear-gradient(180deg,_#050505_0%,_#0c0c0c_100%)] text-stone-100">
       <Toolbar />
-
-      {/* Main area */}
-      <div class="flex flex-1 overflow-hidden">
-        {/* Layer panel */}
-        <LayerPanel />
-
-        {/* Canvas */}
+      <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
         <Canvas />
-
-        {/* Inspector */}
         <Inspector />
-      </div>
-
-      {/* Status bar */}
-      <div class="h-6 bg-toolbar border-t border-gray-700 flex items-center px-3 text-xs text-gray-400 gap-6">
-        <span>{state.canvasWidth > 0 ? `${state.canvasWidth}×${state.canvasHeight}` : "No image"}</span>
-        <span>{state.layers.length} layers</span>
-        <Show when={state.isLoading}>
-          <span class="text-accent">Processing…</span>
-        </Show>
       </div>
     </div>
   );

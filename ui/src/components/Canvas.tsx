@@ -5,7 +5,6 @@ const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
 
-  // Redraw whenever a new source image arrives.
   createEffect(() => {
     if (!canvasRef) return;
     const ctx = canvasRef.getContext("2d");
@@ -19,10 +18,10 @@ const Canvas: Component = () => {
     }
 
     const bitmap = previewBitmap() ?? sourceBitmap();
-    if (!bitmap || !canvasRef) return;
-
+    if (!bitmap) return;
     canvasRef.width = bitmap.width;
     canvasRef.height = bitmap.height;
+    ctx.clearRect(0, 0, canvasRef.width, canvasRef.height);
     ctx.drawImage(bitmap, 0, 0);
   });
 
@@ -33,7 +32,6 @@ const Canvas: Component = () => {
   };
 
   const onDragLeave = (e: DragEvent) => {
-    // Only clear when leaving the drop zone itself, not a child
     if (!(e.currentTarget as Element).contains(e.relatedTarget as Node)) {
       setDragging(false);
     }
@@ -49,33 +47,52 @@ const Canvas: Component = () => {
   };
 
   return (
-    <div
-      class="flex-1 relative bg-gray-900 overflow-hidden flex items-center justify-center"
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
-      <canvas
-        ref={canvasRef}
-        width="800"
-        height="600"
-        class="max-w-full max-h-full border border-gray-700 shadow-lg object-contain"
-      />
+    <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
+      <div
+        class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
-      {/* Drop overlay */}
-      {dragging() && (
-        <div class="absolute inset-0 flex items-center justify-center bg-blue-900/40 border-2 border-dashed border-accent pointer-events-none">
-          <span class="text-accent text-sm font-medium">Drop image to open</span>
+        <div class="relative flex h-full items-center justify-center">
+          <canvas
+            ref={canvasRef}
+            width="800"
+            height="600"
+            class={`max-h-full max-w-full bg-[#111111] object-contain ${
+              state.layers.length === 0 ? "opacity-0" : "opacity-100"
+            }`}
+          />
+          {state.layers.length === 0 && (
+            <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">
+              <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-white/80">
+                <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">
+                  <path d="M12 16V6" />
+                  <path d="m7.5 10.5 4.5-4.5 4.5 4.5" />
+                  <path d="M4 18.5h16" />
+                </svg>
+              </div>
+              <div>
+                <div class="text-lg font-semibold tracking-[-0.02em] text-white">Drop an image to start</div>
+                <div class="mt-1 text-sm text-white/48">
+                  Drag a photo into the stage or use the Open action in the top bar.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Empty state hint */}
-      {!dragging() && state.layers.length === 0 && (
-        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span class="text-gray-600 text-sm">Open an image or drag and drop here</span>
-        </div>
-      )}
-    </div>
+        {dragging() && (
+          <div class="absolute inset-4 flex items-center justify-center rounded-[24px] border border-dashed border-white/35 bg-black/55 backdrop-blur-sm">
+            <span class="rounded-full border border-white/15 bg-white/8 px-4 py-2 text-sm font-medium text-white">
+              Release to open image
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 };
 

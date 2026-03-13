@@ -48,6 +48,18 @@ const [state, setState] = createStore<EditorState>({
 
 export { state };
 
+function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number) {
+  if (currentIdx >= 0 && currentIdx < layers.length) {
+    return currentIdx;
+  }
+  for (let idx = layers.length - 1; idx >= 0; idx -= 1) {
+    if (layers[idx].kind === "adjustment") {
+      return idx;
+    }
+  }
+  return layers.length - 1;
+}
+
 export async function openImage(path: string) {
   setState("isLoading", true);
   replaceBitmap(setSourceBitmap, sourceBitmap, null);
@@ -83,10 +95,14 @@ export async function openImageFile(file: File) {
 
 export async function refreshLayerStack() {
   const info = await bridge.getLayerStack();
+  const layers = info.layers as LayerInfo[];
   setState({
-    layers: info.layers as LayerInfo[],
+    layers,
     canvasWidth: info.canvas_width,
     canvasHeight: info.canvas_height,
+    selectedLayerIdx: layers.length === 0
+      ? -1
+      : resolveSelectedLayerIdx(layers, state.selectedLayerIdx),
   });
 }
 
@@ -113,8 +129,9 @@ export function selectLayer(idx: number) {
 }
 
 export async function addLayer(kind: string) {
-  await bridge.addLayer(kind);
+  const idx = await bridge.addLayer(kind);
   await refreshLayerStack();
+  setState("selectedLayerIdx", idx);
   await refreshPreview();
 }
 

@@ -1,20 +1,30 @@
-import { Component, Show } from "solid-js";
-import { state, applyEdit } from "../store/editor";
+import { Component, JSX, Show, createEffect, createSignal } from "solid-js";
+import { addLayer, applyEdit, selectLayer, setLayerVisible, state } from "../store/editor";
+
+type MobileTab = "brightness" | "contrast" | "saturation" | "curves" | "grain";
 
 interface SliderProps {
   label: string;
+  icon: JSX.Element;
   value: number;
   min: number;
   max: number;
   step?: number;
-  onChange: (v: number) => void;
+  valueLabel?: string;
+  onChange: (value: number) => void;
+  class?: string;
 }
 
 const Slider: Component<SliderProps> = (props) => (
-  <div class="flex flex-col gap-0.5 mb-3">
-    <div class="flex justify-between text-xs text-gray-400">
-      <span>{props.label}</span>
-      <span>{props.value.toFixed(2)}</span>
+  <div class={props.class ?? ""}>
+    <div class="mb-1 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
+        <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4">{props.icon}</span>
+        <span>{props.label}</span>
+      </div>
+      <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">
+        {props.valueLabel ?? props.value.toFixed(2)}
+      </span>
     </div>
     <input
       type="range"
@@ -23,7 +33,7 @@ const Slider: Component<SliderProps> = (props) => (
       step={props.step ?? 0.01}
       value={props.value}
       onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))}
-      class="w-full accent-accent h-1"
+      class="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/18 accent-white"
     />
   </div>
 );
@@ -68,7 +78,71 @@ function curvePath(lut: readonly number[]) {
     .join(" ");
 }
 
+function valueLabel(value: number, scale = 100) {
+  return `${Math.round(value * scale)}`;
+}
+
+const SparkIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" />
+  </svg>
+);
+
+const CircleIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <circle cx="12" cy="12" r="7" />
+  </svg>
+);
+
+const DropletIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <path d="M12 3.5c3.6 4 5.4 6.8 5.4 9a5.4 5.4 0 1 1-10.8 0c0-2.2 1.8-5 5.4-9Z" />
+  </svg>
+);
+
+const GrainIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <circle cx="8" cy="8" r="1.4" />
+    <circle cx="15.5" cy="7.5" r="1.4" />
+    <circle cx="11" cy="12.5" r="1.4" />
+    <circle cx="7.5" cy="16" r="1.4" />
+    <circle cx="16" cy="16.5" r="1.4" />
+  </svg>
+);
+
+const CurveIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <path d="M4 16c3-6 5.5-8 8-8s4 1.5 8 8" />
+  </svg>
+);
+
+const ToneIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <path d="M12 4v16" />
+    <path d="M4 12h16" />
+  </svg>
+);
+
+const tabGlyphs: Record<MobileTab, JSX.Element> = {
+  brightness: <SparkIcon />,
+  contrast: <CircleIcon />,
+  saturation: <DropletIcon />,
+  curves: <CurveIcon />,
+  grain: <GrainIcon />,
+};
+
+const tabLabels: Record<MobileTab, string> = {
+  brightness: "Brightness",
+  contrast: "Contrast",
+  saturation: "Saturation",
+  curves: "Curves",
+  grain: "Grain",
+};
+
 const Inspector: Component = () => {
+  const [activeTab, setActiveTab] = createSignal<MobileTab>("brightness");
+  let previousSelectedIdx = -1;
+
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
   const selectedAdjustmentLayer = () => {
     const layer = selectedLayer();
@@ -79,6 +153,7 @@ const Inspector: Component = () => {
     if (!layer) throw new Error("selected layer is not an adjustment layer");
     return layer;
   };
+
   const tone = () => selectedAdjustmentLayer()?.adjustments?.tone ?? {
     exposure: 0,
     contrast: 0,
@@ -141,145 +216,353 @@ const Inspector: Component = () => {
 
   const curveSamples = () => CURVE_SAMPLE_INDICES.map((idx) => curves().lut_master[idx]);
 
-  return (
-    <div class="w-64 bg-panel border-l border-gray-700 flex flex-col overflow-y-auto">
-      <div class="p-2 border-b border-gray-700 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-        Inspector
+  createEffect(() => {
+    const currentIdx = state.selectedLayerIdx;
+    if (currentIdx === previousSelectedIdx) return;
+    previousSelectedIdx = currentIdx;
+    setActiveTab(selectedAdjustmentLayer()?.adjustments?.curves ? "curves" : "brightness");
+  });
+
+  const renderCurves = () => (
+    <div class="py-1">
+      <div class="mb-1 flex items-center justify-between">
+        <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
+          <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4">
+            <CurveIcon />
+          </span>
+          <span>Curves</span>
+        </div>
+        <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">Master</span>
       </div>
-      <Show
-        when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-        fallback={
-          <div class="p-3 text-xs text-gray-500">Select an adjustment layer</div>
-        }
-      >
-        <div class="p-3">
-          {/* Tone */}
-          <div class="text-xs font-semibold text-gray-300 mb-2">Tone</div>
-          <Slider label="Exposure" value={tone().exposure} min={-3} max={3} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyTone({ exposure: v }); }} />
-          <Slider label="Contrast" value={tone().contrast} min={-1} max={1} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyTone({ contrast: v }); }} />
-          <Slider label="Blacks" value={tone().blacks} min={-0.5} max={0.5} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyTone({ blacks: v }); }} />
-          <Slider label="Highlights" value={tone().highlights} min={-1} max={1} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyTone({ highlights: v }); }} />
-          <Slider label="Shadows" value={tone().shadows} min={-1} max={1} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyTone({ shadows: v }); }} />
+      <svg viewBox="0 0 100 100" class="mb-2 block h-24 w-full bg-transparent">
+        <path d="M 0 100 L 100 0" stroke="#525252" stroke-width="1" fill="none" />
+        <path d={curvePath(curves().lut_master)} stroke="#f5f5f4" stroke-width="2" fill="none" />
+      </svg>
+      <div class="space-y-2">
+        <Slider
+          label="Shadows"
+          icon={<SparkIcon />}
+          value={curveSamples()[0]}
+          valueLabel={valueLabel(curveSamples()[0])}
+          min={0}
+          max={1}
+          onChange={(value) => {
+            selectedAdjustmentLayerOrThrow();
+            const samples = curveSamples();
+            samples[0] = value;
+            void applyCurves(samples);
+          }}
+        />
+        <Slider
+          label="Midtones"
+          icon={<ToneIcon />}
+          value={curveSamples()[1]}
+          valueLabel={valueLabel(curveSamples()[1])}
+          min={0}
+          max={1}
+          onChange={(value) => {
+            selectedAdjustmentLayerOrThrow();
+            const samples = curveSamples();
+            samples[1] = value;
+            void applyCurves(samples);
+          }}
+        />
+        <Slider
+          label="Highlights"
+          icon={<CircleIcon />}
+          value={curveSamples()[2]}
+          valueLabel={valueLabel(curveSamples()[2])}
+          min={0}
+          max={1}
+          onChange={(value) => {
+            selectedAdjustmentLayerOrThrow();
+            const samples = curveSamples();
+            samples[2] = value;
+            void applyCurves(samples);
+          }}
+        />
+      </div>
+    </div>
+  );
 
-          {/* Curves */}
-          <div class="text-xs font-semibold text-gray-300 mb-2 mt-4">Curves</div>
-          <div class="mb-3 rounded border border-gray-700 bg-gray-900/60 p-2">
-            <svg viewBox="0 0 100 100" class="block h-28 w-full">
-              <path d="M 0 100 L 100 0" stroke="#374151" stroke-width="1" fill="none" />
-              <path d={curvePath(curves().lut_master)} stroke="#60a5fa" stroke-width="2" fill="none" />
-            </svg>
-          </div>
+  const renderMobileBody = () => {
+    switch (activeTab()) {
+      case "brightness":
+        return (
           <Slider
-            label="Shadows"
-            value={curveSamples()[0]}
-            min={0}
-            max={1}
-            onChange={(v) => {
+            label="Brightness"
+            icon={<SparkIcon />}
+            value={tone().exposure}
+            valueLabel={valueLabel(tone().exposure, 40)}
+            min={-3}
+            max={3}
+            onChange={(value) => {
               selectedAdjustmentLayerOrThrow();
-              const samples = curveSamples();
-              samples[0] = v;
-              void applyCurves(samples);
+              void applyTone({ exposure: value });
             }}
           />
+        );
+      case "contrast":
+        return (
           <Slider
-            label="Midtones"
-            value={curveSamples()[1]}
-            min={0}
+            label="Contrast"
+            icon={<CircleIcon />}
+            value={tone().contrast}
+            valueLabel={valueLabel(tone().contrast)}
+            min={-1}
             max={1}
-            onChange={(v) => {
+            onChange={(value) => {
               selectedAdjustmentLayerOrThrow();
-              const samples = curveSamples();
-              samples[1] = v;
-              void applyCurves(samples);
+              void applyTone({ contrast: value });
             }}
           />
-          <Slider
-            label="Highlights"
-            value={curveSamples()[2]}
-            min={0}
-            max={1}
-            onChange={(v) => {
-              selectedAdjustmentLayerOrThrow();
-              const samples = curveSamples();
-              samples[2] = v;
-              void applyCurves(samples);
-            }}
-          />
-
-          {/* Color */}
-          <div class="text-xs font-semibold text-gray-300 mb-2 mt-4">Color</div>
+        );
+      case "saturation":
+        return (
           <Slider
             label="Saturation"
+            icon={<DropletIcon />}
             value={color().saturation}
+            valueLabel={valueLabel(color().saturation)}
             min={0}
             max={2}
-            onChange={(v) => {
+            onChange={(value) => {
               selectedAdjustmentLayerOrThrow();
-              void applyColor({ saturation: v });
+              void applyColor({ saturation: value });
             }}
           />
+        );
+      case "curves":
+        return renderCurves();
+      case "grain":
+        return (
           <Slider
-            label="Temperature"
-            value={color().temperature}
-            min={-1}
-            max={1}
-            onChange={(v) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyColor({ temperature: v });
-            }}
-          />
-          <Slider
-            label="Tint"
-            value={color().tint}
-            min={-1}
-            max={1}
-            onChange={(v) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyColor({ tint: v });
-            }}
-          />
-
-          {/* Vignette */}
-          <div class="text-xs font-semibold text-gray-300 mb-2 mt-4">Vignette</div>
-          <Slider
-            label="Amount"
-            value={vignette().amount}
-            min={0}
-            max={1}
-            onChange={(v) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: v });
-            }}
-          />
-
-          {/* Sharpen */}
-          <div class="text-xs font-semibold text-gray-300 mb-2 mt-4">Sharpen</div>
-          <Slider
-            label="Amount"
-            value={sharpen().amount}
-            min={0}
-            max={2}
-            onChange={(v) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: v });
-            }}
-          />
-
-          {/* Grain */}
-          <div class="text-xs font-semibold text-gray-300 mb-2 mt-4">Grain</div>
-          <Slider
-            label="Amount"
+            label="Grain"
+            icon={<GrainIcon />}
             value={grain().amount}
+            valueLabel={valueLabel(grain().amount)}
             min={0}
             max={1}
-            onChange={(v) => {
+            onChange={(value) => {
               selectedAdjustmentLayerOrThrow();
-              void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: v });
+              void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
             }}
           />
+        );
+    }
+  };
+
+  return (
+    <aside class="lg:w-[340px] lg:flex-none">
+      <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
+        <div class="flex-1 overflow-y-auto px-4 py-4">
+          <div class="mb-4">
+            <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
+            <div class="mt-3 flex flex-col gap-1">
+              {[...state.layers].reverse().map((layer, reverseIdx) => {
+                const realIdx = state.layers.length - 1 - reverseIdx;
+                const layerName = layer.kind === "image"
+                  ? "Image"
+                  : layer.adjustments?.curves
+                    ? "Curves"
+                    : "Adjustment";
+                return (
+                  <button
+                    type="button"
+                    onClick={() => selectLayer(realIdx)}
+                    class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
+                      state.selectedLayerIdx === realIdx
+                        ? "border-white/16 bg-white/12 text-white"
+                        : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
+                    }`}
+                  >
+                    <span
+                      class={`inline-flex w-4 items-center justify-center text-xs leading-none ${layer.visible ? "text-stone-100" : "text-white/30"}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void setLayerVisible(realIdx, !layer.visible);
+                      }}
+                    >
+                      {layer.visible ? "●" : "○"}
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
+                      {layerName}
+                    </span>
+                    <span class="text-[11px] text-white/34">{realIdx + 1}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div class="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => void addLayer("adjustment")}
+                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+              >
+                Add Tone
+              </button>
+              <button
+                type="button"
+                onClick={() => void addLayer("curves")}
+                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+              >
+                Add Curves
+              </button>
+            </div>
+          </div>
+
+          <Show
+            when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+            fallback={
+              <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
+                Open an image to unlock live adjustments.
+              </div>
+            }
+          >
+            <div class="flex flex-col gap-3">
+              <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
+              <Slider
+                label="Brightness"
+                icon={<SparkIcon />}
+                value={tone().exposure}
+                valueLabel={valueLabel(tone().exposure, 40)}
+                min={-3}
+                max={3}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ exposure: value });
+                }}
+              />
+              <Slider
+                label="Contrast"
+                icon={<CircleIcon />}
+                value={tone().contrast}
+                valueLabel={valueLabel(tone().contrast)}
+                min={-1}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ contrast: value });
+                }}
+              />
+              <Slider
+                label="Saturation"
+                icon={<DropletIcon />}
+                value={color().saturation}
+                valueLabel={valueLabel(color().saturation)}
+                min={0}
+                max={2}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyColor({ saturation: value });
+                }}
+              />
+              <Slider
+                label="Temperature"
+                icon={<ToneIcon />}
+                value={color().temperature}
+                valueLabel={valueLabel(color().temperature)}
+                min={-1}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyColor({ temperature: value });
+                }}
+              />
+              <Slider
+                label="Tint"
+                icon={<ToneIcon />}
+                value={color().tint}
+                valueLabel={valueLabel(color().tint)}
+                min={-1}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyColor({ tint: value });
+                }}
+              />
+              {renderCurves()}
+              <Slider
+                label="Vignette"
+                icon={<CircleIcon />}
+                value={vignette().amount}
+                valueLabel={valueLabel(vignette().amount)}
+                min={0}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
+                }}
+              />
+              <Slider
+                label="Sharpen"
+                icon={<ToneIcon />}
+                value={sharpen().amount}
+                valueLabel={valueLabel(sharpen().amount)}
+                min={0}
+                max={2}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
+                }}
+              />
+              <Slider
+                label="Grain"
+                icon={<GrainIcon />}
+                value={grain().amount}
+                valueLabel={valueLabel(grain().amount)}
+                min={0}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
+                }}
+              />
+            </div>
+          </Show>
         </div>
-      </Show>
-    </div>
+      </div>
+
+      <div class="border-t border-white/6 bg-[linear-gradient(180deg,rgba(17,17,17,0.98),rgba(14,14,14,0.98))] px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 shadow-[0_-24px_60px_rgba(0,0,0,0.42)] lg:hidden">
+        <div class="mx-auto mb-4 h-1.5 w-14 rounded-full bg-white/14" />
+        <Show
+          when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+          fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}
+        >
+          <div class="px-1">
+            <div class="mb-5 flex items-center justify-between">
+              <div>
+                <div class="text-[30px] font-semibold tracking-[-0.04em] text-white">{tabLabels[activeTab()]}</div>
+                <div class="text-sm text-white/38">Selected layer reacts live as you drag.</div>
+              </div>
+              <span class="bg-black px-4 py-2 text-sm font-semibold text-white/80">
+                {activeTab() === "brightness" && valueLabel(tone().exposure, 40)}
+                {activeTab() === "contrast" && valueLabel(tone().contrast)}
+                {activeTab() === "saturation" && valueLabel(color().saturation)}
+                {activeTab() === "curves" && "CURVE"}
+                {activeTab() === "grain" && valueLabel(grain().amount)}
+              </span>
+            </div>
+            <div class="pb-6">{renderMobileBody()}</div>
+          </div>
+        </Show>
+
+        <div class="mt-2 grid grid-cols-5 gap-1 border-t border-white/6 pt-4">
+          {(["brightness", "contrast", "saturation", "curves", "grain"] as const).map((tab) => (
+            <button
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              class={`flex flex-col items-center gap-1 px-0.5 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+                activeTab() === tab ? "text-stone-100" : "text-white/34"
+              }`}
+            >
+              <span class="[&>svg]:h-5 [&>svg]:w-5">{tabGlyphs[tab]}</span>
+              <span>{tabLabels[tab]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
   );
 };
 
