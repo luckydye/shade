@@ -427,5 +427,9 @@ export function refreshPreview(mode: "progressive" | "final" = "progressive") {
   if (mode === "final") {
     return queuePreviewRefresh(version, "final");
   }
-  return queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
+  const interactive = queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
+  return interactive.finally(() => {
+    if (version !== previewRefreshVersion) return;
+    return queuePreviewRefresh(version, "final") ?? Promise.resolve();
+  });
 }

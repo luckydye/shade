@@ -1,6 +1,5 @@
 import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import {
-  getPreviewDisplaySize,
   isDrawerOpen,
   openImageFile,
   panPreview,
@@ -14,22 +13,41 @@ import {
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
+  let scratchCanvas: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
   let panStart: { x: number; y: number } | null = null;
 
   createEffect(() => {
-    if (!canvasRef) return;
+    state.previewViewportWidth;
+    state.previewViewportHeight;
+    if (!canvasRef || !stageRef) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
+    const cssWidth = Math.max(1, Math.floor(stageRef.clientWidth));
+    const cssHeight = Math.max(1, Math.floor(stageRef.clientHeight));
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    canvasRef.width = Math.max(1, Math.floor(cssWidth * devicePixelRatio));
+    canvasRef.height = Math.max(1, Math.floor(cssHeight * devicePixelRatio));
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
     const frame = previewFrame();
-    if (frame) {
-      canvasRef.width = frame.width;
-      canvasRef.height = frame.height;
-      ctx.putImageData(frame, 0, 0);
-      return;
+    if (!frame) return;
+    scratchCanvas ??= document.createElement("canvas");
+    scratchCanvas.width = frame.width;
+    scratchCanvas.height = frame.height;
+    const scratchContext = scratchCanvas.getContext("2d");
+    if (!scratchContext) {
+      throw new Error("scratch canvas 2d context is required");
     }
-
-    ctx.clearRect(0, 0, canvasRef.width, canvasRef.height);
+    scratchContext.putImageData(frame, 0, 0);
+    const scale = Math.min(cssWidth / frame.width, cssHeight / frame.height);
+    const drawWidth = frame.width * scale;
+    const drawHeight = frame.height * scale;
+    const drawX = (cssWidth - drawWidth) * 0.5;
+    const drawY = (cssHeight - drawHeight) * 0.5;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(scratchCanvas, drawX, drawY, drawWidth, drawHeight);
   });
 
   onMount(() => {
@@ -82,9 +100,6 @@ const Canvas: Component = () => {
   const onPointerUp = () => {
     panStart = null;
   };
-
-  const displaySize = () => getPreviewDisplaySize();
-
   return (
     <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
       <div
@@ -109,10 +124,10 @@ const Canvas: Component = () => {
             height="600"
             onDblClick={() => resetPreviewViewport()}
             style={{
-              width: `${displaySize().width}px`,
-              height: `${displaySize().height}px`,
+              width: "100%",
+              height: "100%",
             }}
-            class={`bg-[#111111] object-contain ${
+            class={`bg-[#111111] ${
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />
