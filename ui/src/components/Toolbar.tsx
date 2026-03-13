@@ -67,15 +67,16 @@ const Toolbar: Component = () => {
       ? `${state.previewRenderWidth} × ${state.previewRenderHeight}`
       : "Pending";
     return [
-      `${state.canvasWidth} × ${state.canvasHeight}`,
+      `Image ${state.canvasWidth} × ${state.canvasHeight}`,
       `Preview ${previewResolution}`,
-      state.previewDisplayColorSpace,
-      state.sourceBitDepth,
+      `Display ${state.previewDisplayColorSpace}`,
+      `Source ${state.sourceBitDepth}`,
     ].join(" · ");
   };
 
   const handleFileChange = async (e: Event) => {
-    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    const files = (e.currentTarget as HTMLInputElement).files;
+    const file = files?.[0];
     if (file) await openImageFile(file);
     if (fileInputRef) fileInputRef.value = "";
   };
@@ -90,7 +91,7 @@ const Toolbar: Component = () => {
         </div>
       </div>
 
-      <input ref={fileInputRef} type="file" accept={ACCEPTED} class="hidden" onChange={handleFileChange} />
+      <input ref={fileInputRef} type="file" class="hidden" onChange={handleFileChange} />
 
       <div class="ml-auto flex items-center gap-2">
         {state.isLoading && (

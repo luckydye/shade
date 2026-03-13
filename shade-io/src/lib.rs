@@ -691,7 +691,7 @@ fn apply_linear_matrix_and_gamma_f32(pixels: &mut [f32], matrix: &ColorMatrix3x3
 
 #[cfg(test)]
 mod tests {
-    use super::load_image;
+    use super::{load_image, load_image_f32_with_info};
     use std::path::Path;
 
     #[test]
@@ -699,6 +699,13 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/_MGC3030.CR3");
         let (_, width, height) = load_image(&path).expect("fixture should decode");
         assert_eq!((width, height), (3648, 5472));
+    }
+
+    #[test]
+    fn reports_actual_exr_bit_depth_for_fixture() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/Desk.exr");
+        let (_, info) = load_image_f32_with_info(&path).expect("fixture should decode");
+        assert_eq!(info.bit_depth, "16-bit float");
     }
 }
 
