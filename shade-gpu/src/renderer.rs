@@ -241,7 +241,8 @@ impl Renderer {
                     *per_channel,
                 )?,
                 AdjustmentOp::Color(params) => {
-                    self.color_pipeline.process(&self.ctx, current_tex, *params)?
+                    self.color_pipeline
+                        .process(&self.ctx, current_tex, *params)?
                 }
                 AdjustmentOp::Vignette(params) => {
                     self.vignette_pipeline
@@ -252,7 +253,8 @@ impl Renderer {
                         .process(&self.ctx, current_tex, *params)
                 }
                 AdjustmentOp::Grain(params) => {
-                    self.grain_pipeline.process(&self.ctx, current_tex, *params)?
+                    self.grain_pipeline
+                        .process(&self.ctx, current_tex, *params)?
                 }
             };
 
@@ -262,11 +264,9 @@ impl Renderer {
         }
 
         let final_tex: &wgpu::Texture = if ops.is_empty() {
-            let passthrough = self.tone_pipeline.process(
-                &self.ctx,
-                &input_tex,
-                ToneParams::default(),
-            )?;
+            let passthrough =
+                self.tone_pipeline
+                    .process(&self.ctx, &input_tex, ToneParams::default())?;
             owned_textures.push(passthrough);
             owned_textures.last().unwrap()
         } else {
@@ -549,7 +549,8 @@ impl Renderer {
         input_tex: &wgpu::Texture,
         uniform: ColorTransformUniform,
     ) -> wgpu::Texture {
-        self.color_transform_pipeline.process(&self.ctx, input_tex, uniform)
+        self.color_transform_pipeline
+            .process(&self.ctx, input_tex, uniform)
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -735,9 +736,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        normalize_preview_crop, resample_mask_region, resample_rgba_region, PreviewCrop,
-    };
+    use super::{normalize_preview_crop, resample_mask_region, resample_rgba_region, PreviewCrop};
 
     #[test]
     fn normalize_preview_crop_clamps_to_canvas() {
@@ -761,8 +760,8 @@ mod tests {
     #[test]
     fn resample_rgba_region_reads_only_selected_crop() {
         let pixels = vec![
-            10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255,
-            50, 0, 0, 255, 60, 0, 0, 255, 70, 0, 0, 255, 80, 0, 0, 255,
+            10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255, 50, 0, 0, 255, 60, 0, 0,
+            255, 70, 0, 0, 255, 80, 0, 0, 255,
         ];
         let output = resample_rgba_region(
             &pixels,
@@ -780,19 +779,13 @@ mod tests {
 
         assert_eq!(
             output,
-            vec![
-                30, 0, 0, 255, 40, 0, 0, 255,
-                70, 0, 0, 255, 80, 0, 0, 255,
-            ]
+            vec![30, 0, 0, 255, 40, 0, 0, 255, 70, 0, 0, 255, 80, 0, 0, 255,]
         );
     }
 
     #[test]
     fn resample_mask_region_reads_only_selected_crop() {
-        let pixels = vec![
-            1, 2, 3, 4,
-            5, 6, 7, 8,
-        ];
+        let pixels = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let output = resample_mask_region(
             &pixels,
             4,

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Tone adjustment parameters — must match the WGSL uniform struct layout.
 #[repr(C)]
@@ -31,7 +31,9 @@ impl Default for ToneParams {
 
 /// Color adjustment parameters.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Copy, Clone, Debug, Default, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
 pub struct ColorParams {
     pub saturation: f32,
     pub vibrancy: f32,
@@ -62,7 +64,9 @@ impl Default for VignetteParams {
 
 /// Sharpen parameters.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Copy, Clone, Debug, Default, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
 pub struct SharpenParams {
     pub amount: f32,
     pub threshold: f32,
@@ -177,12 +181,12 @@ pub enum Layer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BlendMode {
     #[default]
-    Normal,    // 0
-    Multiply,  // 1
-    Screen,    // 2
-    Overlay,   // 3
-    SoftLight, // 4
-    Luminosity,// 5
+    Normal, // 0
+    Multiply,   // 1
+    Screen,     // 2
+    Overlay,    // 3
+    SoftLight,  // 4
+    Luminosity, // 5
 }
 
 impl BlendMode {
@@ -300,7 +304,9 @@ pub enum ColorSpace {
 }
 
 impl Default for ColorSpace {
-    fn default() -> Self { ColorSpace::Srgb }
+    fn default() -> Self {
+        ColorSpace::Srgb
+    }
 }
 
 impl ColorSpace {
@@ -338,9 +344,9 @@ impl ColorMatrix3x3 {
 
     /// Apply matrix to an RGB triple.
     pub fn apply(&self, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-        let out_r = self.m[0][0]*r + self.m[0][1]*g + self.m[0][2]*b;
-        let out_g = self.m[1][0]*r + self.m[1][1]*g + self.m[1][2]*b;
-        let out_b = self.m[2][0]*r + self.m[2][1]*g + self.m[2][2]*b;
+        let out_r = self.m[0][0] * r + self.m[0][1] * g + self.m[0][2] * b;
+        let out_g = self.m[1][0] * r + self.m[1][1] * g + self.m[1][2] * b;
+        let out_b = self.m[2][0] * r + self.m[2][1] * g + self.m[2][2] * b;
         (out_r, out_g, out_b)
     }
 
@@ -348,36 +354,36 @@ impl ColorMatrix3x3 {
     /// Derived from Bradford-adapted primaries.
     pub const ADOBE_RGB_TO_LINEAR_SRGB: Self = Self {
         m: [
-            [ 1.3985,  -0.3086, -0.0908],  // R row
-            [-0.0827,   1.1316, -0.0489],  // G row
-            [ 0.0172,  -0.0603,  1.0431],  // B row
+            [1.3985, -0.3086, -0.0908], // R row
+            [-0.0827, 1.1316, -0.0489], // G row
+            [0.0172, -0.0603, 1.0431],  // B row
         ],
     };
 
     /// Display P3 → linear sRGB matrix.
     pub const DISPLAY_P3_TO_LINEAR_SRGB: Self = Self {
         m: [
-            [ 1.2249,  -0.2247,  0.0000],
-            [-0.0420,   1.0419,  0.0000],
-            [-0.0197,  -0.0786,  1.0983],
+            [1.2249, -0.2247, 0.0000],
+            [-0.0420, 1.0419, 0.0000],
+            [-0.0197, -0.0786, 1.0983],
         ],
     };
 
     /// ProPhoto RGB → linear sRGB matrix.
     pub const PROPHOTO_TO_LINEAR_SRGB: Self = Self {
         m: [
-            [ 1.3460,  -0.2556, -0.0511],
-            [-0.5446,   1.5082,  0.0205],
-            [ 0.0000,   0.0000,  1.2152],
+            [1.3460, -0.2556, -0.0511],
+            [-0.5446, 1.5082, 0.0205],
+            [0.0000, 0.0000, 1.2152],
         ],
     };
 
     /// linear sRGB → Display P3 matrix (inverse of DISPLAY_P3_TO_LINEAR_SRGB).
     pub const LINEAR_SRGB_TO_DISPLAY_P3: Self = Self {
         m: [
-            [ 0.8225,   0.1774,  0.0000],
-            [ 0.0332,   0.9669,  0.0000],
-            [ 0.0171,   0.0724,  0.9105],
+            [0.8225, 0.1774, 0.0000],
+            [0.0332, 0.9669, 0.0000],
+            [0.0171, 0.0724, 0.9105],
         ],
     };
 }

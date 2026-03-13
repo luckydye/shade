@@ -4,9 +4,9 @@ use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
-    ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor,
-    ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor, ShaderStages,
+    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::GpuContext;
@@ -127,9 +127,9 @@ fn dispatch_simple(
     height: u32,
     label: &str,
 ) {
-    let mut encoder =
-        ctx.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(label),
@@ -230,25 +230,31 @@ impl CurvesPipeline {
             ],
         });
 
-        let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("curves.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(CURVES_WGSL.into()),
-        });
+        let shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("curves.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(CURVES_WGSL.into()),
+            });
 
-        let pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("curves pipeline layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = ctx
+            .device
+            .create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("curves pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
-        let pipeline = ctx.device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("curves compute pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let pipeline = ctx
+            .device
+            .create_compute_pipeline(&ComputePipelineDescriptor {
+                label: Some("curves compute pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         Ok(Self {
             pipeline,
@@ -333,7 +339,14 @@ impl CurvesPipeline {
             ],
         });
 
-        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "curves pass");
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            width,
+            height,
+            "curves pass",
+        );
 
         Ok(output_tex)
     }
@@ -349,8 +362,7 @@ pub struct ColorPipeline {
 impl ColorPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout =
-            make_simple_bind_group_layout(device, "color bind group layout");
+        let bind_group_layout = make_simple_bind_group_layout(device, "color bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             COLOR_WGSL,
@@ -359,7 +371,10 @@ impl ColorPipeline {
             "color compute pipeline",
             &bind_group_layout,
         );
-        Ok(Self { pipeline, bind_group_layout })
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
     }
 
     pub fn process(
@@ -402,7 +417,14 @@ impl ColorPipeline {
             ],
         });
 
-        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "color pass");
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            width,
+            height,
+            "color pass",
+        );
 
         Ok(output_tex)
     }
@@ -418,8 +440,7 @@ pub struct VignettePipeline {
 impl VignettePipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout =
-            make_simple_bind_group_layout(device, "vignette bind group layout");
+        let bind_group_layout = make_simple_bind_group_layout(device, "vignette bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             VIGNETTE_WGSL,
@@ -428,7 +449,10 @@ impl VignettePipeline {
             "vignette compute pipeline",
             &bind_group_layout,
         );
-        Ok(Self { pipeline, bind_group_layout })
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
     }
 
     pub fn process(
@@ -471,7 +495,14 @@ impl VignettePipeline {
             ],
         });
 
-        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "vignette pass");
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            width,
+            height,
+            "vignette pass",
+        );
 
         Ok(output_tex)
     }
@@ -487,8 +518,7 @@ pub struct SharpenPipeline {
 impl SharpenPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout =
-            make_simple_bind_group_layout(device, "sharpen bind group layout");
+        let bind_group_layout = make_simple_bind_group_layout(device, "sharpen bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             SHARPEN_WGSL,
@@ -497,7 +527,10 @@ impl SharpenPipeline {
             "sharpen compute pipeline",
             &bind_group_layout,
         );
-        Ok(Self { pipeline, bind_group_layout })
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
     }
 
     pub fn process(
@@ -554,7 +587,14 @@ impl SharpenPipeline {
             ],
         });
 
-        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "sharpen pass");
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            width,
+            height,
+            "sharpen pass",
+        );
 
         Ok(output_tex)
     }
@@ -570,8 +610,7 @@ pub struct GrainPipeline {
 impl GrainPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout =
-            make_simple_bind_group_layout(device, "grain bind group layout");
+        let bind_group_layout = make_simple_bind_group_layout(device, "grain bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             GRAIN_WGSL,
@@ -580,7 +619,10 @@ impl GrainPipeline {
             "grain compute pipeline",
             &bind_group_layout,
         );
-        Ok(Self { pipeline, bind_group_layout })
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
     }
 
     pub fn process(
@@ -623,7 +665,14 @@ impl GrainPipeline {
             ],
         });
 
-        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "grain pass");
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            width,
+            height,
+            "grain pass",
+        );
 
         Ok(output_tex)
     }

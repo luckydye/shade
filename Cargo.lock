@@ -4088,6 +4088,7 @@ name = "shade-io"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "exr",
  "image",
  "shade-core",
 ]

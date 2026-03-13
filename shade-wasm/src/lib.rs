@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
-mod engine;
 mod bridge;
+mod engine;
 
 #[wasm_bindgen(start)]
 pub fn init() {

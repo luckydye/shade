@@ -1,8 +1,8 @@
+use crate::profiler::PassTiming;
 use wgpu::{
     Buffer, BufferDescriptor, BufferUsages, Device, QuerySet, QueryType, Queue,
     QUERY_RESOLVE_BUFFER_ALIGNMENT, QUERY_SIZE,
 };
-use crate::profiler::PassTiming;
 
 /// Manages a wgpu QuerySet for timestamp queries.
 /// Each pass uses 2 timestamps: begin and end.

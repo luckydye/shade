@@ -1,9 +1,9 @@
 use std::collections::HashMap;
+use wgpu::util::DeviceExt;
 use wgpu::{
     Device, Extent3d, Queue, Texture, TextureDescriptor, TextureDimension, TextureFormat,
     TextureUsages,
 };
-use wgpu::util::DeviceExt;
 
 /// Caches GPU textures keyed by a u64 content hash.
 /// Avoids re-uploading unchanged source images every render call.

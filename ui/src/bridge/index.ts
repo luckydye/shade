@@ -168,6 +168,11 @@ export async function openImage(path: string): Promise<{ layer_count: number; ca
 
 /** Open an image from a File object — works for both file picker and drag-and-drop. */
 export async function openImageFile(file: File): Promise<{ layer_count: number; canvas_width: number; canvas_height: number }> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+    return inv("open_image_encoded_bytes", { bytes, file_name: file.name }) as Promise<any>;
+  }
   return _decodeAndSend(file);
 }
 

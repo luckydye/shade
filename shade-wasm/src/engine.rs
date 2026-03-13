@@ -1,6 +1,4 @@
-use shade_core::{
-    AdjustmentOp, ColorParams, LayerStack, TextureId, ToneParams,
-};
+use shade_core::{AdjustmentOp, ColorParams, LayerStack, TextureId, ToneParams};
 use std::collections::HashMap;
 
 /// Holds the in-memory editor state for the WASM context.
@@ -52,7 +50,10 @@ impl WasmEngine {
                     highlights: params.highlights,
                     shadows: params.shadows,
                 };
-                if let Some(op) = ops.iter_mut().find(|o| matches!(o, AdjustmentOp::Tone { .. })) {
+                if let Some(op) = ops
+                    .iter_mut()
+                    .find(|o| matches!(o, AdjustmentOp::Tone { .. }))
+                {
                     *op = new_op;
                 } else {
                     ops.push(new_op);
@@ -96,7 +97,7 @@ impl WasmEngine {
             return String::new();
         }
 
-        use base64::{Engine, engine::general_purpose::STANDARD};
+        use base64::{engine::general_purpose::STANDARD, Engine};
         format!("data:image/png;base64,{}", STANDARD.encode(&buf))
     }
 }

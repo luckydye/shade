@@ -1,7 +1,7 @@
-use wasm_bindgen::prelude::*;
-use shade_core::{ToneParams, ColorParams};
-use std::cell::RefCell;
 use crate::engine::WasmEngine;
+use shade_core::{ColorParams, ToneParams};
+use std::cell::RefCell;
+use wasm_bindgen::prelude::*;
 
 thread_local! {
     static ENGINE: RefCell<WasmEngine> = RefCell::new(WasmEngine::new());
@@ -18,7 +18,10 @@ pub struct LayerInfo {
 /// Returns the texture ID assigned.
 #[wasm_bindgen]
 pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
-    ENGINE.with(|e| e.borrow_mut().load_image_data(pixels.to_vec(), width, height))
+    ENGINE.with(|e| {
+        e.borrow_mut()
+            .load_image_data(pixels.to_vec(), width, height)
+    })
 }
 
 /// Apply tone adjustments to a layer.
@@ -31,23 +34,34 @@ pub fn apply_tone(
     highlights: f32,
     shadows: f32,
 ) {
-    ENGINE.with(|e| e.borrow_mut().apply_tone(layer_idx, ToneParams {
-        exposure, contrast, blacks, highlights, shadows,
-    }));
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_tone(
+            layer_idx,
+            ToneParams {
+                exposure,
+                contrast,
+                blacks,
+                highlights,
+                shadows,
+            },
+        )
+    });
 }
 
 /// Apply color adjustments to a layer.
 #[wasm_bindgen]
-pub fn apply_color(
-    layer_idx: usize,
-    saturation: f32,
-    vibrancy: f32,
-    temperature: f32,
-    tint: f32,
-) {
-    ENGINE.with(|e| e.borrow_mut().apply_color(layer_idx, ColorParams {
-        saturation, vibrancy, temperature, tint,
-    }));
+pub fn apply_color(layer_idx: usize, saturation: f32, vibrancy: f32, temperature: f32, tint: f32) {
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_color(
+            layer_idx,
+            ColorParams {
+                saturation,
+                vibrancy,
+                temperature,
+                tint,
+            },
+        )
+    });
 }
 
 /// Get layer count.
@@ -94,22 +108,28 @@ pub fn set_layer_opacity(layer_idx: usize, opacity: f32) {
 pub fn get_stack_json() -> String {
     ENGINE.with(|e| {
         let eng = e.borrow();
-        let layers: Vec<serde_json::Value> = eng.stack.layers.iter().map(|l| {
-            serde_json::json!({
-                "kind": match &l.layer {
-                    shade_core::Layer::Image { .. } => "image",
-                    shade_core::Layer::Adjustment { .. } => "adjustment",
-                },
-                "visible": l.visible,
-                "opacity": l.opacity,
+        let layers: Vec<serde_json::Value> = eng
+            .stack
+            .layers
+            .iter()
+            .map(|l| {
+                serde_json::json!({
+                    "kind": match &l.layer {
+                        shade_core::Layer::Image { .. } => "image",
+                        shade_core::Layer::Adjustment { .. } => "adjustment",
+                    },
+                    "visible": l.visible,
+                    "opacity": l.opacity,
+                })
             })
-        }).collect();
+            .collect();
         serde_json::json!({
             "layers": layers,
             "canvas_width": eng.canvas_width,
             "canvas_height": eng.canvas_height,
             "generation": eng.stack.generation,
-        }).to_string()
+        })
+        .to_string()
     })
 }
 

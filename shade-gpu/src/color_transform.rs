@@ -1,6 +1,6 @@
-use wgpu::*;
 use crate::context::GpuContext;
-use shade_core::{ColorSpace, ColorMatrix3x3};
+use shade_core::{ColorMatrix3x3, ColorSpace};
+use wgpu::*;
 
 const SHADER: &str = include_str!("../../shaders/color_transform.wgsl");
 
@@ -12,9 +12,9 @@ pub struct ColorTransformUniform {
     pub gamma: f32,
     pub _pad0: f32,
     pub _pad1: f32,
-    pub row0: [f32; 4],  // matrix row 0 + padding
-    pub row1: [f32; 4],  // matrix row 1 + padding
-    pub row2: [f32; 4],  // matrix row 2 + padding
+    pub row0: [f32; 4], // matrix row 0 + padding
+    pub row1: [f32; 4], // matrix row 1 + padding
+    pub row2: [f32; 4], // matrix row 2 + padding
 }
 
 impl ColorTransformUniform {
@@ -22,7 +22,8 @@ impl ColorTransformUniform {
         Self {
             mode: 0,
             gamma: 1.0,
-            _pad0: 0.0, _pad1: 0.0,
+            _pad0: 0.0,
+            _pad1: 0.0,
             row0: [1.0, 0.0, 0.0, 0.0],
             row1: [0.0, 1.0, 0.0, 0.0],
             row2: [0.0, 0.0, 1.0, 0.0],
@@ -36,22 +37,30 @@ impl ColorTransformUniform {
             ColorSpace::Srgb | ColorSpace::Unknown => Self {
                 mode: 2, // sRGB → linear
                 gamma: 2.4,
-                _pad0: 0.0, _pad1: 0.0,
+                _pad0: 0.0,
+                _pad1: 0.0,
                 row0: [1.0, 0.0, 0.0, 0.0],
                 row1: [0.0, 1.0, 0.0, 0.0],
                 row2: [0.0, 0.0, 1.0, 0.0],
             },
-            ColorSpace::AdobeRgb => Self::with_matrix(
-                4, 2.2, &ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB,
-            ),
-            ColorSpace::DisplayP3 => Self::with_matrix(
-                4, 2.2, &ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB,
-            ),
-            ColorSpace::ProPhotoRgb => Self::with_matrix(
-                4, 1.8, &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB,
-            ),
-            ColorSpace::Custom(_) => Self { mode: 2, gamma: 2.4, _pad0: 0.0, _pad1: 0.0,
-                row0: [1.0,0.0,0.0,0.0], row1: [0.0,1.0,0.0,0.0], row2: [0.0,0.0,1.0,0.0] },
+            ColorSpace::AdobeRgb => {
+                Self::with_matrix(4, 2.2, &ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB)
+            }
+            ColorSpace::DisplayP3 => {
+                Self::with_matrix(4, 2.2, &ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB)
+            }
+            ColorSpace::ProPhotoRgb => {
+                Self::with_matrix(4, 1.8, &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB)
+            }
+            ColorSpace::Custom(_) => Self {
+                mode: 2,
+                gamma: 2.4,
+                _pad0: 0.0,
+                _pad1: 0.0,
+                row0: [1.0, 0.0, 0.0, 0.0],
+                row1: [0.0, 1.0, 0.0, 0.0],
+                row2: [0.0, 0.0, 1.0, 0.0],
+            },
         }
     }
 
@@ -62,22 +71,33 @@ impl ColorTransformUniform {
             ColorSpace::Srgb | ColorSpace::Unknown => Self {
                 mode: 1, // linear → sRGB
                 gamma: 2.4,
-                _pad0: 0.0, _pad1: 0.0,
+                _pad0: 0.0,
+                _pad1: 0.0,
                 row0: [1.0, 0.0, 0.0, 0.0],
                 row1: [0.0, 1.0, 0.0, 0.0],
                 row2: [0.0, 0.0, 1.0, 0.0],
             },
-            ColorSpace::DisplayP3 => Self::with_matrix(
-                5, 2.2, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3,
-            ),
-            _ => Self { mode: 1, gamma: 2.4, _pad0: 0.0, _pad1: 0.0,
-                row0: [1.0,0.0,0.0,0.0], row1: [0.0,1.0,0.0,0.0], row2: [0.0,0.0,1.0,0.0] },
+            ColorSpace::DisplayP3 => {
+                Self::with_matrix(5, 2.2, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3)
+            }
+            _ => Self {
+                mode: 1,
+                gamma: 2.4,
+                _pad0: 0.0,
+                _pad1: 0.0,
+                row0: [1.0, 0.0, 0.0, 0.0],
+                row1: [0.0, 1.0, 0.0, 0.0],
+                row2: [0.0, 0.0, 1.0, 0.0],
+            },
         }
     }
 
     fn with_matrix(mode: u32, gamma: f32, m: &ColorMatrix3x3) -> Self {
         Self {
-            mode, gamma, _pad0: 0.0, _pad1: 0.0,
+            mode,
+            gamma,
+            _pad0: 0.0,
+            _pad1: 0.0,
             row0: [m.m[0][0], m.m[0][1], m.m[0][2], 0.0],
             row1: [m.m[1][0], m.m[1][1], m.m[1][2], 0.0],
             row2: [m.m[2][0], m.m[2][1], m.m[2][2], 0.0],
@@ -101,7 +121,8 @@ impl ColorTransformPipeline {
             label: Some("color_transform_bgl"),
             entries: &[
                 BindGroupLayoutEntry {
-                    binding: 0, visibility: ShaderStages::COMPUTE,
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: false },
                         view_dimension: TextureViewDimension::D2,
@@ -110,7 +131,8 @@ impl ColorTransformPipeline {
                     count: None,
                 },
                 BindGroupLayoutEntry {
-                    binding: 1, visibility: ShaderStages::COMPUTE,
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
                         format: TextureFormat::Rgba8Unorm,
@@ -119,7 +141,8 @@ impl ColorTransformPipeline {
                     count: None,
                 },
                 BindGroupLayoutEntry {
-                    binding: 2, visibility: ShaderStages::COMPUTE,
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -130,7 +153,9 @@ impl ColorTransformPipeline {
             ],
         });
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: None, bind_group_layouts: &[&bgl], push_constant_ranges: &[],
+            label: None,
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
         });
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("color_transform_pipeline"),
@@ -156,11 +181,18 @@ impl ColorTransformPipeline {
 
         let output_tex = device.create_texture(&TextureDescriptor {
             label: Some("color_transform_out"),
-            size: Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-            mip_level_count: 1, sample_count: 1,
+            size: Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::COPY_SRC
+                | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 
@@ -171,16 +203,25 @@ impl ColorTransformPipeline {
             usage: BufferUsages::UNIFORM,
         });
 
-        let in_view  = input_tex.create_view(&Default::default());
+        let in_view = input_tex.create_view(&Default::default());
         let out_view = output_tex.create_view(&Default::default());
 
         let bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("color_transform_bg"),
             layout: &self.bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&in_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&out_view) },
-                BindGroupEntry { binding: 2, resource: ubuf.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&in_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&out_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: ubuf.as_entire_binding(),
+                },
             ],
         });
 
@@ -189,7 +230,8 @@ impl ColorTransformPipeline {
         });
         {
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("color_transform_pass"), timestamp_writes: None,
+                label: Some("color_transform_pass"),
+                timestamp_writes: None,
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bg, &[]);

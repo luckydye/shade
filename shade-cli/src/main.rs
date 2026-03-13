@@ -5,7 +5,9 @@ use shade_core::{
     ToneParams, VignetteParams,
 };
 use shade_gpu::Renderer;
-use shade_io::{load_image, load_image_with_colorspace, save_image, to_linear_srgb, from_linear_srgb};
+use shade_io::{
+    from_linear_srgb, load_image, load_image_with_colorspace, save_image, to_linear_srgb,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -29,7 +31,6 @@ enum Commands {
         output: PathBuf,
 
         // ── Tone ──────────────────────────────────────────────────────────────
-
         /// Exposure adjustment in EV stops (default: 0.0)
         #[arg(long, default_value_t = 0.0)]
         exposure: f32,
@@ -51,7 +52,6 @@ enum Commands {
         shadows: f32,
 
         // ── Color ─────────────────────────────────────────────────────────────
-
         /// Color saturation (1.0 = unchanged, 0.0 = monochrome)
         #[arg(long)]
         saturation: Option<f32>,
@@ -69,7 +69,6 @@ enum Commands {
         tint: Option<f32>,
 
         // ── Vignette ──────────────────────────────────────────────────────────
-
         /// Vignette amount (0.0–1.0)
         #[arg(long)]
         vignette: Option<f32>,
@@ -83,7 +82,6 @@ enum Commands {
         vignette_feather: Option<f32>,
 
         // ── Sharpen ───────────────────────────────────────────────────────────
-
         /// Sharpen amount (0.0–2.0)
         #[arg(long)]
         sharpen: Option<f32>,
@@ -93,7 +91,6 @@ enum Commands {
         sharpen_threshold: Option<f32>,
 
         // ── Grain ─────────────────────────────────────────────────────────────
-
         /// Film grain intensity (0.0–1.0)
         #[arg(long)]
         grain: Option<f32>,
@@ -103,7 +100,6 @@ enum Commands {
         grain_size: Option<f32>,
 
         // ── Colour management ─────────────────────────────────────────────────
-
         /// Source colour space: srgb, adobergb, p3, prophoto (default: auto-detect from embedded profile)
         #[arg(long)]
         color_space: Option<String>,
@@ -216,10 +212,7 @@ async fn main() -> Result<()> {
                 shadows,
             });
 
-            if saturation.is_some()
-                || vibrancy.is_some()
-                || temperature.is_some()
-                || tint.is_some()
+            if saturation.is_some() || vibrancy.is_some() || temperature.is_some() || tint.is_some()
             {
                 let color_params = ColorParams {
                     saturation: saturation.unwrap_or(1.0),

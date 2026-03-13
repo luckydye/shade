@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 shade-core = { path = "../shade-core" }
 image = { workspace = true }
+exr = { workspace = true }
 anyhow = { workspace = true }

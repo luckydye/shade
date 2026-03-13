@@ -231,9 +231,12 @@ export async function openImage(path: string) {
 }
 
 export async function openImageFile(file: File) {
-  // Decode for immediate canvas preview — no backend round-trip needed.
-  const bitmap = await createImageBitmap(file);
-  replaceBitmap(setSourceBitmap, sourceBitmap, bitmap);
+  try {
+    const bitmap = await createImageBitmap(file);
+    replaceBitmap(setSourceBitmap, sourceBitmap, bitmap);
+  } catch {
+    replaceBitmap(setSourceBitmap, sourceBitmap, null);
+  }
   replaceBitmap(setPreviewBitmap, previewBitmap, null);
   setPreviewFrame(null);
 

@@ -26,6 +26,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_image,
+            commands::open_image_encoded_bytes,
             commands::open_image_bytes,
             commands::export_image,
             commands::render_preview,

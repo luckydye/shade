@@ -1,8 +1,8 @@
 // Fused tone + color pipeline using shaders/basic_adjust.wgsl
-use bytemuck::{Pod, Zeroable};
-use wgpu::*;
 use crate::context::GpuContext;
-use shade_core::{ToneParams, ColorParams};
+use bytemuck::{Pod, Zeroable};
+use shade_core::{ColorParams, ToneParams};
+use wgpu::*;
 
 const SHADER: &str = include_str!("../../shaders/basic_adjust.wgsl");
 

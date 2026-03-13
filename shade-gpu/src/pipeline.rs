@@ -5,9 +5,9 @@ use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
-    ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor,
-    ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor, ShaderStages,
+    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::GpuContext;
@@ -148,7 +148,9 @@ impl TonePipeline {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::COPY_SRC
+                | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 
@@ -183,8 +185,9 @@ impl TonePipeline {
         });
 
         // Dispatch compute shader.
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("tone") });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("tone"),
+        });
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

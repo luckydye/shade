@@ -40,21 +40,32 @@ impl GpuProfiler {
             return vec![];
         }
         // Collect all pass names from the most recent frame
-        let Some(last) = self.history.back() else { return vec![]; };
-        last.iter().map(|p| {
-            let sum: u64 = self.history.iter()
-                .filter_map(|frame| frame.iter().find(|t| t.name == p.name))
-                .map(|t| t.gpu_micros)
-                .sum();
-            let count = self.history.len() as u64;
-            PassTiming { name: p.name.clone(), gpu_micros: sum / count }
-        }).collect()
+        let Some(last) = self.history.back() else {
+            return vec![];
+        };
+        last.iter()
+            .map(|p| {
+                let sum: u64 = self
+                    .history
+                    .iter()
+                    .filter_map(|frame| frame.iter().find(|t| t.name == p.name))
+                    .map(|t| t.gpu_micros)
+                    .sum();
+                let count = self.history.len() as u64;
+                PassTiming {
+                    name: p.name.clone(),
+                    gpu_micros: sum / count,
+                }
+            })
+            .collect()
     }
 
     /// Print a summary to stderr.
     pub fn print_summary(&self) {
         let avgs = self.averages();
-        if avgs.is_empty() { return; }
+        if avgs.is_empty() {
+            return;
+        }
         let total: u64 = avgs.iter().map(|t| t.gpu_micros).sum();
         eprintln!("── GPU Profiler ──────────────────────");
         for t in &avgs {

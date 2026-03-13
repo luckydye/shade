@@ -1,7 +1,7 @@
 import { Component, JSX } from "solid-js";
 import { openImageFile, state } from "../store/editor";
 
-const ACCEPTED = "image/jpeg,image/png,image/tiff,image/webp,image/avif";
+const ACCEPTED = "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr";
 
 interface ActionButtonProps {
   label: string;

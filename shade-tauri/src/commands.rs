@@ -1,9 +1,9 @@
-use std::sync::Mutex;
-use shade_core::{
-    LayerStack, AdjustmentOp, ColorParams, VignetteParams, SharpenParams, GrainParams, linear_lut,
-};
-use shade_io::load_image;
 use serde::{Deserialize, Serialize};
+use shade_core::{
+    linear_lut, AdjustmentOp, ColorParams, GrainParams, LayerStack, SharpenParams, VignetteParams,
+};
+use shade_io::{load_image, load_image_bytes};
+use std::sync::Mutex;
 
 pub struct EditorState {
     pub stack: LayerStack,
@@ -25,6 +25,36 @@ impl Default for EditorState {
     }
 }
 
+impl EditorState {
+    pub fn replace_with_image(
+        &mut self,
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> LayerInfoResponse {
+        let texture_id = self.next_texture_id;
+        self.next_texture_id += 1;
+        self.stack = LayerStack::new();
+        self.image_sources
+            .insert(texture_id, (pixels, width, height));
+        self.canvas_width = width;
+        self.canvas_height = height;
+        self.stack.add_image_layer(texture_id, width, height);
+        self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+            exposure: 0.0,
+            contrast: 0.0,
+            blacks: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+        }]);
+        LayerInfoResponse {
+            layer_count: self.stack.layers.len(),
+            canvas_width: width,
+            canvas_height: height,
+        }
+    }
+}
+
 // Commands return Result<T, String> where Err is displayed to the user
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,29 +69,21 @@ pub async fn open_image(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    let (pixels, w, h) = load_image(std::path::Path::new(&path))
-        .map_err(|e| e.to_string())?;
+    let (pixels, w, h) = load_image(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
     let mut st = state.lock().unwrap();
-    let tid = st.next_texture_id;
-    st.next_texture_id += 1;
-    st.stack = shade_core::LayerStack::new();
-    st.image_sources.insert(tid, (pixels, w, h));
-    st.canvas_width = w;
-    st.canvas_height = h;
-    st.stack.add_image_layer(tid, w, h);
-    // Add a default adjustment layer on top
-    st.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
-        exposure: 0.0,
-        contrast: 0.0,
-        blacks: 0.0,
-        highlights: 0.0,
-        shadows: 0.0,
-    }]);
-    Ok(LayerInfoResponse {
-        layer_count: st.stack.layers.len(),
-        canvas_width: w,
-        canvas_height: h,
-    })
+    Ok(st.replace_with_image(pixels, w, h))
+}
+
+#[tauri::command]
+pub async fn open_image_encoded_bytes(
+    bytes: Vec<u8>,
+    file_name: Option<String>,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<LayerInfoResponse, String> {
+    let (pixels, width, height) =
+        load_image_bytes(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
+    let mut st = state.lock().unwrap();
+    Ok(st.replace_with_image(pixels, width, height))
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
@@ -75,20 +97,14 @@ pub async fn open_image_bytes(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
     if pixels.len() != (width * height * 4) as usize {
-        return Err(format!("pixel buffer size mismatch: expected {}, got {}", width * height * 4, pixels.len()));
+        return Err(format!(
+            "pixel buffer size mismatch: expected {}, got {}",
+            width * height * 4,
+            pixels.len()
+        ));
     }
     let mut st = state.lock().unwrap();
-    let tid = st.next_texture_id;
-    st.next_texture_id += 1;
-    st.image_sources.insert(tid, (pixels, width, height));
-    st.canvas_width = width;
-    st.canvas_height = height;
-    st.stack = shade_core::LayerStack::new();
-    st.stack.add_image_layer(tid, width, height);
-    st.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
-        exposure: 0.0, contrast: 0.0, blacks: 0.0, highlights: 0.0, shadows: 0.0,
-    }]);
-    Ok(LayerInfoResponse { layer_count: st.stack.layers.len(), canvas_width: width, canvas_height: height })
+    Ok(st.replace_with_image(pixels, width, height))
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -130,7 +146,12 @@ pub async fn render_preview(
                 height: 0,
             });
         }
-        (st.stack.clone(), st.image_sources.clone(), st.canvas_width, st.canvas_height)
+        (
+            st.stack.clone(),
+            st.image_sources.clone(),
+            st.canvas_width,
+            st.canvas_height,
+        )
     };
 
     let guard = renderer.0.lock().await;
@@ -141,21 +162,23 @@ pub async fn render_preview(
         target_height: h,
         crop: None,
     });
-    let pixels = r.render_stack_preview(
-        &stack,
-        &sources,
-        w,
-        h,
-        request.target_width,
-        request.target_height,
-        request.crop.map(|crop| shade_gpu::PreviewCrop {
-            x: crop.x,
-            y: crop.y,
-            width: crop.width,
-            height: crop.height,
-        }),
-    )
-        .await.map_err(|e| e.to_string())?;
+    let pixels = r
+        .render_stack_preview(
+            &stack,
+            &sources,
+            w,
+            h,
+            request.target_width,
+            request.target_height,
+            request.crop.map(|crop| shade_gpu::PreviewCrop {
+                x: crop.x,
+                y: crop.y,
+                width: crop.width,
+                height: crop.height,
+            }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(PreviewFrameResponse {
         pixels,
         width: request.target_width,
@@ -176,7 +199,7 @@ pub async fn export_image(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EditParams {
     pub layer_idx: usize,
-    pub op: String,     // "tone", "curves", "color", "vignette", "sharpen", "grain"
+    pub op: String, // "tone", "curves", "color", "vignette", "sharpen", "grain"
     pub exposure: Option<f32>,
     pub contrast: Option<f32>,
     pub blacks: Option<f32>,
@@ -217,7 +240,10 @@ pub async fn apply_edit(
                         highlights: params.highlights.unwrap_or(0.0),
                         shadows: params.shadows.unwrap_or(0.0),
                     };
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Tone { .. })) {
+                    if let Some(op) = ops
+                        .iter_mut()
+                        .find(|op| matches!(op, AdjustmentOp::Tone { .. }))
+                    {
                         *op = next;
                     } else {
                         ops.push(next);
@@ -230,7 +256,10 @@ pub async fn apply_edit(
                         temperature: params.temperature.unwrap_or(0.0),
                         tint: params.tint.unwrap_or(0.0),
                     });
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Color(_))) {
+                    if let Some(op) = ops
+                        .iter_mut()
+                        .find(|op| matches!(op, AdjustmentOp::Color(_)))
+                    {
                         *op = next;
                     } else {
                         ops.push(next);
@@ -244,7 +273,10 @@ pub async fn apply_edit(
                         lut_master: params.lut_master.ok_or("missing lut_master")?,
                         per_channel: params.per_channel.unwrap_or(false),
                     };
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Curves { .. })) {
+                    if let Some(op) = ops
+                        .iter_mut()
+                        .find(|op| matches!(op, AdjustmentOp::Curves { .. }))
+                    {
                         *op = next;
                     } else {
                         ops.push(next);
@@ -255,7 +287,10 @@ pub async fn apply_edit(
                         amount: params.vignette_amount.unwrap_or(0.0),
                         ..Default::default()
                     });
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Vignette(_))) {
+                    if let Some(op) = ops
+                        .iter_mut()
+                        .find(|op| matches!(op, AdjustmentOp::Vignette(_)))
+                    {
                         *op = next;
                     } else {
                         ops.push(next);
@@ -266,7 +301,10 @@ pub async fn apply_edit(
                         amount: params.sharpen_amount.unwrap_or(0.0),
                         threshold: 0.1,
                     });
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Sharpen(_))) {
+                    if let Some(op) = ops
+                        .iter_mut()
+                        .find(|op| matches!(op, AdjustmentOp::Sharpen(_)))
+                    {
                         *op = next;
                     } else {
                         ops.push(next);
@@ -277,7 +315,10 @@ pub async fn apply_edit(
                         amount: params.grain_amount.unwrap_or(0.0),
                         ..Default::default()
                     });
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Grain(_))) {
+                    if let Some(op) = ops
+                        .iter_mut()
+                        .find(|op| matches!(op, AdjustmentOp::Grain(_)))
+                    {
                         *op = next;
                     } else {
                         ops.push(next);

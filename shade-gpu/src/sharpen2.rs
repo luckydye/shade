@@ -1,8 +1,8 @@
 // Two-pass separable Gaussian unsharp mask pipeline
-use bytemuck::{Pod, Zeroable};
-use wgpu::*;
 use crate::context::GpuContext;
+use bytemuck::{Pod, Zeroable};
 use shade_core::SharpenParams;
+use wgpu::*;
 
 const SHADER_H: &str = include_str!("../../shaders/sharpen_h.wgsl");
 const SHADER_V: &str = include_str!("../../shaders/sharpen_v.wgsl");
@@ -134,12 +134,7 @@ impl SharpenTwoPassPipeline {
         }
     }
 
-    pub fn process(
-        &self,
-        ctx: &GpuContext,
-        input_tex: &Texture,
-        params: SharpenParams,
-    ) -> Texture {
+    pub fn process(&self, ctx: &GpuContext, input_tex: &Texture, params: SharpenParams) -> Texture {
         let device = &ctx.device;
         let queue = &ctx.queue;
         let (w, h) = (input_tex.width(), input_tex.height());

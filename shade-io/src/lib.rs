@@ -1,39 +1,64 @@
-use std::path::Path;
 use anyhow::{anyhow, Context, Result};
+use exr::prelude::{ReadChannels, ReadLayers};
 use image::{DynamicImage, ImageFormat};
-use shade_core::{ColorSpace, ColorMatrix3x3};
+use shade_core::{ColorMatrix3x3, ColorSpace};
+use std::path::Path;
+use std::{convert::TryFrom, io::Cursor};
 
 // ── Public image loading ───────────────────────────────────────────────────────
+
+const EXR_MAGIC: [u8; 4] = [0x76, 0x2f, 0x31, 0x01];
 
 /// Load an image from disk and return raw RGBA8 bytes along with dimensions.
 /// Pixels are returned as-is (still in the source colour space / gamma).
 pub fn load_image(path: &Path) -> Result<(Vec<u8>, u32, u32)> {
-    let img = image::open(path)
-        .with_context(|| format!("Failed to open image: {}", path.display()))?;
-    let rgba = img.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    Ok((rgba.into_raw(), width, height))
+    let bytes =
+        std::fs::read(path).with_context(|| format!("Cannot read file: {}", path.display()))?;
+    let (pixels, width, height, _) =
+        load_image_bytes_with_colorspace(&bytes, path.file_name().and_then(|name| name.to_str()))
+            .with_context(|| format!("Failed to decode image: {}", path.display()))?;
+    Ok((pixels, width, height))
+}
+
+/// Load an encoded image from memory and return raw RGBA8 bytes along with dimensions.
+/// `name_hint` is used only for format detection when the payload itself is ambiguous.
+pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+    let (pixels, width, height, _) = load_image_bytes_with_colorspace(bytes, name_hint)?;
+    Ok((pixels, width, height))
 }
 
 /// Load an image and also detect its embedded colour space.
 /// Returns (pixels_rgba8, width, height, detected_color_space).
 pub fn load_image_with_colorspace(path: &Path) -> Result<(Vec<u8>, u32, u32, ColorSpace)> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Cannot read file: {}", path.display()))?;
+    let bytes =
+        std::fs::read(path).with_context(|| format!("Cannot read file: {}", path.display()))?;
+    load_image_bytes_with_colorspace(&bytes, path.file_name().and_then(|name| name.to_str()))
+        .with_context(|| format!("Failed to decode image: {}", path.display()))
+}
 
-    let ext = path.extension()
-        .and_then(|e| e.to_str())
+/// Load an encoded image from memory and also detect its colour space.
+pub fn load_image_bytes_with_colorspace(
+    bytes: &[u8],
+    name_hint: Option<&str>,
+) -> Result<(Vec<u8>, u32, u32, ColorSpace)> {
+    if is_exr(name_hint, bytes) {
+        let (pixels, width, height) = decode_exr(bytes)?;
+        return Ok((pixels, width, height, ColorSpace::LinearSrgb));
+    }
+
+    let ext = name_hint
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str())
         .unwrap_or("")
-        .to_lowercase();
+        .to_ascii_lowercase();
 
     let color_space = match ext.as_str() {
         "jpg" | "jpeg" => detect_jpeg_colorspace(&bytes),
-        "png"          => detect_png_colorspace(&bytes),
-        _              => ColorSpace::Unknown,
+        "png" => detect_png_colorspace(&bytes),
+        _ => ColorSpace::Unknown,
     };
 
-    let img = image::load_from_memory(&bytes)
-        .with_context(|| format!("Failed to decode image: {}", path.display()))?;
+    let img = image::load_from_memory(&bytes).context("Failed to decode image bytes")?;
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
 
@@ -50,9 +75,15 @@ pub fn to_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
         ColorSpace::Srgb | ColorSpace::Unknown => {
             // Remove sRGB gamma → linear
             for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (srgb_to_linear(chunk[0] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[1] = (srgb_to_linear(chunk[1] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[2] = (srgb_to_linear(chunk[2] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
+                chunk[0] = (srgb_to_linear(chunk[0] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[1] = (srgb_to_linear(chunk[1] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[2] = (srgb_to_linear(chunk[2] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
                 // alpha unchanged
             }
         }
@@ -68,9 +99,15 @@ pub fn to_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
         ColorSpace::Custom(_) => {
             // Fallback: assume sRGB for unknown embedded profiles
             for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (srgb_to_linear(chunk[0] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[1] = (srgb_to_linear(chunk[1] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[2] = (srgb_to_linear(chunk[2] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
+                chunk[0] = (srgb_to_linear(chunk[0] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[1] = (srgb_to_linear(chunk[1] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[2] = (srgb_to_linear(chunk[2] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
         }
     }
@@ -82,9 +119,15 @@ pub fn from_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
         ColorSpace::LinearSrgb => { /* nothing to do */ }
         ColorSpace::Srgb | ColorSpace::Unknown => {
             for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (linear_to_srgb(chunk[0] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[1] = (linear_to_srgb(chunk[1] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[2] = (linear_to_srgb(chunk[2] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
+                chunk[0] = (linear_to_srgb(chunk[0] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[1] = (linear_to_srgb(chunk[1] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[2] = (linear_to_srgb(chunk[2] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
         }
         ColorSpace::DisplayP3 => {
@@ -93,9 +136,15 @@ pub fn from_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
         _ => {
             // Default: apply sRGB encoding
             for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (linear_to_srgb(chunk[0] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[1] = (linear_to_srgb(chunk[1] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
-                chunk[2] = (linear_to_srgb(chunk[2] as f32 / 255.0) * 255.0).round().clamp(0.0, 255.0) as u8;
+                chunk[0] = (linear_to_srgb(chunk[0] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[1] = (linear_to_srgb(chunk[1] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                chunk[2] = (linear_to_srgb(chunk[2] as f32 / 255.0) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
         }
     }
@@ -105,24 +154,40 @@ pub fn from_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
 pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<()> {
     let expected = (width * height * 4) as usize;
     if data.len() != expected {
-        return Err(anyhow!("save_image: expected {} bytes, got {}", expected, data.len()));
+        return Err(anyhow!(
+            "save_image: expected {} bytes, got {}",
+            expected,
+            data.len()
+        ));
     }
     let img = image::RgbaImage::from_raw(width, height, data.to_vec())
         .ok_or_else(|| anyhow!("save_image: failed to construct RgbaImage"))?;
     let dyn_img = DynamicImage::ImageRgba8(img);
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     let format = match ext.as_str() {
-        "png"           => ImageFormat::Png,
-        "jpg" | "jpeg"  => ImageFormat::Jpeg,
-        "tif" | "tiff"  => ImageFormat::Tiff,
-        "webp"          => ImageFormat::WebP,
-        other => return Err(anyhow!("Unsupported output format: '.{}'. Use png, jpg, tiff, or webp.", other)),
+        "png" => ImageFormat::Png,
+        "jpg" | "jpeg" => ImageFormat::Jpeg,
+        "tif" | "tiff" => ImageFormat::Tiff,
+        "webp" => ImageFormat::WebP,
+        other => {
+            return Err(anyhow!(
+                "Unsupported output format: '.{}'. Use png, jpg, tiff, or webp.",
+                other
+            ))
+        }
     };
     if format == ImageFormat::Jpeg {
-        dyn_img.to_rgb8().save_with_format(path, format)
+        dyn_img
+            .to_rgb8()
+            .save_with_format(path, format)
             .with_context(|| format!("Failed to save image to {}", path.display()))?;
     } else {
-        dyn_img.save_with_format(path, format)
+        dyn_img
+            .save_with_format(path, format)
             .with_context(|| format!("Failed to save image to {}", path.display()))?;
     }
     Ok(())
@@ -132,16 +197,77 @@ pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<(
 
 /// sRGB electro-optical transfer function: encoded → linear.
 pub fn srgb_to_linear(v: f32) -> f32 {
-    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055_f32).powf(2.4) }
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055_f32).powf(2.4)
+    }
 }
 
 /// sRGB opto-electrical transfer function: linear → encoded.
 pub fn linear_to_srgb(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
-    if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    if v <= 0.0031308 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+fn is_exr(name_hint: Option<&str>, bytes: &[u8]) -> bool {
+    name_hint
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exr"))
+        || bytes.starts_with(&EXR_MAGIC)
+}
+
+fn decode_exr(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
+    struct ExrPixels {
+        width: usize,
+        data: Vec<f32>,
+    }
+
+    let image = exr::prelude::read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .rgba_channels(
+            |resolution, _channels| ExrPixels {
+                width: resolution.width(),
+                data: vec![0.0; resolution.area() * 4],
+            },
+            |pixels: &mut ExrPixels, position, (r, g, b, a): (f32, f32, f32, f32)| {
+                let base = (position.y() * pixels.width + position.x()) * 4;
+                pixels.data[base] = r;
+                pixels.data[base + 1] = g;
+                pixels.data[base + 2] = b;
+                pixels.data[base + 3] = a;
+            },
+        )
+        .first_valid_layer()
+        .all_attributes()
+        .from_buffered(Cursor::new(bytes))
+        .context("EXR decode failed")?;
+
+    let width = u32::try_from(image.layer_data.size.width()).context("EXR width exceeds u32")?;
+    let height = u32::try_from(image.layer_data.size.height()).context("EXR height exceeds u32")?;
+    let float_pixels = image.layer_data.channel_data.pixels.data;
+    let mut rgba = Vec::with_capacity(float_pixels.len());
+    for channel in float_pixels {
+        rgba.push(float_to_u8(channel));
+    }
+
+    Ok((rgba, width, height))
+}
+
+fn float_to_u8(value: f32) -> u8 {
+    if value.is_nan() {
+        return 0;
+    }
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
 
 /// Decode gamma, apply matrix, result is linear sRGB.
 fn apply_matrix_and_linearise(pixels: &mut Vec<u8>, gamma: f32, matrix: &ColorMatrix3x3) {
@@ -176,7 +302,9 @@ fn apply_linear_matrix_and_gamma(pixels: &mut Vec<u8>, matrix: &ColorMatrix3x3, 
 /// Looks for the APP2 marker (0xFF 0xE2) with "ICC_PROFILE\0" signature.
 fn detect_jpeg_colorspace(bytes: &[u8]) -> ColorSpace {
     let icc = extract_jpeg_icc(bytes);
-    icc.as_deref().map(identify_icc_profile).unwrap_or(ColorSpace::Srgb)
+    icc.as_deref()
+        .map(identify_icc_profile)
+        .unwrap_or(ColorSpace::Srgb)
 }
 
 /// Extract the ICC profile bytes from a JPEG APP2 segment.
@@ -184,7 +312,9 @@ fn extract_jpeg_icc(bytes: &[u8]) -> Option<Vec<u8>> {
     const ICC_SIG: &[u8] = b"ICC_PROFILE\0";
     let mut i = 2; // skip SOI marker
     while i + 4 < bytes.len() {
-        if bytes[i] != 0xFF { break; }
+        if bytes[i] != 0xFF {
+            break;
+        }
         let marker = bytes[i + 1];
         let seg_len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
         if marker == 0xE2 && i + 4 + ICC_SIG.len() < bytes.len() {
@@ -204,16 +334,18 @@ fn extract_jpeg_icc(bytes: &[u8]) -> Option<Vec<u8>> {
 /// or the sRGB chunk.
 fn detect_png_colorspace(bytes: &[u8]) -> ColorSpace {
     // PNG signature is 8 bytes, then chunks
-    if bytes.len() < 8 { return ColorSpace::Unknown; }
+    if bytes.len() < 8 {
+        return ColorSpace::Unknown;
+    }
     let mut i = 8;
     while i + 12 <= bytes.len() {
-        let len = u32::from_be_bytes([bytes[i], bytes[i+1], bytes[i+2], bytes[i+3]]) as usize;
-        let chunk_type = &bytes[i+4..i+8];
+        let len = u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+        let chunk_type = &bytes[i + 4..i + 8];
         match chunk_type {
             b"sRGB" => return ColorSpace::Srgb,
             b"iCCP" => {
                 // iCCP: null-terminated name, 1 byte compression method, compressed profile
-                let data = &bytes[i+8..i+8+len];
+                let data = &bytes[i + 8..i + 8 + len];
                 // Find null terminator for profile name
                 if let Some(null_pos) = data.iter().position(|&b| b == 0) {
                     let profile_name = std::str::from_utf8(&data[..null_pos]).unwrap_or("");
@@ -237,7 +369,9 @@ fn detect_png_colorspace(bytes: &[u8]) -> ColorSpace {
 /// Profile description tag starts at offset 128 in ICC profiles.
 /// We use a simpler heuristic: check the color space field at offset 16.
 fn identify_icc_profile(icc: &[u8]) -> ColorSpace {
-    if icc.len() < 20 { return ColorSpace::Unknown; }
+    if icc.len() < 20 {
+        return ColorSpace::Unknown;
+    }
     // Bytes 16..20: colour space signature
     let cs_sig = &icc[16..20];
     // Bytes 4..8: CMM type (not useful here)
@@ -263,9 +397,15 @@ fn identify_icc_profile(icc: &[u8]) -> ColorSpace {
 /// Identify colour space from the iCCP profile name string.
 fn identify_icc_by_name(name: &str) -> ColorSpace {
     let n = name.to_lowercase();
-    if n.contains("adobe") { ColorSpace::AdobeRgb }
-    else if n.contains("p3") { ColorSpace::DisplayP3 }
-    else if n.contains("prophoto") || n.contains("romm") { ColorSpace::ProPhotoRgb }
-    else if n.contains("srgb") { ColorSpace::Srgb }
-    else { ColorSpace::Custom(vec![]) }
+    if n.contains("adobe") {
+        ColorSpace::AdobeRgb
+    } else if n.contains("p3") {
+        ColorSpace::DisplayP3
+    } else if n.contains("prophoto") || n.contains("romm") {
+        ColorSpace::ProPhotoRgb
+    } else if n.contains("srgb") {
+        ColorSpace::Srgb
+    } else {
+        ColorSpace::Custom(vec![])
+    }
 }
