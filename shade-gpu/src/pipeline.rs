@@ -25,9 +25,9 @@ struct ToneParamsGpu {
     blacks: f32,
     highlights: f32,
     shadows: f32,
-    // Pad to 32 bytes (wgpu uniform buffers need 16-byte alignment; 5 × f32 = 20 bytes,
-    // nearest multiple of 16 = 32 bytes → add 3 floats of padding).
-    _pad: [f32; 3],
+    gamma: f32,
+    // Pad to 32 bytes (6 × f32 = 24 bytes, nearest multiple of 16 = 32 → 2 floats of padding).
+    _pad: [f32; 2],
 }
 
 impl From<ToneParams> for ToneParamsGpu {
@@ -38,7 +38,8 @@ impl From<ToneParams> for ToneParamsGpu {
             blacks: p.blacks,
             highlights: p.highlights,
             shadows: p.shadows,
-            _pad: [0.0; 3],
+            gamma: p.gamma,
+            _pad: [0.0; 2],
         }
     }
 }

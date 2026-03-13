@@ -85,6 +85,7 @@ export interface ToneValues {
   blacks: number;
   highlights: number;
   shadows: number;
+  gamma: number;
 }
 
 export interface ColorValues {

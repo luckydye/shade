@@ -306,6 +306,7 @@ export async function applyEdit(params: Record<string, unknown>) {
           blacks: params.blacks as number,
           highlights: params.highlights as number,
           shadows: params.shadows as number,
+          gamma: params.gamma as number,
         },
       });
       break;

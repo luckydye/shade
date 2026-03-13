@@ -7,6 +7,7 @@ struct ToneParams {
     blacks: f32,
     highlights: f32,
     shadows: f32,
+    gamma: f32,
 };
 
 struct ColorParams {
@@ -23,7 +24,7 @@ struct ColorParams {
 
 // ── Tone helpers ──────────────────────────────────────────────────────────────
 fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
-    var rgb = c.rgb * pow(2.0, p.exposure);
+    var rgb = c.rgb + vec3<f32>(p.exposure);
     let mid = vec3<f32>(0.18);
     rgb = mid + (rgb - mid) * (1.0 + p.contrast);
     rgb = rgb + vec3<f32>(p.blacks);
@@ -31,6 +32,8 @@ fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
     rgb = rgb + vec3<f32>(p.shadows * shadow_mask * 0.5);
     let highlight_mask = smoothstep(0.5, 1.0, rgb.r);
     rgb = rgb * (1.0 - p.highlights * highlight_mask * 0.5);
+    // Gamma: power curve (1.0 = no change)
+    rgb = pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(p.gamma));
     return vec4<f32>(rgb, c.a);
 }
 

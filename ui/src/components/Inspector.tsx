@@ -48,6 +48,7 @@ const DEFAULT_TONE = {
   blacks: 0,
   highlights: 0,
   shadows: 0,
+  gamma: 1,
 } as const;
 const DEFAULT_COLOR = {
   saturation: 1,
@@ -197,6 +198,7 @@ const Inspector: Component = () => {
       blacks: next.blacks ?? current.blacks,
       highlights: next.highlights ?? current.highlights,
       shadows: next.shadows ?? current.shadows,
+      gamma: next.gamma ?? current.gamma,
     });
   };
 
@@ -311,14 +313,22 @@ const Inspector: Component = () => {
         return (
           <div class="space-y-4">
             <Slider
-              label="Brightness"
+              label="Exposure"
               icon={<SparkIcon />}
               value={tone().exposure}
               defaultValue={DEFAULT_TONE.exposure}
-              valueLabel={valueLabel(tone().exposure, 40)}
-              min={-3}
-              max={3}
+              min={-1}
+              max={1}
               onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ exposure: value }); }}
+            />
+            <Slider
+              label="Gamma"
+              icon={<ToneIcon />}
+              value={tone().gamma}
+              defaultValue={DEFAULT_TONE.gamma}
+              min={0.1}
+              max={3}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ gamma: value }); }}
             />
             <Slider
               label="Contrast"
@@ -465,16 +475,27 @@ const Inspector: Component = () => {
             <div class="flex flex-col gap-3">
               <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
               <Slider
-                label="Brightness"
+                label="Exposure"
                 icon={<SparkIcon />}
                 value={tone().exposure}
                 defaultValue={DEFAULT_TONE.exposure}
-                valueLabel={valueLabel(tone().exposure, 40)}
-                min={-3}
-                max={3}
+                min={-1}
+                max={1}
                 onChange={(value) => {
                   selectedAdjustmentLayerOrThrow();
                   void applyTone({ exposure: value });
+                }}
+              />
+              <Slider
+                label="Gamma"
+                icon={<ToneIcon />}
+                value={tone().gamma}
+                defaultValue={DEFAULT_TONE.gamma}
+                min={0.1}
+                max={3}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ gamma: value });
                 }}
               />
               <Slider

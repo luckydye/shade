@@ -5,7 +5,7 @@ use std::collections::HashMap;
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ToneParams {
-    /// Exposure in EV stops; applied as 2^exposure multiplier.
+    /// Exposure offset added to linear pixel values.
     pub exposure: f32,
     /// Contrast adjustment, pivoted around 0.18 mid-grey.
     pub contrast: f32,
@@ -15,6 +15,8 @@ pub struct ToneParams {
     pub highlights: f32,
     /// Shadows lift amount.
     pub shadows: f32,
+    /// Gamma exponent applied as pow(rgb, gamma). 1.0 = no change.
+    pub gamma: f32,
 }
 
 impl Default for ToneParams {
@@ -25,6 +27,7 @@ impl Default for ToneParams {
             blacks: 0.0,
             highlights: 0.0,
             shadows: 0.0,
+            gamma: 1.0,
         }
     }
 }
@@ -107,6 +110,7 @@ pub enum AdjustmentOp {
         blacks: f32,
         highlights: f32,
         shadows: f32,
+        gamma: f32,
     },
     Curves {
         lut_r: Vec<f32>,

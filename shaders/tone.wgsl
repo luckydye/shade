@@ -4,6 +4,7 @@ struct ToneParams {
     blacks: f32,
     highlights: f32,
     shadows: f32,
+    gamma: f32,
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -17,8 +18,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
 
-    // Exposure: 2^exposure multiplier
-    c = vec4<f32>(c.rgb * pow(2.0, params.exposure), c.a);
+    // Exposure: linear offset
+    c = vec4<f32>(c.rgb + vec3<f32>(params.exposure), c.a);
 
     // Contrast: pivot around mid-grey 0.18
     let mid = vec3<f32>(0.18);
@@ -34,6 +35,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Highlights roll-off (compress high end): apply to pixels above 0.5
     let highlight_mask = smoothstep(0.5, 1.0, c.r);
     c = vec4<f32>(c.rgb * (1.0 - params.highlights * highlight_mask * 0.5), c.a);
+
+    // Gamma: power curve (1.0 = no change)
+    c = vec4<f32>(pow(max(c.rgb, vec3<f32>(0.0)), vec3<f32>(params.gamma)), c.a);
 
     textureStore(output_tex, vec2<i32>(gid.xy), c);
 }
