@@ -82,7 +82,7 @@ export const Toolbar: Component = () => {
   };
 
   return (
-    <header class="absolute lg:static top-0 w-full z-50 grid grid-cols-[40px_1fr_40px] md:grid-cols-[auto_1fr_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5">
+    <header class="absolute lg:static top-0 w-full z-50 grid grid-cols-[40px_1fr_40px] md:grid-cols-[auto_1fr_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5 pt-[calc(env(safe-area-inset-top))]">
       <div>
         <Show when={state.canvasWidth > 0 || state.isLoading}>
           <ActionButton
