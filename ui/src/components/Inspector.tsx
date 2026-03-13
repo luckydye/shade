@@ -1,5 +1,5 @@
 import { Component, JSX, Show, createEffect, createSignal } from "solid-js";
-import { addLayer, applyEdit, selectLayer, setLayerVisible, state } from "../store/editor";
+import { addLayer, applyEdit, isDrawerOpen, selectLayer, setIsDrawerOpen, setLayerVisible, state } from "../store/editor";
 
 type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen";
 
@@ -164,7 +164,6 @@ const focusLabels: Record<MobileLayerFocus, string> = {
 };
 
 const Inspector: Component = () => {
-  const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);
   const [layerFocusTypes, setLayerFocusTypes] = createSignal(new Map<number, MobileLayerFocus>());
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
 

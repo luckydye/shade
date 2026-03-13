@@ -1,6 +1,7 @@
 import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import {
   getPreviewDisplaySize,
+  isDrawerOpen,
   openImageFile,
   panPreview,
   previewFrame,
@@ -100,7 +101,7 @@ const Canvas: Component = () => {
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
-        <div class="relative flex h-full items-center justify-center">
+        <div class="relative flex h-full items-center justify-center lg:pb-0" style={{ "padding-bottom": isDrawerOpen() ? "33vh" : "0" }}>
           <canvas
             ref={canvasRef}
             width="800"

@@ -59,6 +59,8 @@ const [state, setState] = createStore<EditorState>({
 
 export { state };
 
+export const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);
+
 function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number) {
   if (currentIdx >= 0 && currentIdx < layers.length) {
     return currentIdx;
