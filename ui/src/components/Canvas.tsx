@@ -90,6 +90,7 @@ const Canvas: Component = () => {
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
+        style={{ "view-transition-name": "active-media" }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -101,7 +102,7 @@ const Canvas: Component = () => {
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
-        <div class="relative flex h-full items-center justify-center lg:pb-0" style={{ "padding-bottom": isDrawerOpen() ? "33vh" : "0" }}>
+        <div class="relative flex h-full items-center justify-center pb-25 lg:pb-0" style={{ "padding-bottom": isDrawerOpen() ? "33vh" : "" }}>
           <canvas
             ref={canvasRef}
             width="800"

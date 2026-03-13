@@ -31,6 +31,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
   const [src] = createResource(() => props.path, resolveSrc);
   // PHAsset local identifiers (iOS) don't have a meaningful filename component.
   const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
+  let imgRef: HTMLImageElement | undefined;
 
   // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
@@ -38,15 +39,26 @@ const ImageTile: Component<{ path: string }> = (props) => {
     if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
   });
 
+  function handleClick() {
+    if (imgRef) imgRef.style.viewTransitionName = "active-media";
+
+    if (document.startViewTransition) {
+      document.startViewTransition(() => void openImage(props.path));
+    } else {
+      void openImage(props.path);
+    }
+  }
+
   return (
     <button
       type="button"
       class="group flex flex-col gap-1.5 rounded-xl text-left hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
-      onClick={() => void openImage(props.path)}
+      onClick={handleClick}
     >
       <div class="aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
         <Suspense fallback={<div class="h-full w-full animate-pulse bg-white/[0.06]" />}>
           <img
+            ref={imgRef}
             src={src()}
             alt={name()}
             class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
