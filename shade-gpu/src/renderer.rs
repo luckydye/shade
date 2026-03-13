@@ -987,9 +987,10 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 mod tests {
     use super::{
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        resample_rgba_f32_region, rgba_display_f32_to_u8, PreviewCrop,
+        resample_rgba_f32_region, rgba_display_f32_to_u8, FloatImage, PreviewCrop, Renderer,
     };
-    use shade_core::ColorSpace;
+    use shade_core::{AdjustmentOp, ColorSpace, LayerStack};
+    use std::collections::HashMap;
 
     #[test]
     fn normalize_preview_crop_clamps_to_canvas() {
@@ -1078,6 +1079,65 @@ mod tests {
 
         assert!(pixel[0] > 0.25);
         assert_eq!(encoded[3], 255);
+    }
+
+    async fn renderer_or_skip() -> Option<Renderer> {
+        match Renderer::new().await {
+            Ok(renderer) => Some(renderer),
+            Err(error) if error.to_string().contains("No suitable wgpu adapter found") => {
+                eprintln!("skipping GPU test: {error}");
+                None
+            }
+            Err(error) => panic!("failed to create renderer: {error}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn second_adjustment_layer_preserves_hdr_highlight_separation() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 2, 1);
+        stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+            exposure: -2.0,
+            contrast: 0.0,
+            blacks: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+        }]);
+        stack.add_adjustment_layer(Vec::new());
+
+        let mut image_sources = HashMap::new();
+        image_sources.insert(
+            1,
+            FloatImage {
+                width: 2,
+                height: 1,
+                pixels: vec![2.0, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 1.0],
+            },
+        );
+
+        let texture = renderer
+            .render_stack_preview_texture(&stack, &image_sources, 2, 1, 2, 1, None)
+            .expect("render stack preview texture");
+        let pixels = renderer
+            .readback_work_texture_to_f32(&texture, 2, 1)
+            .await
+            .expect("read back preview texture");
+
+        let left = pixels[0];
+        let right = pixels[4];
+
+        assert!(
+            left < right,
+            "expected second adjustment layer to preserve highlight ordering, got left={left}, right={right}"
+        );
+        assert!(
+            right > 0.9,
+            "expected brighter highlight to stay above SDR white after two adjustment layers, got {right}"
+        );
     }
 }
 
