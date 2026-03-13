@@ -24,7 +24,8 @@ struct ColorParams {
 
 // ── Tone helpers ──────────────────────────────────────────────────────────────
 fn apply_tone(c: vec4<f32>, p: ToneParams) -> vec4<f32> {
-    var rgb = c.rgb + vec3<f32>(p.exposure);
+    // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
+    var rgb = c.rgb * pow(2.0, p.exposure);
     let mid = vec3<f32>(0.18);
     rgb = mid + (rgb - mid) * (1.0 + p.contrast);
     rgb = rgb + vec3<f32>(p.blacks);

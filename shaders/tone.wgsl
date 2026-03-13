@@ -18,8 +18,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
 
-    // Exposure: linear offset
-    c = vec4<f32>(c.rgb + vec3<f32>(params.exposure), c.a);
+    // Exposure in EV stops: each +1 doubles luminance, each -1 halves it.
+    c = vec4<f32>(c.rgb * pow(2.0, params.exposure), c.a);
 
     // Contrast: pivot around mid-grey 0.18
     let mid = vec3<f32>(0.18);

@@ -317,8 +317,9 @@ const Inspector: Component = () => {
               icon={<SparkIcon />}
               value={tone().exposure}
               defaultValue={DEFAULT_TONE.exposure}
-              min={-1}
-              max={1}
+              min={-5}
+              max={5}
+              step={0.05}
               onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ exposure: value }); }}
             />
             <Slider
@@ -479,8 +480,9 @@ const Inspector: Component = () => {
                 icon={<SparkIcon />}
                 value={tone().exposure}
                 defaultValue={DEFAULT_TONE.exposure}
-                min={-1}
-                max={1}
+                min={-5}
+                max={5}
+                step={0.05}
                 onChange={(value) => {
                   selectedAdjustmentLayerOrThrow();
                   void applyTone({ exposure: value });
