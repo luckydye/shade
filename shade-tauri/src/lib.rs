@@ -10,6 +10,7 @@ pub struct RendererState(pub tokio::sync::Mutex<Option<shade_gpu::Renderer>>);
 pub fn run() {
     tauri::Builder::default()
         .plugin(photos::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RendererState(tokio::sync::Mutex::new(None)))
         .setup(|app| {
@@ -40,6 +41,10 @@ pub fn run() {
             commands::set_layer_opacity,
             commands::get_layer_stack,
             commands::list_pictures,
+            commands::list_media_libraries,
+            commands::list_library_images,
+            commands::add_media_library,
+            commands::remove_media_library,
             commands::get_thumbnail,
         ])
         .run(tauri::generate_context!())

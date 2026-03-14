@@ -1,5 +1,6 @@
 import { Component, createEffect, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
-import { listLibraryImages, listMediaLibraries } from "../bridge/index";
+import { open } from "@tauri-apps/plugin-dialog";
+import { addMediaLibrary, listLibraryImages, listMediaLibraries, removeMediaLibrary } from "../bridge/index";
 import { resolveMediaSrc } from "../media-source";
 import { openImage, state } from "../store/editor";
 
@@ -80,48 +81,118 @@ const ImageTile: Component<{ path: string }> = (props) => {
 };
 
 export const MediaView: Component = () => {
-  const [libraries] = createResource(listMediaLibraries);
+  const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
-  const [images] = createResource(selectedLibraryId, listLibraryImages);
+  const [images, { refetch: refetchImages }] = createResource(selectedLibraryId, listLibraryImages);
+  const [isSubmitting, setIsSubmitting] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
 
   createEffect(() => {
     const availableLibraries = libraries();
-    if (!availableLibraries?.length) return;
-    if (selectedLibraryId()) return;
+    if (!availableLibraries?.length) {
+      setSelectedLibraryId(null);
+      return;
+    }
+    const current = selectedLibraryId();
+    if (current && availableLibraries.some((library) => library.id === current)) return;
     setSelectedLibraryId(availableLibraries[0].id);
   });
 
   const selectedLibrary = () => libraries()?.find((library) => library.id === selectedLibraryId()) ?? null;
 
+  async function handleAddLibrary() {
+    if (isSubmitting()) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (selectedPath === null) {
+        return;
+      }
+      if (Array.isArray(selectedPath)) {
+        throw new Error("expected a single directory path");
+      }
+      const library = await addMediaLibrary(selectedPath);
+      await refetchLibraries();
+      setSelectedLibraryId(library.id);
+      await refetchImages();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRemoveLibrary() {
+    const library = selectedLibrary();
+    if (!library?.removable) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await removeMediaLibrary(library.id);
+      await refetchLibraries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <div class="flex flex-1 flex-col overflow-hidden mt-[calc(env(safe-area-inset-top)+3.5rem)] md:mt-0">
       <div class="border-b border-white/6 px-6 py-4">
-        <div class="flex items-center gap-8">
-          <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-4">
+          <div class="flex items-center gap-8">
             <h1 class="text-sm font-medium text-white/80">Libraries</h1>
+            <div class="flex flex-1 gap-2 overflow-x-auto">
+              <For each={libraries()}>
+                {(library) => (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLibraryId(library.id)}
+                    class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
+                      selectedLibraryId() === library.id
+                        ? "border-white/18 bg-white/12 text-white"
+                        : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
+                    }`}
+                  >
+                    {library.name}
+                  </button>
+                )}
+              </For>
+              <button
+                type="button"
+                class="shrink-0 rounded-full border border-dashed border-white/14 bg-white/[0.03] px-3 py-2 text-[14px] font-semibold leading-none text-white/60 transition-colors hover:border-white/24 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isSubmitting()}
+                onClick={() => void handleAddLibrary()}
+                aria-label="Add library"
+              >
+                +
+              </button>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-xs font-medium uppercase tracking-[0.12em] text-white/28">
+                {selectedLibrary()?.kind ?? "source"}
+              </span>
+              <button
+                type="button"
+                class="rounded-full border border-red-500/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!selectedLibrary()?.removable || isSubmitting()}
+                onClick={() => void handleRemoveLibrary()}
+              >
+                Remove
+              </button>
+            </div>
           </div>
-          <div class="flex flex-1 gap-2 overflow-x-auto">
-            <For each={libraries()}>
-              {(library) => (
-                <button
-                  type="button"
-                  onClick={() => setSelectedLibraryId(library.id)}
-                  class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
-                    selectedLibraryId() === library.id
-                      ? "border-white/18 bg-white/12 text-white"
-                      : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
-                  }`}
-                >
-                  {library.name}
-                </button>
-              )}
-            </For>
-          </div>
-          <div>
-            <span class="text-xs font-medium uppercase tracking-[0.12em] text-white/28">
-              {selectedLibrary()?.kind ?? "source"}
-            </span>
-          </div>
+          {error() && (
+            <p class="text-sm text-red-300">{error()}</p>
+          )}
+          {selectedLibrary()?.path && (
+            <p class="truncate text-xs text-white/28">{selectedLibrary()!.path}</p>
+          )}
         </div>
       </div>
       <div class="flex-1 overflow-y-auto p-6">

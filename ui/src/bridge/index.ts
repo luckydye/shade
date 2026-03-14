@@ -356,25 +356,41 @@ export interface MediaLibrary {
   id: string;
   name: string;
   kind: "directory";
+  path?: string | null;
+  removable: boolean;
 }
 
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
-  return [
-    {
-      id: "pictures",
-      name: "Pictures",
-      kind: "directory",
-    },
-  ];
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_media_libraries") as Promise<MediaLibrary[]>;
+  }
+  throw new Error("listMediaLibraries is only implemented for Tauri");
 }
 
 export async function listLibraryImages(libraryId: string): Promise<string[]> {
-  switch (libraryId) {
-    case "pictures":
-      return listPictures();
-    default:
-      throw new Error(`unknown media library: ${libraryId}`);
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_library_images", { libraryId }) as Promise<string[]>;
   }
+  throw new Error("listLibraryImages is only implemented for Tauri");
+}
+
+export async function addMediaLibrary(path: string): Promise<MediaLibrary> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("add_media_library", { path }) as Promise<MediaLibrary>;
+  }
+  throw new Error("addMediaLibrary is only implemented for Tauri");
+}
+
+export async function removeMediaLibrary(id: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("remove_media_library", { id });
+    return;
+  }
+  throw new Error("removeMediaLibrary is only implemented for Tauri");
 }
 
 export async function addLayer(kind: string): Promise<number> {

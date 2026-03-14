@@ -4,6 +4,7 @@ use shade_core::{
     LayerStack, SharpenParams, VignetteParams,
 };
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[cfg(target_os = "ios")]
@@ -30,6 +31,134 @@ pub struct EditorState {
     pub canvas_height: u32,
     pub next_texture_id: u64,
     pub source_bit_depth: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MediaLibrary {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub path: Option<String>,
+    pub removable: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct MediaLibraryConfig {
+    directories: Vec<String>,
+}
+
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
+    "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
+];
+
+fn media_library_config_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".config/shade/config.json"))
+}
+
+fn load_media_library_config() -> Result<MediaLibraryConfig, String> {
+    let path = media_library_config_path()?;
+    if !path.exists() {
+        return Ok(MediaLibraryConfig::default());
+    }
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| format!("invalid media library config at {}: {e}", path.display()))
+}
+
+fn save_media_library_config(config: &MediaLibraryConfig) -> Result<(), String> {
+    let path = media_library_config_path()?;
+    let parent = path.parent().ok_or_else(|| format!("invalid config path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+fn default_pictures_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join("Pictures"))
+}
+
+fn custom_library_id(path: &Path) -> String {
+    format!("dir:{}", path.display())
+}
+
+fn library_for_directory(path: PathBuf) -> MediaLibrary {
+    let name = path.file_name()
+        .and_then(|segment| segment.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string());
+    MediaLibrary {
+        id: custom_library_id(&path),
+        name,
+        kind: "directory".into(),
+        path: Some(path.display().to_string()),
+        removable: true,
+    }
+}
+
+fn list_desktop_media_libraries() -> Result<Vec<MediaLibrary>, String> {
+    let pictures_dir = default_pictures_dir()?;
+    let mut libraries = vec![MediaLibrary {
+        id: "pictures".into(),
+        name: "Pictures".into(),
+        kind: "directory".into(),
+        path: Some(pictures_dir.display().to_string()),
+        removable: false,
+    }];
+    let config = load_media_library_config()?;
+    for directory in config.directories {
+        let path = PathBuf::from(directory);
+        libraries.push(library_for_directory(path));
+    }
+    Ok(libraries)
+}
+
+fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
+    if library_id == "pictures" {
+        return default_pictures_dir();
+    }
+    let config = load_media_library_config()?;
+    for directory in config.directories {
+        let path = PathBuf::from(&directory);
+        if custom_library_id(&path) == library_id {
+            return Ok(path);
+        }
+    }
+    Err(format!("unknown media library: {library_id}"))
+}
+
+fn collect_images_in_directory(dir: &Path) -> Result<Vec<String>, String> {
+    let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(current_dir) = dirs.pop() {
+        let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
+            if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                continue;
+            }
+            let path_string = path.to_str()
+                .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
+                .to_string();
+            let mtime = path.metadata()
+                .map_err(|e| e.to_string())?
+                .modified()
+                .map_err(|e| e.to_string())?;
+            entries_with_mtime.push((mtime, path_string));
+        }
+    }
+    entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(entries_with_mtime.into_iter().map(|(_, path)| path).collect())
 }
 
 impl Default for EditorState {
@@ -830,43 +959,117 @@ pub async fn list_pictures<R: tauri::Runtime>(
     .map_err(|e| e.to_string())?;
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    {
-        let search_dir = std::env::var("HOME").ok()
-            .map(|h| std::path::PathBuf::from(h).join("Pictures"));
+    collect_images_in_directory(&default_pictures_dir()?)
+}
 
-        const IMAGE_EXTENSIONS: &[&str] = &[
-            "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
-            "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
-        ];
-        let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
-        if let Some(dir) = search_dir {
-            let mut dirs = vec![dir];
-            while let Some(current_dir) = dirs.pop() {
-                let Ok(entries) = std::fs::read_dir(&current_dir) else { continue; };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        dirs.push(path);
-                        continue;
-                    }
-                    if !path.is_file() {
-                        continue;
-                    }
-                    let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
-                    if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                        continue;
-                    }
-                    let Some(s) = path.to_str() else { continue; };
-                    let mtime = path.metadata().ok()
-                        .and_then(|m| m.modified().ok())
-                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                    entries_with_mtime.push((mtime, s.to_string()));
-                }
-            }
-        }
-        entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
-        Ok(entries_with_mtime.into_iter().map(|(_, p)| p).collect())
+#[tauri::command]
+pub async fn list_media_libraries<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+) -> Result<Vec<MediaLibrary>, String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return Ok(vec![MediaLibrary {
+            id: "photos".into(),
+            name: "Photos".into(),
+            kind: "directory".into(),
+            path: None,
+            removable: false,
+        }]);
     }
+
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        return Ok(vec![MediaLibrary {
+            id: "photos".into(),
+            name: "Photos".into(),
+            kind: "directory".into(),
+            path: None,
+            removable: false,
+        }]);
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let _ = _app;
+        list_desktop_media_libraries()
+    }
+}
+
+#[tauri::command]
+pub async fn list_library_images<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    library_id: String,
+) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        if library_id != "photos" {
+            return Err(format!("unknown media library: {library_id}"));
+        }
+        return _app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .list_photos()
+            .await;
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        if library_id != "photos" {
+            return Err(format!("unknown media library: {library_id}"));
+        }
+        return tokio::task::spawn_blocking(|| {
+            let ptr = unsafe { ios_list_photos() };
+            if ptr.is_null() {
+                return Ok(vec![]);
+            }
+            let json = unsafe {
+                let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+                ios_free_string(ptr);
+                s
+            };
+            serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let _ = _app;
+        collect_images_in_directory(&resolve_desktop_library_path(&library_id)?)
+    }
+}
+
+#[tauri::command]
+pub async fn add_media_library(path: String) -> Result<MediaLibrary, String> {
+    let canonical = std::fs::canonicalize(Path::new(&path)).map_err(|e| e.to_string())?;
+    if !canonical.is_dir() {
+        return Err(format!("not a directory: {}", canonical.display()));
+    }
+    let mut config = load_media_library_config()?;
+    let canonical_string = canonical.to_str()
+        .ok_or_else(|| format!("non-utf8 path: {}", canonical.display()))?
+        .to_string();
+    if !config.directories.iter().any(|existing| existing == &canonical_string) {
+        config.directories.push(canonical_string);
+        save_media_library_config(&config)?;
+    }
+    Ok(library_for_directory(canonical))
+}
+
+#[tauri::command]
+pub async fn remove_media_library(id: String) -> Result<(), String> {
+    if id == "pictures" || id == "photos" {
+        return Err(format!("media library is not removable: {id}"));
+    }
+    let mut config = load_media_library_config()?;
+    let before = config.directories.len();
+    config.directories.retain(|directory| custom_library_id(Path::new(directory)) != id);
+    if config.directories.len() == before {
+        return Err(format!("unknown media library: {id}"));
+    }
+    save_media_library_config(&config)
 }
 
 #[tauri::command]
