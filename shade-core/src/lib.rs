@@ -233,6 +233,7 @@ pub enum AdjustmentOp {
         lut_b: Vec<f32>,
         lut_master: Vec<f32>,
         per_channel: bool,
+        control_points: Option<Vec<CurveControlPoint>>,
     },
     Color(ColorParams),
     Vignette(VignetteParams),

@@ -28,7 +28,6 @@ extern "C" {
 pub struct EditorState {
     pub stack: LayerStack,
     pub image_sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
-    pub curve_control_points: Vec<Option<Vec<CurveControlPoint>>>,
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
@@ -331,7 +330,6 @@ impl Default for EditorState {
         Self {
             stack: LayerStack::new(),
             image_sources: std::collections::HashMap::new(),
-            curve_control_points: Vec::new(),
             canvas_width: 1920,
             canvas_height: 1080,
             next_texture_id: 1,
@@ -366,7 +364,6 @@ impl EditorState {
         self.canvas_height = height;
         self.source_bit_depth = source_bit_depth.clone();
         self.stack.add_image_layer(texture_id, width, height);
-        self.curve_control_points = vec![None];
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
             contrast: 0.0,
@@ -376,7 +373,6 @@ impl EditorState {
             shadows: 0.0,
             gamma: 1.0,
         }]);
-        self.curve_control_points.push(None);
         LayerInfoResponse {
             layer_count: self.stack.layers.len(),
             canvas_width: width,
@@ -692,7 +688,6 @@ pub async fn apply_edit(
     let mut st = state.lock().unwrap();
     let canvas_width = st.canvas_width;
     let canvas_height = st.canvas_height;
-    let mut next_curve_control_points: Option<Vec<CurveControlPoint>> = None;
     if params.layer_idx >= st.stack.layers.len() {
         return Err("layer index out of bounds".into());
     }
@@ -759,8 +754,8 @@ pub async fn apply_edit(
                         lut_b: linear_lut(),
                         lut_master: build_curve_lut_from_points(&curve_points),
                         per_channel: false,
+                        control_points: Some(curve_points),
                     };
-                    next_curve_control_points = Some(curve_points);
                     if let Some(op) = ops
                         .iter_mut()
                         .find(|op| matches!(op, AdjustmentOp::Curves { .. }))
@@ -836,9 +831,6 @@ pub async fn apply_edit(
         }
         _ => return Err("target layer is not editable by apply_edit".into()),
     }
-    if let Some(points) = next_curve_control_points {
-        st.curve_control_points[params.layer_idx] = Some(points);
-    }
     Ok(())
 }
 
@@ -866,6 +858,7 @@ pub async fn add_layer(
             lut_b: linear_lut(),
             lut_master: linear_lut(),
             per_channel: false,
+            control_points: None,
         }]),
         "crop" => st.stack.add_crop_layer(CropRect {
             x: 0.0,
@@ -875,7 +868,6 @@ pub async fn add_layer(
         }),
         _ => return Err(format!("unknown layer kind: {kind}")),
     };
-    st.curve_control_points.insert(idx, None);
     Ok(idx)
 }
 
@@ -937,7 +929,6 @@ pub async fn delete_layer(
         st.stack.masks.remove(&mask_id);
     }
     st.stack.layers.remove(params.layer_idx);
-    st.curve_control_points.remove(params.layer_idx);
     st.stack.generation += 1;
     Ok(())
 }
@@ -1220,8 +1211,7 @@ pub async fn get_layer_stack(
         .stack
         .layers
         .iter()
-        .enumerate()
-        .map(|(idx, l)| LayerEntryInfo {
+        .map(|l| LayerEntryInfo {
             kind: match &l.layer {
                 shade_core::Layer::Image { .. } => "image".into(),
                 shade_core::Layer::Crop { .. } => "crop".into(),
@@ -1278,6 +1268,7 @@ pub async fn get_layer_stack(
                                 lut_b,
                                 lut_master,
                                 per_channel,
+                                control_points,
                             } => {
                                 adjustments.curves = Some(CurvesValues {
                                     lut_r: lut_r.clone(),
@@ -1285,7 +1276,7 @@ pub async fn get_layer_stack(
                                     lut_b: lut_b.clone(),
                                     lut_master: lut_master.clone(),
                                     per_channel: *per_channel,
-                                    control_points: st.curve_control_points[idx].clone(),
+                                    control_points: control_points.clone(),
                                 });
                             }
                             AdjustmentOp::Vignette(params) => {
