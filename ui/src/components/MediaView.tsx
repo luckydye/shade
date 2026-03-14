@@ -163,7 +163,7 @@ export const MediaView: Component = () => {
       <div class="border-b border-white/6 px-6 py-4">
         <div class="flex flex-col gap-4">
           <div class="flex items-center gap-8">
-            <h1 class="text-sm font-medium text-white/80">Libraries</h1>
+            <h1 class="hidden md:block text-sm font-medium text-white/80">Libraries</h1>
             <div class="flex flex-1 gap-2 overflow-x-auto">
               <For each={libraries()}>
                 {(library) => (
@@ -191,9 +191,6 @@ export const MediaView: Component = () => {
               </button>
             </div>
             <div class="flex items-center gap-3">
-              <span class="text-xs font-medium uppercase tracking-[0.12em] text-white/28">
-                {selectedLibrary()?.kind ?? "source"}
-              </span>
               <button
                 type="button"
                 class="rounded-full border border-red-500/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"

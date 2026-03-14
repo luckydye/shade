@@ -837,16 +837,6 @@ const Inspector: Component = () => {
                   </div>
                 }
               >
-                <div class="mb-3 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteSelectedLayer()}
-                    class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-                  >
-                    <TrashIcon />
-                    Delete Layer
-                  </button>
-                </div>
                 <div class="flex flex-col gap-3">
                   <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
                   <Slider
@@ -998,16 +988,6 @@ const Inspector: Component = () => {
               </Show>
             }
           >
-            <div class="mb-3 flex justify-end">
-              <button
-                type="button"
-                onClick={() => void handleDeleteSelectedLayer()}
-                class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-              >
-                <TrashIcon />
-                Delete Layer
-              </button>
-            </div>
             <CropPanel />
           </Show>
         </div>
@@ -1015,7 +995,7 @@ const Inspector: Component = () => {
 
       {/* Mobile: drawer overlay */}
       <div
-        class={`fixed bottom-0 left-0 right-0 z-30 border-t border-white/30 bg-black/50 transition-transform duration-300 ease-out lg:hidden ${
+        class={`fixed bottom-0 left-0 right-0 z-30  bg-black/50 transition-transform duration-300 ease-out lg:hidden ${
           isDrawerOpen() ? "translate-y-0" : "translate-y-[calc(100%-4.5rem)]"
         }`}
       >
@@ -1035,32 +1015,12 @@ const Inspector: Component = () => {
                 fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
               >
                 <div class="px-1">
-                  <div class="pb-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteSelectedLayer()}
-                      class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors active:bg-white/[0.08]"
-                    >
-                      <TrashIcon />
-                      Delete Layer
-                    </button>
-                  </div>
-                  <div class="pb-4">{renderLayerBody()}</div>
+                  {renderLayerBody()}
                 </div>
               </Show>
             }
           >
             <div class="px-1">
-              <div class="pb-3">
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteSelectedLayer()}
-                  class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors active:bg-white/[0.08]"
-                >
-                  <TrashIcon />
-                  Delete Layer
-                </button>
-              </div>
               <CropPanel />
             </div>
           </Show>
@@ -1084,6 +1044,9 @@ const Inspector: Component = () => {
               </button>
             );
           })}
+          
+          <div class="flex-1"></div>
+          
           <button
             type="button"
             onClick={() => setIsPickerOpen((v) => !v)}
@@ -1091,9 +1054,19 @@ const Inspector: Component = () => {
               isPickerOpen() ? "text-stone-100" : "text-white/34"
             }`}
           >
-            <span class="flex h-5 w-5 items-center justify-center text-lg leading-none">+</span>
+            <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">+</span>
             <span>Add</span>
           </button>
+          
+          <button
+            type="button"
+            onClick={() => void handleDeleteSelectedLayer()}
+            class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
+          >
+            <TrashIcon />
+            <span>Delete</span>
+          </button>
+          
         </div>
 
       </div>
@@ -1101,7 +1074,7 @@ const Inspector: Component = () => {
       {/* Add layer dialog */}
       <Show when={isPickerOpen()}>
         <div
-          class="fixed inset-0 z-50 flex items-center justify-center lg:hidden"
+          class="fixed bottom-35 right-0 z-50 flex items-center justify-center lg:hidden"
           onClick={() => setIsPickerOpen(false)}
         >
           <div
@@ -1120,6 +1093,14 @@ const Inspector: Component = () => {
                   <span>{focusLabels[focus]}</span>
                 </button>
               ))}
+              
+              <button
+                type="button"
+                onClick={() => void setIsPickerOpen(false)}
+                class="flex justify-end items-center gap-1.5 rounded-xl px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 active:bg-white/10"
+              >
+                <span>Cancel</span>
+              </button>
             </div>
           </div>
         </div>

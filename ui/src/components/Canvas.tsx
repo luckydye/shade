@@ -408,7 +408,7 @@ const Canvas: Component = () => {
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
-        <div class="relative flex h-full items-center justify-center pb-25 lg:pb-0" style={{ "padding-bottom": isDrawerOpen() ? "33vh" : "" }}>
+        <div class="relative flex h-full items-center justify-center pb-25 lg:pb-0" style={{ "padding-bottom": isDrawerOpen() ? "45vh" : "" }}>
           <canvas
             ref={canvasRef}
             width="800"

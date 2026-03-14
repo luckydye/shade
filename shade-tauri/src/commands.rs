@@ -1092,7 +1092,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 ) -> Result<Vec<MediaLibrary>, String> {
     #[cfg(target_os = "android")]
     {
-        let _ = app;
+        let _ = _app;
         return Ok(vec![MediaLibrary {
             id: "photos".into(),
             name: "Photos".into(),
@@ -1104,7 +1104,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
+        let _ = _app;
         return Ok(vec![MediaLibrary {
             id: "photos".into(),
             name: "Photos".into(),
