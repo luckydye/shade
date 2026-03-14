@@ -1,10 +1,14 @@
-import { Component, JSX, Show, createEffect, createSignal, on } from "solid-js";
+import { Component, JSX, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import {
   addLayer,
   applyEdit,
   deleteLayer,
   findCropLayerIdx,
   isDrawerOpen,
+  listPresets,
+  loadPreset,
+  previewContextFrame,
+  savePreset,
   selectLayer,
   setIsDrawerOpen,
   setLayerVisible,
@@ -12,6 +16,7 @@ import {
 } from "../store/editor";
 
 type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen" | "hsl";
+type InspectorTab = "edit" | "presets";
 
 interface SliderProps {
   label: string;
@@ -24,6 +29,7 @@ interface SliderProps {
   valueLabel?: string;
   onChange: (value: number) => void;
   class?: string;
+  accentColor?: string;
 }
 
 const Slider: Component<SliderProps> = (props) => (
@@ -45,7 +51,11 @@ const Slider: Component<SliderProps> = (props) => (
       value={props.value}
       onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))}
       onDblClick={() => props.onChange(props.defaultValue)}
-      class="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/18 accent-white"
+      class="slider h-2 w-full cursor-pointer appearance-none rounded-full"
+      style={{
+        "accent-color": props.accentColor ?? "#ffffff",
+        "--slider-accent": props.accentColor ?? "#ffffff",
+      }}
     />
   </div>
 );
@@ -80,6 +90,11 @@ const DEFAULT_HSL = {
   red_hue: 0, red_sat: 0, red_lum: 0,
   green_hue: 0, green_sat: 0, green_lum: 0,
   blue_hue: 0, blue_sat: 0, blue_lum: 0,
+} as const;
+const HSL_TAB_STYLES = {
+  red: { tabClass: "text-red-400 bg-red-500/15", accentColor: "#f87171" },
+  green: { tabClass: "text-green-400 bg-green-500/15", accentColor: "#4ade80" },
+  blue: { tabClass: "text-blue-400 bg-blue-500/15", accentColor: "#60a5fa" },
 } as const;
 
 interface ControlPoint { x: number; y: number; }
@@ -157,20 +172,6 @@ function normalizePoint(point: ControlPoint): ControlPoint {
   };
 }
 
-function pointsFromLut(lut: readonly number[]): ControlPoint[] {
-  if (lut.length !== 256) throw new Error("invalid LUT length");
-  const points: ControlPoint[] = [];
-  let prevSlope = lut[1] - lut[0];
-  for (let x = 1; x < 255; x += 1) {
-    const nextSlope = lut[x + 1] - lut[x];
-    if (Math.abs(nextSlope - prevSlope) > 1e-6) {
-      points.push({ x, y: clamp(lut[x], 0, 1) });
-    }
-    prevSlope = nextSlope;
-  }
-  return points;
-}
-
 function curvePath(lut: readonly number[]) {
   return lut
     .map((value, idx) => {
@@ -179,6 +180,45 @@ function curvePath(lut: readonly number[]) {
       return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
     })
     .join(" ");
+}
+
+function buildLuminanceHistogram(frame: ImageData, binCount = 64) {
+  const bins = new Array<number>(binCount).fill(0);
+  const { data } = frame;
+  for (let idx = 0; idx < data.length; idx += 4) {
+    const alpha = data[idx + 3] / 255;
+    if (alpha <= 0) continue;
+    const luminance = (
+      (data[idx] / 255) * 0.2126
+      + (data[idx + 1] / 255) * 0.7152
+      + (data[idx + 2] / 255) * 0.0722
+    ) * alpha;
+    const binIdx = Math.min(binCount - 1, Math.floor(luminance * (binCount - 1)));
+    bins[binIdx] += 1;
+  }
+  return bins;
+}
+
+function histogramPath(bins: readonly number[]) {
+  const peak = Math.max(...bins, 0);
+  if (peak <= 0) return "";
+  const step = 100 / Math.max(1, bins.length - 1);
+  const points = bins.map((value, idx) => {
+    const x = idx * step;
+    const y = 100 - (value / peak) * 100;
+    return `${x} ${y}`;
+  });
+  return `M 0 100 L ${points.join(" L ")} L 100 100 Z`;
+}
+
+function remapPath(path: string, width: number, height: number, padding: number) {
+  const innerWidth = Math.max(1, width - padding * 2);
+  const innerHeight = Math.max(1, height - padding * 2);
+  return path.replace(/(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)/g, (_, x, y) => {
+    const nextX = padding + (parseFloat(x) / 100) * innerWidth;
+    const nextY = padding + (parseFloat(y) / 100) * innerHeight;
+    return `${nextX} ${nextY}`;
+  });
 }
 
 function valueLabel(value: number, scale = 100) {
@@ -273,6 +313,11 @@ const Inspector: Component = () => {
   const [curvePointCache, setCurvePointCache] = createSignal(new Map<number, ControlPoint[]>());
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
+  const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
+  const [presets, setPresets] = createSignal<{ name: string }[]>([]);
+  const [presetName, setPresetName] = createSignal("");
+  const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
+  const [isPresetBusy, setIsPresetBusy] = createSignal(false);
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
   const selectedCropLayer = () => {
@@ -328,16 +373,11 @@ const Inspector: Component = () => {
 
   const applyCurves = (points: readonly ControlPoint[]) => {
     const normalizedPoints = normalizePoints(points);
-    const lutMaster = buildLutFromPoints(normalizedPoints);
     setCurvePointCache((prev) => new Map(prev).set(state.selectedLayerIdx, normalizedPoints));
     return applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "curves",
-      lut_r: IDENTITY_LUT,
-      lut_g: IDENTITY_LUT,
-      lut_b: IDENTITY_LUT,
-      lut_master: lutMaster,
-      per_channel: false,
+      curve_points: normalizedPoints,
     });
   };
 
@@ -364,20 +404,55 @@ const Inspector: Component = () => {
   // an active drag. A component (<HslSection />) gets fine-grained in-place updates.
   const CurvesEditor: Component = () => {
     const [draggingId, setDraggingId] = createSignal<number | null>(null);
+    const [hoveredId, setHoveredId] = createSignal<number | null>(null);
     const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
+    const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
+    const luminanceHistogram = createMemo(() => {
+      const frame = previewContextFrame();
+      return frame ? buildLuminanceHistogram(frame) : [];
+    });
     let svgRef!: SVGSVGElement;
     let nextId = 0;
     let lastTapTime = 0;
     let lastTapId = -1;
 
-    createEffect(on(() => state.selectedLayerIdx, () => {
-      const points = curvePointCache().get(state.selectedLayerIdx) ?? pointsFromLut(curves().lut_master);
+    createEffect(on(() => state.selectedLayerIdx, (layerIdx) => {
+      const layer = state.layers[layerIdx];
+      if (layer?.kind !== "adjustment") {
+        setPts([]);
+        setDraggingId(null);
+        setHoveredId(null);
+        return;
+      }
+      const points = curvePointCache().get(layerIdx)
+        ?? layer.adjustments?.curves?.control_points
+        ?? defaultCurvePoints();
       nextId = 0;
       setPts((points.length === 0 ? defaultCurvePoints() : points).map((point) => ({ ...point, id: nextId++ })));
       setDraggingId(null);
-    }, { defer: true }));
+      setHoveredId(null);
+    }));
 
     const lut = () => buildLutFromPoints(pts());
+    const graphPadding = 10;
+    const innerWidth = () => Math.max(1, svgSize().width - graphPadding * 2);
+    const innerHeight = () => Math.max(1, svgSize().height - graphPadding * 2);
+    const chartX = (value: number) => graphPadding + (value / 255) * innerWidth();
+    const chartY = (value: number) => graphPadding + (1 - value) * innerHeight();
+    const curveSvgPath = () => remapPath(curvePath(lut()), svgSize().width, svgSize().height, graphPadding);
+    const histogramSvgPath = () => remapPath(histogramPath(luminanceHistogram()), svgSize().width, svgSize().height, graphPadding);
+
+    onMount(() => {
+      const updateSize = () => {
+        const width = Math.max(1, Math.round(svgRef.clientWidth));
+        const height = Math.max(1, Math.round(svgRef.clientHeight));
+        setSvgSize({ width, height });
+      };
+      updateSize();
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(svgRef);
+      onCleanup(() => observer.disconnect());
+    });
 
     const svgCoords = (event: { clientX: number; clientY: number }) => {
       const point = svgRef.createSVGPoint();
@@ -387,8 +462,8 @@ const Inspector: Component = () => {
       if (!ctm) throw new Error("missing SVG screen transform");
       const local = point.matrixTransform(ctm.inverse());
       return {
-        x: clamp((local.x / 100) * 255, 1, 254),
-        y: clamp(1 - local.y / 100, 0, 1),
+        x: clamp(((local.x - graphPadding) / innerWidth()) * 255, 1, 254),
+        y: clamp(1 - (local.y - graphPadding) / innerHeight(), 0, 1),
       };
     };
 
@@ -401,76 +476,101 @@ const Inspector: Component = () => {
           </div>
           <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">Master</span>
         </div>
-        <svg
-          ref={svgRef!}
-          viewBox="0 0 100 100"
-          class="block h-40 w-full select-none"
-          style={{ cursor: draggingId() !== null ? "grabbing" : "crosshair" }}
-          onPointerDown={(e) => {
-            if (e.target !== svgRef) return;
-            const { x, y } = normalizePoint(svgCoords(e));
-            const id = nextId++;
-            const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
-            setPts(next);
-            selectedAdjustmentLayerOrThrow();
-            void applyCurves(next);
-            svgRef.setPointerCapture(e.pointerId);
-            setDraggingId(id);
-          }}
-          onPointerMove={(e) => {
-            const id = draggingId();
-            if (id === null) return;
-            const { x, y } = normalizePoint(svgCoords(e));
-            const next = pts().map(p => p.id === id ? { ...p, x, y } : p).sort((a, b) => a.x - b.x);
-            setPts(next);
-            selectedAdjustmentLayerOrThrow();
-            void applyCurves(next);
-          }}
-          onPointerUp={(e) => {
-            if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
-            setDraggingId(null);
-          }}
-          onPointerLeave={() => setDraggingId(null)}
-        >
-          <path d="M 0 100 L 100 0" stroke="#525252" stroke-width="0.8" fill="none" />
-          <path d={curvePath(lut())} stroke="#f5f5f4" stroke-width="1.5" fill="none" />
-          {pts().map((pt) => (
-            <circle
-              cx={(pt.x / 255) * 100}
-              cy={(1 - pt.y) * 100}
-              r="3.5"
-              fill="#f5f5f4"
-              stroke="#111111"
-              stroke-width="1.5"
-              style={{ cursor: draggingId() === pt.id ? "grabbing" : "grab" }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                const now = Date.now();
-                if (now - lastTapTime < 300 && lastTapId === pt.id) {
-                  lastTapTime = 0;
-                  const next = pts().filter(p => p.id !== pt.id);
-                  setPts(next);
-                  selectedAdjustmentLayerOrThrow();
-                  void applyCurves(next);
-                  if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
-                  setDraggingId(null);
-                  return;
-                }
-                lastTapTime = now;
-                lastTapId = pt.id;
-                e.preventDefault();
-                svgRef.setPointerCapture(e.pointerId);
-                setDraggingId(pt.id);
-              }}
-            />
-          ))}
-        </svg>
+        <div class="lg:-mx-4">
+          <svg
+            ref={svgRef!}
+            viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
+            class="block h-40 w-full select-none"
+            style={{ cursor: draggingId() !== null ? "grabbing" : "crosshair" }}
+            onPointerDown={(e) => {
+              if (e.target !== svgRef) return;
+              const { x, y } = normalizePoint(svgCoords(e));
+              const id = nextId++;
+              const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
+              setPts(next);
+              selectedAdjustmentLayerOrThrow();
+              void applyCurves(next);
+              svgRef.setPointerCapture(e.pointerId);
+              setDraggingId(id);
+            }}
+            onPointerMove={(e) => {
+              const id = draggingId();
+              if (id === null) return;
+              const { x, y } = normalizePoint(svgCoords(e));
+              const next = pts().map(p => p.id === id ? { ...p, x, y } : p).sort((a, b) => a.x - b.x);
+              setPts(next);
+              selectedAdjustmentLayerOrThrow();
+              void applyCurves(next);
+            }}
+            onPointerUp={(e) => {
+              if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
+              setDraggingId(null);
+            }}
+            onPointerLeave={() => {
+              setDraggingId(null);
+              setHoveredId(null);
+            }}
+          >
+            <rect x={graphPadding} y={graphPadding} width={innerWidth()} height={innerHeight()} fill="#080808" pointer-events="none" />
+            <Show when={histogramSvgPath()}>
+              {(path) => <path d={path()} fill="#f5f5f4" fill-opacity="0.12" stroke="none" pointer-events="none" />}
+            </Show>
+            <path d={`M ${graphPadding} ${graphPadding + innerHeight()} L ${graphPadding + innerWidth()} ${graphPadding}`} stroke="#525252" stroke-width="0.8" fill="none" pointer-events="none" />
+            <path d={curveSvgPath()} stroke="#f5f5f4" stroke-width="1.5" fill="none" pointer-events="none" />
+            {pts().map((pt) => (
+              <>
+                <circle
+                  cx={chartX(pt.x)}
+                  cy={chartY(pt.y)}
+                  r="7"
+                  fill="none"
+                  stroke="#f5f5f4"
+                  stroke-width="1.5"
+                  opacity={hoveredId() === pt.id ? "0.75" : "0"}
+                  pointer-events="none"
+                />
+                <circle
+                  cx={chartX(pt.x)}
+                  cy={chartY(pt.y)}
+                  r="4.5"
+                  fill="#f5f5f4"
+                  stroke="#111111"
+                  stroke-width="1.5"
+                  style={{ cursor: draggingId() === pt.id ? "grabbing" : "grab" }}
+                  onPointerEnter={() => setHoveredId(pt.id)}
+                  onPointerLeave={() => setHoveredId((current) => current === pt.id ? null : current)}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    setHoveredId(pt.id);
+                    const now = Date.now();
+                    if (now - lastTapTime < 300 && lastTapId === pt.id) {
+                      lastTapTime = 0;
+                      const next = pts().filter(p => p.id !== pt.id);
+                      setPts(next);
+                      selectedAdjustmentLayerOrThrow();
+                      void applyCurves(next);
+                      if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
+                      setDraggingId(null);
+                      setHoveredId(null);
+                      return;
+                    }
+                    lastTapTime = now;
+                    lastTapId = pt.id;
+                    e.preventDefault();
+                    svgRef.setPointerCapture(e.pointerId);
+                    setDraggingId(pt.id);
+                  }}
+                />
+              </>
+            ))}
+          </svg>
+        </div>
       </div>
     );
   };
 
   const HslSection: Component = () => {
-    const tabColors = { red: "text-red-400 bg-red-500/15", green: "text-green-400 bg-green-500/15", blue: "text-blue-400 bg-blue-500/15" } as const;
+    const accentColor = () => HSL_TAB_STYLES[hslTab()].accentColor;
     const hue = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_hue : t === "green" ? h.green_hue : h.blue_hue; };
     const sat = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_sat : t === "green" ? h.green_sat : h.blue_sat; };
     const lum = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_lum : t === "green" ? h.green_lum : h.blue_lum; };
@@ -481,15 +581,15 @@ const Inspector: Component = () => {
             <button
               type="button"
               onClick={() => setHslTab(c)}
-              class={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors ${hslTab() === c ? tabColors[c] : "text-white/28 hover:text-white/50"}`}
+              class={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors ${hslTab() === c ? HSL_TAB_STYLES[c].tabClass : "text-white/28 hover:text-white/50"}`}
             >
               {c}
             </button>
           ))}
         </div>
-        <Slider label="Hue"        icon={<HslIcon />}    value={hue()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_hue: v } : hslTab() === "green" ? { green_hue: v } : { blue_hue: v }); }} />
-        <Slider label="Saturation" icon={<DropletIcon />} value={sat()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_sat: v } : hslTab() === "green" ? { green_sat: v } : { blue_sat: v }); }} />
-        <Slider label="Luminance"  icon={<ToneIcon />}   value={lum()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_lum: v } : hslTab() === "green" ? { green_lum: v } : { blue_lum: v }); }} />
+        <Slider label="Hue"        icon={<HslIcon />}    value={hue()} defaultValue={0} min={-1} max={1} step={0.01} accentColor={accentColor()} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_hue: v } : hslTab() === "green" ? { green_hue: v } : { blue_hue: v }); }} />
+        <Slider label="Saturation" icon={<DropletIcon />} value={sat()} defaultValue={0} min={-1} max={1} step={0.01} accentColor={accentColor()} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_sat: v } : hslTab() === "green" ? { green_sat: v } : { blue_sat: v }); }} />
+        <Slider label="Luminance"  icon={<ToneIcon />}   value={lum()} defaultValue={0} min={-1} max={1} step={0.01} accentColor={accentColor()} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_lum: v } : hslTab() === "green" ? { green_lum: v } : { blue_lum: v }); }} />
       </div>
     );
   };
@@ -540,7 +640,53 @@ const Inspector: Component = () => {
     if (state.selectedLayerIdx < 0) {
       throw new Error("cannot delete without a selected layer");
     }
+    if (state.layers[state.selectedLayerIdx]?.kind === "image") {
+      throw new Error("cannot delete the image layer");
+    }
     await deleteLayer(state.selectedLayerIdx);
+  };
+
+  const refreshPresetList = async () => {
+    try {
+      setPresets(await listPresets());
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  createEffect(() => {
+    if (inspectorTab() !== "presets") return;
+    void refreshPresetList();
+  });
+
+  const handleSavePreset = async () => {
+    const name = presetName().trim();
+    if (!name) {
+      setPresetStatus("Preset name cannot be empty");
+      return;
+    }
+    setIsPresetBusy(true);
+    try {
+      await savePreset(name);
+      setPresetStatus(`Saved ${name}`);
+      await refreshPresetList();
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsPresetBusy(false);
+    }
+  };
+
+  const handleLoadPreset = async (name: string) => {
+    setIsPresetBusy(true);
+    try {
+      await loadPreset(name);
+      setPresetStatus(`Loaded ${name}`);
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsPresetBusy(false);
+    }
   };
 
 
@@ -745,277 +891,337 @@ const Inspector: Component = () => {
     );
   };
 
+  const PresetsPanel: Component = () => (
+    <div class="flex flex-col gap-4 pt-1">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Presets</div>
+        <button
+          type="button"
+          onClick={() => void refreshPresetList()}
+          class="text-[10px] font-bold uppercase tracking-[0.08em] text-white/40 transition-colors hover:text-white/70"
+        >
+          Refresh
+        </button>
+      </div>
+      <div class="flex gap-2">
+        <input
+          type="text"
+          value={presetName()}
+          onInput={(event) => setPresetName(event.currentTarget.value)}
+          placeholder="Preset name"
+          class="min-h-10 flex-1 border border-white/8 bg-black/30 px-3 text-[13px] font-medium text-white outline-none transition-colors placeholder:text-white/20"
+        />
+        <button
+          type="button"
+          disabled={isPresetBusy() || state.canvasWidth <= 0}
+          onClick={() => void handleSavePreset()}
+          class="min-h-10 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[10px] font-bold uppercase tracking-[0.05em] text-white/70 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100 disabled:opacity-40"
+        >
+          Save
+        </button>
+      </div>
+      <Show when={presetStatus()}>
+        {(status) => <div class="text-[11px] font-medium text-white/45">{status()}</div>}
+      </Show>
+      <div class="flex flex-col gap-2">
+        <Show
+          when={presets().length > 0}
+          fallback={<div class="border border-dashed border-white/10 bg-white/[0.02] px-3 py-4 text-sm text-white/38">No presets saved yet.</div>}
+        >
+          {presets().map((preset) => (
+            <div class="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5">
+              <div class="min-w-0 flex-1 truncate text-[13px] font-semibold text-white/80">{preset.name}</div>
+              <button
+                type="button"
+                disabled={isPresetBusy() || state.canvasWidth <= 0}
+                onClick={() => void handleLoadPreset(preset.name)}
+                class="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-white/65 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100 disabled:opacity-40"
+              >
+                Load
+              </button>
+            </div>
+          ))}
+        </Show>
+      </div>
+    </div>
+  );
+
+  const InspectorTabs: Component<{ class?: string }> = (props) => (
+    <div class={props.class ?? ""}>
+      <div class="flex gap-1 rounded-xl border border-white/8 bg-white/[0.03] p-1">
+        {(["edit", "presets"] as const).map((tab) => (
+          <button
+            type="button"
+            onClick={() => setInspectorTab(tab)}
+            class={`flex-1 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] transition-colors ${
+              inspectorTab() === tab ? "bg-white/10 text-stone-100" : "text-white/34 hover:text-white/60"
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const DesktopEditPanel: Component = () => (
+    <div>
+      <div class="mb-4">
+        <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
+        <div class="mt-3 flex flex-col gap-1">
+          {[...state.layers].reverse().map((layer, reverseIdx) => {
+            const realIdx = state.layers.length - 1 - reverseIdx;
+            const layerName = layer.kind === "image"
+              ? "Image"
+              : layer.kind === "crop"
+                ? "Crop"
+              : layer.adjustments?.curves
+                ? "Curves"
+                : "Adjustment";
+            return (
+              <div
+                class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
+                  state.selectedLayerIdx === realIdx
+                    ? "border-white/16 bg-white/12 text-white"
+                    : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
+                }`}
+              >
+                <span
+                  class={`inline-flex w-4 items-center justify-center text-xs leading-none ${layer.visible ? "text-stone-100" : "text-white/30"}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void setLayerVisible(realIdx, !layer.visible);
+                  }}
+                >
+                  {layer.visible ? "●" : "○"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectLayer(realIdx)}
+                  class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
+                >
+                  {layerName}
+                </button>
+                <Show when={layer.kind !== "image"}>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteLayer(realIdx);
+                    }}
+                    class="inline-flex h-5 w-5 items-center justify-center text-white/28 transition-colors hover:text-white"
+                    title="Delete layer"
+                  >
+                    <TrashIcon />
+                  </button>
+                </Show>
+                <span class="text-[11px] text-white/34">{realIdx + 1}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void addLayer("adjustment")}
+            class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
+          >
+            <span class="[&>svg]:h-4 [&>svg]:w-4"><SparkIcon /></span>
+            <span>Add Adjustments</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void addLayer("crop")}
+            class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
+          >
+            <span class="[&>svg]:h-4 [&>svg]:w-4"><CropIcon /></span>
+            <span>Add Crop</span>
+          </button>
+        </div>
+      </div>
+      <InspectorTabs class="mb-4" />
+    </div>
+  );
+
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
         <div class="flex-1 overflow-y-auto px-4 py-4">
-          <div class="mb-4">
-            <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
-            <div class="mt-3 flex flex-col gap-1">
-              {[...state.layers].reverse().map((layer, reverseIdx) => {
-                const realIdx = state.layers.length - 1 - reverseIdx;
-                const layerName = layer.kind === "image"
-                  ? "Image"
-                  : layer.kind === "crop"
-                    ? "Crop"
-                  : layer.adjustments?.curves
-                    ? "Curves"
-                    : "Adjustment";
-                return (
-                  <div
-                    class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
-                      state.selectedLayerIdx === realIdx
-                        ? "border-white/16 bg-white/12 text-white"
-                        : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    <span
-                      class={`inline-flex w-4 items-center justify-center text-xs leading-none ${layer.visible ? "text-stone-100" : "text-white/30"}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void setLayerVisible(realIdx, !layer.visible);
-                      }}
-                    >
-                      {layer.visible ? "●" : "○"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => selectLayer(realIdx)}
-                      class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
-                    >
-                      {layerName}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void deleteLayer(realIdx);
-                      }}
-                      class="inline-flex h-7 w-7 items-center justify-center text-white/28 transition-colors hover:text-white"
-                      title="Delete layer"
-                    >
-                      <TrashIcon />
-                    </button>
-                    <span class="text-[11px] text-white/34">{realIdx + 1}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div class="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => void addLayer("adjustment")}
-                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-              >
-                Add Tone
-              </button>
-              <button
-                type="button"
-                onClick={() => void addLayer("curves")}
-                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-              >
-                Add Curves
-              </button>
-              <button
-                type="button"
-                onClick={() => void addLayer("crop")}
-                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-              >
-                Add Crop
-              </button>
-            </div>
-          </div>
-
-          <Show
-            when={selectedCropLayer()}
-            fallback={
+          <DesktopEditPanel />
+          {inspectorTab() === "presets"
+            ? <PresetsPanel />
+            : (
               <Show
-                when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                when={selectedCropLayer()}
                 fallback={
-                  <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
-                    Open an image and select a layer to edit.
-                  </div>
+                  <Show
+                    when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                    fallback={
+                      <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
+                        Open an image and select a layer to edit.
+                      </div>
+                    }
+                  >
+                    <div class="flex flex-col gap-3">
+                      <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
+                      <Slider
+                        label="Exposure"
+                        icon={<SparkIcon />}
+                        value={tone().exposure}
+                        defaultValue={DEFAULT_TONE.exposure}
+                        min={-5}
+                        max={5}
+                        step={0.05}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyTone({ exposure: value });
+                        }}
+                      />
+                      <Slider
+                        label="Gamma"
+                        icon={<ToneIcon />}
+                        value={tone().gamma}
+                        defaultValue={DEFAULT_TONE.gamma}
+                        min={0.1}
+                        max={3}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyTone({ gamma: value });
+                        }}
+                      />
+                      <Slider
+                        label="Contrast"
+                        icon={<CircleIcon />}
+                        value={tone().contrast}
+                        defaultValue={DEFAULT_TONE.contrast}
+                        min={-1.0}
+                        max={1.0}
+                        step={0.01}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyTone({ contrast: value });
+                        }}
+                      />
+                      <Slider
+                        label="Blacks"
+                        icon={<ToneIcon />}
+                        value={tone().blacks}
+                        defaultValue={DEFAULT_TONE.blacks}
+                        min={-0.05}
+                        max={0.1}
+                        step={0.001}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyTone({ blacks: value });
+                        }}
+                      />
+                      <Slider
+                        label="Whites"
+                        icon={<ToneIcon />}
+                        value={tone().whites}
+                        defaultValue={DEFAULT_TONE.whites}
+                        min={-0.1}
+                        max={0.2}
+                        step={0.001}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyTone({ whites: value });
+                        }}
+                      />
+                      <Slider
+                        label="Saturation"
+                        icon={<DropletIcon />}
+                        value={color().saturation}
+                        defaultValue={DEFAULT_COLOR.saturation}
+                        valueLabel={valueLabel(color().saturation)}
+                        min={0}
+                        max={2}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyColor({ saturation: value });
+                        }}
+                      />
+                      <Slider
+                        label="Temperature"
+                        icon={<ToneIcon />}
+                        value={color().temperature}
+                        defaultValue={DEFAULT_COLOR.temperature}
+                        valueLabel={valueLabel(color().temperature)}
+                        min={-1}
+                        max={1}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyColor({ temperature: value });
+                        }}
+                      />
+                      <Slider
+                        label="Tint"
+                        icon={<ToneIcon />}
+                        value={color().tint}
+                        defaultValue={DEFAULT_COLOR.tint}
+                        valueLabel={valueLabel(color().tint)}
+                        min={-1}
+                        max={1}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyColor({ tint: value });
+                        }}
+                      />
+                      <CurvesEditor />
+                      <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
+                      <HslSection />
+                      <Slider
+                        label="Vignette"
+                        icon={<CircleIcon />}
+                        value={vignette().amount}
+                        defaultValue={DEFAULT_VIGNETTE.amount}
+                        valueLabel={valueLabel(vignette().amount)}
+                        min={0}
+                        max={1}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
+                        }}
+                      />
+                      <Slider
+                        label="Sharpen"
+                        icon={<ToneIcon />}
+                        value={sharpen().amount}
+                        defaultValue={DEFAULT_SHARPEN.amount}
+                        valueLabel={valueLabel(sharpen().amount)}
+                        min={0}
+                        max={2}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
+                        }}
+                      />
+                      <Slider
+                        label="Grain"
+                        icon={<GrainIcon />}
+                        value={grain().amount}
+                        defaultValue={DEFAULT_GRAIN.amount}
+                        valueLabel={valueLabel(grain().amount)}
+                        min={0}
+                        max={1}
+                        onChange={(value) => {
+                          selectedAdjustmentLayerOrThrow();
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
+                        }}
+                      />
+                    </div>
+                  </Show>
                 }
               >
-                <div class="mb-3 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteSelectedLayer()}
-                    class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-                  >
-                    <TrashIcon />
-                    Delete Layer
-                  </button>
-                </div>
-                <div class="flex flex-col gap-3">
-                  <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
-                  <Slider
-                    label="Exposure"
-                    icon={<SparkIcon />}
-                    value={tone().exposure}
-                    defaultValue={DEFAULT_TONE.exposure}
-                    min={-5}
-                    max={5}
-                    step={0.05}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ exposure: value });
-                    }}
-                  />
-                  <Slider
-                    label="Gamma"
-                    icon={<ToneIcon />}
-                    value={tone().gamma}
-                    defaultValue={DEFAULT_TONE.gamma}
-                    min={0.1}
-                    max={3}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ gamma: value });
-                    }}
-                  />
-                  <Slider
-                    label="Contrast"
-                    icon={<CircleIcon />}
-                    value={tone().contrast}
-                    defaultValue={DEFAULT_TONE.contrast}
-                    min={-1.0}
-                    max={1.0}
-                    step={0.01}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ contrast: value });
-                    }}
-                  />
-                  <Slider
-                    label="Blacks"
-                    icon={<ToneIcon />}
-                    value={tone().blacks}
-                    defaultValue={DEFAULT_TONE.blacks}
-                    min={-0.05}
-                    max={0.1}
-                    step={0.001}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ blacks: value });
-                    }}
-                  />
-                  <Slider
-                    label="Whites"
-                    icon={<ToneIcon />}
-                    value={tone().whites}
-                    defaultValue={DEFAULT_TONE.whites}
-                    min={-0.1}
-                    max={0.2}
-                    step={0.001}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ whites: value });
-                    }}
-                  />
-                  <Slider
-                    label="Saturation"
-                    icon={<DropletIcon />}
-                    value={color().saturation}
-                    defaultValue={DEFAULT_COLOR.saturation}
-                    valueLabel={valueLabel(color().saturation)}
-                    min={0}
-                    max={2}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyColor({ saturation: value });
-                    }}
-                  />
-                  <Slider
-                    label="Temperature"
-                    icon={<ToneIcon />}
-                    value={color().temperature}
-                    defaultValue={DEFAULT_COLOR.temperature}
-                    valueLabel={valueLabel(color().temperature)}
-                    min={-1}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyColor({ temperature: value });
-                    }}
-                  />
-                  <Slider
-                    label="Tint"
-                    icon={<ToneIcon />}
-                    value={color().tint}
-                    defaultValue={DEFAULT_COLOR.tint}
-                    valueLabel={valueLabel(color().tint)}
-                    min={-1}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyColor({ tint: value });
-                    }}
-                  />
-                  <CurvesEditor />
-                  <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
-                  <HslSection />
-                  <Slider
-                    label="Vignette"
-                    icon={<CircleIcon />}
-                    value={vignette().amount}
-                    defaultValue={DEFAULT_VIGNETTE.amount}
-                    valueLabel={valueLabel(vignette().amount)}
-                    min={0}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
-                    }}
-                  />
-                  <Slider
-                    label="Sharpen"
-                    icon={<ToneIcon />}
-                    value={sharpen().amount}
-                    defaultValue={DEFAULT_SHARPEN.amount}
-                    valueLabel={valueLabel(sharpen().amount)}
-                    min={0}
-                    max={2}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
-                    }}
-                  />
-                  <Slider
-                    label="Grain"
-                    icon={<GrainIcon />}
-                    value={grain().amount}
-                    defaultValue={DEFAULT_GRAIN.amount}
-                    valueLabel={valueLabel(grain().amount)}
-                    min={0}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
-                    }}
-                  />
-                </div>
+                <CropPanel />
               </Show>
-            }
-          >
-            <div class="mb-3 flex justify-end">
-              <button
-                type="button"
-                onClick={() => void handleDeleteSelectedLayer()}
-                class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-              >
-                <TrashIcon />
-                Delete Layer
-              </button>
-            </div>
-            <CropPanel />
-          </Show>
+            )}
         </div>
       </div>
 
       {/* Mobile: drawer overlay */}
       <div
-        class={`fixed bottom-0 left-0 right-0 z-30 border-t border-white/30 bg-black/50 transition-transform duration-300 ease-out lg:hidden ${
+        class={`fixed bottom-0 left-0 right-0 z-30  bg-black/50 transition-transform duration-300 ease-out lg:hidden ${
           isDrawerOpen() ? "translate-y-0" : "translate-y-[calc(100%-4.5rem)]"
         }`}
       >
@@ -1027,41 +1233,27 @@ const Inspector: Component = () => {
         </div>
 
         <div class="px-4 pb-4">
-          <Show
-            when={selectedCropLayer()}
-            fallback={
-              <Show
-                when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-                fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
-              >
-                <div class="px-1">
-                  <div class="pb-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteSelectedLayer()}
-                      class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors active:bg-white/[0.08]"
-                    >
-                      <TrashIcon />
-                      Delete Layer
-                    </button>
-                  </div>
-                  <div class="pb-4">{renderLayerBody()}</div>
-                </div>
-              </Show>
-            }
-          >
-            <div class="px-1">
-              <div class="pb-3">
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteSelectedLayer()}
-                  class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors active:bg-white/[0.08]"
+          <Show when={inspectorTab() === "presets"} fallback={
+            <Show
+              when={selectedCropLayer()}
+              fallback={
+                <Show
+                  when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                  fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
                 >
-                  <TrashIcon />
-                  Delete Layer
-                </button>
+                  <div class="px-1">
+                    {renderLayerBody()}
+                  </div>
+                </Show>
+              }
+            >
+              <div class="px-1">
+                <CropPanel />
               </div>
-              <CropPanel />
+            </Show>
+          }>
+            <div class="px-1">
+              <PresetsPanel />
             </div>
           </Show>
         </div>
@@ -1084,6 +1276,9 @@ const Inspector: Component = () => {
               </button>
             );
           })}
+          
+          <div class="flex-1"></div>
+          
           <button
             type="button"
             onClick={() => setIsPickerOpen((v) => !v)}
@@ -1091,9 +1286,25 @@ const Inspector: Component = () => {
               isPickerOpen() ? "text-stone-100" : "text-white/34"
             }`}
           >
-            <span class="flex h-5 w-5 items-center justify-center text-lg leading-none">+</span>
+            <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">+</span>
             <span>Add</span>
           </button>
+          
+          <Show when={state.selectedLayerIdx >= 0 && state.layers[state.selectedLayerIdx]?.kind !== "image"}>
+            <button
+              type="button"
+              onClick={() => void handleDeleteSelectedLayer()}
+              class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
+            >
+              <TrashIcon />
+              <span>Delete</span>
+            </button>
+          </Show>
+          
+        </div>
+
+        <div class="border-t border-white/6 px-4 pb-4 pt-3">
+          <InspectorTabs />
         </div>
 
       </div>
@@ -1101,7 +1312,7 @@ const Inspector: Component = () => {
       {/* Add layer dialog */}
       <Show when={isPickerOpen()}>
         <div
-          class="fixed inset-0 z-50 flex items-center justify-center lg:hidden"
+          class="fixed bottom-35 right-0 z-50 flex items-center justify-center lg:hidden"
           onClick={() => setIsPickerOpen(false)}
         >
           <div
@@ -1120,6 +1331,14 @@ const Inspector: Component = () => {
                   <span>{focusLabels[focus]}</span>
                 </button>
               ))}
+              
+              <button
+                type="button"
+                onClick={() => void setIsPickerOpen(false)}
+                class="flex justify-end items-center gap-1.5 rounded-xl px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 active:bg-white/10"
+              >
+                <span>Cancel</span>
+              </button>
             </div>
           </div>
         </div>

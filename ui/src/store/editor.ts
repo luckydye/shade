@@ -16,10 +16,7 @@ export { previewFrame };
 const [previewContextFrame, setPreviewContextFrame] = createSignal<ImageData | null>(null);
 export { previewContextFrame };
 type PreviewQuality = "interactive" | "final";
-const INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO = 0.75;
-const FINAL_PREVIEW_DEVICE_PIXEL_RATIO = 1.25;
-const INTERACTIVE_PREVIEW_PIXEL_COUNT = 300_000;
-const FINAL_PREVIEW_PIXEL_COUNT = 1_500_000;
+const INTERACTIVE_PREVIEW_SCALE = 0.33;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
@@ -41,6 +38,7 @@ export interface CropRect {
 }
 
 export interface EditorState {
+  currentView: "media" | "editor";
   layers: LayerInfo[];
   canvasWidth: number;
   canvasHeight: number;
@@ -59,9 +57,11 @@ export interface EditorState {
   crop: CropRect;
   cropDraft: CropRect | null;
   isCropMode: boolean;
+  loadingMediaSrc: string | null;
 }
 
 const [state, setState] = createStore<EditorState>({
+  currentView: "media",
   layers: [],
   canvasWidth: 0,
   canvasHeight: 0,
@@ -80,6 +80,7 @@ const [state, setState] = createStore<EditorState>({
   crop: { x: 0, y: 0, width: 0, height: 0 },
   cropDraft: null,
   isCropMode: false,
+  loadingMediaSrc: null,
 });
 
 export { state };
@@ -246,21 +247,12 @@ function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
 function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   const visible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
   if (!visible) return null;
-  const devicePixelRatio = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
-    : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
-  const maxPixelCount = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_PIXEL_COUNT
-    : FINAL_PREVIEW_PIXEL_COUNT;
-  const target = capPreviewRenderSize(
-    Math.max(1, Math.floor(visible.screenWidth * Math.min(window.devicePixelRatio, devicePixelRatio))),
-    Math.max(1, Math.floor(visible.screenHeight * Math.min(window.devicePixelRatio, devicePixelRatio))),
-    maxPixelCount,
-  );
-  if (target.width <= 0 || target.height <= 0) return null;
+  const devicePixelRatio = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_PREVIEW_SCALE : 1);
+  const targetWidth = Math.max(1, Math.round(visible.screenWidth * devicePixelRatio));
+  const targetHeight = Math.max(1, Math.round(visible.screenHeight * devicePixelRatio));
   return {
-    target_width: target.width,
-    target_height: target.height,
+    target_width: targetWidth,
+    target_height: targetHeight,
     crop: visible.crop,
     ignore_crop_layers: selectedLayerIsCrop(),
   };
@@ -279,23 +271,17 @@ function previewCropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
 function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
   const crop = selectedLayerIsCrop() || state.isCropMode ? undefined : getCommittedCropRect();
-  const devicePixelRatio = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
-    : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
-  const maxPixelCount = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_PIXEL_COUNT
-    : FINAL_PREVIEW_PIXEL_COUNT;
+  const devicePixelRatio = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_PREVIEW_SCALE : 1);
   const fitted = fitPreviewSize(
-    state.previewViewportWidth * Math.min(window.devicePixelRatio, devicePixelRatio),
-    state.previewViewportHeight * Math.min(window.devicePixelRatio, devicePixelRatio),
+    state.previewViewportWidth * devicePixelRatio,
+    state.previewViewportHeight * devicePixelRatio,
     crop?.width ?? state.canvasWidth,
     crop?.height ?? state.canvasHeight,
   );
-  const target = capPreviewRenderSize(fitted.width, fitted.height, maxPixelCount);
-  if (target.width <= 0 || target.height <= 0) return null;
+  if (fitted.width <= 0 || fitted.height <= 0) return null;
   return {
-    target_width: target.width,
-    target_height: target.height,
+    target_width: fitted.width,
+    target_height: fitted.height,
     crop,
     ignore_crop_layers: selectedLayerIsCrop(),
   };
@@ -438,28 +424,54 @@ function resetPreviewState(canvasWidth: number, canvasHeight: number) {
   });
 }
 
-export function closeImage() {
+function clearLoadedImageState() {
   setPreviewFrame(null);
   setPreviewContextFrame(null);
   setState({
     layers: [],
     canvasWidth: 0,
     canvasHeight: 0,
-    isLoading: false,
     selectedLayerIdx: -1,
     previewZoom: 1,
     previewCenterX: 0,
     previewCenterY: 0,
+    previewRenderWidth: 0,
+    previewRenderHeight: 0,
+    previewDisplayColorSpace: "Unknown",
+    sourceBitDepth: "Unknown",
     crop: { x: 0, y: 0, width: 0, height: 0 },
     cropDraft: null,
     isCropMode: false,
   });
 }
 
-export async function openImage(path: string) {
-  setState("isLoading", true);
-  setPreviewFrame(null);
-  setPreviewContextFrame(null);
+export function closeImage() {
+  clearLoadedImageState();
+  setState({
+    currentView: "media",
+    isLoading: false,
+    loadingMediaSrc: null,
+  });
+}
+
+export function showMediaView() {
+  setState("currentView", "media");
+}
+
+export function showEditorView() {
+  if (state.canvasWidth <= 0 && !state.isLoading) {
+    throw new Error("cannot show editor without a loaded image");
+  }
+  setState("currentView", "editor");
+}
+
+export async function openImage(path: string, loadingMediaSrc: string | null = null) {
+  clearLoadedImageState();
+  setState({
+    currentView: "editor",
+    isLoading: true,
+    loadingMediaSrc,
+  });
   try {
     const info = await bridge.openImage(path);
     resetPreviewState(info.canvas_width, info.canvas_height);
@@ -467,15 +479,22 @@ export async function openImage(path: string) {
     await refreshLayerStack();
     await refreshPreview();
   } finally {
-    setState("isLoading", false);
+    if (loadingMediaSrc?.startsWith("blob:")) {
+      URL.revokeObjectURL(loadingMediaSrc);
+    }
+    setState({
+      isLoading: false,
+      loadingMediaSrc: null,
+    });
   }
 }
 
 export async function openImageFile(file: File) {
-  setPreviewFrame(null);
-  setPreviewContextFrame(null);
-
-  setState("isLoading", true);
+  clearLoadedImageState();
+  setState({
+    currentView: "editor",
+    isLoading: true,
+  });
   try {
     const info = await bridge.openImageFile(file);
     resetPreviewState(info.canvas_width, info.canvas_height);
@@ -483,7 +502,10 @@ export async function openImageFile(file: File) {
     await refreshLayerStack();
     await refreshPreview();
   } finally {
-    setState("isLoading", false);
+    setState({
+      isLoading: false,
+      loadingMediaSrc: null,
+    });
   }
 }
 
@@ -602,11 +624,12 @@ export async function applyEdit(params: Record<string, unknown>) {
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
         curves: {
-          lut_r: params.lut_r as number[],
-          lut_g: params.lut_g as number[],
-          lut_b: params.lut_b as number[],
-          lut_master: params.lut_master as number[],
-          per_channel: params.per_channel as boolean,
+          lut_r: adjustments.curves?.lut_r ?? [],
+          lut_g: adjustments.curves?.lut_g ?? [],
+          lut_b: adjustments.curves?.lut_b ?? [],
+          lut_master: adjustments.curves?.lut_master ?? [],
+          per_channel: adjustments.curves?.per_channel ?? false,
+          control_points: params.curve_points as bridge.CurveControlPoint[] | undefined,
         },
       });
       break;
@@ -718,6 +741,20 @@ export async function addLayer(kind: string) {
   const idx = await bridge.addLayer(kind);
   await refreshLayerStack();
   setState("selectedLayerIdx", idx);
+  await refreshPreview();
+}
+
+export async function listPresets() {
+  return bridge.listPresets();
+}
+
+export async function savePreset(name: string) {
+  return bridge.savePreset(name);
+}
+
+export async function loadPreset(name: string) {
+  await bridge.loadPreset(name);
+  await refreshLayerStack();
   await refreshPreview();
 }
 

@@ -1,37 +1,14 @@
-import { Component, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
-import { getThumbnail, listPictures } from "../bridge/index";
-import { openImage } from "../store/editor";
+import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { PeerBrowser } from "./PeerBrowser";
 import { PeerDiscoveryPanel } from "./PeerDiscoveryPanel";
-
-// Formats the browser can display directly via the asset protocol.
-const NATIVE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
-
-function ext(path: string) {
-  return path.split(".").pop()?.toLowerCase() ?? "";
-}
-
-let _convertFileSrc: ((path: string) => string) | null = null;
-
-async function getConvertFileSrc() {
-  if (!_convertFileSrc) {
-    const { convertFileSrc } = await import("@tauri-apps/api/core");
-    _convertFileSrc = convertFileSrc;
-  }
-  return _convertFileSrc;
-}
-
-async function resolveSrc(path: string): Promise<string> {
-  if (NATIVE_EXTENSIONS.has(ext(path))) {
-    const convert = await getConvertFileSrc();
-    return convert(path);
-  }
-  return getThumbnail(path);
-}
+import { open } from "@tauri-apps/plugin-dialog";
+import { addMediaLibrary, listLibraryImages, listMediaLibraries, removeMediaLibrary } from "../bridge/index";
+import { resolveMediaSrc } from "../media-source";
+import { openImage, state } from "../store/editor";
 
 const ImageTile: Component<{ path: string }> = (props) => {
-  const [visible, setVisible] = createSignal(false);
-  const [src] = createResource(() => visible() ? props.path : undefined, resolveSrc);
+  const [isIntersecting, setIsIntersecting] = createSignal(false);
+  const [src, setSrc] = createSignal<string | undefined>(undefined);
   // PHAsset local identifiers (iOS) don't have a meaningful filename component.
   const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
   const [loadError, setLoadError] = createSignal(false);
@@ -41,19 +18,35 @@ const ImageTile: Component<{ path: string }> = (props) => {
 
   onMount(() => {
     const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        setVisible(true);
-        observer.disconnect();
-      }
+      setIsIntersecting(entry.isIntersecting);
     }, { rootMargin: "200px" });
     if (containerRef) observer.observe(containerRef);
     onCleanup(() => observer.disconnect());
   });
 
+  createEffect(() => {
+    if (!isIntersecting() || src()) {
+      return;
+    }
+    const controller = new AbortController();
+    setLoadError(false);
+    void resolveMediaSrc(props.path, controller.signal)
+      .then((nextSrc) => setSrc(nextSrc))
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        void error;
+        setLoadError(true);
+        errorTimer = setTimeout(() => setLoadError(false), 4000);
+      });
+    onCleanup(() => controller.abort());
+  });
+
   // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
     const url = src();
-    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) URL.revokeObjectURL(url);
     clearTimeout(errorTimer);
   });
 
@@ -69,9 +62,9 @@ const ImageTile: Component<{ path: string }> = (props) => {
     // void the promise so startViewTransition captures the "after" state immediately
     // (isLoading=true fires synchronously inside openImage), while still handling errors.
     if (document.startViewTransition) {
-      document.startViewTransition(() => void openImage(props.path).catch(handleError));
+      document.startViewTransition(() => void openImage(props.path, src() ?? null).catch(handleError));
     } else {
-      void openImage(props.path).catch(handleError);
+      void openImage(props.path, src() ?? null).catch(handleError);
     }
   }
 
@@ -85,7 +78,8 @@ const ImageTile: Component<{ path: string }> = (props) => {
       onClick={handleClick}
     >
       <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
-        <Suspense fallback={<div class="h-full w-full animate-pulse bg-white/[0.06]" />}>
+        {!src() && !loadError() && <div class="h-full w-full animate-pulse bg-white/[0.06]" />}
+        {src() && (
           <img
             ref={imgRef}
             src={src()}
@@ -93,7 +87,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
             class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
             loading="lazy"
           />
-        </Suspense>
+        )}
         {loadError() && (
           <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
             <span class="text-[11px] font-medium text-red-400">Failed to open</span>
@@ -106,29 +100,201 @@ const ImageTile: Component<{ path: string }> = (props) => {
 };
 
 export const MediaView: Component = () => {
-  const [images] = createResource(listPictures);
+  const TILE_MIN_WIDTH = 160;
+  const GRID_GAP = 12;
+  const TILE_LABEL_HEIGHT = 24;
+  const OVERSCAN_ROWS = 2;
+  const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
+  const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
+  const [images, { refetch: refetchImages }] = createResource(selectedLibraryId, listLibraryImages);
+  const [isSubmitting, setIsSubmitting] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const [viewportHeight, setViewportHeight] = createSignal(0);
+  const [viewportWidth, setViewportWidth] = createSignal(0);
+  const [scrollTop, setScrollTop] = createSignal(0);
+  let scrollRef!: HTMLDivElement;
+
+  createEffect(() => {
+    const availableLibraries = libraries();
+    if (!availableLibraries?.length) {
+      setSelectedLibraryId(null);
+      return;
+    }
+    const current = selectedLibraryId();
+    if (current && availableLibraries.some((library) => library.id === current)) return;
+    setSelectedLibraryId(availableLibraries[0].id);
+  });
+
+  const selectedLibrary = () => libraries()?.find((library) => library.id === selectedLibraryId()) ?? null;
+  const columns = createMemo(() => Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))));
+  const tileWidth = createMemo(() => {
+    const width = viewportWidth();
+    const columnCount = columns();
+    if (width <= 0) return TILE_MIN_WIDTH;
+    return (width - GRID_GAP * (columnCount - 1)) / columnCount;
+  });
+  const rowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
+  const totalRows = createMemo(() => Math.ceil((images()?.length ?? 0) / columns()));
+  const visibleRowRange = createMemo(() => {
+    const height = viewportHeight();
+    const currentRowHeight = rowHeight();
+    if (height <= 0 || currentRowHeight <= 0) {
+      return { start: 0, end: 0 };
+    }
+    const start = Math.max(0, Math.floor(scrollTop() / currentRowHeight) - OVERSCAN_ROWS);
+    const end = Math.min(
+      totalRows(),
+      Math.ceil((scrollTop() + height) / currentRowHeight) + OVERSCAN_ROWS,
+    );
+    return { start, end };
+  });
+  const visibleImages = createMemo(() => {
+    const allImages = images() ?? [];
+    const { start, end } = visibleRowRange();
+    const startIdx = start * columns();
+    const endIdx = Math.min(allImages.length, end * columns());
+    return allImages.slice(startIdx, endIdx);
+  });
+  const offsetY = createMemo(() => visibleRowRange().start * rowHeight());
+
+  onMount(() => {
+    const updateViewport = () => {
+      setViewportHeight(scrollRef.clientHeight);
+      setViewportWidth(scrollRef.clientWidth - 48);
+    };
+    updateViewport();
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(scrollRef);
+    onCleanup(() => observer.disconnect());
+  });
+
+  createEffect(() => {
+    selectedLibraryId();
+    setScrollTop(0);
+    if (scrollRef) scrollRef.scrollTop = 0;
+  });
+
+  async function handleAddLibrary() {
+    if (isSubmitting()) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (selectedPath === null) {
+        return;
+      }
+      if (Array.isArray(selectedPath)) {
+        throw new Error("expected a single directory path");
+      }
+      const library = await addMediaLibrary(selectedPath);
+      await refetchLibraries();
+      setSelectedLibraryId(library.id);
+      await refetchImages();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRemoveLibrary() {
+    const library = selectedLibrary();
+    if (!library?.removable) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await removeMediaLibrary(library.id);
+      await refetchLibraries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <div class="flex flex-1 flex-col overflow-hidden mt-[calc(env(safe-area-inset-top)+3.5rem)] md:mt-0">
       <div class="border-b border-white/6 px-6 py-4">
-        <h1 class="text-sm font-medium text-white/80">Pictures</h1>
-      </div>
-      <div class="flex-1 overflow-y-auto p-6">
-        <div class="mb-6">
-          <PeerDiscoveryPanel />
-        </div>
-        <div class="mb-6">
-          <PeerBrowser />
-        </div>
-        <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-            <For
-              each={images()}
-              fallback={<p class="col-span-full text-sm text-white/30">No images found in Pictures.</p>}
-            >
-              {(path) => <ImageTile path={path} />}
-            </For>
+        <div class="flex flex-col gap-4">
+          <h1 class="text-sm font-medium text-white/80">Media</h1>
+          <div class="grid gap-4 lg:grid-cols-2">
+            <PeerDiscoveryPanel />
+            <PeerBrowser />
           </div>
+          <div class="flex items-center gap-8">
+            <h1 class="hidden md:block text-sm font-medium text-white/80">Libraries</h1>
+            <div class="flex flex-1 gap-2 overflow-x-auto">
+              <For each={libraries()}>
+                {(library) => (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLibraryId(library.id)}
+                    class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
+                      selectedLibraryId() === library.id
+                        ? "border-white/18 bg-white/12 text-white"
+                        : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
+                    }`}
+                  >
+                    {library.name}
+                  </button>
+                )}
+              </For>
+              <button
+                type="button"
+                class="shrink-0 rounded-full border border-dashed border-white/14 bg-white/[0.03] px-3 py-2 text-[14px] font-semibold leading-none text-white/60 transition-colors hover:border-white/24 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isSubmitting()}
+                onClick={() => void handleAddLibrary()}
+                aria-label="Add library"
+              >
+                +
+              </button>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="rounded-full border border-red-500/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!selectedLibrary()?.removable || isSubmitting()}
+                onClick={() => void handleRemoveLibrary()}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+          {error() && (
+            <p class="text-sm text-red-300">{error()}</p>
+          )}
+          {selectedLibrary()?.path && (
+            <p class="truncate text-xs text-white/28">{selectedLibrary()!.path}</p>
+          )}
+        </div>
+      </div>
+      <div
+        ref={scrollRef!}
+        class="media-scroll flex-1 overflow-y-auto p-6"
+        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      >
+        <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
+          <Show
+            when={(images()?.length ?? 0) > 0}
+            fallback={<p class="text-sm text-white/30">No images found in {selectedLibrary()?.name ?? "this library"}.</p>}
+          >
+            <div style={{ height: `${totalRows() * rowHeight()}px`, position: "relative" }}>
+              <div
+                class="grid gap-3"
+                style={{
+                  "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))`,
+                  transform: `translateY(${offsetY()}px)`,
+                }}
+              >
+                <For each={visibleImages()}>
+                  {(path) => <ImageTile path={path} />}
+                </For>
+              </div>
+            </div>
+          </Show>
         </Suspense>
       </div>
     </div>

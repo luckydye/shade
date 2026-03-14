@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use shade_core::{
-    linear_lut, AdjustmentOp, ColorParams, CropRect, FloatImage, GrainParams, HslParams,
-    LayerStack, SharpenParams, VignetteParams,
+    build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
+    CurveControlPoint, FloatImage, GrainParams, HslParams, LayerStack, SharpenParams,
+    VignetteParams,
 };
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
-use std::sync::Mutex;
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
+use tauri::Manager;
 
 #[cfg(target_os = "ios")]
 extern "C" {
@@ -31,6 +34,380 @@ pub struct EditorState {
     pub canvas_height: u32,
     pub next_texture_id: u64,
     pub source_bit_depth: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MediaLibrary {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub path: Option<String>,
+    pub removable: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct MediaLibraryConfig {
+    directories: Vec<String>,
+}
+
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
+    "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
+];
+
+fn media_library_config_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".config/shade/config.json"))
+}
+
+fn presets_dir_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".config/shade/presets"))
+}
+
+fn preset_file_path(name: &str) -> Result<PathBuf, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("preset name cannot be empty".into());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
+        return Err("preset name contains invalid path characters".into());
+    }
+    Ok(presets_dir_path()?.join(format!("{trimmed}.json")))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PresetFile {
+    version: u32,
+    layers: Vec<shade_core::LayerEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PresetInfo {
+    pub name: String,
+}
+
+fn load_media_library_config() -> Result<MediaLibraryConfig, String> {
+    let path = media_library_config_path()?;
+    if !path.exists() {
+        return Ok(MediaLibraryConfig::default());
+    }
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| format!("invalid media library config at {}: {e}", path.display()))
+}
+
+fn save_media_library_config(config: &MediaLibraryConfig) -> Result<(), String> {
+    let path = media_library_config_path()?;
+    let parent = path.parent().ok_or_else(|| format!("invalid config path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+fn default_pictures_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join("Pictures"))
+}
+
+fn custom_library_id(path: &Path) -> String {
+    format!("dir:{}", path.display())
+}
+
+fn library_for_directory(path: PathBuf) -> MediaLibrary {
+    let name = path.file_name()
+        .and_then(|segment| segment.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string());
+    MediaLibrary {
+        id: custom_library_id(&path),
+        name,
+        kind: "directory".into(),
+        path: Some(path.display().to_string()),
+        removable: true,
+    }
+}
+
+fn list_desktop_media_libraries() -> Result<Vec<MediaLibrary>, String> {
+    let pictures_dir = default_pictures_dir()?;
+    let mut libraries = vec![MediaLibrary {
+        id: "pictures".into(),
+        name: "Pictures".into(),
+        kind: "directory".into(),
+        path: Some(pictures_dir.display().to_string()),
+        removable: false,
+    }];
+    let config = load_media_library_config()?;
+    for directory in config.directories {
+        let path = PathBuf::from(directory);
+        libraries.push(library_for_directory(path));
+    }
+    Ok(libraries)
+}
+
+fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
+    if library_id == "pictures" {
+        return default_pictures_dir();
+    }
+    let config = load_media_library_config()?;
+    for directory in config.directories {
+        let path = PathBuf::from(&directory);
+        if custom_library_id(&path) == library_id {
+            return Ok(path);
+        }
+    }
+    Err(format!("unknown media library: {library_id}"))
+}
+
+fn collect_images_in_directory(dir: &Path) -> Result<Vec<String>, String> {
+    let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(current_dir) = dirs.pop() {
+        let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
+            if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                continue;
+            }
+            let path_string = path.to_str()
+                .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
+                .to_string();
+            let mtime = path.metadata()
+                .map_err(|e| e.to_string())?
+                .modified()
+                .map_err(|e| e.to_string())?;
+            entries_with_mtime.push((mtime, path_string));
+        }
+    }
+    entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(entries_with_mtime.into_iter().map(|(_, path)| path).collect())
+}
+
+pub struct ThumbnailJob {
+    pub path: String,
+    pub response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+}
+
+type ThumbnailResponse = tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>;
+type ThumbnailPending = HashMap<String, Vec<ThumbnailResponse>>;
+type ThumbnailState = (VecDeque<String>, ThumbnailPending);
+
+pub struct PendingThumbnailJob {
+    pub path: String,
+    pub responses: Vec<ThumbnailResponse>,
+}
+
+pub struct ThumbnailQueue {
+    jobs: Mutex<ThumbnailState>,
+    has_jobs: Condvar,
+}
+
+impl ThumbnailQueue {
+    pub fn new() -> Self {
+        Self {
+            jobs: Mutex::new((VecDeque::new(), HashMap::new())),
+            has_jobs: Condvar::new(),
+        }
+    }
+
+    pub fn push(&self, job: ThumbnailJob) {
+        let mut jobs = self.jobs.lock().unwrap();
+        let (order, pending) = &mut *jobs;
+        if let Some(responses) = pending.get_mut(&job.path) {
+            responses.push(job.response);
+            if let Some(existing_idx) = order.iter().position(|path| path == &job.path) {
+                order.remove(existing_idx);
+            }
+            order.push_back(job.path);
+        } else {
+            pending.insert(job.path.clone(), vec![job.response]);
+            order.push_back(job.path);
+        }
+        self.has_jobs.notify_one();
+    }
+
+    pub fn pop_latest(&self) -> PendingThumbnailJob {
+        let mut jobs = self.jobs.lock().unwrap();
+        loop {
+            let (order, pending) = &mut *jobs;
+            if let Some(path) = order.pop_back() {
+                let responses = pending
+                    .remove(&path)
+                    .expect("thumbnail queue pending entry must exist");
+                return PendingThumbnailJob { path, responses };
+            }
+            jobs = self.has_jobs.wait(jobs).unwrap();
+        }
+    }
+}
+
+pub enum RenderJob {
+    Preview {
+        stack: LayerStack,
+        sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        canvas_width: u32,
+        canvas_height: u32,
+        request: PreviewRenderRequest,
+        response: tokio::sync::oneshot::Sender<Result<PreviewFrameResponse, String>>,
+    },
+    PreviewFloat16 {
+        stack: LayerStack,
+        sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        canvas_width: u32,
+        canvas_height: u32,
+        request: PreviewRenderRequest,
+        response: tokio::sync::oneshot::Sender<Result<PreviewFrameFloat16Response, String>>,
+    },
+}
+
+fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
+    let source = std::path::Path::new(path);
+    let mut source_file = std::fs::File::open(source).map_err(|e| e.to_string())?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut source_file, &mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let cache_key = hasher.finalize().to_hex().to_string();
+
+    let cache_dir = std::env::temp_dir().join("shade-thumbnails");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let cache_path = cache_dir.join(format!("v2-{cache_key}.jpg"));
+
+    if cache_path.exists() {
+        return std::fs::read(&cache_path).map_err(|e| e.to_string());
+    }
+
+    let (pixels, width, height) =
+        shade_io::load_image(source).map_err(|e| e.to_string())?;
+    let img = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or("failed to wrap pixels in RgbaImage")?;
+    let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
+    let mut jpeg: Vec<u8> = Vec::new();
+    thumb
+        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
+    Ok(jpeg)
+}
+
+pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue> {
+    let queue = Arc::new(ThumbnailQueue::new());
+    for worker_idx in 0..3 {
+        let worker_queue = queue.clone();
+        std::thread::Builder::new()
+            .name(format!("shade-thumbnail-{worker_idx}"))
+            .spawn(move || {
+                loop {
+                    let job = worker_queue.pop_latest();
+                    let result = generate_desktop_thumbnail(&job.path);
+                    for response in job.responses {
+                        let _ = response.send(result.clone());
+                    }
+                }
+            })
+            .expect("failed to spawn thumbnail worker thread");
+    }
+    queue
+}
+
+pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
+    let (sender, receiver) = crossbeam_channel::unbounded::<RenderJob>();
+    std::thread::Builder::new()
+        .name("shade-render".into())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to create render runtime");
+            let renderer = runtime.block_on(shade_gpu::Renderer::new()).map_err(|e| e.to_string());
+            while let Ok(job) = receiver.recv() {
+                match job {
+                    RenderJob::Preview {
+                        stack,
+                        sources,
+                        canvas_width,
+                        canvas_height,
+                        request,
+                        response,
+                    } => {
+                        let result = match &renderer {
+                            Ok(renderer) => runtime
+                                .block_on(renderer.render_stack_preview(
+                                    &stack,
+                                    &sources,
+                                    canvas_width,
+                                    canvas_height,
+                                    request.target_width,
+                                    request.target_height,
+                                    request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        x: crop.x,
+                                        y: crop.y,
+                                        width: crop.width,
+                                        height: crop.height,
+                                    }),
+                                ))
+                                .map(|pixels| PreviewFrameResponse {
+                                    pixels,
+                                    width: request.target_width,
+                                    height: request.target_height,
+                                })
+                                .map_err(|e| e.to_string()),
+                            Err(error) => Err(error.clone()),
+                        };
+                        let _ = response.send(result);
+                    }
+                    RenderJob::PreviewFloat16 {
+                        stack,
+                        sources,
+                        canvas_width,
+                        canvas_height,
+                        request,
+                        response,
+                    } => {
+                        let result = match &renderer {
+                            Ok(renderer) => runtime
+                                .block_on(renderer.render_stack_preview_f16(
+                                    &stack,
+                                    &sources,
+                                    canvas_width,
+                                    canvas_height,
+                                    request.target_width,
+                                    request.target_height,
+                                    request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        x: crop.x,
+                                        y: crop.y,
+                                        width: crop.width,
+                                        height: crop.height,
+                                    }),
+                                ))
+                                .map(|pixels| PreviewFrameFloat16Response {
+                                    pixels,
+                                    width: request.target_width,
+                                    height: request.target_height,
+                                })
+                                .map_err(|e| e.to_string()),
+                            Err(error) => Err(error.clone()),
+                        };
+                        let _ = response.send(result);
+                    }
+                }
+            }
+        })
+        .expect("failed to spawn render worker thread");
+    sender
 }
 
 impl Default for EditorState {
@@ -266,37 +643,42 @@ pub struct PreviewRenderRequest {
     pub ignore_crop_layers: Option<bool>,
 }
 
-/// Run the full GPU render pipeline and return raw RGBA8 pixels.
-#[tauri::command]
-pub async fn render_preview(
+fn snapshot_render_state(
+    state: &tauri::State<'_, Mutex<EditorState>>,
+) -> Result<
+    (
+        LayerStack,
+        std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        u32,
+        u32,
+    ),
+    PreviewFrameResponse,
+> {
+    let st = state.lock().unwrap();
+    if st.canvas_width == 0 {
+        return Err(PreviewFrameResponse {
+            pixels: Vec::new(),
+            width: 0,
+            height: 0,
+        });
+    }
+    Ok((
+        st.stack.clone(),
+        st.image_sources.clone(),
+        st.canvas_width,
+        st.canvas_height,
+    ))
+}
+
+fn apply_preview_request(
+    mut stack: LayerStack,
+    canvas_width: u32,
+    canvas_height: u32,
     request: Option<PreviewRenderRequest>,
-    renderer: tauri::State<'_, crate::RendererState>,
-    state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<PreviewFrameResponse, String> {
-    // Snapshot state without holding the lock during GPU work.
-    let (mut stack, sources, w, h) = {
-        let st = state.lock().unwrap();
-        if st.canvas_width == 0 {
-            return Ok(PreviewFrameResponse {
-                pixels: Vec::new(),
-                width: 0,
-                height: 0,
-            });
-        }
-        (
-            st.stack.clone(),
-            st.image_sources.clone(),
-            st.canvas_width,
-            st.canvas_height,
-        )
-    };
-
-    let guard = renderer.0.lock().await;
-    let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
-
+) -> (LayerStack, PreviewRenderRequest) {
     let request = request.unwrap_or(PreviewRenderRequest {
-        target_width: w,
-        target_height: h,
+        target_width: canvas_width,
+        target_height: canvas_height,
         crop: None,
         ignore_crop_layers: None,
     });
@@ -307,37 +689,43 @@ pub async fn render_preview(
             }
         }
     }
-    let pixels = r
-        .render_stack_preview(
-            &stack,
-            &sources,
-            w,
-            h,
-            request.target_width,
-            request.target_height,
-            request.crop.map(|crop| shade_gpu::PreviewCrop {
-                x: crop.x,
-                y: crop.y,
-                width: crop.width,
-                height: crop.height,
-            }),
-        )
-        .await
+    (stack, request)
+}
+
+/// Run the full GPU render pipeline and return raw RGBA8 pixels.
+#[tauri::command]
+pub async fn render_preview(
+    request: Option<PreviewRenderRequest>,
+    render_service: tauri::State<'_, crate::RenderService>,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<PreviewFrameResponse, String> {
+    let (stack, sources, canvas_width, canvas_height) = match snapshot_render_state(&state) {
+        Ok(snapshot) => snapshot,
+        Err(empty) => return Ok(empty),
+    };
+    let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    render_service
+        .0
+        .send(RenderJob::Preview {
+            stack,
+            sources,
+            canvas_width,
+            canvas_height,
+            request,
+            response: response_tx,
+        })
         .map_err(|e| e.to_string())?;
-    Ok(PreviewFrameResponse {
-        pixels,
-        width: request.target_width,
-        height: request.target_height,
-    })
+    response_rx.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn render_preview_float16(
     request: Option<PreviewRenderRequest>,
-    renderer: tauri::State<'_, crate::RendererState>,
+    render_service: tauri::State<'_, crate::RenderService>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameFloat16Response, String> {
-    let (mut stack, sources, w, h) = {
+    let (stack, sources, canvas_width, canvas_height) = {
         let st = state.lock().unwrap();
         if st.canvas_width == 0 {
             return Ok(PreviewFrameFloat16Response {
@@ -353,45 +741,20 @@ pub async fn render_preview_float16(
             st.canvas_height,
         )
     };
-
-    let guard = renderer.0.lock().await;
-    let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
-
-    let request = request.unwrap_or(PreviewRenderRequest {
-        target_width: w,
-        target_height: h,
-        crop: None,
-        ignore_crop_layers: None,
-    });
-    if request.ignore_crop_layers.unwrap_or(false) {
-        for entry in &mut stack.layers {
-            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
-                entry.visible = false;
-            }
-        }
-    }
-    let pixels = r
-        .render_stack_preview_f16(
-            &stack,
-            &sources,
-            w,
-            h,
-            request.target_width,
-            request.target_height,
-            request.crop.map(|crop| shade_gpu::PreviewCrop {
-                x: crop.x,
-                y: crop.y,
-                width: crop.width,
-                height: crop.height,
-            }),
-        )
-        .await
+    let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    render_service
+        .0
+        .send(RenderJob::PreviewFloat16 {
+            stack,
+            sources,
+            canvas_width,
+            canvas_height,
+            request,
+            response: response_tx,
+        })
         .map_err(|e| e.to_string())?;
-    Ok(PreviewFrameFloat16Response {
-        pixels,
-        width: request.target_width,
-        height: request.target_height,
-    })
+    response_rx.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -421,6 +784,7 @@ pub struct EditParams {
     pub lut_b: Option<Vec<f32>>,
     pub lut_master: Option<Vec<f32>>,
     pub per_channel: Option<bool>,
+    pub curve_points: Option<Vec<CurveControlPoint>>,
     pub saturation: Option<f32>,
     pub vibrancy: Option<f32>,
     pub temperature: Option<f32>,
@@ -510,12 +874,14 @@ pub async fn apply_edit(
                     }
                 }
                 "curves" => {
+                    let curve_points = params.curve_points.ok_or("missing curve_points")?;
                     let next = AdjustmentOp::Curves {
-                        lut_r: params.lut_r.ok_or("missing lut_r")?,
-                        lut_g: params.lut_g.ok_or("missing lut_g")?,
-                        lut_b: params.lut_b.ok_or("missing lut_b")?,
-                        lut_master: params.lut_master.ok_or("missing lut_master")?,
-                        per_channel: params.per_channel.unwrap_or(false),
+                        lut_r: linear_lut(),
+                        lut_g: linear_lut(),
+                        lut_b: linear_lut(),
+                        lut_master: build_curve_lut_from_points(&curve_points),
+                        per_channel: false,
+                        control_points: Some(curve_points),
                     };
                     if let Some(op) = ops
                         .iter_mut()
@@ -619,6 +985,7 @@ pub async fn add_layer(
             lut_b: linear_lut(),
             lut_master: linear_lut(),
             per_channel: false,
+            control_points: None,
         }]),
         "crop" => st.stack.add_crop_layer(CropRect {
             x: 0.0,
@@ -748,6 +1115,7 @@ pub struct CurvesValues {
     pub lut_b: Vec<f32>,
     pub lut_master: Vec<f32>,
     pub per_channel: bool,
+    pub control_points: Option<Vec<CurveControlPoint>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -782,6 +1150,7 @@ pub struct HslValues {
 #[tauri::command]
 pub async fn get_thumbnail<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    _thumbnail_service: tauri::State<'_, crate::ThumbnailService>,
     path: String,
 ) -> Result<Vec<u8>, String> {
     load_thumbnail_bytes(app, &path).await
@@ -820,47 +1189,20 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?;
     }
 
-    use std::hash::{Hash, Hasher};
-
-    let source = std::path::Path::new(picture_id);
-    let mtime = std::fs::metadata(source)
-        .and_then(|m| m.modified())
-        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
-        .unwrap_or(0);
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    picture_id.hash(&mut hasher);
-    mtime.hash(&mut hasher);
-    let cache_key = hasher.finish();
-
-    let cache_dir = std::env::temp_dir().join("shade-thumbnails");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
-    let cache_path = cache_dir.join(format!("{cache_key:016x}.jpg"));
-
-    if cache_path.exists() {
-        return std::fs::read(&cache_path).map_err(|e| e.to_string());
-    }
-
-    let (pixels, width, height) =
-        shade_io::load_image(source).map_err(|e| e.to_string())?;
-    let img = image::RgbaImage::from_raw(width, height, pixels)
-        .ok_or("failed to wrap pixels in RgbaImage")?;
-    let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
-    let mut jpeg: Vec<u8> = Vec::new();
-    thumb
-        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
-        .map_err(|e| e.to_string())?;
-    std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
-    Ok(jpeg)
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    app.state::<crate::ThumbnailService>()
+        .0
+        .push(ThumbnailJob { path: picture_id.to_owned(), response: response_tx });
+    response_rx.await.map_err(|e| e.to_string())?
 }
 
 pub async fn load_picture_bytes<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+    _app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
     #[cfg(target_os = "android")]
     if picture_id.starts_with("content://") {
-        return app
+        return _app
             .state::<crate::photos::PhotosHandle<R>>()
             .get_image_data(picture_id)
             .await;
@@ -902,10 +1244,10 @@ pub async fn list_pictures<R: tauri::Runtime>(
 }
 
 pub async fn load_picture_entries<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+    _app: tauri::AppHandle<R>,
 ) -> Result<Vec<shade_p2p::SharedPicture>, String> {
     #[cfg(target_os = "android")]
-    return app
+    return _app
         .state::<crate::photos::PhotosHandle<R>>()
         .list_photos()
         .await
@@ -946,39 +1288,198 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
     .map_err(|e| e.to_string())?;
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    {
-        let search_dir = std::env::var("HOME").ok()
-            .map(|h| std::path::PathBuf::from(h).join("Pictures"));
+    Ok(collect_images_in_directory(&default_pictures_dir()?)?
+        .into_iter()
+        .map(|id| shade_p2p::SharedPicture {
+            name: picture_display_name(&id),
+            id,
+        })
+        .collect())
+}
 
-        const IMAGE_EXTENSIONS: &[&str] = &[
-            "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
-            "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
-        ];
-        let mut entries_with_mtime: Vec<(std::time::SystemTime, shade_p2p::SharedPicture)> = Vec::new();
-        if let Some(dir) = search_dir {
-            let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(vec![]); };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                            if let Some(s) = path.to_str() {
-                                let mtime = path.metadata().ok()
-                                    .and_then(|m| m.modified().ok())
-                                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                                entries_with_mtime.push((mtime, shade_p2p::SharedPicture {
-                                    name: picture_display_name(s),
-                                    id: s.to_string(),
-                                }));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
-        Ok(entries_with_mtime.into_iter().map(|(_, p)| p).collect())
+#[tauri::command]
+pub async fn list_media_libraries<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+) -> Result<Vec<MediaLibrary>, String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = _app;
+        return Ok(vec![MediaLibrary {
+            id: "photos".into(),
+            name: "Photos".into(),
+            kind: "directory".into(),
+            path: None,
+            removable: false,
+        }]);
     }
+
+    #[cfg(target_os = "ios")]
+    {
+        let _ = _app;
+        return Ok(vec![MediaLibrary {
+            id: "photos".into(),
+            name: "Photos".into(),
+            kind: "directory".into(),
+            path: None,
+            removable: false,
+        }]);
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let _ = _app;
+        list_desktop_media_libraries()
+    }
+}
+
+#[tauri::command]
+pub async fn list_library_images<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    library_id: String,
+) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        if library_id != "photos" {
+            return Err(format!("unknown media library: {library_id}"));
+        }
+        return _app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .list_photos()
+            .await;
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        if library_id != "photos" {
+            return Err(format!("unknown media library: {library_id}"));
+        }
+        return tokio::task::spawn_blocking(|| {
+            let ptr = unsafe { ios_list_photos() };
+            if ptr.is_null() {
+                return Ok(vec![]);
+            }
+            let json = unsafe {
+                let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+                ios_free_string(ptr);
+                s
+            };
+            serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let _ = _app;
+        collect_images_in_directory(&resolve_desktop_library_path(&library_id)?)
+    }
+}
+
+#[tauri::command]
+pub async fn add_media_library(path: String) -> Result<MediaLibrary, String> {
+    let canonical = std::fs::canonicalize(Path::new(&path)).map_err(|e| e.to_string())?;
+    if !canonical.is_dir() {
+        return Err(format!("not a directory: {}", canonical.display()));
+    }
+    let mut config = load_media_library_config()?;
+    let canonical_string = canonical.to_str()
+        .ok_or_else(|| format!("non-utf8 path: {}", canonical.display()))?
+        .to_string();
+    if !config.directories.iter().any(|existing| existing == &canonical_string) {
+        config.directories.push(canonical_string);
+        save_media_library_config(&config)?;
+    }
+    Ok(library_for_directory(canonical))
+}
+
+#[tauri::command]
+pub async fn remove_media_library(id: String) -> Result<(), String> {
+    if id == "pictures" || id == "photos" {
+        return Err(format!("media library is not removable: {id}"));
+    }
+    let mut config = load_media_library_config()?;
+    let before = config.directories.len();
+    config.directories.retain(|directory| custom_library_id(Path::new(directory)) != id);
+    if config.directories.len() == before {
+        return Err(format!("unknown media library: {id}"));
+    }
+    save_media_library_config(&config)
+}
+
+#[tauri::command]
+pub async fn list_presets() -> Result<Vec<PresetInfo>, String> {
+    let dir = presets_dir_path()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut presets = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        presets.push(PresetInfo { name: stem.to_string() });
+    }
+    presets.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(presets)
+}
+
+#[tauri::command]
+pub async fn save_preset(
+    name: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<PresetInfo, String> {
+    let path = preset_file_path(&name)?;
+    let parent = path.parent().ok_or_else(|| format!("invalid preset path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let st = state.lock().unwrap();
+    let layers = st
+        .stack
+        .layers
+        .iter()
+        .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    let file = PresetFile { version: 1, layers };
+    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(PresetInfo { name: name.trim().to_string() })
+}
+
+#[tauri::command]
+pub async fn load_preset(
+    name: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    let path = preset_file_path(&name)?;
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let file: PresetFile = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    if file.version != 1 {
+        return Err(format!("unsupported preset version: {}", file.version));
+    }
+    let mut st = state.lock().unwrap();
+    let image_layers: Vec<_> = st
+        .stack
+        .layers
+        .iter()
+        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    if image_layers.is_empty() {
+        return Err("cannot load a preset without a loaded image".into());
+    }
+    st.stack.layers = image_layers;
+    st.stack.layers.extend(file.layers);
+    st.stack.generation += 1;
+    Ok(())
 }
 
 fn picture_display_name(picture_id: &str) -> String {
@@ -1090,6 +1591,7 @@ pub async fn get_layer_stack(
                                 lut_b,
                                 lut_master,
                                 per_channel,
+                                control_points,
                             } => {
                                 adjustments.curves = Some(CurvesValues {
                                     lut_r: lut_r.clone(),
@@ -1097,6 +1599,7 @@ pub async fn get_layer_stack(
                                     lut_b: lut_b.clone(),
                                     lut_master: lut_master.clone(),
                                     per_channel: *per_channel,
+                                    control_points: control_points.clone(),
                                 });
                             }
                             AdjustmentOp::Vignette(params) => {

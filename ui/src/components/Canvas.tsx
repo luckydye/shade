@@ -69,6 +69,7 @@ function getFullImageBounds(stageWidth: number, stageHeight: number): ImageBound
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
+  let viewportRef: HTMLDivElement | undefined;
   let scratchCanvas: HTMLCanvasElement | undefined;
   let contextCanvas: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
@@ -159,11 +160,11 @@ const Canvas: Component = () => {
   }
 
   function drawFrame() {
-    if (!canvasRef || !stageRef) return;
+    if (!canvasRef || !viewportRef) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
-    const cssWidth = Math.max(1, Math.floor(stageRef.clientWidth));
-    const cssHeight = Math.max(1, Math.floor(stageRef.clientHeight));
+    const cssWidth = Math.max(1, Math.floor(viewportRef.clientWidth));
+    const cssHeight = Math.max(1, Math.floor(viewportRef.clientHeight));
     const devicePixelRatio = window.devicePixelRatio || 1;
     const pixelWidth = Math.max(1, Math.floor(cssWidth * devicePixelRatio));
     const pixelHeight = Math.max(1, Math.floor(cssHeight * devicePixelRatio));
@@ -237,12 +238,12 @@ const Canvas: Component = () => {
   });
 
   onMount(() => {
-    const stage = stageRef;
-    if (!stage) return;
+    const viewport = viewportRef;
+    if (!viewport) return;
     const observer = new ResizeObserver(([entry]) => {
       setPreviewViewportSize(entry.contentRect.width, entry.contentRect.height);
     });
-    observer.observe(stage);
+    observer.observe(viewport);
     onCleanup(() => observer.disconnect());
   });
 
@@ -397,7 +398,6 @@ const Canvas: Component = () => {
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
-        style={{ "view-transition-name": "active-media" }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -409,7 +409,13 @@ const Canvas: Component = () => {
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
-        <div class="relative flex h-full items-center justify-center pb-25 lg:pb-0" style={{ "padding-bottom": isDrawerOpen() ? "33vh" : "" }}>
+        <div
+          ref={viewportRef}
+          class="relative flex h-[calc(100%-6.25rem)] w-full items-center justify-center lg:h-full"
+          style={{
+            height: isDrawerOpen() ? "calc(100% - 45vh)" : undefined,
+          }}
+        >
           <canvas
             ref={canvasRef}
             width="800"
@@ -418,11 +424,31 @@ const Canvas: Component = () => {
             style={{
               width: "100%",
               height: "100%",
+              "view-transition-name": state.currentView === "editor" && state.layers.length > 0 && !state.isLoading
+                ? "active-editor-media"
+                : "none",
             }}
             class={`bg-[#111111] ${
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />
+          {state.isLoading && state.loadingMediaSrc && !previewFrame() && (
+            <div class="pointer-events-none absolute inset-0">
+              <img
+                src={state.loadingMediaSrc}
+                alt=""
+                class="absolute inset-0 h-full w-full object-contain"
+                style={{ "view-transition-name": "active-media" }}
+              />
+              <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.04),_transparent_40%)]" />
+              <div class="absolute inset-x-0 bottom-6 flex items-center justify-center">
+                <span class="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur">
+                  <span class="h-2 w-2 animate-pulse rounded-full bg-white" />
+                  Loading
+                </span>
+              </div>
+            </div>
+          )}
           {selectedCropLayer() && activeCrop() && (
             <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
               <span>Crop</span>
@@ -431,7 +457,7 @@ const Canvas: Component = () => {
               </span>
             </div>
           )}
-          {state.layers.length === 0 && (
+          {state.layers.length === 0 && !state.isLoading && (
             <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">
               <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-white/80">
                 <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">

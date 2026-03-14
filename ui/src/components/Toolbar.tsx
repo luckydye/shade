@@ -1,5 +1,5 @@
 import { Component, JSX, Show } from "solid-js";
-import { closeImage, openImageFile, state } from "../store/editor";
+import { openImageFile, showEditorView, showMediaView, state } from "../store/editor";
 
 const ACCEPTED = "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
 
@@ -60,6 +60,8 @@ const SaveIcon = () => (
 
 export const Toolbar: Component = () => {
   let fileInputRef: HTMLInputElement | undefined;
+  const hasImage = () => state.canvasWidth > 0 || state.isLoading;
+  const canResumeEditor = () => hasImage() && state.currentView === "media";
 
   const statusText = () => {
     if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return "No image loaded";
@@ -82,9 +84,9 @@ export const Toolbar: Component = () => {
   };
 
   return (
-    <header class="absolute lg:static top-0 w-full z-50 grid grid-cols-[40px_1fr_40px] md:grid-cols-[auto_1fr_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-5 pt-[calc(env(safe-area-inset-top))]">
+    <header class="absolute lg:static top-0 w-full z-50 grid grid-cols-[40px_1fr_40px] md:grid-cols-[auto_1fr_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-3 pt-[calc(env(safe-area-inset-top))] lg:pt-2">
       <div>
-        <Show when={state.canvasWidth > 0 || state.isLoading}>
+        <Show when={hasImage() && state.currentView === "editor"}>
           <ActionButton
             label="Back"
             icon={
@@ -94,17 +96,34 @@ export const Toolbar: Component = () => {
             }
             onClick={() => {
               if (document.startViewTransition) {
-                document.startViewTransition(closeImage);
+                document.startViewTransition(showMediaView);
               } else {
-                closeImage();
+                showMediaView();
               }
             }}
           />
         </Show>
       </div>
       
-      <div class="text-center">
-        <div class="flex flex-col">
+      <div class="flex justify-center text-center">
+        <button
+          type="button"
+          class={`flex flex-col ${canResumeEditor() ? "cursor-pointer" : "cursor-default"}`}
+          style={{
+            "view-transition-name": hasImage() && state.currentView === "media"
+              ? "active-editor-media"
+              : "none",
+          }}
+          onClick={() => {
+            if (!canResumeEditor()) return;
+            if (document.startViewTransition) {
+              document.startViewTransition(showEditorView);
+            } else {
+              showEditorView();
+            }
+          }}
+          disabled={!canResumeEditor()}
+        >
           <span class="block text-[11px] text-white/40">
             {state.isLoading && (
               <span class="hidden rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] font-medium text-white/70 sm:inline-flex">
@@ -112,7 +131,7 @@ export const Toolbar: Component = () => {
               </span>
             ) || statusText()}
           </span>
-        </div>
+        </button>
       </div>
 
       <div>

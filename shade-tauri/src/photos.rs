@@ -1,11 +1,14 @@
+#[cfg(target_os = "android")]
 use serde::Deserialize;
-use tauri::{plugin::Builder, Manager, Runtime};
+use tauri::{plugin::Builder, Runtime};
 
+#[cfg(target_os = "android")]
 #[derive(Deserialize)]
 struct ListResult {
     uris: Vec<String>,
 }
 
+#[cfg(target_os = "android")]
 #[derive(Deserialize)]
 struct BytesResult {
     bytes: Vec<u8>,

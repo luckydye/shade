@@ -118,6 +118,11 @@ export interface HslValues {
   blue_hue: number; blue_sat: number; blue_lum: number;
 }
 
+export interface CurveControlPoint {
+  x: number;
+  y: number;
+}
+
 export interface AdjustmentValues {
   tone: ToneValues | null;
   curves: CurvesValues | null;
@@ -134,6 +139,7 @@ export interface CurvesValues {
   lut_b: number[];
   lut_master: number[];
   per_channel: boolean;
+  control_points?: CurveControlPoint[] | null;
 }
 
 export interface LayerInfo {
@@ -426,6 +432,76 @@ export async function listPictures(): Promise<string[]> {
     return inv("list_pictures") as Promise<string[]>;
   }
   return [];
+}
+
+export interface MediaLibrary {
+  id: string;
+  name: string;
+  kind: "directory";
+  path?: string | null;
+  removable: boolean;
+}
+
+export interface PresetInfo {
+  name: string;
+}
+
+export async function listMediaLibraries(): Promise<MediaLibrary[]> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_media_libraries") as Promise<MediaLibrary[]>;
+  }
+  throw new Error("listMediaLibraries is only implemented for Tauri");
+}
+
+export async function listLibraryImages(libraryId: string): Promise<string[]> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_library_images", { libraryId }) as Promise<string[]>;
+  }
+  throw new Error("listLibraryImages is only implemented for Tauri");
+}
+
+export async function addMediaLibrary(path: string): Promise<MediaLibrary> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("add_media_library", { path }) as Promise<MediaLibrary>;
+  }
+  throw new Error("addMediaLibrary is only implemented for Tauri");
+}
+
+export async function removeMediaLibrary(id: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("remove_media_library", { id });
+    return;
+  }
+  throw new Error("removeMediaLibrary is only implemented for Tauri");
+}
+
+export async function listPresets(): Promise<PresetInfo[]> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_presets") as Promise<PresetInfo[]>;
+  }
+  throw new Error("listPresets is only implemented for Tauri");
+}
+
+export async function savePreset(name: string): Promise<PresetInfo> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("save_preset", { name }) as Promise<PresetInfo>;
+  }
+  throw new Error("savePreset is only implemented for Tauri");
+}
+
+export async function loadPreset(name: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("load_preset", { name });
+    return;
+  }
+  throw new Error("loadPreset is only implemented for Tauri");
 }
 
 export async function addLayer(kind: string): Promise<number> {

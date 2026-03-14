@@ -186,6 +186,7 @@ impl Renderer {
                     lut_b,
                     lut_master,
                     per_channel,
+                    control_points: _,
                 } => self.curves_pipeline.process(
                     &self.ctx,
                     current_tex,
