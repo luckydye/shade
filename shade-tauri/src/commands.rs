@@ -840,20 +840,27 @@ pub async fn list_pictures<R: tauri::Runtime>(
         ];
         let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
         if let Some(dir) = search_dir {
-            let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(vec![]); };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                            if let Some(s) = path.to_str() {
-                                let mtime = path.metadata().ok()
-                                    .and_then(|m| m.modified().ok())
-                                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                                entries_with_mtime.push((mtime, s.to_string()));
-                            }
-                        }
+            let mut dirs = vec![dir];
+            while let Some(current_dir) = dirs.pop() {
+                let Ok(entries) = std::fs::read_dir(&current_dir) else { continue; };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        dirs.push(path);
+                        continue;
                     }
+                    if !path.is_file() {
+                        continue;
+                    }
+                    let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
+                    if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                        continue;
+                    }
+                    let Some(s) = path.to_str() else { continue; };
+                    let mtime = path.metadata().ok()
+                        .and_then(|m| m.modified().ok())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    entries_with_mtime.push((mtime, s.to_string()));
                 }
             }
         }

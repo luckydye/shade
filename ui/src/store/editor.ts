@@ -16,10 +16,7 @@ export { previewFrame };
 const [previewContextFrame, setPreviewContextFrame] = createSignal<ImageData | null>(null);
 export { previewContextFrame };
 type PreviewQuality = "interactive" | "final";
-const INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO = 0.75;
-const FINAL_PREVIEW_DEVICE_PIXEL_RATIO = 1.25;
-const INTERACTIVE_PREVIEW_PIXEL_COUNT = 300_000;
-const FINAL_PREVIEW_PIXEL_COUNT = 1_500_000;
+const INTERACTIVE_PREVIEW_SCALE = 0.75;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
@@ -246,21 +243,12 @@ function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
 function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   const visible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
   if (!visible) return null;
-  const devicePixelRatio = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
-    : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
-  const maxPixelCount = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_PIXEL_COUNT
-    : FINAL_PREVIEW_PIXEL_COUNT;
-  const target = capPreviewRenderSize(
-    Math.max(1, Math.floor(visible.screenWidth * Math.min(window.devicePixelRatio, devicePixelRatio))),
-    Math.max(1, Math.floor(visible.screenHeight * Math.min(window.devicePixelRatio, devicePixelRatio))),
-    maxPixelCount,
-  );
-  if (target.width <= 0 || target.height <= 0) return null;
+  const devicePixelRatio = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_PREVIEW_SCALE : 1);
+  const targetWidth = Math.max(1, Math.round(visible.screenWidth * devicePixelRatio));
+  const targetHeight = Math.max(1, Math.round(visible.screenHeight * devicePixelRatio));
   return {
-    target_width: target.width,
-    target_height: target.height,
+    target_width: targetWidth,
+    target_height: targetHeight,
     crop: visible.crop,
     ignore_crop_layers: selectedLayerIsCrop(),
   };
@@ -279,23 +267,17 @@ function previewCropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
 function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
   const crop = selectedLayerIsCrop() || state.isCropMode ? undefined : getCommittedCropRect();
-  const devicePixelRatio = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
-    : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
-  const maxPixelCount = quality === "interactive"
-    ? INTERACTIVE_PREVIEW_PIXEL_COUNT
-    : FINAL_PREVIEW_PIXEL_COUNT;
+  const devicePixelRatio = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_PREVIEW_SCALE : 1);
   const fitted = fitPreviewSize(
-    state.previewViewportWidth * Math.min(window.devicePixelRatio, devicePixelRatio),
-    state.previewViewportHeight * Math.min(window.devicePixelRatio, devicePixelRatio),
+    state.previewViewportWidth * devicePixelRatio,
+    state.previewViewportHeight * devicePixelRatio,
     crop?.width ?? state.canvasWidth,
     crop?.height ?? state.canvasHeight,
   );
-  const target = capPreviewRenderSize(fitted.width, fitted.height, maxPixelCount);
-  if (target.width <= 0 || target.height <= 0) return null;
+  if (fitted.width <= 0 || fitted.height <= 0) return null;
   return {
-    target_width: target.width,
-    target_height: target.height,
+    target_width: fitted.width,
+    target_height: fitted.height,
     crop,
     ignore_crop_layers: selectedLayerIsCrop(),
   };
