@@ -3,30 +3,38 @@ mod photos;
 
 use tauri::Manager;
 
-pub struct P2pState(pub shade_p2p::LocalPeerDiscovery);
+pub struct P2pState(pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>);
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
 pub struct ThumbnailService(pub std::sync::Arc<commands::ThumbnailQueue>);
+pub struct LibraryScanService(pub std::sync::Arc<commands::LibraryScanService>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(photos::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(P2pState(tokio::sync::RwLock::new(None)))
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RenderService(commands::spawn_render_worker()))
         .manage(ThumbnailService(commands::spawn_thumbnail_workers()))
+        .manage(LibraryScanService(commands::LibraryScanService::new()))
         .setup(|app| {
-            let handle = app.handle().clone();
-            let secret_key = commands::load_p2p_secret_key()
-                .expect("failed to load persisted p2p secret key");
-            let p2p = tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
-                secret_key,
-                std::sync::Arc::new(commands::AppMediaProvider::new(handle.clone())),
-            ))
-            .expect("failed to initialize local peer discovery");
-            commands::save_p2p_secret_key(p2p.secret_key_bytes())
-                .expect("failed to persist p2p secret key");
-            app.manage(P2pState(p2p));
+            #[cfg(not(target_os = "android"))]
+            {
+                let handle = app.handle().clone();
+                let secret_key = commands::load_p2p_secret_key()?;
+                let p2p = std::sync::Arc::new(
+                    tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
+                        secret_key,
+                        std::sync::Arc::new(commands::AppMediaProvider::new(handle)),
+                    ))
+                    .map_err(|error| error.to_string())?,
+                );
+                commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
+                tauri::async_runtime::block_on(async {
+                    *app.state::<P2pState>().0.write().await = Some(p2p);
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

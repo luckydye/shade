@@ -4,8 +4,10 @@ use shade_core::{
     CurveControlPoint, FloatImage, GrainParams, HslParams, LayerStack, SharpenParams,
     VignetteParams,
 };
+use shade_io::SourceImageInfo;
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
 use std::collections::{HashMap, VecDeque};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::Manager;
@@ -54,6 +56,12 @@ pub struct LibraryImage {
     pub modified_at: Option<u64>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LibraryImageListing {
+    pub items: Vec<LibraryImage>,
+    pub is_complete: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(default)]
 struct AppConfig {
@@ -66,6 +74,49 @@ const IMAGE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
     "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
 ];
+
+fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&'static str>() {
+            Ok(message) => (*message).to_string(),
+            Err(_) => "panic without message".to_string(),
+        },
+    }
+}
+
+fn decode_image_bytes_with_info(
+    bytes: &[u8],
+    name_hint: Option<&str>,
+) -> Result<(FloatImage, SourceImageInfo), String> {
+    catch_unwind(AssertUnwindSafe(|| load_image_bytes_f32_with_info(bytes, name_hint)))
+        .map_err(|payload| format!("image decode panicked: {}", panic_payload_message(payload)))?
+        .map_err(|e| e.to_string())
+}
+
+fn decode_image_path_with_info(path: &Path) -> Result<(FloatImage, SourceImageInfo), String> {
+    catch_unwind(AssertUnwindSafe(|| load_image_f32_with_info(path)))
+        .map_err(|payload| format!("image decode panicked: {}", panic_payload_message(payload)))?
+        .map_err(|e| e.to_string())
+}
+
+fn lock_editor_state<'a>(
+    state: &'a tauri::State<'_, Mutex<EditorState>>,
+) -> Result<std::sync::MutexGuard<'a, EditorState>, String> {
+    state
+        .lock()
+        .map_err(|_| "editor state lock poisoned".to_string())
+}
+
+async fn require_p2p(
+    p2p: &tauri::State<'_, crate::P2pState>,
+) -> Result<std::sync::Arc<shade_p2p::LocalPeerDiscovery>, String> {
+    p2p.0
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "p2p is unavailable on this platform".to_string())
+}
 
 fn app_config_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
@@ -238,6 +289,153 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
     }
     entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
     Ok(entries_with_mtime.into_iter().map(|(_, entry)| entry).collect())
+}
+
+pub struct LibraryScanEntry {
+    pub modified_at: u64,
+    pub image: LibraryImage,
+}
+
+pub struct LibraryScanSnapshot {
+    pub items: Vec<LibraryScanEntry>,
+    pub is_complete: bool,
+    pub error: Option<String>,
+    pub completed_at: Option<u64>,
+}
+
+pub struct LibraryScanService {
+    pub scans: Mutex<HashMap<String, Arc<Mutex<LibraryScanSnapshot>>>>,
+}
+
+impl LibraryScanService {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            scans: Mutex::new(HashMap::new()),
+        })
+    }
+
+    pub fn snapshot_for_library(&self, library_id: &str, root: PathBuf) -> Result<LibraryImageListing, String> {
+        let snapshot = {
+            let mut scans = self.scans.lock().map_err(|_| "library scan lock poisoned".to_string())?;
+            let should_restart = scans
+                .get(library_id)
+                .map(|snapshot| library_scan_should_restart(snapshot))
+                .transpose()?
+                .unwrap_or(true);
+            if should_restart {
+                let snapshot = Arc::new(Mutex::new(LibraryScanSnapshot {
+                    items: Vec::new(),
+                    is_complete: false,
+                    error: None,
+                    completed_at: None,
+                }));
+                scans.insert(library_id.to_string(), snapshot.clone());
+                spawn_library_scan(snapshot.clone(), root);
+                snapshot
+            } else {
+                scans
+                    .get(library_id)
+                    .expect("library scan snapshot must exist")
+                    .clone()
+            }
+        };
+        let snapshot = snapshot.lock().map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+        if let Some(error) = &snapshot.error {
+            return Err(error.clone());
+        }
+        Ok(LibraryImageListing {
+            items: snapshot.items.iter().map(|entry| entry.image.clone()).collect(),
+            is_complete: snapshot.is_complete,
+        })
+    }
+}
+
+pub fn library_scan_should_restart(snapshot: &Arc<Mutex<LibraryScanSnapshot>>) -> Result<bool, String> {
+    let snapshot = snapshot.lock().map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+    if !snapshot.is_complete {
+        return Ok(false);
+    }
+    let Some(completed_at) = snapshot.completed_at else {
+        return Ok(true);
+    };
+    let now = modified_at_millis(std::time::SystemTime::now())?;
+    Ok(now.saturating_sub(completed_at) > 5_000)
+}
+
+pub fn spawn_library_scan(snapshot: Arc<Mutex<LibraryScanSnapshot>>, root: PathBuf) {
+    std::thread::Builder::new()
+        .name("shade-library-scan".into())
+        .spawn(move || {
+            let result = scan_library_into_snapshot(&root, &snapshot);
+            let mut guard = snapshot.lock().expect("library scan snapshot lock poisoned");
+            if let Err(error) = result {
+                guard.error = Some(error);
+            }
+            guard.completed_at = Some(modified_at_millis(std::time::SystemTime::now()).expect("current time must be valid"));
+            guard.is_complete = true;
+        })
+        .expect("failed to spawn library scan thread");
+}
+
+pub fn scan_library_into_snapshot(
+    dir: &Path,
+    snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
+) -> Result<(), String> {
+    let mut dirs = vec![dir.to_path_buf()];
+    let mut batch = Vec::new();
+    while let Some(current_dir) = dirs.pop() {
+        let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
+            if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                continue;
+            }
+            let path_string = path.to_str()
+                .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
+                .to_string();
+            let modified_at = modified_at_millis(
+                path.metadata()
+                    .map_err(|e| e.to_string())?
+                    .modified()
+                    .map_err(|e| e.to_string())?,
+            )?;
+            batch.push(LibraryScanEntry {
+                modified_at,
+                image: LibraryImage {
+                    name: picture_display_name(&path_string),
+                    path: path_string,
+                    modified_at: Some(modified_at),
+                },
+            });
+            if batch.len() >= 64 {
+                flush_library_scan_batch(snapshot, &mut batch)?;
+            }
+        }
+    }
+    flush_library_scan_batch(snapshot, &mut batch)?;
+    Ok(())
+}
+
+pub fn flush_library_scan_batch(
+    snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
+    batch: &mut Vec<LibraryScanEntry>,
+) -> Result<(), String> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+    let mut guard = snapshot.lock().map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+    guard.items.extend(batch.drain(..));
+    guard.items.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    Ok(())
 }
 
 pub struct ThumbnailJob {
@@ -530,7 +728,7 @@ pub struct LayerInfoResponse {
 pub async fn get_local_peer_discovery_snapshot(
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<shade_p2p::LocalPeerDiscoverySnapshot, String> {
-    Ok(p2p.0.snapshot().await)
+    Ok(require_p2p(&p2p).await?.snapshot().await)
 }
 
 #[tauri::command]
@@ -538,7 +736,8 @@ pub async fn list_peer_pictures(
     peer_endpoint_id: String,
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<Vec<shade_p2p::SharedPicture>, String> {
-    p2p.0
+    require_p2p(&p2p)
+        .await?
         .list_peer_pictures(&peer_endpoint_id)
         .await
         .map_err(|error| error.to_string())
@@ -550,7 +749,8 @@ pub async fn get_peer_thumbnail(
     picture_id: String,
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<Vec<u8>, String> {
-    p2p.0
+    require_p2p(&p2p)
+        .await?
         .get_peer_thumbnail(&peer_endpoint_id, &picture_id)
         .await
         .map_err(|error| error.to_string())
@@ -562,7 +762,8 @@ pub async fn get_peer_image_bytes(
     picture_id: String,
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<Vec<u8>, String> {
-    p2p.0
+    require_p2p(&p2p)
+        .await?
         .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
         .await
         .map_err(|error| error.to_string())
@@ -581,8 +782,7 @@ pub async fn open_image<R: tauri::Runtime>(
             .state::<crate::photos::PhotosHandle<R>>()
             .get_image_data(&path)
             .await?;
-        let (image, info) =
-            shade_io::load_image_bytes_f32_with_info(&bytes, None).map_err(|e| e.to_string())?;
+        let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
         let mut st = state.lock().unwrap();
         return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space));
     }
@@ -606,14 +806,12 @@ pub async fn open_image<R: tauri::Runtime>(
         .await
         .map_err(|e| e.to_string())??;
 
-        let (image, info) =
-            load_image_bytes_f32_with_info(&bytes, None).map_err(|e| e.to_string())?;
+        let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
         let mut st = state.lock().unwrap();
         return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space));
     }
 
-    let (image, info) =
-        load_image_f32_with_info(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let (image, info) = decode_image_path_with_info(std::path::Path::new(&path))?;
     let mut st = state.lock().unwrap();
     Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
 }
@@ -624,8 +822,7 @@ pub async fn open_image_encoded_bytes(
     file_name: Option<String>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    let (image, info) =
-        load_image_bytes_f32_with_info(&bytes, file_name.as_deref()).map_err(|e| e.to_string())?;
+    let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let mut st = state.lock().unwrap();
     Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
 }
@@ -701,15 +898,11 @@ fn snapshot_render_state(
         u32,
         u32,
     ),
-    PreviewFrameResponse,
+    String,
 > {
-    let st = state.lock().unwrap();
+    let st = lock_editor_state(state)?;
     if st.canvas_width == 0 {
-        return Err(PreviewFrameResponse {
-            pixels: Vec::new(),
-            width: 0,
-            height: 0,
-        });
+        return Err("no image loaded".to_string());
     }
     Ok((
         st.stack.clone(),
@@ -748,10 +941,7 @@ pub async fn render_preview(
     render_service: tauri::State<'_, crate::RenderService>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameResponse, String> {
-    let (stack, sources, canvas_width, canvas_height) = match snapshot_render_state(&state) {
-        Ok(snapshot) => snapshot,
-        Err(empty) => return Ok(empty),
-    };
+    let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
     let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     render_service
@@ -775,13 +965,9 @@ pub async fn render_preview_float16(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameFloat16Response, String> {
     let (stack, sources, canvas_width, canvas_height) = {
-        let st = state.lock().unwrap();
+        let st = lock_editor_state(&state)?;
         if st.canvas_width == 0 {
-            return Ok(PreviewFrameFloat16Response {
-                pixels: Vec::new(),
-                width: 0,
-                height: 0,
-            });
+            return Err("no image loaded".to_string());
         }
         (
             st.stack.clone(),
@@ -1388,7 +1574,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 pub async fn list_library_images<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
     library_id: String,
-) -> Result<Vec<LibraryImage>, String> {
+) -> Result<LibraryImageListing, String> {
     #[cfg(target_os = "android")]
     {
         if library_id != "photos" {
@@ -1398,15 +1584,16 @@ pub async fn list_library_images<R: tauri::Runtime>(
             .state::<crate::photos::PhotosHandle<R>>()
             .list_photos()
             .await
-            .map(|photos| {
-                photos
+            .map(|photos| LibraryImageListing {
+                items: photos
                     .into_iter()
                     .map(|path| LibraryImage {
                         name: picture_display_name(&path),
                         path,
                         modified_at: None,
                     })
-                    .collect()
+                    .collect(),
+                is_complete: true,
             });
     }
 
@@ -1426,15 +1613,16 @@ pub async fn list_library_images<R: tauri::Runtime>(
                 s
             };
             serde_json::from_str::<Vec<String>>(&json)
-                .map(|photos| {
-                    photos
+                .map(|photos| LibraryImageListing {
+                    items: photos
                         .into_iter()
                         .map(|path| LibraryImage {
                             name: picture_display_name(&path),
                             path,
                             modified_at: None,
                         })
-                        .collect()
+                        .collect(),
+                    is_complete: true,
                 })
                 .map_err(|e| e.to_string())
         })
@@ -1444,8 +1632,11 @@ pub async fn list_library_images<R: tauri::Runtime>(
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        let _ = _app;
-        collect_images_in_directory(&resolve_desktop_library_path(&library_id)?)
+        let library_path = resolve_desktop_library_path(&library_id)?;
+        _app
+            .state::<crate::LibraryScanService>()
+            .0
+            .snapshot_for_library(&library_id, library_path)
     }
 }
 
@@ -1633,7 +1824,7 @@ impl<R: tauri::Runtime> shade_p2p::MediaProvider for AppMediaProvider<R> {
 pub async fn get_layer_stack(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerStackInfo, String> {
-    let st = state.lock().unwrap();
+    let st = lock_editor_state(&state)?;
     let layers = st
         .stack
         .layers

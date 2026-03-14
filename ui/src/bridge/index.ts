@@ -103,6 +103,11 @@ export interface LibraryImage {
   modified_at: number | null;
 }
 
+export interface LibraryImageListing {
+  items: LibraryImage[];
+  is_complete: boolean;
+}
+
 export interface ToneValues {
   exposure: number;
   contrast: number;
@@ -189,6 +194,10 @@ let float16PreviewSupport: boolean | null = null;
 
 function supportsFloat16Preview() {
   if (float16PreviewSupport !== null) return float16PreviewSupport;
+  if (typeof navigator !== "undefined" && /\bAndroid\b/i.test(navigator.userAgent)) {
+    float16PreviewSupport = false;
+    return false;
+  }
   const Float16 = (globalThis as any).Float16Array as Float16ArrayCtor | undefined;
   if (typeof ImageData === "undefined" || !Float16) {
     float16PreviewSupport = false;
@@ -465,10 +474,10 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   throw new Error("listMediaLibraries is only implemented for Tauri");
 }
 
-export async function listLibraryImages(libraryId: string): Promise<LibraryImage[]> {
+export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("list_library_images", { libraryId }) as Promise<LibraryImage[]>;
+    return inv("list_library_images", { libraryId }) as Promise<LibraryImageListing>;
   }
   throw new Error("listLibraryImages is only implemented for Tauri");
 }

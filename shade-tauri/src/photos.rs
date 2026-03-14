@@ -1,5 +1,7 @@
 #[cfg(target_os = "android")]
 use serde::Deserialize;
+#[cfg(target_os = "android")]
+use tauri::Manager;
 use tauri::{plugin::Builder, Runtime};
 
 #[cfg(target_os = "android")]

@@ -18,6 +18,7 @@ import {
   removePeerLibrary,
   resolvePeerThumbnailSrc,
   type PeerLibrary,
+  type PeerLibraryItem,
 } from "../peer-library-cache";
 import { openImage, openPeerImage, state } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
@@ -93,22 +94,65 @@ function localMediaItem(image: LibraryImage): MediaItem {
   };
 }
 
+function peerMediaItem(image: PeerLibraryItem): MediaItem {
+  return {
+    kind: "peer",
+    id: image.id,
+    name: image.name,
+    peerId: image.peerId,
+    modifiedAt: normalizeModifiedAt(image.modified_at),
+  };
+}
+
+function mediaItemKey(item: MediaItem) {
+  return item.kind === "peer" ? `peer:${item.peerId}:${item.id}` : `local:${item.id}`;
+}
+
+function sameMediaItem(left: MediaItem, right: MediaItem) {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  if (left.id !== right.id || left.name !== right.name || left.modifiedAt !== right.modifiedAt) {
+    return false;
+  }
+  if (left.kind === "local") {
+    return true;
+  }
+  return right.kind === "peer" && left.peerId === right.peerId;
+}
+
 async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> {
   if (!libraryId) {
     return [];
   }
   if (libraryId.startsWith("peer:")) {
     const peerId = libraryId.slice("peer:".length);
-    return loadPeerLibraryItems(peerId);
+    return (await loadPeerLibraryItems(peerId)).map(peerMediaItem);
   }
-  const images = await listLibraryImages(libraryId);
-  return images.map(localMediaItem);
+  const listing = await listLibraryImages(libraryId);
+  return listing.items.map(localMediaItem);
 }
 
-async function loadLibraryData(libraryId: string | null) {
+async function loadLibraryData(libraryId: string | null): Promise<{ libraryId: string | null; items: MediaItem[]; isComplete: boolean }> {
+  if (!libraryId) {
+    return {
+      libraryId,
+      items: [],
+      isComplete: true,
+    };
+  }
+  if (libraryId.startsWith("peer:")) {
+    return {
+      libraryId,
+      items: await loadLibraryItems(libraryId),
+      isComplete: true,
+    };
+  }
+  const listing = await listLibraryImages(libraryId);
   return {
     libraryId,
-    items: await loadLibraryItems(libraryId),
+    items: listing.items.map(localMediaItem),
+    isComplete: listing.is_complete,
   };
 }
 
@@ -261,7 +305,7 @@ export const MediaView: Component = () => {
     if (!isPeerLibrary(library)) {
       return [];
     }
-    return getCachedPeerLibraryItems(library.peerId);
+    return getCachedPeerLibraryItems(library.peerId).map(peerMediaItem);
   });
   const displayedItems = createMemo(() => {
     const current = items();
@@ -269,6 +313,27 @@ export const MediaView: Component = () => {
       return current.items;
     }
     return selectedPeerCachedItems();
+  });
+  const stableDisplayedItems = createMemo<MediaItem[]>((previous) => {
+    const nextItems = displayedItems();
+    const previousByKey = new Map((previous ?? []).map((item) => [mediaItemKey(item), item]));
+    return nextItems.map((item) => {
+      const existing = previousByKey.get(mediaItemKey(item));
+      if (existing && sameMediaItem(existing, item)) {
+        return existing;
+      }
+      return item;
+    });
+  });
+  const isLibraryScanComplete = createMemo(() => {
+    const current = items();
+    if (!selectedLibraryId() || selectedLibraryId()?.startsWith("peer:")) {
+      return true;
+    }
+    if (!current || current.libraryId !== selectedLibraryId()) {
+      return false;
+    }
+    return current.isComplete;
   });
   const selectedLibraryDetail = createMemo(() => {
     const library = selectedLibrary();
@@ -292,7 +357,7 @@ export const MediaView: Component = () => {
     const currentColumns = columns();
     let lastDateKey: string | null = null;
     let currentRow: MediaItem[] = [];
-    for (const item of displayedItems()) {
+    for (const item of stableDisplayedItems()) {
       const dateKey = modificationMonthKey(item.modifiedAt);
       if (lastDateKey !== dateKey) {
         if (currentRow.length > 0) {
@@ -395,6 +460,19 @@ export const MediaView: Component = () => {
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
+  });
+
+  createEffect(() => {
+    const libraryId = selectedLibraryId();
+    const current = items();
+    if (!libraryId || libraryId.startsWith("peer:")) {
+      return;
+    }
+    if (!current || current.libraryId !== libraryId || current.isComplete) {
+      return;
+    }
+    const timer = setTimeout(() => void refetchItems(), 150);
+    onCleanup(() => clearTimeout(timer));
   });
 
   async function handleAddLibrary() {
@@ -545,7 +623,10 @@ export const MediaView: Component = () => {
           </div>
           {error() && <p class="text-sm text-red-300">{error()}</p>}
           <Show when={selectedLibraryDetail()}>
-            <p class="truncate text-xs text-white/28">{selectedLibraryDetail()}</p>
+            <p class="truncate text-xs text-white/28">
+              {selectedLibraryDetail()}
+              {!isLibraryScanComplete() && ` • indexing ${stableDisplayedItems().length} images`}
+            </p>
           </Show>
         </div>
       </div>
@@ -555,10 +636,12 @@ export const MediaView: Component = () => {
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         <Show
-          when={displayedItems().length > 0}
+          when={stableDisplayedItems().length > 0}
           fallback={
             <p class="text-sm text-white/30">
-              {items.loading ? "Loading…" : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+              {items.loading || !isLibraryScanComplete()
+                ? "Loading…"
+                : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
             </p>
           }
         >

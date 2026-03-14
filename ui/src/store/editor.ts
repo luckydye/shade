@@ -784,6 +784,9 @@ async function performPreviewRefresh() {
   if (queued.version !== previewRefreshVersion) return;
   if (frame.width === 0 || frame.height === 0) return;
   const crop = request.crop;
+  if (!crop) {
+    throw new Error("preview refresh requires a crop");
+  }
   const currentVisible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
   if (!currentVisible) return;
   const currentCrop = currentVisible.crop;
