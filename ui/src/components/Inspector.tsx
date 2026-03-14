@@ -1,10 +1,11 @@
-import { Component, JSX, Show, createEffect, createSignal, on } from "solid-js";
+import { Component, JSX, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import {
   addLayer,
   applyEdit,
   deleteLayer,
   findCropLayerIdx,
   isDrawerOpen,
+  previewContextFrame,
   selectLayer,
   setIsDrawerOpen,
   setLayerVisible,
@@ -157,20 +158,6 @@ function normalizePoint(point: ControlPoint): ControlPoint {
   };
 }
 
-function pointsFromLut(lut: readonly number[]): ControlPoint[] {
-  if (lut.length !== 256) throw new Error("invalid LUT length");
-  const points: ControlPoint[] = [];
-  let prevSlope = lut[1] - lut[0];
-  for (let x = 1; x < 255; x += 1) {
-    const nextSlope = lut[x + 1] - lut[x];
-    if (Math.abs(nextSlope - prevSlope) > 1e-6) {
-      points.push({ x, y: clamp(lut[x], 0, 1) });
-    }
-    prevSlope = nextSlope;
-  }
-  return points;
-}
-
 function curvePath(lut: readonly number[]) {
   return lut
     .map((value, idx) => {
@@ -179,6 +166,45 @@ function curvePath(lut: readonly number[]) {
       return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
     })
     .join(" ");
+}
+
+function buildLuminanceHistogram(frame: ImageData, binCount = 64) {
+  const bins = new Array<number>(binCount).fill(0);
+  const { data } = frame;
+  for (let idx = 0; idx < data.length; idx += 4) {
+    const alpha = data[idx + 3] / 255;
+    if (alpha <= 0) continue;
+    const luminance = (
+      (data[idx] / 255) * 0.2126
+      + (data[idx + 1] / 255) * 0.7152
+      + (data[idx + 2] / 255) * 0.0722
+    ) * alpha;
+    const binIdx = Math.min(binCount - 1, Math.floor(luminance * (binCount - 1)));
+    bins[binIdx] += 1;
+  }
+  return bins;
+}
+
+function histogramPath(bins: readonly number[]) {
+  const peak = Math.max(...bins, 0);
+  if (peak <= 0) return "";
+  const step = 100 / Math.max(1, bins.length - 1);
+  const points = bins.map((value, idx) => {
+    const x = idx * step;
+    const y = 100 - (value / peak) * 100;
+    return `${x} ${y}`;
+  });
+  return `M 0 100 L ${points.join(" L ")} L 100 100 Z`;
+}
+
+function remapPath(path: string, width: number, height: number, padding: number) {
+  const innerWidth = Math.max(1, width - padding * 2);
+  const innerHeight = Math.max(1, height - padding * 2);
+  return path.replace(/(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)/g, (_, x, y) => {
+    const nextX = padding + (parseFloat(x) / 100) * innerWidth;
+    const nextY = padding + (parseFloat(y) / 100) * innerHeight;
+    return `${nextX} ${nextY}`;
+  });
 }
 
 function valueLabel(value: number, scale = 100) {
@@ -328,16 +354,11 @@ const Inspector: Component = () => {
 
   const applyCurves = (points: readonly ControlPoint[]) => {
     const normalizedPoints = normalizePoints(points);
-    const lutMaster = buildLutFromPoints(normalizedPoints);
     setCurvePointCache((prev) => new Map(prev).set(state.selectedLayerIdx, normalizedPoints));
     return applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "curves",
-      lut_r: IDENTITY_LUT,
-      lut_g: IDENTITY_LUT,
-      lut_b: IDENTITY_LUT,
-      lut_master: lutMaster,
-      per_channel: false,
+      curve_points: normalizedPoints,
     });
   };
 
@@ -365,19 +386,51 @@ const Inspector: Component = () => {
   const CurvesEditor: Component = () => {
     const [draggingId, setDraggingId] = createSignal<number | null>(null);
     const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
+    const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
+    const luminanceHistogram = createMemo(() => {
+      const frame = previewContextFrame();
+      return frame ? buildLuminanceHistogram(frame) : [];
+    });
     let svgRef!: SVGSVGElement;
     let nextId = 0;
     let lastTapTime = 0;
     let lastTapId = -1;
 
-    createEffect(on(() => state.selectedLayerIdx, () => {
-      const points = curvePointCache().get(state.selectedLayerIdx) ?? pointsFromLut(curves().lut_master);
+    createEffect(on(() => state.selectedLayerIdx, (layerIdx) => {
+      const layer = state.layers[layerIdx];
+      if (layer?.kind !== "adjustment") {
+        setPts([]);
+        setDraggingId(null);
+        return;
+      }
+      const points = curvePointCache().get(layerIdx)
+        ?? layer.adjustments?.curves?.control_points
+        ?? defaultCurvePoints();
       nextId = 0;
       setPts((points.length === 0 ? defaultCurvePoints() : points).map((point) => ({ ...point, id: nextId++ })));
       setDraggingId(null);
-    }, { defer: true }));
+    }));
 
     const lut = () => buildLutFromPoints(pts());
+    const graphPadding = 10;
+    const innerWidth = () => Math.max(1, svgSize().width - graphPadding * 2);
+    const innerHeight = () => Math.max(1, svgSize().height - graphPadding * 2);
+    const chartX = (value: number) => graphPadding + (value / 255) * innerWidth();
+    const chartY = (value: number) => graphPadding + (1 - value) * innerHeight();
+    const curveSvgPath = () => remapPath(curvePath(lut()), svgSize().width, svgSize().height, graphPadding);
+    const histogramSvgPath = () => remapPath(histogramPath(luminanceHistogram()), svgSize().width, svgSize().height, graphPadding);
+
+    onMount(() => {
+      const updateSize = () => {
+        const width = Math.max(1, Math.round(svgRef.clientWidth));
+        const height = Math.max(1, Math.round(svgRef.clientHeight));
+        setSvgSize({ width, height });
+      };
+      updateSize();
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(svgRef);
+      onCleanup(() => observer.disconnect());
+    });
 
     const svgCoords = (event: { clientX: number; clientY: number }) => {
       const point = svgRef.createSVGPoint();
@@ -387,8 +440,8 @@ const Inspector: Component = () => {
       if (!ctm) throw new Error("missing SVG screen transform");
       const local = point.matrixTransform(ctm.inverse());
       return {
-        x: clamp((local.x / 100) * 255, 1, 254),
-        y: clamp(1 - local.y / 100, 0, 1),
+        x: clamp(((local.x - graphPadding) / innerWidth()) * 255, 1, 254),
+        y: clamp(1 - (local.y - graphPadding) / innerHeight(), 0, 1),
       };
     };
 
@@ -401,70 +454,76 @@ const Inspector: Component = () => {
           </div>
           <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">Master</span>
         </div>
-        <svg
-          ref={svgRef!}
-          viewBox="0 0 100 100"
-          class="block h-40 w-full select-none"
-          style={{ cursor: draggingId() !== null ? "grabbing" : "crosshair" }}
-          onPointerDown={(e) => {
-            if (e.target !== svgRef) return;
-            const { x, y } = normalizePoint(svgCoords(e));
-            const id = nextId++;
-            const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
-            setPts(next);
-            selectedAdjustmentLayerOrThrow();
-            void applyCurves(next);
-            svgRef.setPointerCapture(e.pointerId);
-            setDraggingId(id);
-          }}
-          onPointerMove={(e) => {
-            const id = draggingId();
-            if (id === null) return;
-            const { x, y } = normalizePoint(svgCoords(e));
-            const next = pts().map(p => p.id === id ? { ...p, x, y } : p).sort((a, b) => a.x - b.x);
-            setPts(next);
-            selectedAdjustmentLayerOrThrow();
-            void applyCurves(next);
-          }}
-          onPointerUp={(e) => {
-            if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
-            setDraggingId(null);
-          }}
-          onPointerLeave={() => setDraggingId(null)}
-        >
-          <path d="M 0 100 L 100 0" stroke="#525252" stroke-width="0.8" fill="none" />
-          <path d={curvePath(lut())} stroke="#f5f5f4" stroke-width="1.5" fill="none" />
-          {pts().map((pt) => (
-            <circle
-              cx={(pt.x / 255) * 100}
-              cy={(1 - pt.y) * 100}
-              r="3.5"
-              fill="#f5f5f4"
-              stroke="#111111"
-              stroke-width="1.5"
-              style={{ cursor: draggingId() === pt.id ? "grabbing" : "grab" }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                const now = Date.now();
-                if (now - lastTapTime < 300 && lastTapId === pt.id) {
-                  lastTapTime = 0;
-                  const next = pts().filter(p => p.id !== pt.id);
-                  setPts(next);
-                  selectedAdjustmentLayerOrThrow();
-                  void applyCurves(next);
-                  if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
-                  setDraggingId(null);
-                  return;
-                }
-                lastTapTime = now;
-                lastTapId = pt.id;
-                e.preventDefault();
-                svgRef.setPointerCapture(e.pointerId);
-                setDraggingId(pt.id);
-              }}
-            />
-          ))}
-        </svg>
+        <div class="lg:-mx-4">
+          <svg
+            ref={svgRef!}
+            viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
+            class="block h-40 w-full select-none"
+            style={{ cursor: draggingId() !== null ? "grabbing" : "crosshair" }}
+            onPointerDown={(e) => {
+              if (e.target !== svgRef) return;
+              const { x, y } = normalizePoint(svgCoords(e));
+              const id = nextId++;
+              const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
+              setPts(next);
+              selectedAdjustmentLayerOrThrow();
+              void applyCurves(next);
+              svgRef.setPointerCapture(e.pointerId);
+              setDraggingId(id);
+            }}
+            onPointerMove={(e) => {
+              const id = draggingId();
+              if (id === null) return;
+              const { x, y } = normalizePoint(svgCoords(e));
+              const next = pts().map(p => p.id === id ? { ...p, x, y } : p).sort((a, b) => a.x - b.x);
+              setPts(next);
+              selectedAdjustmentLayerOrThrow();
+              void applyCurves(next);
+            }}
+            onPointerUp={(e) => {
+              if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
+              setDraggingId(null);
+            }}
+            onPointerLeave={() => setDraggingId(null)}
+          >
+            <rect x={graphPadding} y={graphPadding} width={innerWidth()} height={innerHeight()} fill="#080808" pointer-events="none" />
+            <Show when={histogramSvgPath()}>
+              {(path) => <path d={path()} fill="#f5f5f4" fill-opacity="0.12" stroke="none" pointer-events="none" />}
+            </Show>
+            <path d={`M ${graphPadding} ${graphPadding + innerHeight()} L ${graphPadding + innerWidth()} ${graphPadding}`} stroke="#525252" stroke-width="0.8" fill="none" pointer-events="none" />
+            <path d={curveSvgPath()} stroke="#f5f5f4" stroke-width="1.5" fill="none" pointer-events="none" />
+            {pts().map((pt) => (
+              <circle
+                cx={chartX(pt.x)}
+                cy={chartY(pt.y)}
+                r="4.5"
+                fill="#f5f5f4"
+                stroke="#111111"
+                stroke-width="1.5"
+                style={{ cursor: draggingId() === pt.id ? "grabbing" : "grab" }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  const now = Date.now();
+                  if (now - lastTapTime < 300 && lastTapId === pt.id) {
+                    lastTapTime = 0;
+                    const next = pts().filter(p => p.id !== pt.id);
+                    setPts(next);
+                    selectedAdjustmentLayerOrThrow();
+                    void applyCurves(next);
+                    if (svgRef.hasPointerCapture(e.pointerId)) svgRef.releasePointerCapture(e.pointerId);
+                    setDraggingId(null);
+                    return;
+                  }
+                  lastTapTime = now;
+                  lastTapId = pt.id;
+                  e.preventDefault();
+                  svgRef.setPointerCapture(e.pointerId);
+                  setDraggingId(pt.id);
+                }}
+              />
+            ))}
+          </svg>
+        </div>
       </div>
     );
   };
@@ -539,6 +598,9 @@ const Inspector: Component = () => {
   const handleDeleteSelectedLayer = async () => {
     if (state.selectedLayerIdx < 0) {
       throw new Error("cannot delete without a selected layer");
+    }
+    if (state.layers[state.selectedLayerIdx]?.kind === "image") {
+      throw new Error("cannot delete the image layer");
     }
     await deleteLayer(state.selectedLayerIdx);
   };
@@ -785,17 +847,19 @@ const Inspector: Component = () => {
                     >
                       {layerName}
                     </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void deleteLayer(realIdx);
-                      }}
-                      class="inline-flex h-7 w-7 items-center justify-center text-white/28 transition-colors hover:text-white"
-                      title="Delete layer"
-                    >
-                      <TrashIcon />
-                    </button>
+                    <Show when={layer.kind !== "image"}>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteLayer(realIdx);
+                        }}
+                        class="inline-flex h-7 w-7 items-center justify-center text-white/28 transition-colors hover:text-white"
+                        title="Delete layer"
+                      >
+                        <TrashIcon />
+                      </button>
+                    </Show>
                     <span class="text-[11px] text-white/34">{realIdx + 1}</span>
                   </div>
                 );
@@ -1053,14 +1117,16 @@ const Inspector: Component = () => {
             <span>Add</span>
           </button>
           
-          <button
-            type="button"
-            onClick={() => void handleDeleteSelectedLayer()}
-            class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
-          >
-            <TrashIcon />
-            <span>Delete</span>
-          </button>
+          <Show when={state.selectedLayerIdx >= 0 && state.layers[state.selectedLayerIdx]?.kind !== "image"}>
+            <button
+              type="button"
+              onClick={() => void handleDeleteSelectedLayer()}
+              class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
+            >
+              <TrashIcon />
+              <span>Delete</span>
+            </button>
+          </Show>
           
         </div>
 

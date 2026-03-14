@@ -106,6 +106,100 @@ pub fn linear_lut() -> Vec<f32> {
     (0u32..256).map(|i| i as f32 / 255.0).collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CurveControlPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+fn clamp(value: f32, min: f32, max: f32) -> f32 {
+    value.clamp(min, max)
+}
+
+fn normalize_curve_points(points: &[CurveControlPoint]) -> Vec<CurveControlPoint> {
+    let mut normalized: Vec<CurveControlPoint> = points
+        .iter()
+        .map(|point| CurveControlPoint {
+            x: clamp(point.x.round(), 1.0, 254.0),
+            y: clamp(point.y, 0.0, 1.0),
+        })
+        .collect();
+    normalized.sort_by(|a, b| a.x.total_cmp(&b.x));
+    normalized.dedup_by(|a, b| a.x == b.x);
+    normalized
+}
+
+pub fn build_curve_lut_from_points(points: &[CurveControlPoint]) -> Vec<f32> {
+    let sorted = normalize_curve_points(points);
+    let mut anchors = Vec::with_capacity(sorted.len() + 2);
+    anchors.push(CurveControlPoint { x: 0.0, y: 0.0 });
+    anchors.extend(sorted);
+    anchors.push(CurveControlPoint { x: 255.0, y: 1.0 });
+
+    let mut lut = vec![0.0; 256];
+    let mut delta = vec![0.0; anchors.len() - 1];
+    let mut tangent = vec![0.0; anchors.len()];
+
+    for i in 0..anchors.len() - 1 {
+        let span = anchors[i + 1].x - anchors[i].x;
+        assert!(span > 0.0, "curve anchors must be strictly increasing");
+        delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
+    }
+
+    tangent[0] = delta[0];
+    tangent[anchors.len() - 1] = delta[delta.len() - 1];
+    for i in 1..anchors.len() - 1 {
+        tangent[i] = if delta[i - 1] * delta[i] <= 0.0 {
+            0.0
+        } else {
+            (delta[i - 1] + delta[i]) * 0.5
+        };
+    }
+
+    for i in 0..delta.len() {
+        if delta[i] == 0.0 {
+            tangent[i] = 0.0;
+            tangent[i + 1] = 0.0;
+            continue;
+        }
+        let a = tangent[i] / delta[i];
+        let b = tangent[i + 1] / delta[i];
+        let norm = a.hypot(b);
+        if norm > 3.0 {
+            let scale = 3.0 / norm;
+            tangent[i] = scale * a * delta[i];
+            tangent[i + 1] = scale * b * delta[i];
+        }
+    }
+
+    for seg in 0..anchors.len() - 1 {
+        let start = anchors[seg];
+        let end = anchors[seg + 1];
+        let span = end.x - start.x;
+        let start_x = start.x as usize;
+        let end_x = end.x as usize;
+        for x in start_x..=end_x {
+            let t = (x as f32 - start.x) / span;
+            let t2 = t * t;
+            let t3 = t2 * t;
+            let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+            let h10 = t3 - 2.0 * t2 + t;
+            let h01 = -2.0 * t3 + 3.0 * t2;
+            let h11 = t3 - t2;
+            lut[x] = clamp(
+                h00 * start.y
+                    + h10 * span * tangent[seg]
+                    + h01 * end.y
+                    + h11 * span * tangent[seg + 1],
+                0.0,
+                1.0,
+            );
+        }
+    }
+
+    lut
+}
+
 /// Per-color HSL adjustment parameters (red, green, blue ranges).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct HslParams {

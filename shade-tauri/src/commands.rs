@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use shade_core::{
-    linear_lut, AdjustmentOp, ColorParams, CropRect, FloatImage, GrainParams, HslParams,
-    LayerStack, SharpenParams, VignetteParams,
+    build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
+    CurveControlPoint, FloatImage, GrainParams, HslParams, LayerStack, SharpenParams,
+    VignetteParams,
 };
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ extern "C" {
 pub struct EditorState {
     pub stack: LayerStack,
     pub image_sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+    pub curve_control_points: Vec<Option<Vec<CurveControlPoint>>>,
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
@@ -329,6 +331,7 @@ impl Default for EditorState {
         Self {
             stack: LayerStack::new(),
             image_sources: std::collections::HashMap::new(),
+            curve_control_points: Vec::new(),
             canvas_width: 1920,
             canvas_height: 1080,
             next_texture_id: 1,
@@ -363,6 +366,7 @@ impl EditorState {
         self.canvas_height = height;
         self.source_bit_depth = source_bit_depth.clone();
         self.stack.add_image_layer(texture_id, width, height);
+        self.curve_control_points = vec![None];
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
             contrast: 0.0,
@@ -372,6 +376,7 @@ impl EditorState {
             shadows: 0.0,
             gamma: 1.0,
         }]);
+        self.curve_control_points.push(None);
         LayerInfoResponse {
             layer_count: self.stack.layers.len(),
             canvas_width: width,
@@ -656,6 +661,7 @@ pub struct EditParams {
     pub lut_b: Option<Vec<f32>>,
     pub lut_master: Option<Vec<f32>>,
     pub per_channel: Option<bool>,
+    pub curve_points: Option<Vec<CurveControlPoint>>,
     pub saturation: Option<f32>,
     pub vibrancy: Option<f32>,
     pub temperature: Option<f32>,
@@ -686,6 +692,7 @@ pub async fn apply_edit(
     let mut st = state.lock().unwrap();
     let canvas_width = st.canvas_width;
     let canvas_height = st.canvas_height;
+    let mut next_curve_control_points: Option<Vec<CurveControlPoint>> = None;
     if params.layer_idx >= st.stack.layers.len() {
         return Err("layer index out of bounds".into());
     }
@@ -745,13 +752,15 @@ pub async fn apply_edit(
                     }
                 }
                 "curves" => {
+                    let curve_points = params.curve_points.ok_or("missing curve_points")?;
                     let next = AdjustmentOp::Curves {
-                        lut_r: params.lut_r.ok_or("missing lut_r")?,
-                        lut_g: params.lut_g.ok_or("missing lut_g")?,
-                        lut_b: params.lut_b.ok_or("missing lut_b")?,
-                        lut_master: params.lut_master.ok_or("missing lut_master")?,
-                        per_channel: params.per_channel.unwrap_or(false),
+                        lut_r: linear_lut(),
+                        lut_g: linear_lut(),
+                        lut_b: linear_lut(),
+                        lut_master: build_curve_lut_from_points(&curve_points),
+                        per_channel: false,
                     };
+                    next_curve_control_points = Some(curve_points);
                     if let Some(op) = ops
                         .iter_mut()
                         .find(|op| matches!(op, AdjustmentOp::Curves { .. }))
@@ -827,6 +836,9 @@ pub async fn apply_edit(
         }
         _ => return Err("target layer is not editable by apply_edit".into()),
     }
+    if let Some(points) = next_curve_control_points {
+        st.curve_control_points[params.layer_idx] = Some(points);
+    }
     Ok(())
 }
 
@@ -863,6 +875,7 @@ pub async fn add_layer(
         }),
         _ => return Err(format!("unknown layer kind: {kind}")),
     };
+    st.curve_control_points.insert(idx, None);
     Ok(idx)
 }
 
@@ -924,6 +937,7 @@ pub async fn delete_layer(
         st.stack.masks.remove(&mask_id);
     }
     st.stack.layers.remove(params.layer_idx);
+    st.curve_control_points.remove(params.layer_idx);
     st.stack.generation += 1;
     Ok(())
 }
@@ -983,6 +997,7 @@ pub struct CurvesValues {
     pub lut_b: Vec<f32>,
     pub lut_master: Vec<f32>,
     pub per_channel: bool,
+    pub control_points: Option<Vec<CurveControlPoint>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1205,7 +1220,8 @@ pub async fn get_layer_stack(
         .stack
         .layers
         .iter()
-        .map(|l| LayerEntryInfo {
+        .enumerate()
+        .map(|(idx, l)| LayerEntryInfo {
             kind: match &l.layer {
                 shade_core::Layer::Image { .. } => "image".into(),
                 shade_core::Layer::Crop { .. } => "crop".into(),
@@ -1269,6 +1285,7 @@ pub async fn get_layer_stack(
                                     lut_b: lut_b.clone(),
                                     lut_master: lut_master.clone(),
                                     per_channel: *per_channel,
+                                    control_points: st.curve_control_points[idx].clone(),
                                 });
                             }
                             AdjustmentOp::Vignette(params) => {

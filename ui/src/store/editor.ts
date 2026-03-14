@@ -608,11 +608,12 @@ export async function applyEdit(params: Record<string, unknown>) {
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
         curves: {
-          lut_r: params.lut_r as number[],
-          lut_g: params.lut_g as number[],
-          lut_b: params.lut_b as number[],
-          lut_master: params.lut_master as number[],
-          per_channel: params.per_channel as boolean,
+          lut_r: adjustments.curves?.lut_r ?? [],
+          lut_g: adjustments.curves?.lut_g ?? [],
+          lut_b: adjustments.curves?.lut_b ?? [],
+          lut_master: adjustments.curves?.lut_master ?? [],
+          per_channel: adjustments.curves?.per_channel ?? false,
+          control_points: params.curve_points as bridge.CurveControlPoint[] | undefined,
         },
       });
       break;

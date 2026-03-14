@@ -36,13 +36,15 @@ const LayerPanel: Component = () => {
                 <span class="flex-1 truncate">
                   {layer.kind === "image" ? "Image" : layer.kind === "crop" ? "Crop" : "Adjustment"}
                 </span>
-                <button
-                  class="text-gray-500 transition-colors hover:text-white"
-                  onClick={(e) => { e.stopPropagation(); void deleteLayer(realIdx); }}
-                  title="Delete layer"
-                >
-                  ×
-                </button>
+                {layer.kind !== "image" && (
+                  <button
+                    class="text-gray-500 transition-colors hover:text-white"
+                    onClick={(e) => { e.stopPropagation(); void deleteLayer(realIdx); }}
+                    title="Delete layer"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             );
           }}

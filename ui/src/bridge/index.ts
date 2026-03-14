@@ -101,6 +101,11 @@ export interface HslValues {
   blue_hue: number; blue_sat: number; blue_lum: number;
 }
 
+export interface CurveControlPoint {
+  x: number;
+  y: number;
+}
+
 export interface AdjustmentValues {
   tone: ToneValues | null;
   curves: CurvesValues | null;
@@ -117,6 +122,7 @@ export interface CurvesValues {
   lut_b: number[];
   lut_master: number[];
   per_channel: boolean;
+  control_points?: CurveControlPoint[] | null;
 }
 
 export interface LayerInfo {
