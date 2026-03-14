@@ -9,6 +9,8 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::Manager;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tokio::sync::Mutex as TokioMutex;
 
 #[cfg(target_os = "ios")]
 extern "C" {
@@ -46,8 +48,11 @@ pub struct MediaLibrary {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-struct MediaLibraryConfig {
+#[serde(default)]
+struct AppConfig {
     directories: Vec<String>,
+    paired_peers: Vec<String>,
+    p2p_secret_key: Option<[u8; 32]>,
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -55,7 +60,7 @@ const IMAGE_EXTENSIONS: &[&str] = &[
     "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
 ];
 
-fn media_library_config_path() -> Result<PathBuf, String> {
+fn app_config_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
     Ok(PathBuf::from(home).join(".config/shade/config.json"))
 }
@@ -87,21 +92,47 @@ pub struct PresetInfo {
     pub name: String,
 }
 
-fn load_media_library_config() -> Result<MediaLibraryConfig, String> {
-    let path = media_library_config_path()?;
+fn load_app_config() -> Result<AppConfig, String> {
+    let path = app_config_path()?;
     if !path.exists() {
-        return Ok(MediaLibraryConfig::default());
+        return Ok(AppConfig::default());
     }
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| format!("invalid media library config at {}: {e}", path.display()))
+    serde_json::from_str(&json).map_err(|e| format!("invalid app config at {}: {e}", path.display()))
 }
 
-fn save_media_library_config(config: &MediaLibraryConfig) -> Result<(), String> {
-    let path = media_library_config_path()?;
+fn save_app_config(config: &AppConfig) -> Result<(), String> {
+    let path = app_config_path()?;
     let parent = path.parent().ok_or_else(|| format!("invalid config path: {}", path.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+pub fn load_p2p_secret_key() -> Result<Option<iroh::SecretKey>, String> {
+    Ok(load_app_config()?
+        .p2p_secret_key
+        .map(|bytes| iroh::SecretKey::from_bytes(&bytes)))
+}
+
+pub fn save_p2p_secret_key(secret_key: [u8; 32]) -> Result<(), String> {
+    let mut config = load_app_config()?;
+    config.p2p_secret_key = Some(secret_key);
+    save_app_config(&config)
+}
+
+fn is_peer_paired(peer_endpoint_id: &str) -> Result<bool, String> {
+    Ok(load_app_config()?.paired_peers.iter().any(|peer| peer == peer_endpoint_id))
+}
+
+fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
+    let mut config = load_app_config()?;
+    if config.paired_peers.iter().any(|peer| peer == peer_endpoint_id) {
+        return Ok(());
+    }
+    config.paired_peers.push(peer_endpoint_id.to_owned());
+    config.paired_peers.sort();
+    save_app_config(&config)
 }
 
 fn default_pictures_dir() -> Result<PathBuf, String> {
@@ -136,7 +167,7 @@ fn list_desktop_media_libraries() -> Result<Vec<MediaLibrary>, String> {
         path: Some(pictures_dir.display().to_string()),
         removable: false,
     }];
-    let config = load_media_library_config()?;
+    let config = load_app_config()?;
     for directory in config.directories {
         let path = PathBuf::from(directory);
         libraries.push(library_for_directory(path));
@@ -148,7 +179,7 @@ fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
     if library_id == "pictures" {
         return default_pictures_dir();
     }
-    let config = load_media_library_config()?;
+    let config = load_app_config()?;
     for directory in config.directories {
         let path = PathBuf::from(&directory);
         if custom_library_id(&path) == library_id {
@@ -1382,13 +1413,13 @@ pub async fn add_media_library(path: String) -> Result<MediaLibrary, String> {
     if !canonical.is_dir() {
         return Err(format!("not a directory: {}", canonical.display()));
     }
-    let mut config = load_media_library_config()?;
+    let mut config = load_app_config()?;
     let canonical_string = canonical.to_str()
         .ok_or_else(|| format!("non-utf8 path: {}", canonical.display()))?
         .to_string();
     if !config.directories.iter().any(|existing| existing == &canonical_string) {
         config.directories.push(canonical_string);
-        save_media_library_config(&config)?;
+        save_app_config(&config)?;
     }
     Ok(library_for_directory(canonical))
 }
@@ -1398,13 +1429,13 @@ pub async fn remove_media_library(id: String) -> Result<(), String> {
     if id == "pictures" || id == "photos" {
         return Err(format!("media library is not removable: {id}"));
     }
-    let mut config = load_media_library_config()?;
+    let mut config = load_app_config()?;
     let before = config.directories.len();
     config.directories.retain(|directory| custom_library_id(Path::new(directory)) != id);
     if config.directories.len() == before {
         return Err(format!("unknown media library: {id}"));
     }
-    save_media_library_config(&config)
+    save_app_config(&config)
 }
 
 #[tauri::command]
@@ -1496,16 +1527,47 @@ fn picture_display_name(picture_id: &str) -> String {
 
 pub struct AppMediaProvider<R: tauri::Runtime = tauri::Wry> {
     app: tauri::AppHandle<R>,
+    prompt_lock: Arc<TokioMutex<()>>,
 }
 
 impl<R: tauri::Runtime> AppMediaProvider<R> {
     pub fn new(app: tauri::AppHandle<R>) -> Self {
-        Self { app }
+        Self {
+            app,
+            prompt_lock: Arc::new(TokioMutex::new(())),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl<R: tauri::Runtime> shade_p2p::MediaProvider for AppMediaProvider<R> {
+    async fn authorize_peer(&self, peer_endpoint_id: &str) -> anyhow::Result<()> {
+        if is_peer_paired(peer_endpoint_id).map_err(anyhow::Error::msg)? {
+            return Ok(());
+        }
+        let _guard = self.prompt_lock.lock().await;
+        if is_peer_paired(peer_endpoint_id).map_err(anyhow::Error::msg)? {
+            return Ok(());
+        }
+        let app = self.app.clone();
+        let peer_endpoint_id = peer_endpoint_id.to_owned();
+        let peer_endpoint_id_for_prompt = peer_endpoint_id.clone();
+        let allow = tokio::task::spawn_blocking(move || {
+            app.dialog()
+                .message(format!(
+                    "Peer {peer_endpoint_id_for_prompt} wants to browse your media library.\nAllow and pair this peer on this device?"
+                ))
+                .buttons(MessageDialogButtons::OkCancelCustom("Pair".into(), "Deny".into()))
+                .blocking_show()
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        if !allow {
+            return Err(anyhow::anyhow!("peer access denied"));
+        }
+        pair_peer(&peer_endpoint_id).map_err(anyhow::Error::msg)
+    }
+
     async fn list_pictures(&self) -> anyhow::Result<Vec<shade_p2p::SharedPicture>> {
         load_picture_entries(self.app.clone())
             .await

@@ -333,6 +333,7 @@ export const MediaView: Component = () => {
     setIsSubmitting(true);
     setError(null);
     try {
+      await listPeerPictures(peerId);
       const nextLibrary: PeerLibrary = {
         id: peerLibraryId(peerId),
         kind: "peer",

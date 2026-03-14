@@ -6606,6 +6606,7 @@ dependencies = [
  "crossbeam-channel",
  "env_logger",
  "image",
+ "iroh",
  "log",
  "serde",
  "serde_json",

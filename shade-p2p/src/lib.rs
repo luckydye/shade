@@ -5,8 +5,7 @@ use iroh::{
     endpoint_info::UserData,
     endpoint::Connection,
     protocol::{AcceptError, ProtocolHandler, Router},
-    EndpointId,
-    Endpoint, RelayMode,
+    Endpoint, EndpointId, RelayMode, SecretKey,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
@@ -24,6 +23,7 @@ const MAX_IMAGE_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 
 #[async_trait]
 pub trait MediaProvider: Send + Sync + 'static {
+    async fn authorize_peer(&self, peer_endpoint_id: &str) -> Result<()>;
     async fn list_pictures(&self) -> Result<Vec<SharedPicture>>;
     async fn get_thumbnail(&self, picture_id: &str) -> Result<Vec<u8>>;
     async fn get_image_bytes(&self, picture_id: &str) -> Result<Vec<u8>>;
@@ -72,10 +72,15 @@ pub struct LocalPeerDiscovery {
 }
 
 impl LocalPeerDiscovery {
-    pub async fn bind(media_provider: Arc<dyn MediaProvider>) -> Result<Self> {
-        let endpoint = Endpoint::empty_builder(RelayMode::Disabled)
-            .bind()
-            .await?;
+    pub async fn bind(
+        secret_key: Option<SecretKey>,
+        media_provider: Arc<dyn MediaProvider>,
+    ) -> Result<Self> {
+        let mut builder = Endpoint::empty_builder(RelayMode::Disabled);
+        if let Some(secret_key) = secret_key {
+            builder = builder.secret_key(secret_key);
+        }
+        let endpoint = builder.bind().await?;
         let mdns = MdnsAddressLookup::builder().build(endpoint.id())?;
         endpoint.address_lookup().add(mdns.clone());
         endpoint.set_user_data_for_address_lookup(Some(UserData::try_from(
@@ -99,6 +104,10 @@ impl LocalPeerDiscovery {
             peers,
             event_task,
         })
+    }
+
+    pub fn secret_key_bytes(&self) -> [u8; 32] {
+        self.endpoint.secret_key().to_bytes()
     }
 
     pub async fn snapshot(&self) -> LocalPeerDiscoverySnapshot {
@@ -257,6 +266,16 @@ impl std::fmt::Debug for BrowseProtocol {
 
 impl ProtocolHandler for BrowseProtocol {
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+        let peer_endpoint_id = connection.remote_id().to_string();
+        if let Err(error) = self.media_provider.authorize_peer(&peer_endpoint_id).await {
+            let (mut send, _) = connection.accept_bi().await?;
+            let response = serde_json::to_vec(&BrowseResponse::Error(error.to_string()))
+                .map_err(AcceptError::from_err)?;
+            send.write_all(&response).await.map_err(AcceptError::from_err)?;
+            send.finish().map_err(AcceptError::from_err)?;
+            connection.closed().await;
+            return Ok(());
+        }
         let (mut send, mut recv) = connection.accept_bi().await?;
         let request = recv
             .read_to_end(MAX_REQUEST_MESSAGE_BYTES)

@@ -12,6 +12,7 @@ tauri = { version = "2", features = ["protocol-asset", "devtools"] }
 tauri-plugin-dialog = "2"
 blake3 = "1"
 crossbeam-channel = "0.5"
+iroh = { version = "0.96.1", features = ["address-lookup-mdns"] }
 shade-core = { path = "../shade-core" }
 shade-gpu = { path = "../shade-gpu" }
 shade-io = { path = "../shade-io" }

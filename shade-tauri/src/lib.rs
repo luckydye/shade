@@ -17,10 +17,15 @@ pub fn run() {
         .manage(ThumbnailService(commands::spawn_thumbnail_workers()))
         .setup(|app| {
             let handle = app.handle().clone();
+            let secret_key = commands::load_p2p_secret_key()
+                .expect("failed to load persisted p2p secret key");
             let p2p = tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
+                secret_key,
                 std::sync::Arc::new(commands::AppMediaProvider::new(handle.clone())),
             ))
             .expect("failed to initialize local peer discovery");
+            commands::save_p2p_secret_key(p2p.secret_key_bytes())
+                .expect("failed to persist p2p secret key");
             app.manage(P2pState(p2p));
             Ok(())
         })
