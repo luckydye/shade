@@ -25,6 +25,7 @@ interface SliderProps {
   valueLabel?: string;
   onChange: (value: number) => void;
   class?: string;
+  accentColor?: string;
 }
 
 const Slider: Component<SliderProps> = (props) => (
@@ -46,7 +47,11 @@ const Slider: Component<SliderProps> = (props) => (
       value={props.value}
       onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))}
       onDblClick={() => props.onChange(props.defaultValue)}
-      class="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/18 accent-white"
+      class="slider h-2 w-full cursor-pointer appearance-none rounded-full"
+      style={{
+        "accent-color": props.accentColor ?? "#ffffff",
+        "--slider-accent": props.accentColor ?? "#ffffff",
+      }}
     />
   </div>
 );
@@ -81,6 +86,11 @@ const DEFAULT_HSL = {
   red_hue: 0, red_sat: 0, red_lum: 0,
   green_hue: 0, green_sat: 0, green_lum: 0,
   blue_hue: 0, blue_sat: 0, blue_lum: 0,
+} as const;
+const HSL_TAB_STYLES = {
+  red: { tabClass: "text-red-400 bg-red-500/15", accentColor: "#f87171" },
+  green: { tabClass: "text-green-400 bg-green-500/15", accentColor: "#4ade80" },
+  blue: { tabClass: "text-blue-400 bg-blue-500/15", accentColor: "#60a5fa" },
 } as const;
 
 interface ControlPoint { x: number; y: number; }
@@ -529,7 +539,7 @@ const Inspector: Component = () => {
   };
 
   const HslSection: Component = () => {
-    const tabColors = { red: "text-red-400 bg-red-500/15", green: "text-green-400 bg-green-500/15", blue: "text-blue-400 bg-blue-500/15" } as const;
+    const accentColor = () => HSL_TAB_STYLES[hslTab()].accentColor;
     const hue = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_hue : t === "green" ? h.green_hue : h.blue_hue; };
     const sat = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_sat : t === "green" ? h.green_sat : h.blue_sat; };
     const lum = () => { const t = hslTab(), h = hsl(); return t === "red" ? h.red_lum : t === "green" ? h.green_lum : h.blue_lum; };
@@ -540,15 +550,15 @@ const Inspector: Component = () => {
             <button
               type="button"
               onClick={() => setHslTab(c)}
-              class={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors ${hslTab() === c ? tabColors[c] : "text-white/28 hover:text-white/50"}`}
+              class={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors ${hslTab() === c ? HSL_TAB_STYLES[c].tabClass : "text-white/28 hover:text-white/50"}`}
             >
               {c}
             </button>
           ))}
         </div>
-        <Slider label="Hue"        icon={<HslIcon />}    value={hue()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_hue: v } : hslTab() === "green" ? { green_hue: v } : { blue_hue: v }); }} />
-        <Slider label="Saturation" icon={<DropletIcon />} value={sat()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_sat: v } : hslTab() === "green" ? { green_sat: v } : { blue_sat: v }); }} />
-        <Slider label="Luminance"  icon={<ToneIcon />}   value={lum()} defaultValue={0} min={-1} max={1} step={0.01} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_lum: v } : hslTab() === "green" ? { green_lum: v } : { blue_lum: v }); }} />
+        <Slider label="Hue"        icon={<HslIcon />}    value={hue()} defaultValue={0} min={-1} max={1} step={0.01} accentColor={accentColor()} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_hue: v } : hslTab() === "green" ? { green_hue: v } : { blue_hue: v }); }} />
+        <Slider label="Saturation" icon={<DropletIcon />} value={sat()} defaultValue={0} min={-1} max={1} step={0.01} accentColor={accentColor()} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_sat: v } : hslTab() === "green" ? { green_sat: v } : { blue_sat: v }); }} />
+        <Slider label="Luminance"  icon={<ToneIcon />}   value={lum()} defaultValue={0} min={-1} max={1} step={0.01} accentColor={accentColor()} onChange={(v) => { selectedAdjustmentLayerOrThrow(); void applyHsl(hslTab() === "red" ? { red_lum: v } : hslTab() === "green" ? { green_lum: v } : { blue_lum: v }); }} />
       </div>
     );
   };
