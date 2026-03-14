@@ -9,6 +9,7 @@ use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_line
 use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -75,6 +76,15 @@ const IMAGE_EXTENSIONS: &[&str] = &[
     "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
 ];
 
+static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn init_app_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    APP_CONFIG_DIR
+        .set(config_dir)
+        .map_err(|_| "app config path already initialized".to_string())
+}
+
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
     match payload.downcast::<String>() {
         Ok(message) => *message,
@@ -119,13 +129,18 @@ async fn require_p2p(
 }
 
 fn app_config_path() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-    Ok(PathBuf::from(home).join(".config/shade/config.json"))
+    Ok(app_config_dir()?.join("config.json"))
 }
 
 fn presets_dir_path() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-    Ok(PathBuf::from(home).join(".config/shade/presets"))
+    Ok(app_config_dir()?.join("presets"))
+}
+
+fn app_config_dir() -> Result<PathBuf, String> {
+    APP_CONFIG_DIR
+        .get()
+        .cloned()
+        .ok_or_else(|| "app config path is not initialized".to_string())
 }
 
 fn preset_file_path(name: &str) -> Result<PathBuf, String> {

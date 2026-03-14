@@ -19,22 +19,20 @@ pub fn run() {
         .manage(ThumbnailService(commands::spawn_thumbnail_workers()))
         .manage(LibraryScanService(commands::LibraryScanService::new()))
         .setup(|app| {
-            #[cfg(not(target_os = "android"))]
-            {
-                let handle = app.handle().clone();
-                let secret_key = commands::load_p2p_secret_key()?;
-                let p2p = std::sync::Arc::new(
-                    tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
-                        secret_key,
-                        std::sync::Arc::new(commands::AppMediaProvider::new(handle)),
-                    ))
-                    .map_err(|error| error.to_string())?,
-                );
-                commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
-                tauri::async_runtime::block_on(async {
-                    *app.state::<P2pState>().0.write().await = Some(p2p);
-                });
-            }
+            commands::init_app_paths(&app.handle().clone())?;
+            let handle = app.handle().clone();
+            let secret_key = commands::load_p2p_secret_key()?;
+            let p2p = std::sync::Arc::new(
+                tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
+                    secret_key,
+                    std::sync::Arc::new(commands::AppMediaProvider::new(handle)),
+                ))
+                .map_err(|error| error.to_string())?,
+            );
+            commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
+            tauri::async_runtime::block_on(async {
+                *app.state::<P2pState>().0.write().await = Some(p2p);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
