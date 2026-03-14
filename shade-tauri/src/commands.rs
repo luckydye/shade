@@ -867,12 +867,12 @@ pub struct HslValues {
 
 #[tauri::command]
 pub async fn get_thumbnail<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+    _app: tauri::AppHandle<R>,
     path: String,
 ) -> Result<Vec<u8>, String> {
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
-        return app
+        return _app
             .state::<crate::photos::PhotosHandle<R>>()
             .get_thumbnail(&path)
             .await;
@@ -934,10 +934,10 @@ pub async fn get_thumbnail<R: tauri::Runtime>(
 
 #[tauri::command]
 pub async fn list_pictures<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+    _app: tauri::AppHandle<R>,
 ) -> Result<Vec<String>, String> {
     #[cfg(target_os = "android")]
-    return app
+    return _app
         .state::<crate::photos::PhotosHandle<R>>()
         .list_photos()
         .await;
