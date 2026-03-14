@@ -283,20 +283,24 @@ export async function listPeerPictures(peer_endpoint_id: string): Promise<Shared
   return inv("list_peer_pictures", { peerEndpointId: peer_endpoint_id }) as Promise<SharedPicture[]>;
 }
 
-export async function getPeerThumbnail(peer_endpoint_id: string, picture_id: string): Promise<string> {
+export async function getPeerThumbnailBytes(peer_endpoint_id: string, picture_id: string): Promise<Uint8Array> {
   if (!await isTauriRuntime()) {
-    return "";
+    return new Uint8Array();
   }
   const inv = await getTauriInvoke();
   const result = await inv("get_peer_thumbnail", {
     peerEndpointId: peer_endpoint_id,
-    pictureId: picture_id,
+  pictureId: picture_id,
   }) as number[] | Uint8Array | ArrayBuffer;
-  const bytes = result instanceof Uint8Array
+  return result instanceof Uint8Array
     ? result
     : result instanceof ArrayBuffer
       ? new Uint8Array(result)
       : Uint8Array.from(result as number[]);
+}
+
+export async function getPeerThumbnail(peer_endpoint_id: string, picture_id: string): Promise<string> {
+  const bytes = await getPeerThumbnailBytes(peer_endpoint_id, picture_id);
   const blobBytes = Uint8Array.from(bytes);
   return URL.createObjectURL(new Blob([blobBytes.buffer], { type: "image/jpeg" }));
 }

@@ -1,27 +1,25 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   addMediaLibrary,
-  getPeerThumbnail,
   listLibraryImages,
   listMediaLibraries,
-  listPeerPictures,
   removeMediaLibrary,
   type MediaLibrary,
   type SharedPicture,
 } from "../bridge/index";
 import { resolveMediaSrc } from "../media-source";
+import {
+  addPeerLibrary,
+  getCachedPeerLibraryItems,
+  listPeerLibraries,
+  loadPeerLibraryItems,
+  removePeerLibrary,
+  resolvePeerThumbnailSrc,
+  type PeerLibrary,
+} from "../peer-library-cache";
 import { openImage, openPeerImage, state } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
-
-type PeerLibrary = {
-  id: string;
-  kind: "peer";
-  name: string;
-  path: null;
-  removable: true;
-  peerId: string;
-};
 
 type LibraryEntry = MediaLibrary | PeerLibrary;
 
@@ -33,14 +31,6 @@ const TILE_MIN_WIDTH = 160;
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
 const OVERSCAN_ROWS = 2;
-
-function peerLibraryId(peerId: string) {
-  return `peer:${peerId}`;
-}
-
-function peerLibraryName(peerId: string) {
-  return `Peer ${peerId.slice(0, 8)}`;
-}
 
 function shortPeerId(peerId: string) {
   if (peerId.length <= 18) {
@@ -72,24 +62,22 @@ async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> 
   }
   if (libraryId.startsWith("peer:")) {
     const peerId = libraryId.slice("peer:".length);
-    const pictures = await listPeerPictures(peerId);
-    return pictures.map((picture) => ({
-      kind: "peer",
-      id: picture.id,
-      name: picture.name,
-      peerId,
-    }));
+    return loadPeerLibraryItems(peerId);
   }
   const paths = await listLibraryImages(libraryId);
   return paths.map(localMediaItem);
 }
 
+async function loadLibraryData(libraryId: string | null) {
+  return {
+    libraryId,
+    items: await loadLibraryItems(libraryId),
+  };
+}
+
 async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string> {
   if (item.kind === "peer") {
-    if (signal.aborted) {
-      throw new DOMException("thumbnail load aborted", "AbortError");
-    }
-    return getPeerThumbnail(item.peerId, item.id);
+    return resolvePeerThumbnailSrc(item.peerId, item.id, signal);
   }
   return resolveMediaSrc(item.path, signal);
 }
@@ -198,8 +186,8 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 export const MediaView: Component = () => {
   const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
-  const [peerLibraries, setPeerLibraries] = createSignal<PeerLibrary[]>([]);
-  const [items, { refetch: refetchItems }] = createResource(selectedLibraryId, loadLibraryItems);
+  const [peerLibraries, setPeerLibraries] = createSignal<PeerLibrary[]>(listPeerLibraries());
+  const [items, { refetch: refetchItems }] = createResource(selectedLibraryId, loadLibraryData);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [viewportHeight, setViewportHeight] = createSignal(0);
@@ -208,15 +196,11 @@ export const MediaView: Component = () => {
   let scrollRef!: HTMLDivElement;
 
   const discoveredPeerIds = createMemo(() => p2pState.peers.map((peer) => peer.endpoint_id));
+  const onlinePeerIds = createMemo(() => new Set(discoveredPeerIds()));
   const libraryEntries = createMemo<LibraryEntry[]>(() => [...(libraries() ?? []), ...peerLibraries()]);
   const suggestedPeers = createMemo(() => {
     const addedPeerIds = new Set(peerLibraries().map((library) => library.peerId));
     return p2pState.peers.filter((peer) => !addedPeerIds.has(peer.endpoint_id));
-  });
-
-  createEffect(() => {
-    const peerIds = new Set(discoveredPeerIds());
-    setPeerLibraries((current) => current.filter((library) => peerIds.has(library.peerId)));
   });
 
   createEffect(() => {
@@ -235,6 +219,20 @@ export const MediaView: Component = () => {
   const selectedLibrary = createMemo(() => (
     libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null
   ));
+  const selectedPeerCachedItems = createMemo(() => {
+    const library = selectedLibrary();
+    if (!isPeerLibrary(library)) {
+      return [];
+    }
+    return getCachedPeerLibraryItems(library.peerId);
+  });
+  const displayedItems = createMemo(() => {
+    const current = items();
+    if (current?.libraryId === selectedLibraryId()) {
+      return current.items;
+    }
+    return selectedPeerCachedItems();
+  });
   const selectedLibraryDetail = createMemo(() => {
     const library = selectedLibrary();
     if (!library) {
@@ -252,7 +250,7 @@ export const MediaView: Component = () => {
     return (width - GRID_GAP * (columnCount - 1)) / columnCount;
   });
   const rowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
-  const totalRows = createMemo(() => Math.ceil((items()?.length ?? 0) / columns()));
+  const totalRows = createMemo(() => Math.ceil(displayedItems().length / columns()));
   const visibleRowRange = createMemo(() => {
     const height = viewportHeight();
     const currentRowHeight = rowHeight();
@@ -267,7 +265,7 @@ export const MediaView: Component = () => {
     return { start, end };
   });
   const visibleItems = createMemo(() => {
-    const allItems = items() ?? [];
+    const allItems = displayedItems();
     const { start, end } = visibleRowRange();
     const startIdx = start * columns();
     const endIdx = Math.min(allItems.length, end * columns());
@@ -333,15 +331,7 @@ export const MediaView: Component = () => {
     setIsSubmitting(true);
     setError(null);
     try {
-      await listPeerPictures(peerId);
-      const nextLibrary: PeerLibrary = {
-        id: peerLibraryId(peerId),
-        kind: "peer",
-        name: peerLibraryName(peerId),
-        path: null,
-        removable: true,
-        peerId,
-      };
+      const nextLibrary = await addPeerLibrary(peerId);
       setPeerLibraries((current) => {
         if (current.some((library) => library.peerId === peerId)) {
           return current;
@@ -364,6 +354,7 @@ export const MediaView: Component = () => {
     setError(null);
     try {
       if (isPeerLibrary(library)) {
+        await removePeerLibrary(library.peerId);
         setPeerLibraries((current) => current.filter((entry) => entry.id !== library.id));
         return;
       }
@@ -391,17 +382,31 @@ export const MediaView: Component = () => {
             <div class="flex flex-1 gap-2 overflow-x-auto">
               <For each={libraryEntries()}>
                 {(library) => (
+                  (() => {
+                    const offline = isPeerLibrary(library) && !onlinePeerIds().has(library.peerId);
+                    return (
                   <button
                     type="button"
                     onClick={() => setSelectedLibraryId(library.id)}
                     class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
                       selectedLibraryId() === library.id
-                        ? "border-white/18 bg-white/12 text-white"
-                        : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
+                        ? offline
+                          ? "border-dashed border-amber-400/45 bg-white/12 text-white"
+                          : "border-white/18 bg-white/12 text-white"
+                        : offline
+                          ? "border-dashed border-amber-500/25 bg-white/[0.03] text-white/65 hover:border-amber-400/40 hover:text-white"
+                          : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
                     }`}
                   >
-                    {library.name}
+                    <span class="flex items-center gap-2">
+                      {isPeerLibrary(library) && (
+                        <span class={`h-1.5 w-1.5 rounded-full ${offline ? "bg-amber-400" : "bg-emerald-400"}`} />
+                      )}
+                      <span>{library.name}</span>
+                    </span>
                   </button>
+                    );
+                  })()
                 )}
               </For>
               <For each={suggestedPeers()}>
@@ -412,7 +417,7 @@ export const MediaView: Component = () => {
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
-                    {peerLibraryName(peer.endpoint_id)}
+                    {`Peer ${peer.endpoint_id.slice(0, 8)}`}
                   </button>
                 )}
               </For>
@@ -448,26 +453,28 @@ export const MediaView: Component = () => {
         class="media-scroll flex-1 overflow-y-auto p-6"
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
-        <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
-          <Show
-            when={(items()?.length ?? 0) > 0}
-            fallback={<p class="text-sm text-white/30">No images found in {selectedLibrary()?.name ?? "this library"}.</p>}
-          >
-            <div style={{ height: `${totalRows() * rowHeight()}px`, position: "relative" }}>
-              <div
-                class="grid gap-3"
-                style={{
-                  "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))`,
-                  transform: `translateY(${offsetY()}px)`,
-                }}
-              >
-                <For each={visibleItems()}>
-                  {(item) => <ImageTile item={item} />}
-                </For>
-              </div>
+        <Show
+          when={displayedItems().length > 0}
+          fallback={
+            <p class="text-sm text-white/30">
+              {items.loading ? "Loading…" : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+            </p>
+          }
+        >
+          <div style={{ height: `${totalRows() * rowHeight()}px`, position: "relative" }}>
+            <div
+              class="grid gap-3"
+              style={{
+                "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))`,
+                transform: `translateY(${offsetY()}px)`,
+              }}
+            >
+              <For each={visibleItems()}>
+                {(item) => <ImageTile item={item} />}
+              </For>
             </div>
-          </Show>
-        </Suspense>
+          </div>
+        </Show>
       </div>
     </div>
   );
