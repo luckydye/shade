@@ -56,9 +56,13 @@ export function startP2pPolling() {
   if (refreshTimer !== null) {
     return;
   }
-  void refreshP2pState();
+  void refreshP2pState().catch((error) => {
+    console.warn("failed to refresh p2p state", error);
+  });
   refreshTimer = window.setInterval(() => {
-    void refreshP2pState();
+    void refreshP2pState().catch((error) => {
+      console.warn("failed to refresh p2p state", error);
+    });
   }, 1500);
 }
 

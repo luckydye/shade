@@ -61,6 +61,7 @@ pub fn run() {
             commands::list_peer_pictures,
             commands::get_peer_thumbnail,
             commands::get_peer_image_bytes,
+            commands::open_peer_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

@@ -20,6 +20,7 @@ const SHADE_P2P_BROWSE_ALPN: &[u8] = b"/shade/p2p/browse/1";
 const MAX_REQUEST_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_THUMBNAIL_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_IMAGE_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
+const PEER_PICTURE_PAGE_SIZE: usize = 256;
 
 #[async_trait]
 pub trait MediaProvider: Send + Sync + 'static {
@@ -38,14 +39,14 @@ pub struct SharedPicture {
 
 #[derive(Debug, Serialize, Deserialize)]
 enum BrowseRequest {
-    ListPictures,
+    ListPictures { offset: usize, limit: usize },
     GetThumbnail { picture_id: String },
     GetImageBytes { picture_id: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 enum BrowseResponse {
-    Pictures(Vec<SharedPicture>),
+    PicturesPage { pictures: Vec<SharedPicture>, has_more: bool },
     Thumbnail(Vec<u8>),
     ImageBytes(Vec<u8>),
     Error(String),
@@ -128,18 +129,31 @@ impl LocalPeerDiscovery {
     }
 
     pub async fn list_peer_pictures(&self, peer_endpoint_id: &str) -> Result<Vec<SharedPicture>> {
-        match self
-            .send_request(
-                peer_endpoint_id,
-                BrowseRequest::ListPictures,
-                MAX_REQUEST_MESSAGE_BYTES,
-            )
-            .await?
-        {
-            BrowseResponse::Pictures(pictures) => Ok(pictures),
-            BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
-            BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!("received thumbnail response for picture list request")),
-            BrowseResponse::ImageBytes(_) => Err(anyhow::anyhow!("received image response for picture list request")),
+        let mut pictures = Vec::new();
+        let mut offset = 0;
+        loop {
+            match self
+                .send_request(
+                    peer_endpoint_id,
+                    BrowseRequest::ListPictures {
+                        offset,
+                        limit: PEER_PICTURE_PAGE_SIZE,
+                    },
+                    MAX_REQUEST_MESSAGE_BYTES,
+                )
+                .await?
+            {
+                BrowseResponse::PicturesPage { pictures: page, has_more } => {
+                    offset += page.len();
+                    pictures.extend(page);
+                    if !has_more {
+                        return Ok(pictures);
+                    }
+                }
+                BrowseResponse::Error(message) => return Err(anyhow::anyhow!(message)),
+                BrowseResponse::Thumbnail(_) => return Err(anyhow::anyhow!("received thumbnail response for picture list request")),
+                BrowseResponse::ImageBytes(_) => return Err(anyhow::anyhow!("received image response for picture list request")),
+            }
         }
     }
 
@@ -160,7 +174,7 @@ impl LocalPeerDiscovery {
         {
             BrowseResponse::Thumbnail(bytes) => Ok(bytes),
             BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
-            BrowseResponse::Pictures(_) => Err(anyhow::anyhow!("received picture list response for thumbnail request")),
+            BrowseResponse::PicturesPage { .. } => Err(anyhow::anyhow!("received picture list response for thumbnail request")),
             BrowseResponse::ImageBytes(_) => Err(anyhow::anyhow!("received image response for thumbnail request")),
         }
     }
@@ -182,7 +196,7 @@ impl LocalPeerDiscovery {
         {
             BrowseResponse::ImageBytes(bytes) => Ok(bytes),
             BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
-            BrowseResponse::Pictures(_) => Err(anyhow::anyhow!("received picture list response for image request")),
+            BrowseResponse::PicturesPage { .. } => Err(anyhow::anyhow!("received picture list response for image request")),
             BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!("received thumbnail response for image request")),
         }
     }
@@ -285,8 +299,15 @@ impl ProtocolHandler for BrowseProtocol {
         let request = serde_json::from_slice::<BrowseRequest>(&request)
             .map_err(AcceptError::from_err)?;
         let response = match request {
-            BrowseRequest::ListPictures => match self.media_provider.list_pictures().await {
-                Ok(pictures) => BrowseResponse::Pictures(pictures),
+            BrowseRequest::ListPictures { offset, limit } => match self.media_provider.list_pictures().await {
+                Ok(pictures) => {
+                    let total = pictures.len();
+                    let page = pictures.into_iter().skip(offset).take(limit).collect();
+                    BrowseResponse::PicturesPage {
+                        pictures: page,
+                        has_more: offset.saturating_add(limit) < total,
+                    }
+                }
                 Err(error) => BrowseResponse::Error(error.to_string()),
             },
             BrowseRequest::GetThumbnail { picture_id } => {

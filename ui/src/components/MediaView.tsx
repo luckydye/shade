@@ -37,6 +37,13 @@ type MediaGridRow =
   | { kind: "date"; modifiedAt: number | null }
   | { kind: "items"; items: MediaItem[] };
 
+type LibraryData = {
+  libraryId: string | null;
+  items: MediaItem[];
+  isComplete: boolean;
+  error: string | null;
+};
+
 const TILE_MIN_WIDTH = 160;
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -133,27 +140,39 @@ async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> 
   return listing.items.map(localMediaItem);
 }
 
-async function loadLibraryData(libraryId: string | null): Promise<{ libraryId: string | null; items: MediaItem[]; isComplete: boolean }> {
+async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
   if (!libraryId) {
     return {
       libraryId,
       items: [],
       isComplete: true,
+      error: null,
     };
   }
-  if (libraryId.startsWith("peer:")) {
+  try {
+    if (libraryId.startsWith("peer:")) {
+      return {
+        libraryId,
+        items: await loadLibraryItems(libraryId),
+        isComplete: true,
+        error: null,
+      };
+    }
+    const listing = await listLibraryImages(libraryId);
     return {
       libraryId,
-      items: await loadLibraryItems(libraryId),
+      items: listing.items.map(localMediaItem),
+      isComplete: listing.is_complete,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      libraryId,
+      items: [],
       isComplete: true,
+      error: error instanceof Error ? error.message : String(error),
     };
   }
-  const listing = await listLibraryImages(libraryId);
-  return {
-    libraryId,
-    items: listing.items.map(localMediaItem),
-    isComplete: listing.is_complete,
-  };
 }
 
 async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string> {
@@ -299,7 +318,8 @@ export const MediaView: Component = () => {
     if (current && availableLibraries.some((library) => library.id === current)) {
       return;
     }
-    setSelectedLibraryId(availableLibraries[0].id);
+    const firstLocalLibrary = availableLibraries.find((library) => !isPeerLibrary(library));
+    setSelectedLibraryId(firstLocalLibrary?.id ?? null);
   });
 
   const selectedLibrary = createMemo(() => (
@@ -339,6 +359,13 @@ export const MediaView: Component = () => {
       return false;
     }
     return current.isComplete;
+  });
+  createEffect(() => {
+    const current = items();
+    if (!current || current.libraryId !== selectedLibraryId()) {
+      return;
+    }
+    setError(current.error);
   });
   const selectedLibraryDetail = createMemo(() => {
     const library = selectedLibrary();
@@ -481,7 +508,9 @@ export const MediaView: Component = () => {
       if (isDisposed) {
         return;
       }
-      void refetchItems();
+      void Promise.resolve(refetchItems()).catch((error) => {
+        console.warn("failed to refresh media library items", error);
+      });
     }, 300);
     onCleanup(() => clearTimeout(timer));
   });
@@ -530,6 +559,8 @@ export const MediaView: Component = () => {
       });
       setSelectedLibraryId(nextLibrary.id);
       await refetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
     }

@@ -326,17 +326,9 @@ export async function openPeerImage(peer_endpoint_id: string, picture: SharedPic
     throw new Error("peer image loading requires the Tauri runtime");
   }
   const inv = await getTauriInvoke();
-  const result = await inv("get_peer_image_bytes", {
+  return inv("open_peer_image", {
     peerEndpointId: peer_endpoint_id,
     pictureId: picture.id,
-  }) as number[] | Uint8Array | ArrayBuffer;
-  const bytes = result instanceof Uint8Array
-    ? result
-    : result instanceof ArrayBuffer
-      ? new Uint8Array(result)
-      : Uint8Array.from(result as number[]);
-  return inv("open_image_encoded_bytes", {
-    bytes: Array.from(bytes),
     file_name: picture.name,
   }) as Promise<OpenImageInfo>;
 }

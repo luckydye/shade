@@ -214,13 +214,10 @@ export function getCachedPeerLibraryItems(peerId: string): PeerLibraryItem[] {
 }
 
 export async function addPeerLibrary(peerId: string): Promise<PeerLibrary> {
-  const pictures = await listPeerPictures(peerId);
   const peerIds = loadPeerLibraryIds();
   if (!peerIds.includes(peerId)) {
     savePeerLibraryIds([...peerIds, peerId]);
   }
-  persistPeerLibraryItems(peerId, pictures);
-  void warmPeerLibraryThumbnails(peerId, pictures);
   return toPeerLibrary(peerId);
 }
 

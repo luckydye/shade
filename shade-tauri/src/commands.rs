@@ -794,6 +794,24 @@ pub async fn get_peer_image_bytes(
 }
 
 #[tauri::command]
+pub async fn open_peer_image(
+    peer_endpoint_id: String,
+    picture_id: String,
+    file_name: Option<String>,
+    p2p: tauri::State<'_, crate::P2pState>,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<LayerInfoResponse, String> {
+    let bytes = require_p2p(&p2p)
+        .await?
+        .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
+    let mut st = state.lock().unwrap();
+    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
+}
+
+#[tauri::command]
 #[allow(unused_variables)]
 pub async fn open_image<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
