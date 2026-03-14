@@ -805,23 +805,18 @@ const Inspector: Component = () => {
               <button
                 type="button"
                 onClick={() => void addLayer("adjustment")}
-                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+                class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
               >
-                Add Tone
-              </button>
-              <button
-                type="button"
-                onClick={() => void addLayer("curves")}
-                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
-              >
-                Add Curves
+                <span class="[&>svg]:h-4 [&>svg]:w-4"><SparkIcon /></span>
+                <span>Add Adjustments</span>
               </button>
               <button
                 type="button"
                 onClick={() => void addLayer("crop")}
-                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+                class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
               >
-                Add Crop
+                <span class="[&>svg]:h-4 [&>svg]:w-4"><CropIcon /></span>
+                <span>Add Crop</span>
               </button>
             </div>
           </div>
