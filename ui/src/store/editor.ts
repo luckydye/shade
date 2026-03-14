@@ -124,19 +124,30 @@ function cropRectsMatch(a: CropRect, b: CropRect) {
 }
 
 export function getCommittedCropRect() {
-  return state.crop;
+  const cropLayer = state.layers.find((layer) => layer.kind === "crop" && layer.visible && layer.crop);
+  if (cropLayer?.crop) {
+    return cropLayer.crop;
+  }
+  return fullCanvasCrop();
 }
 
 export function getDraftCropRect() {
-  return state.cropDraft ?? state.crop;
+  return state.cropDraft ?? getCommittedCropRect();
 }
 
 export function hasActiveCrop() {
-  return !cropRectsMatch(state.crop, fullCanvasCrop());
+  return !cropRectsMatch(getCommittedCropRect(), fullCanvasCrop());
+}
+
+function selectedLayerIsCrop() {
+  return state.selectedLayerIdx >= 0 && state.layers[state.selectedLayerIdx]?.kind === "crop";
 }
 
 function getPreviewBounds() {
-  return state.crop;
+  if (selectedLayerIsCrop()) {
+    return fullCanvasCrop();
+  }
+  return getCommittedCropRect();
 }
 
 function fitPreviewSize(containerWidth: number, containerHeight: number, imageWidth: number, imageHeight: number) {
@@ -233,9 +244,6 @@ function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
 }
 
 function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
-  if (state.isCropMode) {
-    return getContextPreviewRequest(quality);
-  }
   const visible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
   if (!visible) return null;
   const devicePixelRatio = quality === "interactive"
@@ -254,6 +262,7 @@ function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | nul
     target_width: target.width,
     target_height: target.height,
     crop: visible.crop,
+    ignore_crop_layers: selectedLayerIsCrop(),
   };
 }
 
@@ -269,7 +278,7 @@ function previewCropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
 
 function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
-  const crop = state.isCropMode ? undefined : state.crop;
+  const crop = selectedLayerIsCrop() || state.isCropMode ? undefined : getCommittedCropRect();
   const devicePixelRatio = quality === "interactive"
     ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
     : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
@@ -288,6 +297,7 @@ function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewReques
     target_width: target.width,
     target_height: target.height,
     crop,
+    ignore_crop_layers: selectedLayerIsCrop(),
   };
 }
 
@@ -366,8 +376,8 @@ export function zoomPreviewDelta(delta: number, pinch: boolean, anchorX: number,
   const sensitivity = pinch ? 0.0005 : 0.001;
   const multiplier = Math.exp(-delta * sensitivity);
   const fitScale = Math.min(
-    state.previewViewportWidth / state.crop.width,
-    state.previewViewportHeight / state.crop.height,
+    state.previewViewportWidth / getPreviewBounds().width,
+    state.previewViewportHeight / getPreviewBounds().height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");
@@ -395,8 +405,8 @@ export function zoomPreviewDelta(delta: number, pinch: boolean, anchorX: number,
 export function panPreview(deltaX: number, deltaY: number) {
   if (state.previewZoom <= 1 || state.previewViewportWidth <= 0 || state.previewViewportHeight <= 0) return;
   const fitScale = Math.min(
-    state.previewViewportWidth / state.crop.width,
-    state.previewViewportHeight / state.crop.height,
+    state.previewViewportWidth / getPreviewBounds().width,
+    state.previewViewportHeight / getPreviewBounds().height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");

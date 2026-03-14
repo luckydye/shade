@@ -150,6 +150,7 @@ export interface PreviewRequest {
   target_width: number;
   target_height: number;
   crop?: PreviewCrop;
+  ignore_crop_layers?: boolean;
 }
 
 type Float16ArrayCtor = new (buffer: ArrayBufferLike) => unknown;

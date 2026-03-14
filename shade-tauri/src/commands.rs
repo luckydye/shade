@@ -220,6 +220,7 @@ pub struct PreviewRenderRequest {
     pub target_width: u32,
     pub target_height: u32,
     pub crop: Option<PreviewCrop>,
+    pub ignore_crop_layers: Option<bool>,
 }
 
 /// Run the full GPU render pipeline and return raw RGBA8 pixels.
@@ -230,7 +231,7 @@ pub async fn render_preview(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameResponse, String> {
     // Snapshot state without holding the lock during GPU work.
-    let (stack, sources, w, h) = {
+    let (mut stack, sources, w, h) = {
         let st = state.lock().unwrap();
         if st.canvas_width == 0 {
             return Ok(PreviewFrameResponse {
@@ -254,7 +255,15 @@ pub async fn render_preview(
         target_width: w,
         target_height: h,
         crop: None,
+        ignore_crop_layers: None,
     });
+    if request.ignore_crop_layers.unwrap_or(false) {
+        for entry in &mut stack.layers {
+            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
+                entry.visible = false;
+            }
+        }
+    }
     let pixels = r
         .render_stack_preview(
             &stack,
@@ -285,7 +294,7 @@ pub async fn render_preview_float16(
     renderer: tauri::State<'_, crate::RendererState>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameFloat16Response, String> {
-    let (stack, sources, w, h) = {
+    let (mut stack, sources, w, h) = {
         let st = state.lock().unwrap();
         if st.canvas_width == 0 {
             return Ok(PreviewFrameFloat16Response {
@@ -309,7 +318,15 @@ pub async fn render_preview_float16(
         target_width: w,
         target_height: h,
         crop: None,
+        ignore_crop_layers: None,
     });
+    if request.ignore_crop_layers.unwrap_or(false) {
+        for entry in &mut stack.layers {
+            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
+                entry.visible = false;
+            }
+        }
+    }
     let pixels = r
         .render_stack_preview_f16(
             &stack,

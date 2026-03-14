@@ -731,7 +731,6 @@ const Inspector: Component = () => {
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
         <div class="flex-1 overflow-y-auto px-4 py-4">
-          <CropPanel />
           <div class="mb-4">
             <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
             <div class="mt-3 flex flex-col gap-1">
@@ -797,161 +796,168 @@ const Inspector: Component = () => {
           </div>
 
           <Show
-            when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+            when={selectedCropLayer()}
             fallback={
-              <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
-                Open an image to unlock live adjustments.
-              </div>
+              <Show
+                when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                fallback={
+                  <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
+                    Open an image and select a layer to edit.
+                  </div>
+                }
+              >
+                <div class="flex flex-col gap-3">
+                  <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
+                  <Slider
+                    label="Exposure"
+                    icon={<SparkIcon />}
+                    value={tone().exposure}
+                    defaultValue={DEFAULT_TONE.exposure}
+                    min={-5}
+                    max={5}
+                    step={0.05}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyTone({ exposure: value });
+                    }}
+                  />
+                  <Slider
+                    label="Gamma"
+                    icon={<ToneIcon />}
+                    value={tone().gamma}
+                    defaultValue={DEFAULT_TONE.gamma}
+                    min={0.1}
+                    max={3}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyTone({ gamma: value });
+                    }}
+                  />
+                  <Slider
+                    label="Contrast"
+                    icon={<CircleIcon />}
+                    value={tone().contrast}
+                    defaultValue={DEFAULT_TONE.contrast}
+                    min={-1.0}
+                    max={1.0}
+                    step={0.01}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyTone({ contrast: value });
+                    }}
+                  />
+                  <Slider
+                    label="Blacks"
+                    icon={<ToneIcon />}
+                    value={tone().blacks}
+                    defaultValue={DEFAULT_TONE.blacks}
+                    min={-0.05}
+                    max={0.1}
+                    step={0.001}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyTone({ blacks: value });
+                    }}
+                  />
+                  <Slider
+                    label="Whites"
+                    icon={<ToneIcon />}
+                    value={tone().whites}
+                    defaultValue={DEFAULT_TONE.whites}
+                    min={-0.1}
+                    max={0.2}
+                    step={0.001}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyTone({ whites: value });
+                    }}
+                  />
+                  <Slider
+                    label="Saturation"
+                    icon={<DropletIcon />}
+                    value={color().saturation}
+                    defaultValue={DEFAULT_COLOR.saturation}
+                    valueLabel={valueLabel(color().saturation)}
+                    min={0}
+                    max={2}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyColor({ saturation: value });
+                    }}
+                  />
+                  <Slider
+                    label="Temperature"
+                    icon={<ToneIcon />}
+                    value={color().temperature}
+                    defaultValue={DEFAULT_COLOR.temperature}
+                    valueLabel={valueLabel(color().temperature)}
+                    min={-1}
+                    max={1}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyColor({ temperature: value });
+                    }}
+                  />
+                  <Slider
+                    label="Tint"
+                    icon={<ToneIcon />}
+                    value={color().tint}
+                    defaultValue={DEFAULT_COLOR.tint}
+                    valueLabel={valueLabel(color().tint)}
+                    min={-1}
+                    max={1}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyColor({ tint: value });
+                    }}
+                  />
+                  <CurvesEditor />
+                  <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
+                  <HslSection />
+                  <Slider
+                    label="Vignette"
+                    icon={<CircleIcon />}
+                    value={vignette().amount}
+                    defaultValue={DEFAULT_VIGNETTE.amount}
+                    valueLabel={valueLabel(vignette().amount)}
+                    min={0}
+                    max={1}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
+                    }}
+                  />
+                  <Slider
+                    label="Sharpen"
+                    icon={<ToneIcon />}
+                    value={sharpen().amount}
+                    defaultValue={DEFAULT_SHARPEN.amount}
+                    valueLabel={valueLabel(sharpen().amount)}
+                    min={0}
+                    max={2}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
+                    }}
+                  />
+                  <Slider
+                    label="Grain"
+                    icon={<GrainIcon />}
+                    value={grain().amount}
+                    defaultValue={DEFAULT_GRAIN.amount}
+                    valueLabel={valueLabel(grain().amount)}
+                    min={0}
+                    max={1}
+                    onChange={(value) => {
+                      selectedAdjustmentLayerOrThrow();
+                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
+                    }}
+                  />
+                </div>
+              </Show>
             }
           >
-            <div class="flex flex-col gap-3">
-              <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
-              <Slider
-                label="Exposure"
-                icon={<SparkIcon />}
-                value={tone().exposure}
-                defaultValue={DEFAULT_TONE.exposure}
-                min={-5}
-                max={5}
-                step={0.05}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyTone({ exposure: value });
-                }}
-              />
-              <Slider
-                label="Gamma"
-                icon={<ToneIcon />}
-                value={tone().gamma}
-                defaultValue={DEFAULT_TONE.gamma}
-                min={0.1}
-                max={3}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyTone({ gamma: value });
-                }}
-              />
-              <Slider
-                label="Contrast"
-                icon={<CircleIcon />}
-                value={tone().contrast}
-                defaultValue={DEFAULT_TONE.contrast}
-                min={-1.0}
-                max={1.0}
-                step={0.01}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyTone({ contrast: value });
-                }}
-              />
-              <Slider
-                label="Blacks"
-                icon={<ToneIcon />}
-                value={tone().blacks}
-                defaultValue={DEFAULT_TONE.blacks}
-                min={-0.05}
-                max={0.1}
-                step={0.001}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyTone({ blacks: value });
-                }}
-              />
-              <Slider
-                label="Whites"
-                icon={<ToneIcon />}
-                value={tone().whites}
-                defaultValue={DEFAULT_TONE.whites}
-                min={-0.1}
-                max={0.2}
-                step={0.001}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyTone({ whites: value });
-                }}
-              />
-              <Slider
-                label="Saturation"
-                icon={<DropletIcon />}
-                value={color().saturation}
-                defaultValue={DEFAULT_COLOR.saturation}
-                valueLabel={valueLabel(color().saturation)}
-                min={0}
-                max={2}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyColor({ saturation: value });
-                }}
-              />
-              <Slider
-                label="Temperature"
-                icon={<ToneIcon />}
-                value={color().temperature}
-                defaultValue={DEFAULT_COLOR.temperature}
-                valueLabel={valueLabel(color().temperature)}
-                min={-1}
-                max={1}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyColor({ temperature: value });
-                }}
-              />
-              <Slider
-                label="Tint"
-                icon={<ToneIcon />}
-                value={color().tint}
-                defaultValue={DEFAULT_COLOR.tint}
-                valueLabel={valueLabel(color().tint)}
-                min={-1}
-                max={1}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyColor({ tint: value });
-                }}
-              />
-              <CurvesEditor />
-              <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
-              <HslSection />
-              <Slider
-                label="Vignette"
-                icon={<CircleIcon />}
-                value={vignette().amount}
-                defaultValue={DEFAULT_VIGNETTE.amount}
-                valueLabel={valueLabel(vignette().amount)}
-                min={0}
-                max={1}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
-                }}
-              />
-              <Slider
-                label="Sharpen"
-                icon={<ToneIcon />}
-                value={sharpen().amount}
-                defaultValue={DEFAULT_SHARPEN.amount}
-                valueLabel={valueLabel(sharpen().amount)}
-                min={0}
-                max={2}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
-                }}
-              />
-              <Slider
-                label="Grain"
-                icon={<GrainIcon />}
-                value={grain().amount}
-                defaultValue={DEFAULT_GRAIN.amount}
-                valueLabel={valueLabel(grain().amount)}
-                min={0}
-                max={1}
-                onChange={(value) => {
-                  selectedAdjustmentLayerOrThrow();
-                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
-                }}
-              />
-            </div>
+            <CropPanel />
           </Show>
         </div>
       </div>
@@ -970,15 +976,21 @@ const Inspector: Component = () => {
         </div>
 
         <div class="px-4 pb-4">
-          <div class="px-1">
-            <CropPanel />
-          </div>
           <Show
-            when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-            fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}
+            when={selectedCropLayer()}
+            fallback={
+              <Show
+                when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
+              >
+                <div class="px-1">
+                  <div class="pb-4">{renderLayerBody()}</div>
+                </div>
+              </Show>
+            }
           >
             <div class="px-1">
-              <div class="pb-4">{renderLayerBody()}</div>
+              <CropPanel />
             </div>
           </Show>
         </div>

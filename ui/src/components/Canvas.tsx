@@ -1,14 +1,7 @@
 import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import {
-  applyCrop,
-  cancelCropMode,
-  getCommittedCropRect,
-  getDraftCropRect,
-  hasActiveCrop,
-  resetCrop,
-  startCropMode,
+  applyEdit,
   state,
-  updateCropDraft,
   isDrawerOpen,
   openImageFile,
   panPreview,
@@ -40,7 +33,12 @@ interface ImageBounds {
 
 const HANDLE_SIZE = 10;
 
-function getDisplayBounds(stageWidth: number, stageHeight: number, crop = getCommittedCropRect()): ImageBounds {
+function getDisplayBounds(stageWidth: number, stageHeight: number, crop = {
+  x: 0,
+  y: 0,
+  width: state.canvasWidth,
+  height: state.canvasHeight,
+}): ImageBounds {
   if (stageWidth <= 0 || stageHeight <= 0 || crop.width <= 0 || crop.height <= 0) {
     return { x: 0, y: 0, width: 0, height: 0, scale: 0 };
   }
@@ -74,16 +72,25 @@ const Canvas: Component = () => {
   let scratchCanvas: HTMLCanvasElement | undefined;
   let contextCanvas: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
+  const [draftCrop, setDraftCrop] = createSignal<{ x: number; y: number; width: number; height: number } | null>(null);
   let gesture:
     | { kind: "pan"; x: number; y: number }
-    | { kind: "crop"; pointerId: number; handle: CropHandle; startX: number; startY: number; crop: ReturnType<typeof getDraftCropRect> }
+    | { kind: "crop"; pointerId: number; handle: CropHandle; startX: number; startY: number; crop: { x: number; y: number; width: number; height: number } }
     | null = null;
 
+  const selectedCropLayer = () => {
+    const layer = state.layers[state.selectedLayerIdx];
+    return layer?.kind === "crop" && layer.crop ? layer : null;
+  };
+
+  const activeCrop = () => draftCrop() ?? selectedCropLayer()?.crop ?? null;
+
   function cropHandleAtPoint(x: number, y: number) {
-    if (!stageRef || !state.isCropMode) return null;
+    if (!stageRef || !selectedCropLayer()) return null;
     const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
     if (bounds.scale <= 0) return null;
-    const draft = getDraftCropRect();
+    const draft = activeCrop();
+    if (!draft) return null;
     const left = bounds.x + draft.x * bounds.scale;
     const top = bounds.y + draft.y * bounds.scale;
     const right = left + draft.width * bounds.scale;
@@ -106,10 +113,11 @@ const Canvas: Component = () => {
   }
 
   function drawCropOverlay(ctx: CanvasRenderingContext2D, cssWidth: number, cssHeight: number) {
-    if (!stageRef || !state.isCropMode) return;
+    if (!stageRef || !selectedCropLayer()) return;
     const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
     if (bounds.scale <= 0) return;
-    const draft = getDraftCropRect();
+    const draft = activeCrop();
+    if (!draft) return;
     const left = bounds.x + draft.x * bounds.scale;
     const top = bounds.y + draft.y * bounds.scale;
     const width = draft.width * bounds.scale;
@@ -165,7 +173,7 @@ const Canvas: Component = () => {
     }
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    const imageBounds = state.isCropMode
+    const imageBounds = selectedCropLayer()
       ? getFullImageBounds(cssWidth, cssHeight)
       : getDisplayBounds(cssWidth, cssHeight);
     const contextFrame = previewContextFrame();
@@ -204,8 +212,8 @@ const Canvas: Component = () => {
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(
         scratchCanvas,
-        imageBounds.x + (frame.crop.x - (state.isCropMode ? 0 : getCommittedCropRect().x)) * imageBounds.scale,
-        imageBounds.y + (frame.crop.y - (state.isCropMode ? 0 : getCommittedCropRect().y)) * imageBounds.scale,
+        imageBounds.x + frame.crop.x * imageBounds.scale,
+        imageBounds.y + frame.crop.y * imageBounds.scale,
         frame.crop.width * imageBounds.scale,
         frame.crop.height * imageBounds.scale,
       );
@@ -216,11 +224,16 @@ const Canvas: Component = () => {
   createEffect(() => {
     state.previewViewportWidth;
     state.previewViewportHeight;
-    state.isCropMode;
-    state.cropDraft;
+    state.selectedLayerIdx;
+    state.layers;
     previewContextFrame();
     previewFrame();
     drawFrame();
+  });
+
+  createEffect(() => {
+    const cropLayer = selectedCropLayer();
+    setDraftCrop(cropLayer?.crop ?? null);
   });
 
   onMount(() => {
@@ -255,7 +268,7 @@ const Canvas: Component = () => {
   };
 
   const onWheel = (e: WheelEvent) => {
-    if (state.isCropMode) return;
+    if (selectedCropLayer()) return;
     e.preventDefault();
     if (!stageRef) {
       throw new Error("preview stage is required for wheel zoom");
@@ -275,17 +288,21 @@ const Canvas: Component = () => {
     if (!stageRef) {
       throw new Error("preview stage is required for pointer interaction");
     }
-    if (state.isCropMode) {
+    if (selectedCropLayer()) {
       const rect = stageRef.getBoundingClientRect();
       const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
       if (!handle) return;
+      const crop = activeCrop();
+      if (!crop) {
+        throw new Error("crop interaction requires a crop layer");
+      }
       gesture = {
         kind: "crop",
         pointerId: e.pointerId,
         handle,
         startX: e.clientX,
         startY: e.clientY,
-        crop: getDraftCropRect(),
+        crop,
       };
       stageRef.setPointerCapture(e.pointerId);
       drawFrame();
@@ -347,13 +364,31 @@ const Canvas: Component = () => {
         next = { x: start.x + deltaX, y: start.y, width: start.width - deltaX, height: start.height };
         break;
     }
-    updateCropDraft(next);
+    setDraftCrop({
+      x: Math.max(0, next.x),
+      y: Math.max(0, next.y),
+      width: Math.max(1, next.width),
+      height: Math.max(1, next.height),
+    });
     drawFrame();
   };
 
   const onPointerUp = (e?: PointerEvent) => {
     if (gesture?.kind === "crop" && stageRef && e && stageRef.hasPointerCapture(e.pointerId)) {
       stageRef.releasePointerCapture(e.pointerId);
+    }
+    if (gesture?.kind === "crop") {
+      const crop = draftCrop();
+      if (crop && selectedCropLayer()) {
+        void applyEdit({
+          layer_idx: state.selectedLayerIdx,
+          op: "crop",
+          crop_x: crop.x,
+          crop_y: crop.y,
+          crop_width: crop.width,
+          crop_height: crop.height,
+        });
+      }
     }
     gesture = null;
   };
@@ -388,55 +423,12 @@ const Canvas: Component = () => {
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />
-          {state.isCropMode && (
+          {selectedCropLayer() && activeCrop() && (
             <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
               <span>Crop</span>
               <span class="text-white/35">
-                {getDraftCropRect().width} × {getDraftCropRect().height}
+                {activeCrop()!.width} × {activeCrop()!.height}
               </span>
-            </div>
-          )}
-          {!state.isCropMode && hasActiveCrop() && (
-            <div class="absolute right-4 top-4 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => startCropMode()}
-                class="rounded-full border border-white/10 bg-black/45 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition-colors hover:border-white/20 hover:text-white"
-              >
-                Edit crop
-              </button>
-              <button
-                type="button"
-                onClick={() => resetPreviewViewport()}
-                class="rounded-full border border-white/10 bg-black/45 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition-colors hover:border-white/20 hover:text-white"
-              >
-                Reset view
-              </button>
-            </div>
-          )}
-          {state.isCropMode && (
-            <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/55 px-2 py-2 backdrop-blur">
-              <button
-                type="button"
-                onClick={() => cancelCropMode()}
-                class="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/78 transition-colors hover:border-white/20 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => resetCrop()}
-                class="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/78 transition-colors hover:border-white/20 hover:text-white"
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => applyCrop()}
-                class="rounded-full border border-stone-100 bg-stone-100 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-950 transition-colors hover:bg-white"
-              >
-                Apply crop
-              </button>
             </div>
           )}
           {state.layers.length === 0 && (
