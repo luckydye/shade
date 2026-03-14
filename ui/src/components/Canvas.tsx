@@ -417,6 +417,9 @@ const Canvas: Component = () => {
             style={{
               width: "100%",
               height: "100%",
+              "view-transition-name": state.currentView === "editor" && state.layers.length > 0 && !state.isLoading
+                ? "active-editor-media"
+                : "none",
             }}
             class={`bg-[#111111] ${
               state.layers.length === 0 ? "opacity-0" : "opacity-100"

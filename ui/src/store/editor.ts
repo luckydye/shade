@@ -38,6 +38,7 @@ export interface CropRect {
 }
 
 export interface EditorState {
+  currentView: "media" | "editor";
   layers: LayerInfo[];
   canvasWidth: number;
   canvasHeight: number;
@@ -60,6 +61,7 @@ export interface EditorState {
 }
 
 const [state, setState] = createStore<EditorState>({
+  currentView: "media",
   layers: [],
   canvasWidth: 0,
   canvasHeight: 0,
@@ -422,32 +424,54 @@ function resetPreviewState(canvasWidth: number, canvasHeight: number) {
   });
 }
 
-export function closeImage() {
+function clearLoadedImageState() {
   setPreviewFrame(null);
   setPreviewContextFrame(null);
   setState({
     layers: [],
     canvasWidth: 0,
     canvasHeight: 0,
-    isLoading: false,
     selectedLayerIdx: -1,
     previewZoom: 1,
     previewCenterX: 0,
     previewCenterY: 0,
+    previewRenderWidth: 0,
+    previewRenderHeight: 0,
+    previewDisplayColorSpace: "Unknown",
+    sourceBitDepth: "Unknown",
     crop: { x: 0, y: 0, width: 0, height: 0 },
     cropDraft: null,
     isCropMode: false,
+  });
+}
+
+export function closeImage() {
+  clearLoadedImageState();
+  setState({
+    currentView: "media",
+    isLoading: false,
     loadingMediaSrc: null,
   });
 }
 
+export function showMediaView() {
+  setState("currentView", "media");
+}
+
+export function showEditorView() {
+  if (state.canvasWidth <= 0 && !state.isLoading) {
+    throw new Error("cannot show editor without a loaded image");
+  }
+  setState("currentView", "editor");
+}
+
 export async function openImage(path: string, loadingMediaSrc: string | null = null) {
+  clearLoadedImageState();
   setState({
+    currentView: "editor",
     isLoading: true,
     loadingMediaSrc,
   });
-  setPreviewFrame(null);
-  setPreviewContextFrame(null);
   try {
     const info = await bridge.openImage(path);
     resetPreviewState(info.canvas_width, info.canvas_height);
@@ -466,10 +490,11 @@ export async function openImage(path: string, loadingMediaSrc: string | null = n
 }
 
 export async function openImageFile(file: File) {
-  setPreviewFrame(null);
-  setPreviewContextFrame(null);
-
-  setState("isLoading", true);
+  clearLoadedImageState();
+  setState({
+    currentView: "editor",
+    isLoading: true,
+  });
   try {
     const info = await bridge.openImageFile(file);
     resetPreviewState(info.canvas_width, info.canvas_height);
