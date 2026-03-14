@@ -9,7 +9,7 @@ import {
   type MediaLibrary,
   type SharedPicture,
 } from "../bridge/index";
-import { resolveMediaSrc } from "../media-source";
+import { releaseMediaSrc, resolveMediaSrc } from "../media-source";
 import {
   addPeerLibrary,
   getCachedPeerLibraryItems,
@@ -209,7 +209,11 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
   onCleanup(() => {
     const url = src();
     if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) {
-      URL.revokeObjectURL(url);
+      if (props.item.kind === "local") {
+        releaseMediaSrc(url);
+      } else {
+        URL.revokeObjectURL(url);
+      }
     }
     clearTimeout(errorTimer);
   });
@@ -274,6 +278,7 @@ export const MediaView: Component = () => {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
+  let isDisposed = false;
   let scrollRef!: HTMLDivElement;
 
   const discoveredPeerIds = createMemo(() => p2pState.peers.map((peer) => peer.endpoint_id));
@@ -449,6 +454,7 @@ export const MediaView: Component = () => {
     const observer = new ResizeObserver(updateViewport);
     observer.observe(scrollRef);
     onCleanup(() => {
+      isDisposed = true;
       observer.disconnect();
       stopP2pPolling();
     });
@@ -468,10 +474,15 @@ export const MediaView: Component = () => {
     if (!libraryId || libraryId.startsWith("peer:")) {
       return;
     }
-    if (!current || current.libraryId !== libraryId || current.isComplete) {
+    if (items.loading || !current || current.libraryId !== libraryId || current.isComplete) {
       return;
     }
-    const timer = setTimeout(() => void refetchItems(), 150);
+    const timer = setTimeout(() => {
+      if (isDisposed) {
+        return;
+      }
+      void refetchItems();
+    }, 300);
     onCleanup(() => clearTimeout(timer));
   });
 
