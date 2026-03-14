@@ -161,6 +161,63 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<String>, String> {
     Ok(entries_with_mtime.into_iter().map(|(_, path)| path).collect())
 }
 
+pub struct ThumbnailJob {
+    pub path: String,
+    pub response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+}
+
+fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
+    let source = std::path::Path::new(path);
+    let mut source_file = std::fs::File::open(source).map_err(|e| e.to_string())?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut source_file, &mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let cache_key = hasher.finalize().to_hex().to_string();
+
+    let cache_dir = std::env::temp_dir().join("shade-thumbnails");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let cache_path = cache_dir.join(format!("v2-{cache_key}.jpg"));
+
+    if cache_path.exists() {
+        return std::fs::read(&cache_path).map_err(|e| e.to_string());
+    }
+
+    let (pixels, width, height) =
+        shade_io::load_image(source).map_err(|e| e.to_string())?;
+    let img = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or("failed to wrap pixels in RgbaImage")?;
+    let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
+    let mut jpeg: Vec<u8> = Vec::new();
+    thumb
+        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
+    Ok(jpeg)
+}
+
+pub fn spawn_thumbnail_workers() -> crossbeam_channel::Sender<ThumbnailJob> {
+    let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailJob>();
+    for worker_idx in 0..3 {
+        let worker_receiver = receiver.clone();
+        std::thread::Builder::new()
+            .name(format!("shade-thumbnail-{worker_idx}"))
+            .spawn(move || {
+                while let Ok(job) = worker_receiver.recv() {
+                    let result = generate_desktop_thumbnail(&job.path);
+                    let _ = job.response.send(result);
+                }
+            })
+            .expect("failed to spawn thumbnail worker thread");
+    }
+    sender
+}
+
 impl Default for EditorState {
     fn default() -> Self {
         Self {
@@ -868,6 +925,7 @@ pub struct HslValues {
 #[tauri::command]
 pub async fn get_thumbnail<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
+    thumbnail_service: tauri::State<'_, crate::ThumbnailService>,
     path: String,
 ) -> Result<Vec<u8>, String> {
     #[cfg(target_os = "android")]
@@ -898,38 +956,12 @@ pub async fn get_thumbnail<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?;
     }
 
-    use std::hash::{Hash, Hasher};
-
-    let source = std::path::Path::new(&path);
-    let mtime = std::fs::metadata(source)
-        .and_then(|m| m.modified())
-        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
-        .unwrap_or(0);
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    mtime.hash(&mut hasher);
-    let cache_key = hasher.finish();
-
-    let cache_dir = std::env::temp_dir().join("shade-thumbnails");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
-    let cache_path = cache_dir.join(format!("{cache_key:016x}.jpg"));
-
-    if cache_path.exists() {
-        return std::fs::read(&cache_path).map_err(|e| e.to_string());
-    }
-
-    let (pixels, width, height) =
-        shade_io::load_image(source).map_err(|e| e.to_string())?;
-    let img = image::RgbaImage::from_raw(width, height, pixels)
-        .ok_or("failed to wrap pixels in RgbaImage")?;
-    let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
-    let mut jpeg: Vec<u8> = Vec::new();
-    thumb
-        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    thumbnail_service
+        .0
+        .send(ThumbnailJob { path, response: response_tx })
         .map_err(|e| e.to_string())?;
-    std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
-    Ok(jpeg)
+    response_rx.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

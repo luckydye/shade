@@ -5,6 +5,7 @@ mod photos;
 
 /// Lazily-initialised GPU renderer, shared across all command invocations.
 pub struct RendererState(pub tokio::sync::Mutex<Option<shade_gpu::Renderer>>);
+pub struct ThumbnailService(pub crossbeam_channel::Sender<commands::ThumbnailJob>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -13,6 +14,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RendererState(tokio::sync::Mutex::new(None)))
+        .manage(ThumbnailService(commands::spawn_thumbnail_workers()))
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

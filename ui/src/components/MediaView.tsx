@@ -5,8 +5,8 @@ import { resolveMediaSrc } from "../media-source";
 import { openImage, state } from "../store/editor";
 
 const ImageTile: Component<{ path: string }> = (props) => {
-  const [visible, setVisible] = createSignal(false);
-  const [src] = createResource(() => visible() ? props.path : undefined, resolveMediaSrc);
+  const [isIntersecting, setIsIntersecting] = createSignal(false);
+  const [src, setSrc] = createSignal<string | undefined>(undefined);
   // PHAsset local identifiers (iOS) don't have a meaningful filename component.
   const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
   const [loadError, setLoadError] = createSignal(false);
@@ -16,13 +16,29 @@ const ImageTile: Component<{ path: string }> = (props) => {
 
   onMount(() => {
     const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        setVisible(true);
-        observer.disconnect();
-      }
+      setIsIntersecting(entry.isIntersecting);
     }, { rootMargin: "200px" });
     if (containerRef) observer.observe(containerRef);
     onCleanup(() => observer.disconnect());
+  });
+
+  createEffect(() => {
+    if (!isIntersecting() || src()) {
+      return;
+    }
+    const controller = new AbortController();
+    setLoadError(false);
+    void resolveMediaSrc(props.path, controller.signal)
+      .then((nextSrc) => setSrc(nextSrc))
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        void error;
+        setLoadError(true);
+        errorTimer = setTimeout(() => setLoadError(false), 4000);
+      });
+    onCleanup(() => controller.abort());
   });
 
   // Revoke blob URLs created for non-native formats.
@@ -60,7 +76,8 @@ const ImageTile: Component<{ path: string }> = (props) => {
       onClick={handleClick}
     >
       <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
-        <Suspense fallback={<div class="h-full w-full animate-pulse bg-white/[0.06]" />}>
+        {!src() && !loadError() && <div class="h-full w-full animate-pulse bg-white/[0.06]" />}
+        {src() && (
           <img
             ref={imgRef}
             src={src()}
@@ -68,7 +85,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
             class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
             loading="lazy"
           />
-        </Suspense>
+        )}
         {loadError() && (
           <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
             <span class="text-[11px] font-medium text-red-400">Failed to open</span>
