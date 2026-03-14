@@ -19,7 +19,20 @@ export type PeerLibraryItem = {
   id: string;
   name: string;
   peerId: string;
+  modified_at: number | null;
 };
+
+function normalizeModifiedAt(modifiedAt: unknown) {
+  return typeof modifiedAt === "number" && Number.isFinite(modifiedAt) ? modifiedAt : null;
+}
+
+function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
+  return {
+    id: picture.id,
+    name: picture.name,
+    modified_at: normalizeModifiedAt((picture as SharedPicture & { modified_at?: unknown }).modified_at),
+  };
+}
 
 function peerLibraryId(peerId: string) {
   return `peer:${peerId}`;
@@ -108,7 +121,10 @@ function savePeerLibraryIds(peerIds: string[]) {
 }
 
 function loadPeerLibraryItemsMap() {
-  return readJson<Record<string, SharedPicture[]>>(ITEMS_KEY, {});
+  const raw = readJson<Record<string, SharedPicture[]>>(ITEMS_KEY, {});
+  return Object.fromEntries(
+    Object.entries(raw).map(([peerId, pictures]) => [peerId, pictures.map(normalizeSharedPicture)]),
+  );
 }
 
 function savePeerLibraryItemsMap(items: Record<string, SharedPicture[]>) {
@@ -156,12 +172,13 @@ function toPeerLibraryItems(peerId: string, pictures: SharedPicture[]): PeerLibr
     id: picture.id,
     name: picture.name,
     peerId,
+    modified_at: normalizeModifiedAt(picture.modified_at),
   }));
 }
 
 function persistPeerLibraryItems(peerId: string, pictures: SharedPicture[]) {
   const allItems = loadPeerLibraryItemsMap();
-  allItems[peerId] = pictures;
+  allItems[peerId] = pictures.map(normalizeSharedPicture);
   savePeerLibraryItemsMap(allItems);
 }
 

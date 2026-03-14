@@ -33,6 +33,7 @@ pub trait MediaProvider: Send + Sync + 'static {
 pub struct SharedPicture {
     pub id: String,
     pub name: String,
+    pub modified_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

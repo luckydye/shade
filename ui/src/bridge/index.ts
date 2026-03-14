@@ -94,6 +94,13 @@ export interface LocalPeerDiscoverySnapshot {
 export interface SharedPicture {
   id: string;
   name: string;
+  modified_at: number | null;
+}
+
+export interface LibraryImage {
+  path: string;
+  name: string;
+  modified_at: number | null;
 }
 
 export interface ToneValues {
@@ -458,10 +465,10 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   throw new Error("listMediaLibraries is only implemented for Tauri");
 }
 
-export async function listLibraryImages(libraryId: string): Promise<string[]> {
+export async function listLibraryImages(libraryId: string): Promise<LibraryImage[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("list_library_images", { libraryId }) as Promise<string[]>;
+    return inv("list_library_images", { libraryId }) as Promise<LibraryImage[]>;
   }
   throw new Error("listLibraryImages is only implemented for Tauri");
 }

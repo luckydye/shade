@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   addMediaLibrary,
+  type LibraryImage,
   listLibraryImages,
   listMediaLibraries,
   removeMediaLibrary,
@@ -24,13 +25,12 @@ import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 type LibraryEntry = MediaLibrary | PeerLibrary;
 
 type MediaItem =
-  | { kind: "local"; id: string; name: string; path: string }
-  | { kind: "peer"; id: string; name: string; peerId: string };
+  | { kind: "local"; id: string; name: string; path: string; modifiedAt: number | null }
+  | { kind: "peer"; id: string; name: string; peerId: string; modifiedAt: number | null };
 
-const TILE_MIN_WIDTH = 160;
-const GRID_GAP = 12;
-const TILE_LABEL_HEIGHT = 24;
-const OVERSCAN_ROWS = 2;
+type MediaGridEntry =
+  | { kind: "date"; modifiedAt: number | null }
+  | { kind: "item"; item: MediaItem };
 
 function shortPeerId(peerId: string) {
   if (peerId.length <= 18) {
@@ -47,12 +47,39 @@ function pictureName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
-function localMediaItem(path: string): MediaItem {
+function normalizeModifiedAt(modifiedAt: number | null | undefined) {
+  return typeof modifiedAt === "number" && Number.isFinite(modifiedAt) ? modifiedAt : null;
+}
+
+function modificationMonthKey(modifiedAt: number | null | undefined) {
+  const normalized = normalizeModifiedAt(modifiedAt);
+  if (normalized === null) {
+    return "unknown";
+  }
+  const date = new Date(normalized);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function formatModificationMonth(modifiedAt: number | null | undefined) {
+  const normalized = normalizeModifiedAt(modifiedAt);
+  if (normalized === null) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+  }).format(new Date(normalized));
+}
+
+function localMediaItem(image: LibraryImage): MediaItem {
   return {
     kind: "local",
-    id: path,
-    name: pictureName(path),
-    path,
+    id: image.path,
+    name: image.name || pictureName(image.path),
+    path: image.path,
+    modifiedAt: normalizeModifiedAt(image.modified_at),
   };
 }
 
@@ -64,8 +91,8 @@ async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> 
     const peerId = libraryId.slice("peer:".length);
     return loadPeerLibraryItems(peerId);
   }
-  const paths = await listLibraryImages(libraryId);
-  return paths.map(localMediaItem);
+  const images = await listLibraryImages(libraryId);
+  return images.map(localMediaItem);
 }
 
 async function loadLibraryData(libraryId: string | null) {
@@ -84,7 +111,7 @@ async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string
 
 async function openMediaItem(item: MediaItem, src: string | null) {
   if (item.kind === "peer") {
-    const picture: SharedPicture = { id: item.id, name: item.name };
+    const picture: SharedPicture = { id: item.id, name: item.name, modified_at: item.modifiedAt };
     await openPeerImage(item.peerId, picture, src);
     return;
   }
@@ -190,9 +217,6 @@ export const MediaView: Component = () => {
   const [items, { refetch: refetchItems }] = createResource(selectedLibraryId, loadLibraryData);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [viewportHeight, setViewportHeight] = createSignal(0);
-  const [viewportWidth, setViewportWidth] = createSignal(0);
-  const [scrollTop, setScrollTop] = createSignal(0);
   let scrollRef!: HTMLDivElement;
 
   const discoveredPeerIds = createMemo(() => p2pState.peers.map((peer) => peer.endpoint_id));
@@ -240,57 +264,29 @@ export const MediaView: Component = () => {
     }
     return isPeerLibrary(library) ? library.peerId : library.path ?? "";
   });
-  const columns = createMemo(() => Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))));
-  const tileWidth = createMemo(() => {
-    const width = viewportWidth();
-    const columnCount = columns();
-    if (width <= 0) {
-      return TILE_MIN_WIDTH;
+  const gridEntries = createMemo<MediaGridEntry[]>(() => {
+    const entries: MediaGridEntry[] = [];
+    let lastDateKey: string | null = null;
+    for (const item of displayedItems()) {
+      const dateKey = modificationMonthKey(item.modifiedAt);
+      if (lastDateKey !== dateKey) {
+        entries.push({ kind: "date", modifiedAt: item.modifiedAt });
+        lastDateKey = dateKey;
+      }
+      entries.push({ kind: "item", item });
     }
-    return (width - GRID_GAP * (columnCount - 1)) / columnCount;
+    return entries;
   });
-  const rowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
-  const totalRows = createMemo(() => Math.ceil(displayedItems().length / columns()));
-  const visibleRowRange = createMemo(() => {
-    const height = viewportHeight();
-    const currentRowHeight = rowHeight();
-    if (height <= 0 || currentRowHeight <= 0) {
-      return { start: 0, end: 0 };
-    }
-    const start = Math.max(0, Math.floor(scrollTop() / currentRowHeight) - OVERSCAN_ROWS);
-    const end = Math.min(
-      totalRows(),
-      Math.ceil((scrollTop() + height) / currentRowHeight) + OVERSCAN_ROWS,
-    );
-    return { start, end };
-  });
-  const visibleItems = createMemo(() => {
-    const allItems = displayedItems();
-    const { start, end } = visibleRowRange();
-    const startIdx = start * columns();
-    const endIdx = Math.min(allItems.length, end * columns());
-    return allItems.slice(startIdx, endIdx);
-  });
-  const offsetY = createMemo(() => visibleRowRange().start * rowHeight());
 
   onMount(() => {
     startP2pPolling();
-    const updateViewport = () => {
-      setViewportHeight(scrollRef.clientHeight);
-      setViewportWidth(scrollRef.clientWidth - 48);
-    };
-    updateViewport();
-    const observer = new ResizeObserver(updateViewport);
-    observer.observe(scrollRef);
     onCleanup(() => {
-      observer.disconnect();
       stopP2pPolling();
     });
   });
 
   createEffect(() => {
     selectedLibraryId();
-    setScrollTop(0);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
@@ -451,7 +447,6 @@ export const MediaView: Component = () => {
       <div
         ref={scrollRef!}
         class="media-scroll flex-1 overflow-y-auto p-6"
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         <Show
           when={displayedItems().length > 0}
@@ -461,18 +456,18 @@ export const MediaView: Component = () => {
             </p>
           }
         >
-          <div style={{ height: `${totalRows() * rowHeight()}px`, position: "relative" }}>
-            <div
-              class="grid gap-3"
-              style={{
-                "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))`,
-                transform: `translateY(${offsetY()}px)`,
-              }}
-            >
-              <For each={visibleItems()}>
-                {(item) => <ImageTile item={item} />}
-              </For>
-            </div>
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+            <For each={gridEntries()}>
+              {(entry) => (
+                entry.kind === "date" ? (
+                  <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-white/38 first:pt-0">
+                    {formatModificationMonth(entry.modifiedAt)}
+                  </h2>
+                ) : (
+                  <ImageTile item={entry.item} />
+                )
+              )}
+            </For>
           </div>
         </Show>
       </div>

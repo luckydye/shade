@@ -47,6 +47,13 @@ pub struct MediaLibrary {
     pub removable: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LibraryImage {
+    pub path: String,
+    pub name: String,
+    pub modified_at: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(default)]
 struct AppConfig {
@@ -189,8 +196,15 @@ fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
     Err(format!("unknown media library: {library_id}"))
 }
 
-fn collect_images_in_directory(dir: &Path) -> Result<Vec<String>, String> {
-    let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
+fn modified_at_millis(mtime: std::time::SystemTime) -> Result<u64, String> {
+    let duration = mtime
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?;
+    u64::try_from(duration.as_millis()).map_err(|e| e.to_string())
+}
+
+fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> {
+    let mut entries_with_mtime: Vec<(std::time::SystemTime, LibraryImage)> = Vec::new();
     let mut dirs = vec![dir.to_path_buf()];
     while let Some(current_dir) = dirs.pop() {
         let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
@@ -215,11 +229,15 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<String>, String> {
                 .map_err(|e| e.to_string())?
                 .modified()
                 .map_err(|e| e.to_string())?;
-            entries_with_mtime.push((mtime, path_string));
+            entries_with_mtime.push((mtime, LibraryImage {
+                name: picture_display_name(&path_string),
+                path: path_string,
+                modified_at: Some(modified_at_millis(mtime)?),
+            }));
         }
     }
     entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(entries_with_mtime.into_iter().map(|(_, path)| path).collect())
+    Ok(entries_with_mtime.into_iter().map(|(_, entry)| entry).collect())
 }
 
 pub struct ThumbnailJob {
@@ -1288,6 +1306,7 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
                 .map(|id| shade_p2p::SharedPicture {
                     name: picture_display_name(&id),
                     id,
+                    modified_at: None,
                 })
                 .collect()
         });
@@ -1310,6 +1329,7 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
                     .map(|id| shade_p2p::SharedPicture {
                         name: picture_display_name(&id),
                         id,
+                        modified_at: None,
                     })
                     .collect()
             })
@@ -1321,9 +1341,10 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     Ok(collect_images_in_directory(&default_pictures_dir()?)?
         .into_iter()
-        .map(|id| shade_p2p::SharedPicture {
-            name: picture_display_name(&id),
-            id,
+        .map(|picture| shade_p2p::SharedPicture {
+            name: picture.name,
+            id: picture.path,
+            modified_at: picture.modified_at,
         })
         .collect())
 }
@@ -1367,7 +1388,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 pub async fn list_library_images<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
     library_id: String,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<LibraryImage>, String> {
     #[cfg(target_os = "android")]
     {
         if library_id != "photos" {
@@ -1376,7 +1397,17 @@ pub async fn list_library_images<R: tauri::Runtime>(
         return _app
             .state::<crate::photos::PhotosHandle<R>>()
             .list_photos()
-            .await;
+            .await
+            .map(|photos| {
+                photos
+                    .into_iter()
+                    .map(|path| LibraryImage {
+                        name: picture_display_name(&path),
+                        path,
+                        modified_at: None,
+                    })
+                    .collect()
+            });
     }
 
     #[cfg(target_os = "ios")]
@@ -1394,7 +1425,18 @@ pub async fn list_library_images<R: tauri::Runtime>(
                 ios_free_string(ptr);
                 s
             };
-            serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())
+            serde_json::from_str::<Vec<String>>(&json)
+                .map(|photos| {
+                    photos
+                        .into_iter()
+                        .map(|path| LibraryImage {
+                            name: picture_display_name(&path),
+                            path,
+                            modified_at: None,
+                        })
+                        .collect()
+                })
+                .map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())?;
