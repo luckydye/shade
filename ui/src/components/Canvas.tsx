@@ -1,6 +1,7 @@
 import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import {
   applyEdit,
+  getCommittedCropRect,
   state,
   isDrawerOpen,
   openImageFile,
@@ -174,9 +175,13 @@ const Canvas: Component = () => {
     }
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    const imageBounds = selectedCropLayer()
+    const cropLayer = selectedCropLayer();
+    const previewBounds = cropLayer
+      ? { x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight }
+      : getCommittedCropRect();
+    const imageBounds = cropLayer
       ? getFullImageBounds(cssWidth, cssHeight)
-      : getDisplayBounds(cssWidth, cssHeight);
+      : getDisplayBounds(cssWidth, cssHeight, previewBounds);
     const contextFrame = previewContextFrame();
     if (contextFrame) {
       contextCanvas ??= document.createElement("canvas");
@@ -198,7 +203,7 @@ const Canvas: Component = () => {
       );
     }
     const frame = previewFrame();
-    if (frame) {
+    if (frame && !cropLayer) {
       scratchCanvas ??= document.createElement("canvas");
       if (scratchCanvas.width !== frame.image.width || scratchCanvas.height !== frame.image.height) {
         scratchCanvas.width = frame.image.width;
@@ -213,8 +218,8 @@ const Canvas: Component = () => {
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(
         scratchCanvas,
-        imageBounds.x + frame.crop.x * imageBounds.scale,
-        imageBounds.y + frame.crop.y * imageBounds.scale,
+        imageBounds.x + (frame.crop.x - previewBounds.x) * imageBounds.scale,
+        imageBounds.y + (frame.crop.y - previewBounds.y) * imageBounds.scale,
         frame.crop.width * imageBounds.scale,
         frame.crop.height * imageBounds.scale,
       );

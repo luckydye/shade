@@ -270,7 +270,7 @@ function previewCropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
 
 function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
-  const crop = selectedLayerIsCrop() || state.isCropMode ? undefined : getCommittedCropRect();
+  const crop = selectedLayerIsCrop() ? undefined : getCommittedCropRect();
   const devicePixelRatio = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_PREVIEW_SCALE : 1);
   const fitted = fitPreviewSize(
     state.previewViewportWidth * devicePixelRatio,
@@ -283,7 +283,7 @@ function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewReques
     target_width: fitted.width,
     target_height: fitted.height,
     crop,
-    ignore_crop_layers: selectedLayerIsCrop(),
+    ignore_crop_layers: true,
   };
 }
 
@@ -343,6 +343,8 @@ export function setPreviewViewportSize(width: number, height: number) {
   const nextWidth = Math.max(0, Math.floor(width));
   const nextHeight = Math.max(0, Math.floor(height));
   if (nextWidth === state.previewViewportWidth && nextHeight === state.previewViewportHeight) return;
+  // setPreviewFrame(null);
+  // setPreviewContextFrame(null);
   setState({
     previewViewportWidth: nextWidth,
     previewViewportHeight: nextHeight,
@@ -687,6 +689,7 @@ export async function applyEdit(params: Record<string, unknown>) {
 }
 
 export function selectLayer(idx: number) {
+  if (idx === state.selectedLayerIdx) return;
   setState("selectedLayerIdx", idx);
 }
 
