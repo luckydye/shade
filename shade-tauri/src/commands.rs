@@ -166,6 +166,25 @@ pub struct ThumbnailJob {
     pub response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
 }
 
+pub enum RenderJob {
+    Preview {
+        stack: LayerStack,
+        sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        canvas_width: u32,
+        canvas_height: u32,
+        request: PreviewRenderRequest,
+        response: tokio::sync::oneshot::Sender<Result<PreviewFrameResponse, String>>,
+    },
+    PreviewFloat16 {
+        stack: LayerStack,
+        sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        canvas_width: u32,
+        canvas_height: u32,
+        request: PreviewRenderRequest,
+        response: tokio::sync::oneshot::Sender<Result<PreviewFrameFloat16Response, String>>,
+    },
+}
+
 fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
     let source = std::path::Path::new(path);
     let mut source_file = std::fs::File::open(source).map_err(|e| e.to_string())?;
@@ -215,6 +234,93 @@ pub fn spawn_thumbnail_workers() -> crossbeam_channel::Sender<ThumbnailJob> {
             })
             .expect("failed to spawn thumbnail worker thread");
     }
+    sender
+}
+
+pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
+    let (sender, receiver) = crossbeam_channel::unbounded::<RenderJob>();
+    std::thread::Builder::new()
+        .name("shade-render".into())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to create render runtime");
+            let renderer = runtime.block_on(shade_gpu::Renderer::new()).map_err(|e| e.to_string());
+            while let Ok(job) = receiver.recv() {
+                match job {
+                    RenderJob::Preview {
+                        stack,
+                        sources,
+                        canvas_width,
+                        canvas_height,
+                        request,
+                        response,
+                    } => {
+                        let result = match &renderer {
+                            Ok(renderer) => runtime
+                                .block_on(renderer.render_stack_preview(
+                                    &stack,
+                                    &sources,
+                                    canvas_width,
+                                    canvas_height,
+                                    request.target_width,
+                                    request.target_height,
+                                    request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        x: crop.x,
+                                        y: crop.y,
+                                        width: crop.width,
+                                        height: crop.height,
+                                    }),
+                                ))
+                                .map(|pixels| PreviewFrameResponse {
+                                    pixels,
+                                    width: request.target_width,
+                                    height: request.target_height,
+                                })
+                                .map_err(|e| e.to_string()),
+                            Err(error) => Err(error.clone()),
+                        };
+                        let _ = response.send(result);
+                    }
+                    RenderJob::PreviewFloat16 {
+                        stack,
+                        sources,
+                        canvas_width,
+                        canvas_height,
+                        request,
+                        response,
+                    } => {
+                        let result = match &renderer {
+                            Ok(renderer) => runtime
+                                .block_on(renderer.render_stack_preview_f16(
+                                    &stack,
+                                    &sources,
+                                    canvas_width,
+                                    canvas_height,
+                                    request.target_width,
+                                    request.target_height,
+                                    request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        x: crop.x,
+                                        y: crop.y,
+                                        width: crop.width,
+                                        height: crop.height,
+                                    }),
+                                ))
+                                .map(|pixels| PreviewFrameFloat16Response {
+                                    pixels,
+                                    width: request.target_width,
+                                    height: request.target_height,
+                                })
+                                .map_err(|e| e.to_string()),
+                            Err(error) => Err(error.clone()),
+                        };
+                        let _ = response.send(result);
+                    }
+                }
+            }
+        })
+        .expect("failed to spawn render worker thread");
     sender
 }
 
@@ -409,37 +515,42 @@ pub struct PreviewRenderRequest {
     pub ignore_crop_layers: Option<bool>,
 }
 
-/// Run the full GPU render pipeline and return raw RGBA8 pixels.
-#[tauri::command]
-pub async fn render_preview(
+fn snapshot_render_state(
+    state: &tauri::State<'_, Mutex<EditorState>>,
+) -> Result<
+    (
+        LayerStack,
+        std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        u32,
+        u32,
+    ),
+    PreviewFrameResponse,
+> {
+    let st = state.lock().unwrap();
+    if st.canvas_width == 0 {
+        return Err(PreviewFrameResponse {
+            pixels: Vec::new(),
+            width: 0,
+            height: 0,
+        });
+    }
+    Ok((
+        st.stack.clone(),
+        st.image_sources.clone(),
+        st.canvas_width,
+        st.canvas_height,
+    ))
+}
+
+fn apply_preview_request(
+    mut stack: LayerStack,
+    canvas_width: u32,
+    canvas_height: u32,
     request: Option<PreviewRenderRequest>,
-    renderer: tauri::State<'_, crate::RendererState>,
-    state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<PreviewFrameResponse, String> {
-    // Snapshot state without holding the lock during GPU work.
-    let (mut stack, sources, w, h) = {
-        let st = state.lock().unwrap();
-        if st.canvas_width == 0 {
-            return Ok(PreviewFrameResponse {
-                pixels: Vec::new(),
-                width: 0,
-                height: 0,
-            });
-        }
-        (
-            st.stack.clone(),
-            st.image_sources.clone(),
-            st.canvas_width,
-            st.canvas_height,
-        )
-    };
-
-    let guard = renderer.0.lock().await;
-    let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
-
+) -> (LayerStack, PreviewRenderRequest) {
     let request = request.unwrap_or(PreviewRenderRequest {
-        target_width: w,
-        target_height: h,
+        target_width: canvas_width,
+        target_height: canvas_height,
         crop: None,
         ignore_crop_layers: None,
     });
@@ -450,37 +561,43 @@ pub async fn render_preview(
             }
         }
     }
-    let pixels = r
-        .render_stack_preview(
-            &stack,
-            &sources,
-            w,
-            h,
-            request.target_width,
-            request.target_height,
-            request.crop.map(|crop| shade_gpu::PreviewCrop {
-                x: crop.x,
-                y: crop.y,
-                width: crop.width,
-                height: crop.height,
-            }),
-        )
-        .await
+    (stack, request)
+}
+
+/// Run the full GPU render pipeline and return raw RGBA8 pixels.
+#[tauri::command]
+pub async fn render_preview(
+    request: Option<PreviewRenderRequest>,
+    render_service: tauri::State<'_, crate::RenderService>,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<PreviewFrameResponse, String> {
+    let (stack, sources, canvas_width, canvas_height) = match snapshot_render_state(&state) {
+        Ok(snapshot) => snapshot,
+        Err(empty) => return Ok(empty),
+    };
+    let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    render_service
+        .0
+        .send(RenderJob::Preview {
+            stack,
+            sources,
+            canvas_width,
+            canvas_height,
+            request,
+            response: response_tx,
+        })
         .map_err(|e| e.to_string())?;
-    Ok(PreviewFrameResponse {
-        pixels,
-        width: request.target_width,
-        height: request.target_height,
-    })
+    response_rx.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn render_preview_float16(
     request: Option<PreviewRenderRequest>,
-    renderer: tauri::State<'_, crate::RendererState>,
+    render_service: tauri::State<'_, crate::RenderService>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PreviewFrameFloat16Response, String> {
-    let (mut stack, sources, w, h) = {
+    let (stack, sources, canvas_width, canvas_height) = {
         let st = state.lock().unwrap();
         if st.canvas_width == 0 {
             return Ok(PreviewFrameFloat16Response {
@@ -496,45 +613,20 @@ pub async fn render_preview_float16(
             st.canvas_height,
         )
     };
-
-    let guard = renderer.0.lock().await;
-    let r = guard.as_ref().ok_or("GPU renderer not ready yet")?;
-
-    let request = request.unwrap_or(PreviewRenderRequest {
-        target_width: w,
-        target_height: h,
-        crop: None,
-        ignore_crop_layers: None,
-    });
-    if request.ignore_crop_layers.unwrap_or(false) {
-        for entry in &mut stack.layers {
-            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
-                entry.visible = false;
-            }
-        }
-    }
-    let pixels = r
-        .render_stack_preview_f16(
-            &stack,
-            &sources,
-            w,
-            h,
-            request.target_width,
-            request.target_height,
-            request.crop.map(|crop| shade_gpu::PreviewCrop {
-                x: crop.x,
-                y: crop.y,
-                width: crop.width,
-                height: crop.height,
-            }),
-        )
-        .await
+    let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    render_service
+        .0
+        .send(RenderJob::PreviewFloat16 {
+            stack,
+            sources,
+            canvas_width,
+            canvas_height,
+            request,
+            response: response_tx,
+        })
         .map_err(|e| e.to_string())?;
-    Ok(PreviewFrameFloat16Response {
-        pixels,
-        width: request.target_width,
-        height: request.target_height,
-    })
+    response_rx.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
