@@ -1,5 +1,5 @@
-import { Component, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
-import { listPictures } from "../bridge/index";
+import { Component, createEffect, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
+import { listLibraryImages, listMediaLibraries } from "../bridge/index";
 import { resolveMediaSrc } from "../media-source";
 import { openImage, state } from "../store/editor";
 
@@ -80,19 +80,56 @@ const ImageTile: Component<{ path: string }> = (props) => {
 };
 
 export const MediaView: Component = () => {
-  const [images] = createResource(listPictures);
+  const [libraries] = createResource(listMediaLibraries);
+  const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
+  const [images] = createResource(selectedLibraryId, listLibraryImages);
+
+  createEffect(() => {
+    const availableLibraries = libraries();
+    if (!availableLibraries?.length) return;
+    if (selectedLibraryId()) return;
+    setSelectedLibraryId(availableLibraries[0].id);
+  });
+
+  const selectedLibrary = () => libraries()?.find((library) => library.id === selectedLibraryId()) ?? null;
 
   return (
     <div class="flex flex-1 flex-col overflow-hidden mt-[calc(env(safe-area-inset-top)+3.5rem)] md:mt-0">
       <div class="border-b border-white/6 px-6 py-4">
-        <h1 class="text-sm font-medium text-white/80">Pictures</h1>
+        <div class="flex items-center gap-8">
+          <div class="flex items-center justify-between gap-4">
+            <h1 class="text-sm font-medium text-white/80">Libraries</h1>
+          </div>
+          <div class="flex flex-1 gap-2 overflow-x-auto">
+            <For each={libraries()}>
+              {(library) => (
+                <button
+                  type="button"
+                  onClick={() => setSelectedLibraryId(library.id)}
+                  class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
+                    selectedLibraryId() === library.id
+                      ? "border-white/18 bg-white/12 text-white"
+                      : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
+                  }`}
+                >
+                  {library.name}
+                </button>
+              )}
+            </For>
+          </div>
+          <div>
+            <span class="text-xs font-medium uppercase tracking-[0.12em] text-white/28">
+              {selectedLibrary()?.kind ?? "source"}
+            </span>
+          </div>
+        </div>
       </div>
       <div class="flex-1 overflow-y-auto p-6">
         <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
           <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             <For
               each={images()}
-              fallback={<p class="col-span-full text-sm text-white/30">No images found in Pictures.</p>}
+              fallback={<p class="col-span-full text-sm text-white/30">No images found in {selectedLibrary()?.name ?? "this library"}.</p>}
             >
               {(path) => <ImageTile path={path} />}
             </For>

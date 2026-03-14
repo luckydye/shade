@@ -352,6 +352,31 @@ export async function listPictures(): Promise<string[]> {
   return [];
 }
 
+export interface MediaLibrary {
+  id: string;
+  name: string;
+  kind: "directory";
+}
+
+export async function listMediaLibraries(): Promise<MediaLibrary[]> {
+  return [
+    {
+      id: "pictures",
+      name: "Pictures",
+      kind: "directory",
+    },
+  ];
+}
+
+export async function listLibraryImages(libraryId: string): Promise<string[]> {
+  switch (libraryId) {
+    case "pictures":
+      return listPictures();
+    default:
+      throw new Error(`unknown media library: ${libraryId}`);
+  }
+}
+
 export async function addLayer(kind: string): Promise<number> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
