@@ -16,7 +16,7 @@ export { previewFrame };
 const [previewContextFrame, setPreviewContextFrame] = createSignal<ImageData | null>(null);
 export { previewContextFrame };
 type PreviewQuality = "interactive" | "final";
-const INTERACTIVE_PREVIEW_SCALE = 0.75;
+const INTERACTIVE_PREVIEW_SCALE = 0.33;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
@@ -56,6 +56,7 @@ export interface EditorState {
   crop: CropRect;
   cropDraft: CropRect | null;
   isCropMode: boolean;
+  loadingMediaSrc: string | null;
 }
 
 const [state, setState] = createStore<EditorState>({
@@ -77,6 +78,7 @@ const [state, setState] = createStore<EditorState>({
   crop: { x: 0, y: 0, width: 0, height: 0 },
   cropDraft: null,
   isCropMode: false,
+  loadingMediaSrc: null,
 });
 
 export { state };
@@ -435,11 +437,15 @@ export function closeImage() {
     crop: { x: 0, y: 0, width: 0, height: 0 },
     cropDraft: null,
     isCropMode: false,
+    loadingMediaSrc: null,
   });
 }
 
-export async function openImage(path: string) {
-  setState("isLoading", true);
+export async function openImage(path: string, loadingMediaSrc: string | null = null) {
+  setState({
+    isLoading: true,
+    loadingMediaSrc,
+  });
   setPreviewFrame(null);
   setPreviewContextFrame(null);
   try {
@@ -449,7 +455,13 @@ export async function openImage(path: string) {
     await refreshLayerStack();
     await refreshPreview();
   } finally {
-    setState("isLoading", false);
+    if (loadingMediaSrc?.startsWith("blob:")) {
+      URL.revokeObjectURL(loadingMediaSrc);
+    }
+    setState({
+      isLoading: false,
+      loadingMediaSrc: null,
+    });
   }
 }
 
@@ -465,7 +477,10 @@ export async function openImageFile(file: File) {
     await refreshLayerStack();
     await refreshPreview();
   } finally {
-    setState("isLoading", false);
+    setState({
+      isLoading: false,
+      loadingMediaSrc: null,
+    });
   }
 }
 

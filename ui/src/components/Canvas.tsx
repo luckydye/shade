@@ -397,7 +397,6 @@ const Canvas: Component = () => {
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
-        style={{ "view-transition-name": "active-media" }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -423,6 +422,23 @@ const Canvas: Component = () => {
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />
+          {state.isLoading && state.loadingMediaSrc && !previewFrame() && (
+            <div class="pointer-events-none absolute inset-0">
+              <img
+                src={state.loadingMediaSrc}
+                alt=""
+                class="absolute inset-0 h-full w-full object-contain"
+                style={{ "view-transition-name": "active-media" }}
+              />
+              <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.04),_transparent_40%)]" />
+              <div class="absolute inset-x-0 bottom-6 flex items-center justify-center">
+                <span class="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur">
+                  <span class="h-2 w-2 animate-pulse rounded-full bg-white" />
+                  Loading
+                </span>
+              </div>
+            </div>
+          )}
           {selectedCropLayer() && activeCrop() && (
             <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
               <span>Crop</span>
@@ -431,7 +447,7 @@ const Canvas: Component = () => {
               </span>
             </div>
           )}
-          {state.layers.length === 0 && (
+          {state.layers.length === 0 && !state.isLoading && (
             <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">
               <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-white/80">
                 <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6">

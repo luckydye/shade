@@ -1,35 +1,11 @@
 import { Component, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
-import { getThumbnail, listPictures } from "../bridge/index";
-import { openImage } from "../store/editor";
-
-// Formats the browser can display directly via the asset protocol.
-const NATIVE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
-
-function ext(path: string) {
-  return path.split(".").pop()?.toLowerCase() ?? "";
-}
-
-let _convertFileSrc: ((path: string) => string) | null = null;
-
-async function getConvertFileSrc() {
-  if (!_convertFileSrc) {
-    const { convertFileSrc } = await import("@tauri-apps/api/core");
-    _convertFileSrc = convertFileSrc;
-  }
-  return _convertFileSrc;
-}
-
-async function resolveSrc(path: string): Promise<string> {
-  if (NATIVE_EXTENSIONS.has(ext(path))) {
-    const convert = await getConvertFileSrc();
-    return convert(path);
-  }
-  return getThumbnail(path);
-}
+import { listPictures } from "../bridge/index";
+import { resolveMediaSrc } from "../media-source";
+import { openImage, state } from "../store/editor";
 
 const ImageTile: Component<{ path: string }> = (props) => {
   const [visible, setVisible] = createSignal(false);
-  const [src] = createResource(() => visible() ? props.path : undefined, resolveSrc);
+  const [src] = createResource(() => visible() ? props.path : undefined, resolveMediaSrc);
   // PHAsset local identifiers (iOS) don't have a meaningful filename component.
   const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
   const [loadError, setLoadError] = createSignal(false);
@@ -51,7 +27,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
   // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
     const url = src();
-    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) URL.revokeObjectURL(url);
     clearTimeout(errorTimer);
   });
 
@@ -67,9 +43,9 @@ const ImageTile: Component<{ path: string }> = (props) => {
     // void the promise so startViewTransition captures the "after" state immediately
     // (isLoading=true fires synchronously inside openImage), while still handling errors.
     if (document.startViewTransition) {
-      document.startViewTransition(() => void openImage(props.path).catch(handleError));
+      document.startViewTransition(() => void openImage(props.path, src() ?? null).catch(handleError));
     } else {
-      void openImage(props.path).catch(handleError);
+      void openImage(props.path, src() ?? null).catch(handleError);
     }
   }
 
