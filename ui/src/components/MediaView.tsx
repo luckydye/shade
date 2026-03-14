@@ -361,20 +361,7 @@ export const MediaView: Component = () => {
       end: Math.min(rows.length, end + OVERSCAN_ROWS),
     };
   });
-  const visibleEntries = createMemo<MediaGridEntry[]>(() => {
-    const entries: MediaGridEntry[] = [];
-    const rows = gridRows().slice(visibleRowRange().start, visibleRowRange().end);
-    for (const row of rows) {
-      if (row.kind === "date") {
-        entries.push(row);
-        continue;
-      }
-      for (const item of row.items) {
-        entries.push({ kind: "item", item });
-      }
-    }
-    return entries;
-  });
+  const visibleRows = createMemo(() => gridRows().slice(visibleRowRange().start, visibleRowRange().end));
   const offsetY = createMemo(() => rowOffsets()[visibleRowRange().start] ?? 0);
   const gridTemplateColumns = createMemo(() => `repeat(${columns()}, minmax(0, 1fr))`);
 
@@ -583,14 +570,16 @@ export const MediaView: Component = () => {
                 transform: `translateY(${offsetY()}px)`,
               }}
             >
-              <For each={visibleEntries()}>
-                {(entry) => (
-                  entry.kind === "date" ? (
+              <For each={visibleRows()}>
+                {(row) => (
+                  row.kind === "date" ? (
                     <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-white/38 first:pt-0">
-                      {formatModificationMonth(entry.modifiedAt)}
+                      {formatModificationMonth(row.modifiedAt)}
                     </h2>
                   ) : (
-                    <ImageTile item={entry.item} />
+                    <For each={row.items}>
+                      {(item) => <ImageTile item={item} />}
+                    </For>
                   )
                 )}
               </For>
