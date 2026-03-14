@@ -32,6 +32,13 @@ extern "C" {
     fn ios_free_string(ptr: *mut std::os::raw::c_char);
 }
 
+#[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct IosPhotoEntry {
+    id: String,
+    modified_at: Option<u64>,
+}
+
 pub struct EditorState {
     pub stack: LayerStack,
     pub image_sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
@@ -1531,10 +1538,10 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
         .map(|pictures| {
             pictures
                 .into_iter()
-                .map(|id| shade_p2p::SharedPicture {
-                    name: picture_display_name(&id),
-                    id,
-                    modified_at: None,
+                .map(|photo| shade_p2p::SharedPicture {
+                    name: picture_display_name(&photo.uri),
+                    id: photo.uri,
+                    modified_at: photo.modified_at,
                 })
                 .collect()
         });
@@ -1550,14 +1557,14 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
             ios_free_string(ptr);
             s
         };
-        serde_json::from_str::<Vec<String>>(&json)
+        serde_json::from_str::<Vec<IosPhotoEntry>>(&json)
             .map(|pictures| {
                 pictures
                     .into_iter()
-                    .map(|id| shade_p2p::SharedPicture {
-                        name: picture_display_name(&id),
-                        id,
-                        modified_at: None,
+                    .map(|photo| shade_p2p::SharedPicture {
+                        name: picture_display_name(&photo.id),
+                        id: photo.id,
+                        modified_at: photo.modified_at,
                     })
                     .collect()
             })
@@ -1629,10 +1636,10 @@ pub async fn list_library_images<R: tauri::Runtime>(
             .map(|photos| LibraryImageListing {
                 items: photos
                     .into_iter()
-                    .map(|path| LibraryImage {
-                        name: picture_display_name(&path),
-                        path,
-                        modified_at: None,
+                    .map(|photo| LibraryImage {
+                        name: picture_display_name(&photo.uri),
+                        path: photo.uri,
+                        modified_at: photo.modified_at,
                     })
                     .collect(),
                 is_complete: true,
@@ -1650,18 +1657,18 @@ pub async fn list_library_images<R: tauri::Runtime>(
                 return Ok(vec![]);
             }
             let json = unsafe {
-                let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
-                ios_free_string(ptr);
-                s
-            };
-            serde_json::from_str::<Vec<String>>(&json)
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            ios_free_string(ptr);
+            s
+        };
+            serde_json::from_str::<Vec<IosPhotoEntry>>(&json)
                 .map(|photos| LibraryImageListing {
                     items: photos
                         .into_iter()
-                        .map(|path| LibraryImage {
-                            name: picture_display_name(&path),
-                            path,
-                            modified_at: None,
+                        .map(|photo| LibraryImage {
+                            name: picture_display_name(&photo.id),
+                            path: photo.id,
+                            modified_at: photo.modified_at,
                         })
                         .collect(),
                     is_complete: true,

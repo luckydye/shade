@@ -53,7 +53,11 @@ class PhotosPlugin(private val activity: android.app.Activity) : Plugin(activity
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
 
-        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DATE_ADDED,
+            MediaStore.Images.Media.DATE_MODIFIED,
+        )
         val cursor = activity.contentResolver.query(
             collection, projection, null, null,
             "${MediaStore.Images.Media.DATE_ADDED} DESC"
@@ -62,14 +66,20 @@ class PhotosPlugin(private val activity: android.app.Activity) : Plugin(activity
         val arr = JSArray()
         cursor?.use {
             val idCol = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val modifiedCol = it.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
+            val addedCol = it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
             while (it.moveToNext()) {
                 val uri = ContentUris.withAppendedId(collection, it.getLong(idCol))
-                arr.put(uri.toString())
+                val photo = JSObject()
+                photo.put("uri", uri.toString())
+                val modifiedSeconds = if (modifiedCol >= 0) it.getLong(modifiedCol) else it.getLong(addedCol)
+                photo.put("modified_at", modifiedSeconds * 1000)
+                arr.put(photo)
             }
         }
 
         val result = JSObject()
-        result.put("uris", arr)
+        result.put("photos", arr)
         invoke.resolve(result)
     }
 

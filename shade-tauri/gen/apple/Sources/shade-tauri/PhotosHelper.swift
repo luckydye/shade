@@ -1,7 +1,12 @@
 import Photos
 import UIKit
 
-// Returns a heap-allocated JSON array of PHAsset local identifiers, sorted newest-first.
+struct PhotoEntry: Codable {
+    let id: String
+    let modified_at: UInt64?
+}
+
+// Returns a heap-allocated JSON array of photo entries, sorted newest-first.
 // Requests photo library permission if not yet determined.
 // Caller must free with ios_free_string. Returns nil on permission denied.
 @_cdecl("ios_list_photos")
@@ -17,13 +22,19 @@ public func iosListPhotos() -> UnsafeMutablePointer<CChar>? {
     guard newStatus == .authorized || newStatus == .limited else { return nil }
 
     let options = PHFetchOptions()
-    options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+    options.sortDescriptors = [NSSortDescriptor(key: "modificationDate", ascending: false)]
     let assets = PHAsset.fetchAssets(with: .image, options: options)
 
-    var identifiers: [String] = []
-    assets.enumerateObjects { asset, _, _ in identifiers.append(asset.localIdentifier) }
+    var photos: [PhotoEntry] = []
+    assets.enumerateObjects { asset, _, _ in
+        let modifiedAt = asset.modificationDate ?? asset.creationDate
+        photos.append(PhotoEntry(
+            id: asset.localIdentifier,
+            modified_at: modifiedAt.map { UInt64($0.timeIntervalSince1970 * 1000) }
+        ))
+    }
 
-    guard let data = try? JSONEncoder().encode(identifiers),
+    guard let data = try? JSONEncoder().encode(photos),
           let json = String(data: data, encoding: .utf8) else { return nil }
     return strdup(json)
 }

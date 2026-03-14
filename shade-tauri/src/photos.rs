@@ -6,8 +6,15 @@ use tauri::{plugin::Builder, Runtime};
 
 #[cfg(target_os = "android")]
 #[derive(Deserialize)]
+pub struct PhotoEntry {
+    pub uri: String,
+    pub modified_at: Option<u64>,
+}
+
+#[cfg(target_os = "android")]
+#[derive(Deserialize)]
 struct ListResult {
-    uris: Vec<String>,
+    photos: Vec<PhotoEntry>,
 }
 
 #[cfg(target_os = "android")]
@@ -22,13 +29,13 @@ pub struct PhotosHandle<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> PhotosHandle<R> {
-    pub async fn list_photos(&self) -> Result<Vec<String>, String> {
+    pub async fn list_photos(&self) -> Result<Vec<PhotoEntry>, String> {
         let r: ListResult = self
             .0
             .run_mobile_plugin_async("listPhotos", ())
             .await
             .map_err(|e| e.to_string())?;
-        Ok(r.uris)
+        Ok(r.photos)
     }
 
     pub async fn get_thumbnail(&self, uri: &str) -> Result<Vec<u8>, String> {
