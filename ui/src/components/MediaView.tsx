@@ -32,6 +32,16 @@ type MediaGridEntry =
   | { kind: "date"; modifiedAt: number | null }
   | { kind: "item"; item: MediaItem };
 
+type MediaGridRow =
+  | { kind: "date"; modifiedAt: number | null }
+  | { kind: "items"; items: MediaItem[] };
+
+const TILE_MIN_WIDTH = 160;
+const GRID_GAP = 12;
+const TILE_LABEL_HEIGHT = 24;
+const HEADER_ROW_HEIGHT = 32;
+const OVERSCAN_ROWS = 2;
+
 function shortPeerId(peerId: string) {
   if (peerId.length <= 18) {
     return peerId;
@@ -217,6 +227,9 @@ export const MediaView: Component = () => {
   const [items, { refetch: refetchItems }] = createResource(selectedLibraryId, loadLibraryData);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [viewportHeight, setViewportHeight] = createSignal(0);
+  const [viewportWidth, setViewportWidth] = createSignal(0);
+  const [scrollTop, setScrollTop] = createSignal(0);
   let scrollRef!: HTMLDivElement;
 
   const discoveredPeerIds = createMemo(() => p2pState.peers.map((peer) => peer.endpoint_id));
@@ -264,29 +277,134 @@ export const MediaView: Component = () => {
     }
     return isPeerLibrary(library) ? library.peerId : library.path ?? "";
   });
-  const gridEntries = createMemo<MediaGridEntry[]>(() => {
-    const entries: MediaGridEntry[] = [];
+  const columns = createMemo(() => Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))));
+  const tileWidth = createMemo(() => {
+    const width = viewportWidth();
+    const columnCount = columns();
+    if (width <= 0) {
+      return TILE_MIN_WIDTH;
+    }
+    return (width - GRID_GAP * (columnCount - 1)) / columnCount;
+  });
+  const tileRowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
+  const gridRows = createMemo<MediaGridRow[]>(() => {
+    const rows: MediaGridRow[] = [];
+    const currentColumns = columns();
     let lastDateKey: string | null = null;
+    let currentRow: MediaItem[] = [];
     for (const item of displayedItems()) {
       const dateKey = modificationMonthKey(item.modifiedAt);
       if (lastDateKey !== dateKey) {
-        entries.push({ kind: "date", modifiedAt: item.modifiedAt });
+        if (currentRow.length > 0) {
+          rows.push({ kind: "items", items: currentRow });
+          currentRow = [];
+        }
+        rows.push({ kind: "date", modifiedAt: item.modifiedAt });
         lastDateKey = dateKey;
       }
-      entries.push({ kind: "item", item });
+      currentRow.push(item);
+      if (currentRow.length === currentColumns) {
+        rows.push({ kind: "items", items: currentRow });
+        currentRow = [];
+      }
+    }
+    if (currentRow.length > 0) {
+      rows.push({ kind: "items", items: currentRow });
+    }
+    return rows;
+  });
+  const rowOffsets = createMemo(() => {
+    const offsets: number[] = [];
+    let offset = 0;
+    for (const row of gridRows()) {
+      offsets.push(offset);
+      offset += row.kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight();
+    }
+    return offsets;
+  });
+  const totalHeight = createMemo(() => {
+    const rows = gridRows();
+    if (rows.length === 0) {
+      return 0;
+    }
+    const offsets = rowOffsets();
+    const lastRow = rows[rows.length - 1];
+    return offsets[offsets.length - 1] + (lastRow.kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight());
+  });
+  const visibleRowRange = createMemo(() => {
+    const rows = gridRows();
+    const offsets = rowOffsets();
+    const height = viewportHeight();
+    const top = scrollTop();
+    if (rows.length === 0 || height <= 0) {
+      return { start: 0, end: 0 };
+    }
+    let start = 0;
+    while (start < rows.length) {
+      const rowTop = offsets[start];
+      const rowBottom = rowTop + (rows[start].kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight());
+      if (rowBottom >= top) {
+        break;
+      }
+      start += 1;
+    }
+    let end = start;
+    while (end < rows.length) {
+      const rowTop = offsets[end];
+      if (rowTop > top + height) {
+        break;
+      }
+      end += 1;
+    }
+    return {
+      start: Math.max(0, start - OVERSCAN_ROWS),
+      end: Math.min(rows.length, end + OVERSCAN_ROWS),
+    };
+  });
+  const visibleEntries = createMemo<MediaGridEntry[]>(() => {
+    const entries: MediaGridEntry[] = [];
+    const rows = gridRows().slice(visibleRowRange().start, visibleRowRange().end);
+    for (const row of rows) {
+      if (row.kind === "date") {
+        entries.push(row);
+        continue;
+      }
+      for (const item of row.items) {
+        entries.push({ kind: "item", item });
+      }
     }
     return entries;
+  });
+  const offsetY = createMemo(() => rowOffsets()[visibleRowRange().start] ?? 0);
+  const gridTemplateColumns = createMemo(() => `repeat(${columns()}, minmax(0, 1fr))`);
+
+  const totalRows = createMemo(() => gridRows().length);
+
+  const containerHeight = createMemo(() => {
+    if (totalRows() === 0) {
+      return 0;
+    }
+    return totalHeight();
   });
 
   onMount(() => {
     startP2pPolling();
+    const updateViewport = () => {
+      setViewportHeight(scrollRef.clientHeight);
+      setViewportWidth(scrollRef.clientWidth - 48);
+    };
+    updateViewport();
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(scrollRef);
     onCleanup(() => {
+      observer.disconnect();
       stopP2pPolling();
     });
   });
 
   createEffect(() => {
     selectedLibraryId();
+    setScrollTop(0);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
@@ -447,6 +565,7 @@ export const MediaView: Component = () => {
       <div
         ref={scrollRef!}
         class="media-scroll flex-1 overflow-y-auto p-6"
+        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         <Show
           when={displayedItems().length > 0}
@@ -456,18 +575,26 @@ export const MediaView: Component = () => {
             </p>
           }
         >
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-            <For each={gridEntries()}>
-              {(entry) => (
-                entry.kind === "date" ? (
-                  <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-white/38 first:pt-0">
-                    {formatModificationMonth(entry.modifiedAt)}
-                  </h2>
-                ) : (
-                  <ImageTile item={entry.item} />
-                )
-              )}
-            </For>
+          <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
+            <div
+              class="grid gap-3"
+              style={{
+                "grid-template-columns": gridTemplateColumns(),
+                transform: `translateY(${offsetY()}px)`,
+              }}
+            >
+              <For each={visibleEntries()}>
+                {(entry) => (
+                  entry.kind === "date" ? (
+                    <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-white/38 first:pt-0">
+                      {formatModificationMonth(entry.modifiedAt)}
+                    </h2>
+                  ) : (
+                    <ImageTile item={entry.item} />
+                  )
+                )}
+              </For>
+            </div>
           </div>
         </Show>
       </div>
