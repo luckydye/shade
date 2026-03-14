@@ -1,6 +1,7 @@
 import { Component, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
 import { getThumbnail, listPictures } from "../bridge/index";
 import { openImage } from "../store/editor";
+import { PeerDiscoveryPanel } from "./PeerDiscoveryPanel";
 
 // Formats the browser can display directly via the asset protocol.
 const NATIVE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
@@ -87,7 +88,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
           <img
             ref={imgRef}
             src={src()}
-            alt={name()}
+            alt={name() ?? undefined}
             class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
             loading="lazy"
           />
@@ -112,6 +113,9 @@ export const MediaView: Component = () => {
         <h1 class="text-sm font-medium text-white/80">Pictures</h1>
       </div>
       <div class="flex-1 overflow-y-auto p-6">
+        <div class="mb-6">
+          <PeerDiscoveryPanel />
+        </div>
         <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
           <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             <For

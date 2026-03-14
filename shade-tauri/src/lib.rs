@@ -5,13 +5,18 @@ mod photos;
 
 /// Lazily-initialised GPU renderer, shared across all command invocations.
 pub struct RendererState(pub tokio::sync::Mutex<Option<shade_gpu::Renderer>>);
+pub struct P2pState(pub shade_p2p::LocalPeerDiscovery);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let p2p = tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind())
+        .expect("failed to initialize local peer discovery");
+
     tauri::Builder::default()
         .plugin(photos::init())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RendererState(tokio::sync::Mutex::new(None)))
+        .manage(P2pState(p2p))
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -41,6 +46,7 @@ pub fn run() {
             commands::get_layer_stack,
             commands::list_pictures,
             commands::get_thumbnail,
+            commands::get_local_peer_discovery_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

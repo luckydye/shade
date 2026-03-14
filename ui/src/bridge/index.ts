@@ -79,6 +79,18 @@ export interface OpenImageInfo {
   source_bit_depth: string;
 }
 
+export interface LocalPeer {
+  endpoint_id: string;
+  direct_addresses: string[];
+  last_updated: number | null;
+}
+
+export interface LocalPeerDiscoverySnapshot {
+  local_endpoint_id: string;
+  local_direct_addresses: string[];
+  peers: LocalPeer[];
+}
+
 export interface ToneValues {
   exposure: number;
   contrast: number;
@@ -238,6 +250,18 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
   await ensureWorkerReady();
   const response = await fetch(path);
   return _loadEncodedBytes(new Uint8Array(await response.arrayBuffer()), path);
+}
+
+export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
+  if (!await isTauriRuntime()) {
+    return {
+      local_endpoint_id: "browser-runtime",
+      local_direct_addresses: [],
+      peers: [],
+    };
+  }
+  const inv = await getTauriInvoke();
+  return inv("get_local_peer_discovery_snapshot") as Promise<LocalPeerDiscoverySnapshot>;
 }
 
 /** Open an image from a File object — works for both file picker and drag-and-drop. */

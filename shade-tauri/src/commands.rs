@@ -100,6 +100,13 @@ pub struct LayerInfoResponse {
 }
 
 #[tauri::command]
+pub async fn get_local_peer_discovery_snapshot(
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<shade_p2p::LocalPeerDiscoverySnapshot, String> {
+    Ok(p2p.0.snapshot().await)
+}
+
+#[tauri::command]
 #[allow(unused_variables)]
 pub async fn open_image<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
