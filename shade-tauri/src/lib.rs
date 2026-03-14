@@ -9,16 +9,17 @@ pub struct P2pState(pub shade_p2p::LocalPeerDiscovery);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let p2p = tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind())
-        .expect("failed to initialize local peer discovery");
-
     tauri::Builder::default()
         .plugin(photos::init())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RendererState(tokio::sync::Mutex::new(None)))
-        .manage(P2pState(p2p))
         .setup(|app| {
             let handle = app.handle().clone();
+            let p2p = tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
+                std::sync::Arc::new(commands::AppMediaProvider::new(handle.clone())),
+            ))
+            .expect("failed to initialize local peer discovery");
+            app.manage(P2pState(p2p));
             tauri::async_runtime::spawn(async move {
                 match shade_gpu::Renderer::new().await {
                     Ok(r) => {
@@ -47,6 +48,8 @@ pub fn run() {
             commands::list_pictures,
             commands::get_thumbnail,
             commands::get_local_peer_discovery_snapshot,
+            commands::list_peer_pictures,
+            commands::get_peer_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

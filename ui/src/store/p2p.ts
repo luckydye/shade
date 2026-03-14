@@ -1,8 +1,16 @@
 import { createStore } from "solid-js/store";
-import { getLocalPeerDiscoverySnapshot, type LocalPeerDiscoverySnapshot } from "../bridge/index";
+import {
+  getLocalPeerDiscoverySnapshot,
+  listPeerPictures,
+  type LocalPeerDiscoverySnapshot,
+  type SharedPicture,
+} from "../bridge/index";
 
 interface P2pState extends LocalPeerDiscoverySnapshot {
   isLoading: boolean;
+  selectedPeerId: string;
+  remotePictures: SharedPicture[];
+  isLoadingPeerPictures: boolean;
 }
 
 const [state, setState] = createStore<P2pState>({
@@ -10,6 +18,9 @@ const [state, setState] = createStore<P2pState>({
   local_direct_addresses: [],
   peers: [],
   isLoading: false,
+  selectedPeerId: "",
+  remotePictures: [],
+  isLoadingPeerPictures: false,
 });
 
 let refreshTimer: number | null = null;
@@ -55,4 +66,37 @@ export function stopP2pPolling() {
   }
   window.clearInterval(refreshTimer);
   refreshTimer = null;
+}
+
+export async function selectPeer(peerId: string) {
+  if (!peerId) {
+    setState({
+      selectedPeerId: "",
+      remotePictures: [],
+      isLoadingPeerPictures: false,
+    });
+    return;
+  }
+  setState({
+    selectedPeerId: peerId,
+    remotePictures: [],
+    isLoadingPeerPictures: true,
+  });
+  try {
+    const remotePictures = await listPeerPictures(peerId);
+    if (state.selectedPeerId !== peerId) {
+      return;
+    }
+    setState({
+      selectedPeerId: peerId,
+      remotePictures,
+      isLoadingPeerPictures: false,
+    });
+  } catch (error) {
+    if (state.selectedPeerId !== peerId) {
+      return;
+    }
+    setState("isLoadingPeerPictures", false);
+    throw error;
+  }
 }

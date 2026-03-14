@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use shade_core::{
     linear_lut, AdjustmentOp, ColorParams, CropRect, FloatImage, GrainParams, HslParams,
     LayerStack, SharpenParams, VignetteParams,
@@ -104,6 +105,29 @@ pub async fn get_local_peer_discovery_snapshot(
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<shade_p2p::LocalPeerDiscoverySnapshot, String> {
     Ok(p2p.0.snapshot().await)
+}
+
+#[tauri::command]
+pub async fn list_peer_pictures(
+    peer_endpoint_id: String,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<Vec<shade_p2p::SharedPicture>, String> {
+    p2p.0
+        .list_peer_pictures(&peer_endpoint_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_peer_thumbnail(
+    peer_endpoint_id: String,
+    picture_id: String,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<Vec<u8>, String> {
+    p2p.0
+        .get_peer_thumbnail(&peer_endpoint_id, &picture_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -748,18 +772,26 @@ pub async fn get_thumbnail<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     path: String,
 ) -> Result<Vec<u8>, String> {
+    load_thumbnail_bytes(app, &path).await
+}
+
+pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    picture_id: &str,
+) -> Result<Vec<u8>, String> {
     #[cfg(target_os = "android")]
-    if path.starts_with("content://") {
+    if picture_id.starts_with("content://") {
         return app
             .state::<crate::photos::PhotosHandle<R>>()
-            .get_thumbnail(&path)
+            .get_thumbnail(picture_id)
             .await;
     }
 
     #[cfg(target_os = "ios")]
-    if !path.starts_with('/') {
+    if !picture_id.starts_with('/') {
+        let picture_id = picture_id.to_owned();
         return tokio::task::spawn_blocking(move || {
-            let c_id = std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
+            let c_id = std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
             let mut out_size: i32 = 0;
             let ptr = unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
             if ptr.is_null() {
@@ -778,14 +810,14 @@ pub async fn get_thumbnail<R: tauri::Runtime>(
 
     use std::hash::{Hash, Hasher};
 
-    let source = std::path::Path::new(&path);
+    let source = std::path::Path::new(picture_id);
     let mtime = std::fs::metadata(source)
         .and_then(|m| m.modified())
         .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
         .unwrap_or(0);
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
+    picture_id.hash(&mut hasher);
     mtime.hash(&mut hasher);
     let cache_key = hasher.finish();
 
@@ -814,11 +846,30 @@ pub async fn get_thumbnail<R: tauri::Runtime>(
 pub async fn list_pictures<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<Vec<String>, String> {
+    Ok(load_picture_entries(app)
+        .await?
+        .into_iter()
+        .map(|picture| picture.id)
+        .collect())
+}
+
+pub async fn load_picture_entries<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<shade_p2p::SharedPicture>, String> {
     #[cfg(target_os = "android")]
     return app
         .state::<crate::photos::PhotosHandle<R>>()
         .list_photos()
-        .await;
+        .await
+        .map(|pictures| {
+            pictures
+                .into_iter()
+                .map(|id| shade_p2p::SharedPicture {
+                    name: picture_display_name(&id),
+                    id,
+                })
+                .collect()
+        });
 
     #[cfg(target_os = "ios")]
     return tokio::task::spawn_blocking(|| {
@@ -831,7 +882,17 @@ pub async fn list_pictures<R: tauri::Runtime>(
             ios_free_string(ptr);
             s
         };
-        serde_json::from_str::<Vec<String>>(&json).map_err(|e| e.to_string())
+        serde_json::from_str::<Vec<String>>(&json)
+            .map(|pictures| {
+                pictures
+                    .into_iter()
+                    .map(|id| shade_p2p::SharedPicture {
+                        name: picture_display_name(&id),
+                        id,
+                    })
+                    .collect()
+            })
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -845,7 +906,7 @@ pub async fn list_pictures<R: tauri::Runtime>(
             "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
             "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
         ];
-        let mut entries_with_mtime: Vec<(std::time::SystemTime, String)> = Vec::new();
+        let mut entries_with_mtime: Vec<(std::time::SystemTime, shade_p2p::SharedPicture)> = Vec::new();
         if let Some(dir) = search_dir {
             let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(vec![]); };
             for entry in entries.flatten() {
@@ -857,7 +918,10 @@ pub async fn list_pictures<R: tauri::Runtime>(
                                 let mtime = path.metadata().ok()
                                     .and_then(|m| m.modified().ok())
                                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                                entries_with_mtime.push((mtime, s.to_string()));
+                                entries_with_mtime.push((mtime, shade_p2p::SharedPicture {
+                                    name: picture_display_name(s),
+                                    id: s.to_string(),
+                                }));
                             }
                         }
                     }
@@ -866,6 +930,43 @@ pub async fn list_pictures<R: tauri::Runtime>(
         }
         entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
         Ok(entries_with_mtime.into_iter().map(|(_, p)| p).collect())
+    }
+}
+
+fn picture_display_name(picture_id: &str) -> String {
+    if let Some(name) = Path::new(picture_id).file_name().and_then(|name| name.to_str()) {
+        return name.to_owned();
+    }
+    let short = if picture_id.len() <= 20 {
+        picture_id.to_owned()
+    } else {
+        format!("{}...{}", &picture_id[..8], &picture_id[picture_id.len() - 8..])
+    };
+    format!("Photo {short}")
+}
+
+pub struct AppMediaProvider<R: tauri::Runtime = tauri::Wry> {
+    app: tauri::AppHandle<R>,
+}
+
+impl<R: tauri::Runtime> AppMediaProvider<R> {
+    pub fn new(app: tauri::AppHandle<R>) -> Self {
+        Self { app }
+    }
+}
+
+#[async_trait::async_trait]
+impl<R: tauri::Runtime> shade_p2p::MediaProvider for AppMediaProvider<R> {
+    async fn list_pictures(&self) -> anyhow::Result<Vec<shade_p2p::SharedPicture>> {
+        load_picture_entries(self.app.clone())
+            .await
+            .map_err(anyhow::Error::msg)
+    }
+
+    async fn get_thumbnail(&self, picture_id: &str) -> anyhow::Result<Vec<u8>> {
+        load_thumbnail_bytes(self.app.clone(), picture_id)
+            .await
+            .map_err(anyhow::Error::msg)
     }
 }
 

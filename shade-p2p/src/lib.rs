@@ -1,10 +1,14 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use iroh::{
     address_lookup::{DiscoveryEvent, MdnsAddressLookup},
     endpoint_info::UserData,
+    endpoint::Connection,
+    protocol::{AcceptError, ProtocolHandler, Router},
+    EndpointId,
     Endpoint, RelayMode,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::{
     sync::RwLock,
@@ -13,6 +17,33 @@ use tokio::{
 use tokio_stream::StreamExt;
 
 const SHADE_P2P_DISCOVERY_TAG: &str = "shade-p2p";
+const SHADE_P2P_BROWSE_ALPN: &[u8] = b"/shade/p2p/browse/1";
+const MAX_PROTOCOL_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+
+#[async_trait]
+pub trait MediaProvider: Send + Sync + 'static {
+    async fn list_pictures(&self) -> Result<Vec<SharedPicture>>;
+    async fn get_thumbnail(&self, picture_id: &str) -> Result<Vec<u8>>;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SharedPicture {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum BrowseRequest {
+    ListPictures,
+    GetThumbnail { picture_id: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum BrowseResponse {
+    Pictures(Vec<SharedPicture>),
+    Thumbnail(Vec<u8>),
+    Error(String),
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LocalPeer {
@@ -30,12 +61,13 @@ pub struct LocalPeerDiscoverySnapshot {
 
 pub struct LocalPeerDiscovery {
     endpoint: Endpoint,
+    router: Router,
     peers: Arc<RwLock<BTreeMap<String, LocalPeer>>>,
     event_task: JoinHandle<()>,
 }
 
 impl LocalPeerDiscovery {
-    pub async fn bind() -> Result<Self> {
+    pub async fn bind(media_provider: Arc<dyn MediaProvider>) -> Result<Self> {
         let endpoint = Endpoint::empty_builder(RelayMode::Disabled)
             .bind()
             .await?;
@@ -44,12 +76,21 @@ impl LocalPeerDiscovery {
         endpoint.set_user_data_for_address_lookup(Some(UserData::try_from(
             SHADE_P2P_DISCOVERY_TAG.to_owned(),
         )?));
+        let router = Router::builder(endpoint.clone())
+            .accept(
+                SHADE_P2P_BROWSE_ALPN,
+                BrowseProtocol {
+                    media_provider: media_provider.clone(),
+                },
+            )
+            .spawn();
 
         let peers = Arc::new(RwLock::new(BTreeMap::new()));
         let event_task = tokio::spawn(run_discovery_event_loop(mdns, Arc::clone(&peers)));
 
         Ok(Self {
             endpoint,
+            router,
             peers,
             event_task,
         })
@@ -70,11 +111,71 @@ impl LocalPeerDiscovery {
             peers,
         }
     }
+
+    pub async fn list_peer_pictures(&self, peer_endpoint_id: &str) -> Result<Vec<SharedPicture>> {
+        match self
+            .send_request(
+                peer_endpoint_id,
+                BrowseRequest::ListPictures,
+                MAX_PROTOCOL_MESSAGE_BYTES,
+            )
+            .await?
+        {
+            BrowseResponse::Pictures(pictures) => Ok(pictures),
+            BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
+            BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!("received thumbnail response for picture list request")),
+        }
+    }
+
+    pub async fn get_peer_thumbnail(
+        &self,
+        peer_endpoint_id: &str,
+        picture_id: &str,
+    ) -> Result<Vec<u8>> {
+        match self
+            .send_request(
+                peer_endpoint_id,
+                BrowseRequest::GetThumbnail {
+                    picture_id: picture_id.to_owned(),
+                },
+                MAX_PROTOCOL_MESSAGE_BYTES,
+            )
+            .await?
+        {
+            BrowseResponse::Thumbnail(bytes) => Ok(bytes),
+            BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
+            BrowseResponse::Pictures(_) => Err(anyhow::anyhow!("received picture list response for thumbnail request")),
+        }
+    }
+
+    async fn send_request(
+        &self,
+        peer_endpoint_id: &str,
+        request: BrowseRequest,
+        max_response_bytes: usize,
+    ) -> Result<BrowseResponse> {
+        let peer_endpoint_id = peer_endpoint_id.parse::<EndpointId>()?;
+        let connection = self
+            .endpoint
+            .connect(peer_endpoint_id, SHADE_P2P_BROWSE_ALPN)
+            .await?;
+        let (mut send, mut recv) = connection.open_bi().await?;
+        let request = serde_json::to_vec(&request)?;
+        send.write_all(&request).await?;
+        send.finish()?;
+        let response = recv.read_to_end(max_response_bytes).await?;
+        connection.close(0u32.into(), b"done");
+        Ok(serde_json::from_slice(&response)?)
+    }
 }
 
 impl Drop for LocalPeerDiscovery {
     fn drop(&mut self) {
         self.event_task.abort();
+        let router = self.router.clone();
+        tokio::spawn(async move {
+            let _ = router.shutdown().await;
+        });
     }
 }
 
@@ -111,5 +212,45 @@ async fn run_discovery_event_loop(
                 peers.write().await.remove(&endpoint_id.to_string());
             }
         }
+    }
+}
+
+#[derive(Clone)]
+struct BrowseProtocol {
+    media_provider: Arc<dyn MediaProvider>,
+}
+
+impl std::fmt::Debug for BrowseProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BrowseProtocol")
+    }
+}
+
+impl ProtocolHandler for BrowseProtocol {
+    async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+        let (mut send, mut recv) = connection.accept_bi().await?;
+        let request = recv
+            .read_to_end(MAX_PROTOCOL_MESSAGE_BYTES)
+            .await
+            .map_err(AcceptError::from_err)?;
+        let request = serde_json::from_slice::<BrowseRequest>(&request)
+            .map_err(AcceptError::from_err)?;
+        let response = match request {
+            BrowseRequest::ListPictures => match self.media_provider.list_pictures().await {
+                Ok(pictures) => BrowseResponse::Pictures(pictures),
+                Err(error) => BrowseResponse::Error(error.to_string()),
+            },
+            BrowseRequest::GetThumbnail { picture_id } => {
+                match self.media_provider.get_thumbnail(&picture_id).await {
+                    Ok(bytes) => BrowseResponse::Thumbnail(bytes),
+                    Err(error) => BrowseResponse::Error(error.to_string()),
+                }
+            }
+        };
+        let response = serde_json::to_vec(&response).map_err(AcceptError::from_err)?;
+        send.write_all(&response).await.map_err(AcceptError::from_err)?;
+        send.finish().map_err(AcceptError::from_err)?;
+        connection.closed().await;
+        Ok(())
     }
 }

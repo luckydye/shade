@@ -6562,6 +6562,7 @@ name = "shade-p2p"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "iroh",
  "iroh-blobs",
  "iroh-tickets",
@@ -6576,6 +6577,7 @@ name = "shade-tauri"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "env_logger",
  "image",
  "log",

@@ -1,6 +1,7 @@
 import { Component, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
 import { getThumbnail, listPictures } from "../bridge/index";
 import { openImage } from "../store/editor";
+import { PeerBrowser } from "./PeerBrowser";
 import { PeerDiscoveryPanel } from "./PeerDiscoveryPanel";
 
 // Formats the browser can display directly via the asset protocol.
@@ -115,6 +116,9 @@ export const MediaView: Component = () => {
       <div class="flex-1 overflow-y-auto p-6">
         <div class="mb-6">
           <PeerDiscoveryPanel />
+        </div>
+        <div class="mb-6">
+          <PeerBrowser />
         </div>
         <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
           <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">

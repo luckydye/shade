@@ -91,6 +91,11 @@ export interface LocalPeerDiscoverySnapshot {
   peers: LocalPeer[];
 }
 
+export interface SharedPicture {
+  id: string;
+  name: string;
+}
+
 export interface ToneValues {
   exposure: number;
   contrast: number;
@@ -264,6 +269,29 @@ export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscover
   return inv("get_local_peer_discovery_snapshot") as Promise<LocalPeerDiscoverySnapshot>;
 }
 
+export async function listPeerPictures(peer_endpoint_id: string): Promise<SharedPicture[]> {
+  if (!await isTauriRuntime()) {
+    return [];
+  }
+  const inv = await getTauriInvoke();
+  return inv("list_peer_pictures", { peer_endpoint_id }) as Promise<SharedPicture[]>;
+}
+
+export async function getPeerThumbnail(peer_endpoint_id: string, picture_id: string): Promise<string> {
+  if (!await isTauriRuntime()) {
+    return "";
+  }
+  const inv = await getTauriInvoke();
+  const result = await inv("get_peer_thumbnail", { peer_endpoint_id, picture_id }) as number[] | Uint8Array | ArrayBuffer;
+  const bytes = result instanceof Uint8Array
+    ? result
+    : result instanceof ArrayBuffer
+      ? new Uint8Array(result)
+      : Uint8Array.from(result as number[]);
+  const blobBytes = Uint8Array.from(bytes);
+  return URL.createObjectURL(new Blob([blobBytes.buffer], { type: "image/jpeg" }));
+}
+
 /** Open an image from a File object — works for both file picker and drag-and-drop. */
 export async function openImageFile(file: File): Promise<OpenImageInfo> {
   if (await isTauriRuntime()) {
@@ -363,7 +391,8 @@ export async function getThumbnail(path: string): Promise<string> {
       : result instanceof ArrayBuffer
         ? new Uint8Array(result)
         : Uint8Array.from(result as number[]);
-    return URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+    const blobBytes = Uint8Array.from(bytes);
+    return URL.createObjectURL(new Blob([blobBytes.buffer], { type: "image/jpeg" }));
   }
   return "";
 }
