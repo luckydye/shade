@@ -487,6 +487,22 @@ export async function openImageFile(file: File) {
   }
 }
 
+export async function openPeerImage(peerEndpointId: string, picture: bridge.SharedPicture) {
+  setPreviewFrame(null);
+  setPreviewContextFrame(null);
+
+  setState("isLoading", true);
+  try {
+    const info = await bridge.openPeerImage(peerEndpointId, picture);
+    resetPreviewState(info.canvas_width, info.canvas_height);
+    setState("sourceBitDepth", info.source_bit_depth);
+    await refreshLayerStack();
+    await refreshPreview();
+  } finally {
+    setState("isLoading", false);
+  }
+}
+
 export async function refreshLayerStack() {
   const info = await bridge.getLayerStack();
   const layers = info.layers as LayerInfo[];

@@ -131,6 +131,18 @@ pub async fn get_peer_thumbnail(
 }
 
 #[tauri::command]
+pub async fn get_peer_image_bytes(
+    peer_endpoint_id: String,
+    picture_id: String,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<Vec<u8>, String> {
+    p2p.0
+        .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 #[allow(unused_variables)]
 pub async fn open_image<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -842,6 +854,42 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     Ok(jpeg)
 }
 
+pub async fn load_picture_bytes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    picture_id: &str,
+) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "android")]
+    if picture_id.starts_with("content://") {
+        return app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .get_image_data(picture_id)
+            .await;
+    }
+
+    #[cfg(target_os = "ios")]
+    if !picture_id.starts_with('/') {
+        let picture_id = picture_id.to_owned();
+        return tokio::task::spawn_blocking(move || {
+            let c_id = std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
+            let mut out_size: i32 = 0;
+            let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
+            if ptr.is_null() {
+                return Err("failed to fetch image from photo library".to_string());
+            }
+            let bytes = unsafe {
+                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
+                ios_free_buffer(ptr);
+                v
+            };
+            Ok(bytes)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    std::fs::read(picture_id).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn list_pictures<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -965,6 +1013,12 @@ impl<R: tauri::Runtime> shade_p2p::MediaProvider for AppMediaProvider<R> {
 
     async fn get_thumbnail(&self, picture_id: &str) -> anyhow::Result<Vec<u8>> {
         load_thumbnail_bytes(self.app.clone(), picture_id)
+            .await
+            .map_err(anyhow::Error::msg)
+    }
+
+    async fn get_image_bytes(&self, picture_id: &str) -> anyhow::Result<Vec<u8>> {
+        load_picture_bytes(self.app.clone(), picture_id)
             .await
             .map_err(anyhow::Error::msg)
     }

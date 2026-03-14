@@ -274,7 +274,7 @@ export async function listPeerPictures(peer_endpoint_id: string): Promise<Shared
     return [];
   }
   const inv = await getTauriInvoke();
-  return inv("list_peer_pictures", { peer_endpoint_id }) as Promise<SharedPicture[]>;
+  return inv("list_peer_pictures", { peerEndpointId: peer_endpoint_id }) as Promise<SharedPicture[]>;
 }
 
 export async function getPeerThumbnail(peer_endpoint_id: string, picture_id: string): Promise<string> {
@@ -282,7 +282,10 @@ export async function getPeerThumbnail(peer_endpoint_id: string, picture_id: str
     return "";
   }
   const inv = await getTauriInvoke();
-  const result = await inv("get_peer_thumbnail", { peer_endpoint_id, picture_id }) as number[] | Uint8Array | ArrayBuffer;
+  const result = await inv("get_peer_thumbnail", {
+    peerEndpointId: peer_endpoint_id,
+    pictureId: picture_id,
+  }) as number[] | Uint8Array | ArrayBuffer;
   const bytes = result instanceof Uint8Array
     ? result
     : result instanceof ArrayBuffer
@@ -290,6 +293,26 @@ export async function getPeerThumbnail(peer_endpoint_id: string, picture_id: str
       : Uint8Array.from(result as number[]);
   const blobBytes = Uint8Array.from(bytes);
   return URL.createObjectURL(new Blob([blobBytes.buffer], { type: "image/jpeg" }));
+}
+
+export async function openPeerImage(peer_endpoint_id: string, picture: SharedPicture): Promise<OpenImageInfo> {
+  if (!await isTauriRuntime()) {
+    throw new Error("peer image loading requires the Tauri runtime");
+  }
+  const inv = await getTauriInvoke();
+  const result = await inv("get_peer_image_bytes", {
+    peerEndpointId: peer_endpoint_id,
+    pictureId: picture.id,
+  }) as number[] | Uint8Array | ArrayBuffer;
+  const bytes = result instanceof Uint8Array
+    ? result
+    : result instanceof ArrayBuffer
+      ? new Uint8Array(result)
+      : Uint8Array.from(result as number[]);
+  return inv("open_image_encoded_bytes", {
+    bytes: Array.from(bytes),
+    file_name: picture.name,
+  }) as Promise<OpenImageInfo>;
 }
 
 /** Open an image from a File object — works for both file picker and drag-and-drop. */

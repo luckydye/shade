@@ -1,27 +1,38 @@
 import { Component, createResource, For, Show } from "solid-js";
-import { getPeerThumbnail } from "../bridge/index";
+import { getPeerThumbnail, type SharedPicture } from "../bridge/index";
+import { openPeerImage } from "../store/editor";
 import { p2pState, selectPeer } from "../store/p2p";
 
-const RemoteImageTile: Component<{ peerId: string; pictureId: string; name: string }> = (props) => {
+const RemoteImageTile: Component<{ peerId: string; picture: SharedPicture }> = (props) => {
   const [src] = createResource(
-    () => (props.peerId ? `${props.peerId}:${props.pictureId}` : undefined),
-    async () => getPeerThumbnail(props.peerId, props.pictureId),
+    () => (props.peerId ? `${props.peerId}:${props.picture.id}` : undefined),
+    async () => getPeerThumbnail(props.peerId, props.picture.id),
   );
 
   return (
-    <div class="flex flex-col gap-1.5 rounded-xl">
+    <button
+      type="button"
+      class="flex flex-col gap-1.5 rounded-xl text-left"
+      onClick={() => {
+        if (document.startViewTransition) {
+          document.startViewTransition(() => void openPeerImage(props.peerId, props.picture));
+        } else {
+          void openPeerImage(props.peerId, props.picture);
+        }
+      }}
+    >
       <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
         <Show when={src()} fallback={<div class="h-full w-full animate-pulse bg-white/[0.06]" />}>
           <img
             src={src()}
-            alt={props.name}
+            alt={props.picture.name}
             class="h-full w-full object-contain"
             loading="lazy"
           />
         </Show>
       </div>
-      <span class="truncate px-0.5 text-[11px] text-white/40">{props.name}</span>
-    </div>
+      <span class="truncate px-0.5 text-[11px] text-white/40">{props.picture.name}</span>
+    </button>
   );
 };
 
@@ -61,14 +72,22 @@ export const PeerBrowser: Component = () => (
 
     <div class="mt-4">
       <Show when={p2pState.selectedPeerId} fallback={<p class="text-sm text-white/35">Select a peer to browse its images.</p>}>
-        <Show when={!p2pState.isLoadingPeerPictures && p2pState.remotePictures.length > 0} fallback={<p class="text-sm text-white/35">No shared images returned by this peer.</p>}>
+        <Show
+          when={!p2pState.isLoadingPeerPictures && !p2pState.peerBrowserError && p2pState.remotePictures.length > 0}
+          fallback={
+            <p class={`text-sm ${p2pState.peerBrowserError ? "text-red-400" : "text-white/35"}`}>
+              {p2pState.isLoadingPeerPictures
+                ? "Loading peer images…"
+                : p2pState.peerBrowserError || "No shared images returned by this peer."}
+            </p>
+          }
+        >
           <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             <For each={p2pState.remotePictures}>
               {(picture) => (
                 <RemoteImageTile
                   peerId={p2pState.selectedPeerId}
-                  pictureId={picture.id}
-                  name={picture.name}
+                  picture={picture}
                 />
               )}
             </For>

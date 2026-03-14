@@ -18,12 +18,15 @@ use tokio_stream::StreamExt;
 
 const SHADE_P2P_DISCOVERY_TAG: &str = "shade-p2p";
 const SHADE_P2P_BROWSE_ALPN: &[u8] = b"/shade/p2p/browse/1";
-const MAX_PROTOCOL_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_REQUEST_MESSAGE_BYTES: usize = 64 * 1024;
+const MAX_THUMBNAIL_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_IMAGE_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 
 #[async_trait]
 pub trait MediaProvider: Send + Sync + 'static {
     async fn list_pictures(&self) -> Result<Vec<SharedPicture>>;
     async fn get_thumbnail(&self, picture_id: &str) -> Result<Vec<u8>>;
+    async fn get_image_bytes(&self, picture_id: &str) -> Result<Vec<u8>>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -36,12 +39,14 @@ pub struct SharedPicture {
 enum BrowseRequest {
     ListPictures,
     GetThumbnail { picture_id: String },
+    GetImageBytes { picture_id: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 enum BrowseResponse {
     Pictures(Vec<SharedPicture>),
     Thumbnail(Vec<u8>),
+    ImageBytes(Vec<u8>),
     Error(String),
 }
 
@@ -117,13 +122,14 @@ impl LocalPeerDiscovery {
             .send_request(
                 peer_endpoint_id,
                 BrowseRequest::ListPictures,
-                MAX_PROTOCOL_MESSAGE_BYTES,
+                MAX_REQUEST_MESSAGE_BYTES,
             )
             .await?
         {
             BrowseResponse::Pictures(pictures) => Ok(pictures),
             BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
             BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!("received thumbnail response for picture list request")),
+            BrowseResponse::ImageBytes(_) => Err(anyhow::anyhow!("received image response for picture list request")),
         }
     }
 
@@ -138,13 +144,36 @@ impl LocalPeerDiscovery {
                 BrowseRequest::GetThumbnail {
                     picture_id: picture_id.to_owned(),
                 },
-                MAX_PROTOCOL_MESSAGE_BYTES,
+                MAX_THUMBNAIL_MESSAGE_BYTES,
             )
             .await?
         {
             BrowseResponse::Thumbnail(bytes) => Ok(bytes),
             BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
             BrowseResponse::Pictures(_) => Err(anyhow::anyhow!("received picture list response for thumbnail request")),
+            BrowseResponse::ImageBytes(_) => Err(anyhow::anyhow!("received image response for thumbnail request")),
+        }
+    }
+
+    pub async fn get_peer_image_bytes(
+        &self,
+        peer_endpoint_id: &str,
+        picture_id: &str,
+    ) -> Result<Vec<u8>> {
+        match self
+            .send_request(
+                peer_endpoint_id,
+                BrowseRequest::GetImageBytes {
+                    picture_id: picture_id.to_owned(),
+                },
+                MAX_IMAGE_MESSAGE_BYTES,
+            )
+            .await?
+        {
+            BrowseResponse::ImageBytes(bytes) => Ok(bytes),
+            BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
+            BrowseResponse::Pictures(_) => Err(anyhow::anyhow!("received picture list response for image request")),
+            BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!("received thumbnail response for image request")),
         }
     }
 
@@ -230,7 +259,7 @@ impl ProtocolHandler for BrowseProtocol {
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
         let (mut send, mut recv) = connection.accept_bi().await?;
         let request = recv
-            .read_to_end(MAX_PROTOCOL_MESSAGE_BYTES)
+            .read_to_end(MAX_REQUEST_MESSAGE_BYTES)
             .await
             .map_err(AcceptError::from_err)?;
         let request = serde_json::from_slice::<BrowseRequest>(&request)
@@ -243,6 +272,12 @@ impl ProtocolHandler for BrowseProtocol {
             BrowseRequest::GetThumbnail { picture_id } => {
                 match self.media_provider.get_thumbnail(&picture_id).await {
                     Ok(bytes) => BrowseResponse::Thumbnail(bytes),
+                    Err(error) => BrowseResponse::Error(error.to_string()),
+                }
+            }
+            BrowseRequest::GetImageBytes { picture_id } => {
+                match self.media_provider.get_image_bytes(&picture_id).await {
+                    Ok(bytes) => BrowseResponse::ImageBytes(bytes),
                     Err(error) => BrowseResponse::Error(error.to_string()),
                 }
             }

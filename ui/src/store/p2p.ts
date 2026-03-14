@@ -11,6 +11,7 @@ interface P2pState extends LocalPeerDiscoverySnapshot {
   selectedPeerId: string;
   remotePictures: SharedPicture[];
   isLoadingPeerPictures: boolean;
+  peerBrowserError: string;
 }
 
 const [state, setState] = createStore<P2pState>({
@@ -21,6 +22,7 @@ const [state, setState] = createStore<P2pState>({
   selectedPeerId: "",
   remotePictures: [],
   isLoadingPeerPictures: false,
+  peerBrowserError: "",
 });
 
 let refreshTimer: number | null = null;
@@ -74,6 +76,7 @@ export async function selectPeer(peerId: string) {
       selectedPeerId: "",
       remotePictures: [],
       isLoadingPeerPictures: false,
+      peerBrowserError: "",
     });
     return;
   }
@@ -81,6 +84,7 @@ export async function selectPeer(peerId: string) {
     selectedPeerId: peerId,
     remotePictures: [],
     isLoadingPeerPictures: true,
+    peerBrowserError: "",
   });
   try {
     const remotePictures = await listPeerPictures(peerId);
@@ -91,12 +95,15 @@ export async function selectPeer(peerId: string) {
       selectedPeerId: peerId,
       remotePictures,
       isLoadingPeerPictures: false,
+      peerBrowserError: "",
     });
   } catch (error) {
     if (state.selectedPeerId !== peerId) {
       return;
     }
-    setState("isLoadingPeerPictures", false);
-    throw error;
+    setState({
+      isLoadingPeerPictures: false,
+      peerBrowserError: error instanceof Error ? error.message : String(error),
+    });
   }
 }
