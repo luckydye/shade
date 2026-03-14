@@ -1,5 +1,14 @@
 import { Component, JSX, Show, createEffect, createSignal, on } from "solid-js";
-import { addLayer, applyEdit, isDrawerOpen, selectLayer, setIsDrawerOpen, setLayerVisible, state } from "../store/editor";
+import {
+  addLayer,
+  applyEdit,
+  findCropLayerIdx,
+  isDrawerOpen,
+  selectLayer,
+  setIsDrawerOpen,
+  setLayerVisible,
+  state,
+} from "../store/editor";
 
 type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen" | "hsl";
 
@@ -223,6 +232,13 @@ const HslIcon = () => (
   </svg>
 );
 
+const CropIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <path d="M8 4v12a2 2 0 0 0 2 2h10" />
+    <path d="M4 8h12a2 2 0 0 1 2 2v10" />
+  </svg>
+);
+
 const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
   tone: () => <SparkIcon />,
   curves: () => <CurveIcon />,
@@ -248,6 +264,10 @@ const Inspector: Component = () => {
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
+  const selectedCropLayer = () => {
+    const layer = selectedLayer();
+    return layer?.kind === "crop" ? layer : null;
+  };
   const selectedAdjustmentLayer = () => {
     const layer = selectedLayer();
     return layer?.kind === "adjustment" ? layer : null;
@@ -469,6 +489,30 @@ const Inspector: Component = () => {
   const selectedFocus = (): MobileLayerFocus =>
     layerFocusTypes().get(state.selectedLayerIdx) ?? "tone";
 
+  const displayedCrop = () => selectedCropLayer()?.crop ?? {
+    x: 0,
+    y: 0,
+    width: state.canvasWidth,
+    height: state.canvasHeight,
+  };
+  const setCropField = (field: "x" | "y" | "width" | "height", value: number) => {
+    if (!Number.isFinite(value)) {
+      throw new Error(`crop ${field} must be a finite number`);
+    }
+    const crop = displayedCrop();
+    if (!selectedCropLayer()) {
+      throw new Error("crop controls require a selected crop layer");
+    }
+    void applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "crop",
+      crop_x: field === "x" ? value : crop.x,
+      crop_y: field === "y" ? value : crop.y,
+      crop_width: field === "width" ? value : crop.width,
+      crop_height: field === "height" ? value : crop.height,
+    });
+  };
+
   const handleAddLayer = async (focus: MobileLayerFocus) => {
     setIsPickerOpen(false);
     if (focus === "curves") {
@@ -603,10 +647,91 @@ const Inspector: Component = () => {
     }
   };
 
+  const CropPanel: Component = () => {
+    const crop = () => displayedCrop();
+    const hasCropLayer = () => findCropLayerIdx() >= 0;
+
+    return (
+      <div class="mb-5 border border-white/8 bg-white/[0.03] p-3">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
+            <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4"><CropIcon /></span>
+            <span>Crop</span>
+          </div>
+          <span class="text-[11px] font-semibold tracking-[0.03em] text-white/45">
+            {crop().width} × {crop().height}
+          </span>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          {(["x", "y", "width", "height"] as const).map((field) => (
+            <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/36">
+              <span>{field}</span>
+              <input
+                type="number"
+                value={crop()[field]}
+                disabled={!selectedCropLayer()}
+                min="0"
+                step="1"
+                onInput={(event) => setCropField(field, event.currentTarget.valueAsNumber)}
+                class="min-h-10 border border-white/8 bg-black/30 px-3 text-[13px] font-medium text-white outline-none transition-colors disabled:opacity-45"
+              />
+            </label>
+          ))}
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <Show
+            when={selectedCropLayer()}
+            fallback={
+              <button
+                type="button"
+                onClick={() => {
+                  const cropLayerIdx = findCropLayerIdx();
+                  if (cropLayerIdx >= 0) {
+                    selectLayer(cropLayerIdx);
+                    return;
+                  }
+                  void addLayer("crop");
+                }}
+                class="min-h-10 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+              >
+                {hasCropLayer() ? "Select crop" : "Add crop layer"}
+              </button>
+            }
+          >
+            <button
+              type="button"
+              onClick={() => setCropField("x", 0)}
+              class="min-h-10 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+            >
+              Align left
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void applyEdit({
+                  layer_idx: state.selectedLayerIdx,
+                  op: "crop",
+                  crop_x: 0,
+                  crop_y: 0,
+                  crop_width: state.canvasWidth,
+                  crop_height: state.canvasHeight,
+                });
+              }}
+              class="min-h-10 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+            >
+              Reset
+            </button>
+          </Show>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
         <div class="flex-1 overflow-y-auto px-4 py-4">
+          <CropPanel />
           <div class="mb-4">
             <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
             <div class="mt-3 flex flex-col gap-1">
@@ -614,6 +739,8 @@ const Inspector: Component = () => {
                 const realIdx = state.layers.length - 1 - reverseIdx;
                 const layerName = layer.kind === "image"
                   ? "Image"
+                  : layer.kind === "crop"
+                    ? "Crop"
                   : layer.adjustments?.curves
                     ? "Curves"
                     : "Adjustment";
@@ -658,6 +785,13 @@ const Inspector: Component = () => {
                 class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
               >
                 Add Curves
+              </button>
+              <button
+                type="button"
+                onClick={() => void addLayer("crop")}
+                class="min-h-10 border border-white/6 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+              >
+                Add Crop
               </button>
             </div>
           </div>
@@ -836,6 +970,9 @@ const Inspector: Component = () => {
         </div>
 
         <div class="px-4 pb-4">
+          <div class="px-1">
+            <CropPanel />
+          </div>
           <Show
             when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
             fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image to start adjusting.</div>}

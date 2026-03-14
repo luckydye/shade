@@ -17,6 +17,7 @@ const VIGNETTE_WGSL: &str = include_str!("../../shaders/vignette.wgsl");
 const SHARPEN_WGSL: &str = include_str!("../../shaders/sharpen.wgsl");
 const GRAIN_WGSL: &str = include_str!("../../shaders/grain.wgsl");
 const HSL_WGSL: &str = include_str!("../../shaders/hsl_adjust.wgsl");
+const CROP_WGSL: &str = include_str!("../../shaders/crop.wgsl");
 
 // ─── Uniform structs ──────────────────────────────────────────────────────────
 
@@ -26,6 +27,19 @@ const HSL_WGSL: &str = include_str!("../../shaders/hsl_adjust.wgsl");
 struct CurvesUniform {
     apply_per_channel: u32,
     _pad: [u32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CropUniform {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub target_width: f32,
+    pub target_height: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
 }
 
 // ─── Helper: create a simple 3-binding compute pipeline ──────────────────────
@@ -141,6 +155,66 @@ fn dispatch_simple(
         pass.dispatch_workgroups((width + 15) / 16, (height + 15) / 16, 1);
     }
     ctx.queue.submit(std::iter::once(encoder.finish()));
+}
+
+pub struct CropPipeline {
+    pipeline: ComputePipeline,
+    bind_group_layout: BindGroupLayout,
+}
+
+impl CropPipeline {
+    pub fn new(ctx: &GpuContext) -> Result<Self> {
+        let bind_group_layout = make_simple_bind_group_layout(&ctx.device, "crop bind group layout");
+        let pipeline = make_simple_pipeline(
+            &ctx.device,
+            CROP_WGSL,
+            "crop.wgsl",
+            "crop pipeline layout",
+            "crop pipeline",
+            &bind_group_layout,
+        );
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
+    }
+
+    pub fn process(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        params: CropUniform,
+    ) -> Result<Texture> {
+        let size = input_tex.size();
+        let output_tex = create_output_texture(&ctx.device, size.width, size.height, "crop output");
+        let uniform_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("crop uniform"),
+            contents: bytemuck::bytes_of(&params),
+            usage: BufferUsages::UNIFORM,
+        });
+        let in_view = input_tex.create_view(&TextureViewDescriptor::default());
+        let out_view = output_tex.create_view(&TextureViewDescriptor::default());
+        let bind_group = ctx.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("crop bind group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&in_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&out_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buf.as_entire_binding(),
+                },
+            ],
+        });
+        dispatch_simple(ctx, &self.pipeline, &bind_group, size.width, size.height, "crop pass");
+        Ok(output_tex)
+    }
 }
 
 // ─── CurvesPipeline ───────────────────────────────────────────────────────────

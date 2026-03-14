@@ -1,7 +1,8 @@
 use anyhow::Result;
 use half::f16;
 use shade_core::{
-    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack, TextureId, ToneParams,
+    AdjustmentOp, ColorMatrix3x3, ColorSpace, CropRect, FloatImage, Layer, LayerStack, TextureId,
+    ToneParams,
 };
 use std::collections::HashMap;
 use wgpu::{
@@ -15,7 +16,10 @@ use crate::{
         create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
         CompositePipeline, CompositeUniform,
     },
-    pipelines::{ColorPipeline, CurvesPipeline, GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline},
+    pipelines::{
+        ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GrainPipeline, HslPipeline,
+        SharpenPipeline, VignettePipeline,
+    },
     sharpen2::SharpenTwoPassPipeline,
     texture_cache::TextureCache,
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
@@ -39,6 +43,7 @@ pub struct Renderer {
     pub sharpen_pipeline: SharpenPipeline,
     pub grain_pipeline: GrainPipeline,
     pub hsl_pipeline: HslPipeline,
+    pub crop_pipeline: CropPipeline,
     pub composite_pipeline: CompositePipeline,
     pub brush_stamp_pipeline: Option<BrushStampPipeline>,
     pub sharpen2_pipeline: SharpenTwoPassPipeline,
@@ -57,6 +62,7 @@ impl Renderer {
         let sharpen_pipeline = SharpenPipeline::new(&ctx)?;
         let grain_pipeline = GrainPipeline::new(&ctx)?;
         let hsl_pipeline = HslPipeline::new(&ctx)?;
+        let crop_pipeline = CropPipeline::new(&ctx)?;
         let composite_pipeline = CompositePipeline::new(&ctx)?;
         let brush_stamp_pipeline = if ctx
             .device
@@ -79,6 +85,7 @@ impl Renderer {
             sharpen_pipeline,
             grain_pipeline,
             hsl_pipeline,
+            crop_pipeline,
             composite_pipeline,
             brush_stamp_pipeline,
             sharpen2_pipeline,
@@ -308,6 +315,7 @@ impl Renderer {
         assert!(target_width > 0, "preview target_width must be > 0");
         assert!(target_height > 0, "preview target_height must be > 0");
         let crop = normalize_preview_crop(crop, canvas_width, canvas_height);
+        let mut current_view = crop.clone();
 
         // 1. Create accumulator texture (black RGBA8).
         let accum_tex = {
@@ -354,7 +362,7 @@ impl Renderer {
                             image.height,
                             target_width,
                             target_height,
-                            &crop,
+                            &current_view,
                         );
                         self.upload_float_texture(
                             &scaled,
@@ -366,6 +374,29 @@ impl Renderer {
                         // No source image: skip this layer.
                         continue;
                     }
+                }
+                Layer::Crop { rect } => {
+                    let relative_crop = crop_rect_to_target_space(
+                        rect,
+                        &current_view,
+                        target_width,
+                        target_height,
+                    )?;
+                    current_view = intersect_crop_rect(&current_view, rect)?;
+                    self.crop_pipeline.process(
+                        &self.ctx,
+                        current_accum,
+                        CropUniform {
+                            x: relative_crop.x,
+                            y: relative_crop.y,
+                            width: relative_crop.width,
+                            height: relative_crop.height,
+                            target_width: target_width as f32,
+                            target_height: target_height as f32,
+                            _pad0: 0.0,
+                            _pad1: 0.0,
+                        },
+                    )?
                 }
                 Layer::Adjustment { ops } => self.render_texture_with_ops(current_accum, ops)?,
             };
@@ -749,6 +780,37 @@ fn normalize_preview_crop(
     crop.x = crop.x.clamp(0.0, max_width - crop.width);
     crop.y = crop.y.clamp(0.0, max_height - crop.height);
     crop
+}
+
+fn intersect_crop_rect(base: &PreviewCrop, rect: &CropRect) -> Result<PreviewCrop> {
+    let x = base.x.max(rect.x);
+    let y = base.y.max(rect.y);
+    let right = (base.x + base.width).min(rect.x + rect.width);
+    let bottom = (base.y + base.height).min(rect.y + rect.height);
+    if right <= x || bottom <= y {
+        anyhow::bail!("crop layer does not intersect the active preview region");
+    }
+    Ok(PreviewCrop {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+    })
+}
+
+fn crop_rect_to_target_space(
+    rect: &CropRect,
+    current_view: &PreviewCrop,
+    target_width: u32,
+    target_height: u32,
+) -> Result<CropRect> {
+    let intersection = intersect_crop_rect(current_view, rect)?;
+    Ok(CropRect {
+        x: ((intersection.x - current_view.x) / current_view.width) * target_width as f32,
+        y: ((intersection.y - current_view.y) / current_view.height) * target_height as f32,
+        width: (intersection.width / current_view.width) * target_width as f32,
+        height: (intersection.height / current_view.height) * target_height as f32,
+    })
 }
 
 fn resample_rgba_f32_region(

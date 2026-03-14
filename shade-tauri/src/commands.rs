@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 use shade_core::{
-    linear_lut, AdjustmentOp, ColorParams, FloatImage, GrainParams, HslParams, LayerStack,
-    SharpenParams, VignetteParams,
+    linear_lut, AdjustmentOp, ColorParams, CropRect, FloatImage, GrainParams, HslParams,
+    LayerStack, SharpenParams, VignetteParams,
 };
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
 use std::sync::Mutex;
@@ -378,6 +377,10 @@ pub struct EditParams {
     pub blue_hue: Option<f32>,
     pub blue_sat: Option<f32>,
     pub blue_lum: Option<f32>,
+    pub crop_x: Option<f32>,
+    pub crop_y: Option<f32>,
+    pub crop_width: Option<f32>,
+    pub crop_height: Option<f32>,
 }
 
 #[tauri::command]
@@ -386,11 +389,29 @@ pub async fn apply_edit(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
     let mut st = state.lock().unwrap();
+    let canvas_width = st.canvas_width;
+    let canvas_height = st.canvas_height;
     if params.layer_idx >= st.stack.layers.len() {
         return Err("layer index out of bounds".into());
     }
     let layer = &mut st.stack.layers[params.layer_idx];
     match &mut layer.layer {
+        shade_core::Layer::Crop { rect } => {
+            if params.op != "crop" {
+                return Err("target layer is a crop layer".into());
+            }
+            *rect = normalize_crop_rect(
+                CropRect {
+                    x: params.crop_x.ok_or("missing crop_x")?,
+                    y: params.crop_y.ok_or("missing crop_y")?,
+                    width: params.crop_width.ok_or("missing crop_width")?,
+                    height: params.crop_height.ok_or("missing crop_height")?,
+                },
+                canvas_width,
+                canvas_height,
+            )?;
+            st.stack.generation += 1;
+        }
         shade_core::Layer::Adjustment { ops } => {
             match params.op.as_str() {
                 "tone" => {
@@ -509,7 +530,7 @@ pub async fn apply_edit(
             }
             st.stack.generation += 1;
         }
-        _ => return Err("target layer is not an adjustment layer".into()),
+        _ => return Err("target layer is not editable by apply_edit".into()),
     }
     Ok(())
 }
@@ -520,6 +541,8 @@ pub async fn add_layer(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<usize, String> {
     let mut st = state.lock().unwrap();
+    let canvas_width = st.canvas_width;
+    let canvas_height = st.canvas_height;
     let idx = match kind.as_str() {
         "adjustment" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
@@ -537,6 +560,12 @@ pub async fn add_layer(
             lut_master: linear_lut(),
             per_channel: false,
         }]),
+        "crop" => st.stack.add_crop_layer(CropRect {
+            x: 0.0,
+            y: 0.0,
+            width: canvas_width as f32,
+            height: canvas_height as f32,
+        }),
         _ => return Err(format!("unknown layer kind: {kind}")),
     };
     Ok(idx)
@@ -597,6 +626,15 @@ pub struct LayerEntryInfo {
     pub opacity: f32,
     pub blend_mode: String,
     pub adjustments: Option<AdjustmentValues>,
+    pub crop: Option<CropValues>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CropValues {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -797,13 +835,24 @@ pub async fn get_layer_stack(
         .map(|l| LayerEntryInfo {
             kind: match &l.layer {
                 shade_core::Layer::Image { .. } => "image".into(),
+                shade_core::Layer::Crop { .. } => "crop".into(),
                 shade_core::Layer::Adjustment { .. } => "adjustment".into(),
             },
             visible: l.visible,
             opacity: l.opacity,
             blend_mode: format!("{:?}", l.blend_mode),
+            crop: match &l.layer {
+                shade_core::Layer::Crop { rect } => Some(CropValues {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                }),
+                _ => None,
+            },
             adjustments: match &l.layer {
                 shade_core::Layer::Image { .. } => None,
+                shade_core::Layer::Crop { .. } => None,
                 shade_core::Layer::Adjustment { ops } => {
                     let mut adjustments = AdjustmentValues::default();
                     for op in ops {
@@ -884,4 +933,17 @@ pub async fn get_layer_stack(
         canvas_height: st.canvas_height,
         generation: st.stack.generation,
     })
+}
+
+fn normalize_crop_rect(rect: CropRect, canvas_width: u32, canvas_height: u32) -> Result<CropRect, String> {
+    if canvas_width == 0 || canvas_height == 0 {
+        return Err("cannot edit crop without a loaded image".into());
+    }
+    let max_width = canvas_width as f32;
+    let max_height = canvas_height as f32;
+    let width = rect.width.clamp(1.0, max_width);
+    let height = rect.height.clamp(1.0, max_height);
+    let x = rect.x.clamp(0.0, max_width - width);
+    let y = rect.y.clamp(0.0, max_height - height);
+    Ok(CropRect { x, y, width, height })
 }

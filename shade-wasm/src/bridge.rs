@@ -167,6 +167,7 @@ pub fn get_stack_json() -> String {
                 serde_json::json!({
                     "kind": match &l.layer {
                         shade_core::Layer::Image { .. } => "image",
+                        shade_core::Layer::Crop { .. } => "crop",
                         shade_core::Layer::Adjustment { .. } => "adjustment",
                     },
                     "visible": l.visible,

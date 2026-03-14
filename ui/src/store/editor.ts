@@ -25,11 +25,19 @@ let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = 
 let previewRefreshPromise: Promise<void> | null = null;
 
 export interface LayerInfo {
-  kind: "image" | "adjustment";
+  kind: "image" | "adjustment" | "crop";
   visible: boolean;
   opacity: number;
   blend_mode?: string;
   adjustments?: bridge.AdjustmentValues | null;
+  crop?: bridge.CropValues | null;
+}
+
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface EditorState {
@@ -48,6 +56,9 @@ export interface EditorState {
   previewCenterY: number;
   previewViewportWidth: number;
   previewViewportHeight: number;
+  crop: CropRect;
+  cropDraft: CropRect | null;
+  isCropMode: boolean;
 }
 
 const [state, setState] = createStore<EditorState>({
@@ -66,6 +77,9 @@ const [state, setState] = createStore<EditorState>({
   previewCenterY: 0,
   previewViewportWidth: 0,
   previewViewportHeight: 0,
+  crop: { x: 0, y: 0, width: 0, height: 0 },
+  cropDraft: null,
+  isCropMode: false,
 });
 
 export { state };
@@ -86,6 +100,43 @@ function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function fullCanvasCrop(width = state.canvasWidth, height = state.canvasHeight): CropRect {
+  return { x: 0, y: 0, width, height };
+}
+
+function normalizeCropRect(rect: CropRect, canvasWidth = state.canvasWidth, canvasHeight = state.canvasHeight): CropRect {
+  if (canvasWidth <= 0 || canvasHeight <= 0) {
+    throw new Error("cannot normalize crop without a loaded image");
+  }
+  const x = clamp(Math.round(rect.x), 0, canvasWidth - 1);
+  const y = clamp(Math.round(rect.y), 0, canvasHeight - 1);
+  const maxWidth = canvasWidth - x;
+  const maxHeight = canvasHeight - y;
+  const width = clamp(Math.round(rect.width), 1, maxWidth);
+  const height = clamp(Math.round(rect.height), 1, maxHeight);
+  return { x, y, width, height };
+}
+
+function cropRectsMatch(a: CropRect, b: CropRect) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+export function getCommittedCropRect() {
+  return state.crop;
+}
+
+export function getDraftCropRect() {
+  return state.cropDraft ?? state.crop;
+}
+
+export function hasActiveCrop() {
+  return !cropRectsMatch(state.crop, fullCanvasCrop());
+}
+
+function getPreviewBounds() {
+  return state.crop;
 }
 
 function fitPreviewSize(containerWidth: number, containerHeight: number, imageWidth: number, imageHeight: number) {
@@ -112,53 +163,56 @@ function capPreviewRenderSize(width: number, height: number, maxPixelCount: numb
 
 function clampPreviewCenter(zoom: number, centerX: number, centerY: number) {
   const { width: cropWidth, height: cropHeight } = getPreviewCropSize(zoom);
+  const bounds = getPreviewBounds();
   return {
-    x: clamp(centerX, cropWidth * 0.5, state.canvasWidth - cropWidth * 0.5),
-    y: clamp(centerY, cropHeight * 0.5, state.canvasHeight - cropHeight * 0.5),
+    x: clamp(centerX, bounds.x + cropWidth * 0.5, bounds.x + bounds.width - cropWidth * 0.5),
+    y: clamp(centerY, bounds.y + cropHeight * 0.5, bounds.y + bounds.height - cropHeight * 0.5),
   };
 }
 
 function getPreviewCropSize(zoom: number) {
+  const bounds = getPreviewBounds();
   if (
-    state.canvasWidth <= 0
-    || state.canvasHeight <= 0
+    bounds.width <= 0
+    || bounds.height <= 0
     || state.previewViewportWidth <= 0
     || state.previewViewportHeight <= 0
   ) {
     return { width: 0, height: 0 };
   }
   const fitScale = Math.min(
-    state.previewViewportWidth / state.canvasWidth,
-    state.previewViewportHeight / state.canvasHeight,
+    state.previewViewportWidth / bounds.width,
+    state.previewViewportHeight / bounds.height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");
   }
   const imageScale = fitScale * zoom;
   return {
-    width: Math.min(state.canvasWidth, state.previewViewportWidth / imageScale),
-    height: Math.min(state.canvasHeight, state.previewViewportHeight / imageScale),
+    width: Math.min(bounds.width, state.previewViewportWidth / imageScale),
+    height: Math.min(bounds.height, state.previewViewportHeight / imageScale),
   };
 }
 
 function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
-  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
+  const bounds = getPreviewBounds();
+  if (bounds.width <= 0 || bounds.height <= 0) return null;
   if (state.previewViewportWidth <= 0 || state.previewViewportHeight <= 0) return null;
   const fitScale = Math.min(
-    state.previewViewportWidth / state.canvasWidth,
-    state.previewViewportHeight / state.canvasHeight,
+    state.previewViewportWidth / bounds.width,
+    state.previewViewportHeight / bounds.height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");
   }
   const center = clampPreviewCenter(zoom, centerX, centerY);
   const imageScale = fitScale * zoom;
-  const imageX = state.previewViewportWidth * 0.5 - center.x * imageScale;
-  const imageY = state.previewViewportHeight * 0.5 - center.y * imageScale;
+  const imageX = state.previewViewportWidth * 0.5 - (center.x - bounds.x) * imageScale;
+  const imageY = state.previewViewportHeight * 0.5 - (center.y - bounds.y) * imageScale;
   const screenLeft = Math.max(0, imageX);
   const screenTop = Math.max(0, imageY);
-  const screenRight = Math.min(state.previewViewportWidth, imageX + state.canvasWidth * imageScale);
-  const screenBottom = Math.min(state.previewViewportHeight, imageY + state.canvasHeight * imageScale);
+  const screenRight = Math.min(state.previewViewportWidth, imageX + bounds.width * imageScale);
+  const screenBottom = Math.min(state.previewViewportHeight, imageY + bounds.height * imageScale);
   if (screenRight <= screenLeft || screenBottom <= screenTop) {
     throw new Error("visible preview must intersect the viewport");
   }
@@ -168,8 +222,8 @@ function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
     viewportWidth: screenRight - screenLeft,
     viewportHeight: screenBottom - screenTop,
     crop: {
-      x: (screenLeft - imageX) / imageScale,
-      y: (screenTop - imageY) / imageScale,
+      x: bounds.x + (screenLeft - imageX) / imageScale,
+      y: bounds.y + (screenTop - imageY) / imageScale,
       width: (screenRight - screenLeft) / imageScale,
       height: (screenBottom - screenTop) / imageScale,
     },
@@ -179,6 +233,9 @@ function getVisiblePreview(zoom: number, centerX: number, centerY: number) {
 }
 
 function getPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
+  if (state.isCropMode) {
+    return getContextPreviewRequest(quality);
+  }
   const visible = getVisiblePreview(state.previewZoom, state.previewCenterX, state.previewCenterY);
   if (!visible) return null;
   const devicePixelRatio = quality === "interactive"
@@ -212,6 +269,7 @@ function previewCropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
 
 function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
+  const crop = state.isCropMode ? undefined : state.crop;
   const devicePixelRatio = quality === "interactive"
     ? INTERACTIVE_PREVIEW_DEVICE_PIXEL_RATIO
     : FINAL_PREVIEW_DEVICE_PIXEL_RATIO;
@@ -221,14 +279,15 @@ function getContextPreviewRequest(quality: PreviewQuality): bridge.PreviewReques
   const fitted = fitPreviewSize(
     state.previewViewportWidth * Math.min(window.devicePixelRatio, devicePixelRatio),
     state.previewViewportHeight * Math.min(window.devicePixelRatio, devicePixelRatio),
-    state.canvasWidth,
-    state.canvasHeight,
+    crop?.width ?? state.canvasWidth,
+    crop?.height ?? state.canvasHeight,
   );
   const target = capPreviewRenderSize(fitted.width, fitted.height, maxPixelCount);
   if (target.width <= 0 || target.height <= 0) return null;
   return {
     target_width: target.width,
     target_height: target.height,
+    crop,
   };
 }
 
@@ -245,26 +304,28 @@ function toImageData(frame: bridge.PreviewFrame) {
 }
 
 export function getPreviewDisplaySize() {
+  const bounds = getPreviewBounds();
   return fitPreviewSize(
     state.previewViewportWidth,
     state.previewViewportHeight,
-    state.canvasWidth,
-    state.canvasHeight,
+    bounds.width,
+    bounds.height,
   );
 }
 
 export function getMaxPreviewZoom() {
+  const bounds = getPreviewBounds();
   if (
-    state.canvasWidth <= 0
-    || state.canvasHeight <= 0
+    bounds.width <= 0
+    || bounds.height <= 0
     || state.previewViewportWidth <= 0
     || state.previewViewportHeight <= 0
   ) {
     return 1;
   }
   const fitScale = Math.min(
-    state.previewViewportWidth / state.canvasWidth,
-    state.previewViewportHeight / state.canvasHeight,
+    state.previewViewportWidth / bounds.width,
+    state.previewViewportHeight / bounds.height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");
@@ -273,10 +334,11 @@ export function getMaxPreviewZoom() {
 }
 
 export function resetPreviewViewport() {
+  const crop = getPreviewBounds();
   setState({
     previewZoom: 1,
-    previewCenterX: state.canvasWidth * 0.5,
-    previewCenterY: state.canvasHeight * 0.5,
+    previewCenterX: crop.x + crop.width * 0.5,
+    previewCenterY: crop.y + crop.height * 0.5,
   });
   void refreshPreview();
 }
@@ -304,8 +366,8 @@ export function zoomPreviewDelta(delta: number, pinch: boolean, anchorX: number,
   const sensitivity = pinch ? 0.0005 : 0.001;
   const multiplier = Math.exp(-delta * sensitivity);
   const fitScale = Math.min(
-    state.previewViewportWidth / state.canvasWidth,
-    state.previewViewportHeight / state.canvasHeight,
+    state.previewViewportWidth / state.crop.width,
+    state.previewViewportHeight / state.crop.height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");
@@ -333,8 +395,8 @@ export function zoomPreviewDelta(delta: number, pinch: boolean, anchorX: number,
 export function panPreview(deltaX: number, deltaY: number) {
   if (state.previewZoom <= 1 || state.previewViewportWidth <= 0 || state.previewViewportHeight <= 0) return;
   const fitScale = Math.min(
-    state.previewViewportWidth / state.canvasWidth,
-    state.previewViewportHeight / state.canvasHeight,
+    state.previewViewportWidth / state.crop.width,
+    state.previewViewportHeight / state.crop.height,
   );
   if (fitScale <= 0) {
     throw new Error("preview fit scale must be positive");
@@ -353,12 +415,16 @@ export function panPreview(deltaX: number, deltaY: number) {
 }
 
 function resetPreviewState(canvasWidth: number, canvasHeight: number) {
+  const crop = fullCanvasCrop(canvasWidth, canvasHeight);
   setState({
     canvasWidth,
     canvasHeight,
     previewZoom: 1,
-    previewCenterX: canvasWidth * 0.5,
-    previewCenterY: canvasHeight * 0.5,
+    previewCenterX: crop.width * 0.5,
+    previewCenterY: crop.height * 0.5,
+    crop,
+    cropDraft: null,
+    isCropMode: false,
   });
 }
 
@@ -374,6 +440,9 @@ export function closeImage() {
     previewZoom: 1,
     previewCenterX: 0,
     previewCenterY: 0,
+    crop: { x: 0, y: 0, width: 0, height: 0 },
+    cropDraft: null,
+    isCropMode: false,
   });
 }
 
@@ -442,8 +511,22 @@ export async function applyEdit(params: Record<string, unknown>) {
   if (!layer) {
     throw new Error("applyEdit target layer is out of bounds");
   }
+  if (layer.kind === "crop") {
+    if (params.op !== "crop") {
+      throw new Error("crop layers only accept the crop op");
+    }
+    setState("layers", layerIdx, "crop", {
+      x: params.crop_x as number,
+      y: params.crop_y as number,
+      width: params.crop_width as number,
+      height: params.crop_height as number,
+    });
+    await bridge.applyEdit(params);
+    await refreshPreview();
+    return;
+  }
   if (layer.kind !== "adjustment") {
-    throw new Error("applyEdit target layer must be an adjustment layer");
+    throw new Error("applyEdit target layer must be an adjustment or crop layer");
   }
   const adjustments = layer.adjustments ?? {
     tone: null,
@@ -534,6 +617,65 @@ export async function applyEdit(params: Record<string, unknown>) {
 
 export function selectLayer(idx: number) {
   setState("selectedLayerIdx", idx);
+}
+
+export function findCropLayerIdx() {
+  return state.layers.findIndex((layer) => layer.kind === "crop");
+}
+
+export function startCropMode() {
+  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {
+    throw new Error("cannot start crop mode without a loaded image");
+  }
+  setState({
+    isCropMode: true,
+    cropDraft: state.crop,
+  });
+  void refreshPreview();
+}
+
+export function cancelCropMode() {
+  if (!state.isCropMode) return;
+  setState({
+    isCropMode: false,
+    cropDraft: null,
+  });
+  void refreshPreview();
+}
+
+export function updateCropDraft(next: CropRect) {
+  if (!state.isCropMode) {
+    throw new Error("cannot update crop draft when crop mode is inactive");
+  }
+  setState("cropDraft", normalizeCropRect(next));
+}
+
+export function resetCrop() {
+  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {
+    throw new Error("cannot reset crop without a loaded image");
+  }
+  const crop = fullCanvasCrop();
+  setState({
+    crop,
+    cropDraft: state.isCropMode ? crop : null,
+  });
+  resetPreviewViewport();
+}
+
+export function applyCrop() {
+  if (!state.isCropMode || !state.cropDraft) {
+    throw new Error("cannot apply crop without an active draft");
+  }
+  const crop = normalizeCropRect(state.cropDraft);
+  setState({
+    crop,
+    cropDraft: null,
+    isCropMode: false,
+    previewZoom: 1,
+    previewCenterX: crop.x + crop.width * 0.5,
+    previewCenterY: crop.y + crop.height * 0.5,
+  });
+  void refreshPreview();
 }
 
 export async function addLayer(kind: string) {

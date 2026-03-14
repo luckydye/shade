@@ -1,5 +1,14 @@
 import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import {
+  applyCrop,
+  cancelCropMode,
+  getCommittedCropRect,
+  getDraftCropRect,
+  hasActiveCrop,
+  resetCrop,
+  startCropMode,
+  state,
+  updateCropDraft,
   isDrawerOpen,
   openImageFile,
   panPreview,
@@ -7,9 +16,57 @@ import {
   previewFrame,
   resetPreviewViewport,
   setPreviewViewportSize,
-  state,
   zoomPreviewDelta,
 } from "../store/editor";
+
+type CropHandle =
+  | "move"
+  | "top-left"
+  | "top"
+  | "top-right"
+  | "right"
+  | "bottom-right"
+  | "bottom"
+  | "bottom-left"
+  | "left";
+
+interface ImageBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+}
+
+const HANDLE_SIZE = 10;
+
+function getDisplayBounds(stageWidth: number, stageHeight: number, crop = getCommittedCropRect()): ImageBounds {
+  if (stageWidth <= 0 || stageHeight <= 0 || crop.width <= 0 || crop.height <= 0) {
+    return { x: 0, y: 0, width: 0, height: 0, scale: 0 };
+  }
+  const scale = Math.min(stageWidth / crop.width, stageHeight / crop.height) * state.previewZoom;
+  return {
+    x: stageWidth * 0.5 - (state.previewCenterX - crop.x) * scale,
+    y: stageHeight * 0.5 - (state.previewCenterY - crop.y) * scale,
+    width: crop.width * scale,
+    height: crop.height * scale,
+    scale,
+  };
+}
+
+function getFullImageBounds(stageWidth: number, stageHeight: number): ImageBounds {
+  if (stageWidth <= 0 || stageHeight <= 0 || state.canvasWidth <= 0 || state.canvasHeight <= 0) {
+    return { x: 0, y: 0, width: 0, height: 0, scale: 0 };
+  }
+  const scale = Math.min(stageWidth / state.canvasWidth, stageHeight / state.canvasHeight);
+  return {
+    x: (stageWidth - state.canvasWidth * scale) * 0.5,
+    y: (stageHeight - state.canvasHeight * scale) * 0.5,
+    width: state.canvasWidth * scale,
+    height: state.canvasHeight * scale,
+    scale,
+  };
+}
 
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
@@ -17,7 +74,81 @@ const Canvas: Component = () => {
   let scratchCanvas: HTMLCanvasElement | undefined;
   let contextCanvas: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
-  let panStart: { x: number; y: number } | null = null;
+  let gesture:
+    | { kind: "pan"; x: number; y: number }
+    | { kind: "crop"; pointerId: number; handle: CropHandle; startX: number; startY: number; crop: ReturnType<typeof getDraftCropRect> }
+    | null = null;
+
+  function cropHandleAtPoint(x: number, y: number) {
+    if (!stageRef || !state.isCropMode) return null;
+    const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
+    if (bounds.scale <= 0) return null;
+    const draft = getDraftCropRect();
+    const left = bounds.x + draft.x * bounds.scale;
+    const top = bounds.y + draft.y * bounds.scale;
+    const right = left + draft.width * bounds.scale;
+    const bottom = top + draft.height * bounds.scale;
+    const nearLeft = Math.abs(x - left) <= HANDLE_SIZE;
+    const nearRight = Math.abs(x - right) <= HANDLE_SIZE;
+    const nearTop = Math.abs(y - top) <= HANDLE_SIZE;
+    const nearBottom = Math.abs(y - bottom) <= HANDLE_SIZE;
+    const inside = x >= left && x <= right && y >= top && y <= bottom;
+    if (nearLeft && nearTop) return "top-left";
+    if (nearRight && nearTop) return "top-right";
+    if (nearRight && nearBottom) return "bottom-right";
+    if (nearLeft && nearBottom) return "bottom-left";
+    if (nearTop && inside) return "top";
+    if (nearRight && inside) return "right";
+    if (nearBottom && inside) return "bottom";
+    if (nearLeft && inside) return "left";
+    if (inside) return "move";
+    return null;
+  }
+
+  function drawCropOverlay(ctx: CanvasRenderingContext2D, cssWidth: number, cssHeight: number) {
+    if (!stageRef || !state.isCropMode) return;
+    const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
+    if (bounds.scale <= 0) return;
+    const draft = getDraftCropRect();
+    const left = bounds.x + draft.x * bounds.scale;
+    const top = bounds.y + draft.y * bounds.scale;
+    const width = draft.width * bounds.scale;
+    const height = draft.height * bounds.scale;
+    ctx.save();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.beginPath();
+    ctx.rect(0, 0, cssWidth, cssHeight);
+    ctx.rect(left, top, width, height);
+    ctx.fill("evenodd");
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(left, top, width, height);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+    ctx.beginPath();
+    ctx.moveTo(left + width / 3, top);
+    ctx.lineTo(left + width / 3, top + height);
+    ctx.moveTo(left + (width * 2) / 3, top);
+    ctx.lineTo(left + (width * 2) / 3, top + height);
+    ctx.moveTo(left, top + height / 3);
+    ctx.lineTo(left + width, top + height / 3);
+    ctx.moveTo(left, top + (height * 2) / 3);
+    ctx.lineTo(left + width, top + (height * 2) / 3);
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    for (const [handleX, handleY] of [
+      [left, top],
+      [left + width / 2, top],
+      [left + width, top],
+      [left + width, top + height / 2],
+      [left + width, top + height],
+      [left + width / 2, top + height],
+      [left, top + height],
+      [left, top + height / 2],
+    ]) {
+      ctx.fillRect(handleX - 3, handleY - 3, 6, 6);
+    }
+    ctx.restore();
+  }
 
   function drawFrame() {
     if (!canvasRef || !stageRef) return;
@@ -34,10 +165,9 @@ const Canvas: Component = () => {
     }
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    const fitScale = Math.min(cssWidth / state.canvasWidth, cssHeight / state.canvasHeight);
-    const imageScale = fitScale * state.previewZoom;
-    const imageX = cssWidth * 0.5 - state.previewCenterX * imageScale;
-    const imageY = cssHeight * 0.5 - state.previewCenterY * imageScale;
+    const imageBounds = state.isCropMode
+      ? getFullImageBounds(cssWidth, cssHeight)
+      : getDisplayBounds(cssWidth, cssHeight);
     const contextFrame = previewContextFrame();
     if (contextFrame) {
       contextCanvas ??= document.createElement("canvas");
@@ -52,38 +182,42 @@ const Canvas: Component = () => {
       contextScratch.putImageData(contextFrame, 0, 0);
       ctx.drawImage(
         contextCanvas,
-        imageX,
-        imageY,
-        state.canvasWidth * imageScale,
-        state.canvasHeight * imageScale,
+        imageBounds.x,
+        imageBounds.y,
+        imageBounds.width,
+        imageBounds.height,
       );
     }
     const frame = previewFrame();
-    if (!frame) return;
-    scratchCanvas ??= document.createElement("canvas");
-    if (scratchCanvas.width !== frame.image.width || scratchCanvas.height !== frame.image.height) {
-      scratchCanvas.width = frame.image.width;
-      scratchCanvas.height = frame.image.height;
+    if (frame) {
+      scratchCanvas ??= document.createElement("canvas");
+      if (scratchCanvas.width !== frame.image.width || scratchCanvas.height !== frame.image.height) {
+        scratchCanvas.width = frame.image.width;
+        scratchCanvas.height = frame.image.height;
+      }
+      const scratchContext = scratchCanvas.getContext("2d");
+      if (!scratchContext) {
+        throw new Error("scratch canvas 2d context is required");
+      }
+      scratchContext.putImageData(frame.image, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(
+        scratchCanvas,
+        imageBounds.x + (frame.crop.x - (state.isCropMode ? 0 : getCommittedCropRect().x)) * imageBounds.scale,
+        imageBounds.y + (frame.crop.y - (state.isCropMode ? 0 : getCommittedCropRect().y)) * imageBounds.scale,
+        frame.crop.width * imageBounds.scale,
+        frame.crop.height * imageBounds.scale,
+      );
     }
-    const scratchContext = scratchCanvas.getContext("2d");
-    if (!scratchContext) {
-      throw new Error("scratch canvas 2d context is required");
-    }
-    scratchContext.putImageData(frame.image, 0, 0);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(
-      scratchCanvas,
-      imageX + frame.crop.x * imageScale,
-      imageY + frame.crop.y * imageScale,
-      frame.crop.width * imageScale,
-      frame.crop.height * imageScale,
-    );
+    drawCropOverlay(ctx, cssWidth, cssHeight);
   }
 
   createEffect(() => {
     state.previewViewportWidth;
     state.previewViewportHeight;
+    state.isCropMode;
+    state.cropDraft;
     previewContextFrame();
     previewFrame();
     drawFrame();
@@ -121,6 +255,7 @@ const Canvas: Component = () => {
   };
 
   const onWheel = (e: WheelEvent) => {
+    if (state.isCropMode) return;
     e.preventDefault();
     if (!stageRef) {
       throw new Error("preview stage is required for wheel zoom");
@@ -137,21 +272,90 @@ const Canvas: Component = () => {
   };
 
   const onPointerDown = (e: PointerEvent) => {
+    if (!stageRef) {
+      throw new Error("preview stage is required for pointer interaction");
+    }
+    if (state.isCropMode) {
+      const rect = stageRef.getBoundingClientRect();
+      const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
+      if (!handle) return;
+      gesture = {
+        kind: "crop",
+        pointerId: e.pointerId,
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        crop: getDraftCropRect(),
+      };
+      stageRef.setPointerCapture(e.pointerId);
+      drawFrame();
+      return;
+    }
     if (state.previewZoom <= 1) return;
-    panStart = { x: e.clientX, y: e.clientY };
+    gesture = { kind: "pan", x: e.clientX, y: e.clientY };
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    if (!panStart) return;
-    const dx = e.clientX - panStart.x;
-    const dy = e.clientY - panStart.y;
-    panPreview(dx, dy);
+    if (!stageRef) return;
+    if (!gesture) return;
+    if (gesture.kind === "pan") {
+      const dx = e.clientX - gesture.x;
+      const dy = e.clientY - gesture.y;
+      panPreview(dx, dy);
+      drawFrame();
+      gesture = { kind: "pan", x: e.clientX, y: e.clientY };
+      return;
+    }
+    const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
+    if (bounds.scale <= 0) {
+      throw new Error("crop mode requires visible image bounds");
+    }
+    const deltaX = Math.round((e.clientX - gesture.startX) / bounds.scale);
+    const deltaY = Math.round((e.clientY - gesture.startY) / bounds.scale);
+    const start = gesture.crop;
+    let next = start;
+    switch (gesture.handle) {
+      case "move":
+        next = {
+          ...start,
+          x: Math.min(Math.max(0, start.x + deltaX), state.canvasWidth - start.width),
+          y: Math.min(Math.max(0, start.y + deltaY), state.canvasHeight - start.height),
+        };
+        break;
+      case "top-left":
+        next = { x: start.x + deltaX, y: start.y + deltaY, width: start.width - deltaX, height: start.height - deltaY };
+        break;
+      case "top":
+        next = { ...start, y: start.y + deltaY, height: start.height - deltaY };
+        break;
+      case "top-right":
+        next = { x: start.x, y: start.y + deltaY, width: start.width + deltaX, height: start.height - deltaY };
+        break;
+      case "right":
+        next = { ...start, width: start.width + deltaX };
+        break;
+      case "bottom-right":
+        next = { ...start, width: start.width + deltaX, height: start.height + deltaY };
+        break;
+      case "bottom":
+        next = { ...start, height: start.height + deltaY };
+        break;
+      case "bottom-left":
+        next = { x: start.x + deltaX, y: start.y, width: start.width - deltaX, height: start.height + deltaY };
+        break;
+      case "left":
+        next = { x: start.x + deltaX, y: start.y, width: start.width - deltaX, height: start.height };
+        break;
+    }
+    updateCropDraft(next);
     drawFrame();
-    panStart = { x: e.clientX, y: e.clientY };
   };
 
-  const onPointerUp = () => {
-    panStart = null;
+  const onPointerUp = (e?: PointerEvent) => {
+    if (gesture?.kind === "crop" && stageRef && e && stageRef.hasPointerCapture(e.pointerId)) {
+      stageRef.releasePointerCapture(e.pointerId);
+    }
+    gesture = null;
   };
   return (
     <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
@@ -184,6 +388,57 @@ const Canvas: Component = () => {
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />
+          {state.isCropMode && (
+            <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
+              <span>Crop</span>
+              <span class="text-white/35">
+                {getDraftCropRect().width} × {getDraftCropRect().height}
+              </span>
+            </div>
+          )}
+          {!state.isCropMode && hasActiveCrop() && (
+            <div class="absolute right-4 top-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => startCropMode()}
+                class="rounded-full border border-white/10 bg-black/45 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition-colors hover:border-white/20 hover:text-white"
+              >
+                Edit crop
+              </button>
+              <button
+                type="button"
+                onClick={() => resetPreviewViewport()}
+                class="rounded-full border border-white/10 bg-black/45 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition-colors hover:border-white/20 hover:text-white"
+              >
+                Reset view
+              </button>
+            </div>
+          )}
+          {state.isCropMode && (
+            <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/55 px-2 py-2 backdrop-blur">
+              <button
+                type="button"
+                onClick={() => cancelCropMode()}
+                class="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/78 transition-colors hover:border-white/20 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => resetCrop()}
+                class="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/78 transition-colors hover:border-white/20 hover:text-white"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => applyCrop()}
+                class="rounded-full border border-stone-100 bg-stone-100 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-950 transition-colors hover:bg-white"
+              >
+                Apply crop
+              </button>
+            </div>
+          )}
           {state.layers.length === 0 && (
             <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">
               <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-white/80">

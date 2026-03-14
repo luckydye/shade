@@ -1,5 +1,5 @@
 [workspace]
-members = ["shade-core", "shade-gpu", "shade-io", "shade-cli", "shade-tauri", "shade-wasm"]
+members = ["shade-core", "shade-gpu", "shade-io", "shade-cli", "shade-p2p", "shade-tauri", "shade-wasm"]
 resolver = "2"
 
 [workspace.dependencies]

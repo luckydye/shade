@@ -1,0 +1,15 @@
+[package]
+name = "shade-p2p"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+iroh = "0.96.1"
+iroh-blobs = "0.98.0"
+iroh-tickets = "0.3.0"
+serde = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

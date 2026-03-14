@@ -125,6 +125,14 @@ export interface LayerInfo {
   opacity: number;
   blend_mode?: string;
   adjustments?: AdjustmentValues | null;
+  crop?: CropValues | null;
+}
+
+export interface CropValues {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export type PreviewFrame =

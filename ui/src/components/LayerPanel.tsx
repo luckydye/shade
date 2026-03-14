@@ -34,7 +34,7 @@ const LayerPanel: Component = () => {
                   {layer.visible ? "●" : "○"}
                 </button>
                 <span class="flex-1 truncate">
-                  {layer.kind === "image" ? "Image" : "Adjustment"}
+                  {layer.kind === "image" ? "Image" : layer.kind === "crop" ? "Crop" : "Adjustment"}
                 </span>
               </div>
             );
@@ -53,6 +53,12 @@ const LayerPanel: Component = () => {
           class="w-full mt-2 text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
         >
           + Add Curves
+        </button>
+        <button
+          onClick={() => void addLayer("crop")}
+          class="w-full mt-2 text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+        >
+          + Add Crop
         </button>
       </div>
     </div>

@@ -199,12 +199,23 @@ pub struct AffineTransform {
     pub rotation: f32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CropRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// A layer in the edit stack.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Layer {
     Image {
         texture_id: TextureId,
         transform: AffineTransform,
+    },
+    Crop {
+        rect: CropRect,
     },
     Adjustment {
         ops: Vec<AdjustmentOp>,
@@ -291,6 +302,20 @@ impl LayerStack {
                 texture_id,
                 transform: AffineTransform::default(),
             },
+            precision: LayerPrecision::Half,
+            blend_mode: BlendMode::Normal,
+            opacity: 1.0,
+            mask: None,
+            visible: true,
+        });
+        self.generation += 1;
+        idx
+    }
+
+    pub fn add_crop_layer(&mut self, rect: CropRect) -> usize {
+        let idx = self.layers.len();
+        self.layers.push(LayerEntry {
+            layer: Layer::Crop { rect },
             precision: LayerPrecision::Half,
             blend_mode: BlendMode::Normal,
             opacity: 1.0,

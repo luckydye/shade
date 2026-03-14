@@ -1,5 +1,5 @@
 import { Component, JSX, Show } from "solid-js";
-import { closeImage, openImageFile, state } from "../store/editor";
+import { addLayer, closeImage, findCropLayerIdx, openImageFile, selectLayer, state } from "../store/editor";
 
 const ACCEPTED = "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
 
@@ -55,6 +55,13 @@ const SaveIcon = () => (
     <path d="M12 4v9" />
     <path d="m7.5 9.5 4.5 4.5 4.5-4.5" />
     <path d="M5 18.5c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2" />
+  </svg>
+);
+
+const CropIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-4 w-4">
+    <path d="M8 4v12a2 2 0 0 0 2 2h10" />
+    <path d="M4 8h12a2 2 0 0 1 2 2v10" />
   </svg>
 );
 
@@ -117,9 +124,24 @@ export const Toolbar: Component = () => {
 
       <div>
         <input ref={fileInputRef} type="file" class="hidden" onChange={handleFileChange} />
-        <ActionButton label="Open" icon={<UploadIcon />} onClick={() => fileInputRef?.click()} />
+        <div class="flex items-center justify-end gap-2">
+          <Show when={state.canvasWidth > 0 && !state.isLoading && !state.isCropMode}>
+            <ActionButton
+              label={findCropLayerIdx() >= 0 ? "Edit Crop" : "Crop"}
+              icon={<CropIcon />}
+              onClick={() => {
+                const cropLayerIdx = findCropLayerIdx();
+                if (cropLayerIdx >= 0) {
+                  selectLayer(cropLayerIdx);
+                  return;
+                }
+                void addLayer("crop");
+              }}
+            />
+          </Show>
+          <ActionButton label="Open" icon={<UploadIcon />} onClick={() => fileInputRef?.click()} />
+        </div>
       </div>
     </header>
   );
 };
-
