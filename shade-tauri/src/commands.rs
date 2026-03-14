@@ -629,6 +629,28 @@ pub async fn set_layer_opacity(
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct DeleteLayerParams {
+    pub layer_idx: usize,
+}
+
+#[tauri::command]
+pub async fn delete_layer(
+    params: DeleteLayerParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    if params.layer_idx >= st.stack.layers.len() {
+        return Err("index out of bounds".into());
+    }
+    if let Some(mask_id) = st.stack.layers[params.layer_idx].mask {
+        st.stack.masks.remove(&mask_id);
+    }
+    st.stack.layers.remove(params.layer_idx);
+    st.stack.generation += 1;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct LayerStackInfo {
     pub layers: Vec<LayerEntryInfo>,
     pub canvas_width: u32,

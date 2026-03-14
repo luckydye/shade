@@ -512,6 +512,16 @@ export async function setLayerOpacity(idx: number, opacity: number) {
   await refreshPreview();
 }
 
+export async function deleteLayer(idx: number) {
+  await bridge.deleteLayer(idx);
+  await refreshLayerStack();
+  if (state.layers.length === 0) {
+    setPreviewFrame(null);
+    setPreviewContextFrame(null);
+  }
+  await refreshPreview();
+}
+
 export async function applyEdit(params: Record<string, unknown>) {
   const layerIdx = params.layer_idx;
   if (typeof layerIdx !== "number") {

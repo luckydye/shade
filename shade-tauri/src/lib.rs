@@ -35,6 +35,7 @@ pub fn run() {
             commands::render_preview_float16,
             commands::apply_edit,
             commands::add_layer,
+            commands::delete_layer,
             commands::set_layer_visible,
             commands::set_layer_opacity,
             commands::get_layer_stack,

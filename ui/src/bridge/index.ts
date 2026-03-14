@@ -320,6 +320,15 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
   await workerCall({ type: "set_layer_opacity", layerIdx: idx, opacity }, "layer_updated");
 }
 
+export async function deleteLayer(idx: number): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("delete_layer", { params: { layer_idx: idx } });
+    return;
+  }
+  throw new Error("deleteLayer is not implemented for WASM");
+}
+
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
 export async function getThumbnail(path: string): Promise<string> {
   if (await isTauriRuntime()) {

@@ -2,6 +2,7 @@ import { Component, JSX, Show, createEffect, createSignal, on } from "solid-js";
 import {
   addLayer,
   applyEdit,
+  deleteLayer,
   findCropLayerIdx,
   isDrawerOpen,
   selectLayer,
@@ -236,6 +237,16 @@ const CropIcon = () => (
   <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
     <path d="M8 4v12a2 2 0 0 0 2 2h10" />
     <path d="M4 8h12a2 2 0 0 1 2 2v10" />
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+    <path d="M4 7h16" />
+    <path d="M9 7V5.5c0-.8.7-1.5 1.5-1.5h3c.8 0 1.5.7 1.5 1.5V7" />
+    <path d="M7.5 7 8.2 18c.1 1.1 1 2 2.1 2h3.4c1.1 0 2-.9 2.1-2L16.5 7" />
+    <path d="M10 11v5" />
+    <path d="M14 11v5" />
   </svg>
 );
 
@@ -525,6 +536,13 @@ const Inspector: Component = () => {
     setIsDrawerOpen(true);
   };
 
+  const handleDeleteSelectedLayer = async () => {
+    if (state.selectedLayerIdx < 0) {
+      throw new Error("cannot delete without a selected layer");
+    }
+    await deleteLayer(state.selectedLayerIdx);
+  };
+
 
   const renderLayerBody = () => {
     switch (selectedFocus()) {
@@ -744,9 +762,7 @@ const Inspector: Component = () => {
                     ? "Curves"
                     : "Adjustment";
                 return (
-                  <button
-                    type="button"
-                    onClick={() => selectLayer(realIdx)}
+                  <div
                     class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
                       state.selectedLayerIdx === realIdx
                         ? "border-white/16 bg-white/12 text-white"
@@ -762,11 +778,26 @@ const Inspector: Component = () => {
                     >
                       {layer.visible ? "●" : "○"}
                     </span>
-                    <span class="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]">
+                    <button
+                      type="button"
+                      onClick={() => selectLayer(realIdx)}
+                      class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
+                    >
                       {layerName}
-                    </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteLayer(realIdx);
+                      }}
+                      class="inline-flex h-7 w-7 items-center justify-center text-white/28 transition-colors hover:text-white"
+                      title="Delete layer"
+                    >
+                      <TrashIcon />
+                    </button>
                     <span class="text-[11px] text-white/34">{realIdx + 1}</span>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -806,6 +837,16 @@ const Inspector: Component = () => {
                   </div>
                 }
               >
+                <div class="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteSelectedLayer()}
+                    class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+                  >
+                    <TrashIcon />
+                    Delete Layer
+                  </button>
+                </div>
                 <div class="flex flex-col gap-3">
                   <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
                   <Slider
@@ -957,6 +998,16 @@ const Inspector: Component = () => {
               </Show>
             }
           >
+            <div class="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleDeleteSelectedLayer()}
+                class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
+              >
+                <TrashIcon />
+                Delete Layer
+              </button>
+            </div>
             <CropPanel />
           </Show>
         </div>
@@ -984,12 +1035,32 @@ const Inspector: Component = () => {
                 fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
               >
                 <div class="px-1">
+                  <div class="pb-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteSelectedLayer()}
+                      class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors active:bg-white/[0.08]"
+                    >
+                      <TrashIcon />
+                      Delete Layer
+                    </button>
+                  </div>
                   <div class="pb-4">{renderLayerBody()}</div>
                 </div>
               </Show>
             }
           >
             <div class="px-1">
+              <div class="pb-3">
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteSelectedLayer()}
+                  class="inline-flex min-h-10 items-center gap-2 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors active:bg-white/[0.08]"
+                >
+                  <TrashIcon />
+                  Delete Layer
+                </button>
+              </div>
               <CropPanel />
             </div>
           </Show>

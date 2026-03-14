@@ -1,5 +1,5 @@
 import { Component, For } from "solid-js";
-import { state, selectLayer, setLayerVisible, refreshLayerStack, addLayer } from "../store/editor";
+import { state, selectLayer, setLayerVisible, refreshLayerStack, addLayer, deleteLayer } from "../store/editor";
 
 const LayerPanel: Component = () => {
   const addAdjustmentLayer = async () => {
@@ -36,6 +36,13 @@ const LayerPanel: Component = () => {
                 <span class="flex-1 truncate">
                   {layer.kind === "image" ? "Image" : layer.kind === "crop" ? "Crop" : "Adjustment"}
                 </span>
+                <button
+                  class="text-gray-500 transition-colors hover:text-white"
+                  onClick={(e) => { e.stopPropagation(); void deleteLayer(realIdx); }}
+                  title="Delete layer"
+                >
+                  ×
+                </button>
               </div>
             );
           }}
