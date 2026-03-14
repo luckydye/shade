@@ -5,8 +5,9 @@ use shade_core::{
     VignetteParams,
 };
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 
 #[cfg(target_os = "ios")]
 extern "C" {
@@ -194,6 +195,59 @@ pub struct ThumbnailJob {
     pub response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
 }
 
+type ThumbnailResponse = tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>;
+type ThumbnailPending = HashMap<String, Vec<ThumbnailResponse>>;
+type ThumbnailState = (VecDeque<String>, ThumbnailPending);
+
+pub struct PendingThumbnailJob {
+    pub path: String,
+    pub responses: Vec<ThumbnailResponse>,
+}
+
+pub struct ThumbnailQueue {
+    jobs: Mutex<ThumbnailState>,
+    has_jobs: Condvar,
+}
+
+impl ThumbnailQueue {
+    pub fn new() -> Self {
+        Self {
+            jobs: Mutex::new((VecDeque::new(), HashMap::new())),
+            has_jobs: Condvar::new(),
+        }
+    }
+
+    pub fn push(&self, job: ThumbnailJob) {
+        let mut jobs = self.jobs.lock().unwrap();
+        let (order, pending) = &mut *jobs;
+        if let Some(responses) = pending.get_mut(&job.path) {
+            responses.push(job.response);
+            if let Some(existing_idx) = order.iter().position(|path| path == &job.path) {
+                order.remove(existing_idx);
+            }
+            order.push_back(job.path);
+        } else {
+            pending.insert(job.path.clone(), vec![job.response]);
+            order.push_back(job.path);
+        }
+        self.has_jobs.notify_one();
+    }
+
+    pub fn pop_latest(&self) -> PendingThumbnailJob {
+        let mut jobs = self.jobs.lock().unwrap();
+        loop {
+            let (order, pending) = &mut *jobs;
+            if let Some(path) = order.pop_back() {
+                let responses = pending
+                    .remove(&path)
+                    .expect("thumbnail queue pending entry must exist");
+                return PendingThumbnailJob { path, responses };
+            }
+            jobs = self.has_jobs.wait(jobs).unwrap();
+        }
+    }
+}
+
 pub enum RenderJob {
     Preview {
         stack: LayerStack,
@@ -248,21 +302,24 @@ fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
     Ok(jpeg)
 }
 
-pub fn spawn_thumbnail_workers() -> crossbeam_channel::Sender<ThumbnailJob> {
-    let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailJob>();
+pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue> {
+    let queue = Arc::new(ThumbnailQueue::new());
     for worker_idx in 0..3 {
-        let worker_receiver = receiver.clone();
+        let worker_queue = queue.clone();
         std::thread::Builder::new()
             .name(format!("shade-thumbnail-{worker_idx}"))
             .spawn(move || {
-                while let Ok(job) = worker_receiver.recv() {
+                loop {
+                    let job = worker_queue.pop_latest();
                     let result = generate_desktop_thumbnail(&job.path);
-                    let _ = job.response.send(result);
+                    for response in job.responses {
+                        let _ = response.send(result.clone());
+                    }
                 }
             })
             .expect("failed to spawn thumbnail worker thread");
     }
-    sender
+    queue
 }
 
 pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
@@ -1084,8 +1141,7 @@ pub async fn get_thumbnail<R: tauri::Runtime>(
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     thumbnail_service
         .0
-        .send(ThumbnailJob { path, response: response_tx })
-        .map_err(|e| e.to_string())?;
+        .push(ThumbnailJob { path, response: response_tx });
     response_rx.await.map_err(|e| e.to_string())?
 }
 

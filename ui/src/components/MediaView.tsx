@@ -1,4 +1,4 @@
-import { Component, createEffect, createResource, createSignal, For, onCleanup, onMount, Suspense } from "solid-js";
+import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { addMediaLibrary, listLibraryImages, listMediaLibraries, removeMediaLibrary } from "../bridge/index";
 import { resolveMediaSrc } from "../media-source";
@@ -98,11 +98,19 @@ const ImageTile: Component<{ path: string }> = (props) => {
 };
 
 export const MediaView: Component = () => {
+  const TILE_MIN_WIDTH = 160;
+  const GRID_GAP = 12;
+  const TILE_LABEL_HEIGHT = 24;
+  const OVERSCAN_ROWS = 2;
   const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
   const [images, { refetch: refetchImages }] = createResource(selectedLibraryId, listLibraryImages);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [viewportHeight, setViewportHeight] = createSignal(0);
+  const [viewportWidth, setViewportWidth] = createSignal(0);
+  const [scrollTop, setScrollTop] = createSignal(0);
+  let scrollRef!: HTMLDivElement;
 
   createEffect(() => {
     const availableLibraries = libraries();
@@ -116,6 +124,53 @@ export const MediaView: Component = () => {
   });
 
   const selectedLibrary = () => libraries()?.find((library) => library.id === selectedLibraryId()) ?? null;
+  const columns = createMemo(() => Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))));
+  const tileWidth = createMemo(() => {
+    const width = viewportWidth();
+    const columnCount = columns();
+    if (width <= 0) return TILE_MIN_WIDTH;
+    return (width - GRID_GAP * (columnCount - 1)) / columnCount;
+  });
+  const rowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
+  const totalRows = createMemo(() => Math.ceil((images()?.length ?? 0) / columns()));
+  const visibleRowRange = createMemo(() => {
+    const height = viewportHeight();
+    const currentRowHeight = rowHeight();
+    if (height <= 0 || currentRowHeight <= 0) {
+      return { start: 0, end: 0 };
+    }
+    const start = Math.max(0, Math.floor(scrollTop() / currentRowHeight) - OVERSCAN_ROWS);
+    const end = Math.min(
+      totalRows(),
+      Math.ceil((scrollTop() + height) / currentRowHeight) + OVERSCAN_ROWS,
+    );
+    return { start, end };
+  });
+  const visibleImages = createMemo(() => {
+    const allImages = images() ?? [];
+    const { start, end } = visibleRowRange();
+    const startIdx = start * columns();
+    const endIdx = Math.min(allImages.length, end * columns());
+    return allImages.slice(startIdx, endIdx);
+  });
+  const offsetY = createMemo(() => visibleRowRange().start * rowHeight());
+
+  onMount(() => {
+    const updateViewport = () => {
+      setViewportHeight(scrollRef.clientHeight);
+      setViewportWidth(scrollRef.clientWidth - 48);
+    };
+    updateViewport();
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(scrollRef);
+    onCleanup(() => observer.disconnect());
+  });
+
+  createEffect(() => {
+    selectedLibraryId();
+    setScrollTop(0);
+    if (scrollRef) scrollRef.scrollTop = 0;
+  });
 
   async function handleAddLibrary() {
     if (isSubmitting()) return;
@@ -209,16 +264,30 @@ export const MediaView: Component = () => {
           )}
         </div>
       </div>
-      <div class="flex-1 overflow-y-auto p-6">
+      <div
+        ref={scrollRef!}
+        class="media-scroll flex-1 overflow-y-auto p-6"
+        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      >
         <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-            <For
-              each={images()}
-              fallback={<p class="col-span-full text-sm text-white/30">No images found in {selectedLibrary()?.name ?? "this library"}.</p>}
-            >
-              {(path) => <ImageTile path={path} />}
-            </For>
-          </div>
+          <Show
+            when={(images()?.length ?? 0) > 0}
+            fallback={<p class="text-sm text-white/30">No images found in {selectedLibrary()?.name ?? "this library"}.</p>}
+          >
+            <div style={{ height: `${totalRows() * rowHeight()}px`, position: "relative" }}>
+              <div
+                class="grid gap-3"
+                style={{
+                  "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))`,
+                  transform: `translateY(${offsetY()}px)`,
+                }}
+              >
+                <For each={visibleImages()}>
+                  {(path) => <ImageTile path={path} />}
+                </For>
+              </div>
+            </div>
+          </Show>
         </Suspense>
       </div>
     </div>

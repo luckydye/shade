@@ -55,3 +55,28 @@ input.slider::-moz-range-thumb {
   background: var(--slider-accent);
   box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08);
 }
+
+.media-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.28) rgb(255 255 255 / 0.05);
+}
+
+.media-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+
+.media-scroll::-webkit-scrollbar-track {
+  background: rgb(255 255 255 / 0.05);
+}
+
+.media-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.28);
+  background-clip: padding-box;
+}
+
+.media-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.4);
+  background-clip: padding-box;
+}

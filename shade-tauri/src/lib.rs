@@ -2,7 +2,7 @@ mod commands;
 mod photos;
 
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
-pub struct ThumbnailService(pub crossbeam_channel::Sender<commands::ThumbnailJob>);
+pub struct ThumbnailService(pub std::sync::Arc<commands::ThumbnailQueue>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
