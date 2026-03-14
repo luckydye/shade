@@ -366,6 +366,10 @@ export interface MediaLibrary {
   removable: boolean;
 }
 
+export interface PresetInfo {
+  name: string;
+}
+
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
@@ -397,6 +401,31 @@ export async function removeMediaLibrary(id: string): Promise<void> {
     return;
   }
   throw new Error("removeMediaLibrary is only implemented for Tauri");
+}
+
+export async function listPresets(): Promise<PresetInfo[]> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_presets") as Promise<PresetInfo[]>;
+  }
+  throw new Error("listPresets is only implemented for Tauri");
+}
+
+export async function savePreset(name: string): Promise<PresetInfo> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("save_preset", { name }) as Promise<PresetInfo>;
+  }
+  throw new Error("savePreset is only implemented for Tauri");
+}
+
+export async function loadPreset(name: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("load_preset", { name });
+    return;
+  }
+  throw new Error("loadPreset is only implemented for Tauri");
 }
 
 export async function addLayer(kind: string): Promise<number> {

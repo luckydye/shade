@@ -58,6 +58,33 @@ fn media_library_config_path() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(".config/shade/config.json"))
 }
 
+fn presets_dir_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".config/shade/presets"))
+}
+
+fn preset_file_path(name: &str) -> Result<PathBuf, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("preset name cannot be empty".into());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
+        return Err("preset name contains invalid path characters".into());
+    }
+    Ok(presets_dir_path()?.join(format!("{trimmed}.json")))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PresetFile {
+    version: u32,
+    layers: Vec<shade_core::LayerEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PresetInfo {
+    pub name: String,
+}
+
 fn load_media_library_config() -> Result<MediaLibraryConfig, String> {
     let path = media_library_config_path()?;
     if !path.exists() {
@@ -1200,6 +1227,81 @@ pub async fn remove_media_library(id: String) -> Result<(), String> {
         return Err(format!("unknown media library: {id}"));
     }
     save_media_library_config(&config)
+}
+
+#[tauri::command]
+pub async fn list_presets() -> Result<Vec<PresetInfo>, String> {
+    let dir = presets_dir_path()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut presets = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        presets.push(PresetInfo { name: stem.to_string() });
+    }
+    presets.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(presets)
+}
+
+#[tauri::command]
+pub async fn save_preset(
+    name: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<PresetInfo, String> {
+    let path = preset_file_path(&name)?;
+    let parent = path.parent().ok_or_else(|| format!("invalid preset path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let st = state.lock().unwrap();
+    let layers = st
+        .stack
+        .layers
+        .iter()
+        .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    let file = PresetFile { version: 1, layers };
+    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(PresetInfo { name: name.trim().to_string() })
+}
+
+#[tauri::command]
+pub async fn load_preset(
+    name: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    let path = preset_file_path(&name)?;
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let file: PresetFile = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    if file.version != 1 {
+        return Err(format!("unsupported preset version: {}", file.version));
+    }
+    let mut st = state.lock().unwrap();
+    let image_layers: Vec<_> = st
+        .stack
+        .layers
+        .iter()
+        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    if image_layers.is_empty() {
+        return Err("cannot load a preset without a loaded image".into());
+    }
+    st.stack.layers = image_layers;
+    st.stack.layers.extend(file.layers);
+    st.stack.generation += 1;
+    Ok(())
 }
 
 #[tauri::command]

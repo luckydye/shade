@@ -30,6 +30,9 @@ pub fn run() {
             commands::list_library_images,
             commands::add_media_library,
             commands::remove_media_library,
+            commands::list_presets,
+            commands::save_preset,
+            commands::load_preset,
             commands::get_thumbnail,
         ])
         .run(tauri::generate_context!())

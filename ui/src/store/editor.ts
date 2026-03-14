@@ -728,6 +728,20 @@ export async function addLayer(kind: string) {
   await refreshPreview();
 }
 
+export async function listPresets() {
+  return bridge.listPresets();
+}
+
+export async function savePreset(name: string) {
+  return bridge.savePreset(name);
+}
+
+export async function loadPreset(name: string) {
+  await bridge.loadPreset(name);
+  await refreshLayerStack();
+  await refreshPreview();
+}
+
 async function performPreviewRefresh() {
   const queued = previewRefreshQueued;
   if (!queued) return;

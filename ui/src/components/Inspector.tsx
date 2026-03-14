@@ -5,7 +5,10 @@ import {
   deleteLayer,
   findCropLayerIdx,
   isDrawerOpen,
+  listPresets,
+  loadPreset,
   previewContextFrame,
+  savePreset,
   selectLayer,
   setIsDrawerOpen,
   setLayerVisible,
@@ -13,6 +16,7 @@ import {
 } from "../store/editor";
 
 type MobileLayerFocus = "tone" | "curves" | "grain" | "vignette" | "sharpen" | "hsl";
+type InspectorTab = "edit" | "presets";
 
 interface SliderProps {
   label: string;
@@ -309,6 +313,11 @@ const Inspector: Component = () => {
   const [curvePointCache, setCurvePointCache] = createSignal(new Map<number, ControlPoint[]>());
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
+  const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
+  const [presets, setPresets] = createSignal<{ name: string }[]>([]);
+  const [presetName, setPresetName] = createSignal("");
+  const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
+  const [isPresetBusy, setIsPresetBusy] = createSignal(false);
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
   const selectedCropLayer = () => {
@@ -615,6 +624,49 @@ const Inspector: Component = () => {
     await deleteLayer(state.selectedLayerIdx);
   };
 
+  const refreshPresetList = async () => {
+    try {
+      setPresets(await listPresets());
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  createEffect(() => {
+    if (inspectorTab() !== "presets") return;
+    void refreshPresetList();
+  });
+
+  const handleSavePreset = async () => {
+    const name = presetName().trim();
+    if (!name) {
+      setPresetStatus("Preset name cannot be empty");
+      return;
+    }
+    setIsPresetBusy(true);
+    try {
+      await savePreset(name);
+      setPresetStatus(`Saved ${name}`);
+      await refreshPresetList();
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsPresetBusy(false);
+    }
+  };
+
+  const handleLoadPreset = async (name: string) => {
+    setIsPresetBusy(true);
+    try {
+      await loadPreset(name);
+      setPresetStatus(`Loaded ${name}`);
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsPresetBusy(false);
+    }
+  };
+
 
   const renderLayerBody = () => {
     switch (selectedFocus()) {
@@ -817,248 +869,322 @@ const Inspector: Component = () => {
     );
   };
 
+  const PresetsPanel: Component = () => (
+    <div class="flex flex-col gap-4 pt-1">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Presets</div>
+        <button
+          type="button"
+          onClick={() => void refreshPresetList()}
+          class="text-[10px] font-bold uppercase tracking-[0.08em] text-white/40 transition-colors hover:text-white/70"
+        >
+          Refresh
+        </button>
+      </div>
+      <div class="flex gap-2">
+        <input
+          type="text"
+          value={presetName()}
+          onInput={(event) => setPresetName(event.currentTarget.value)}
+          placeholder="Preset name"
+          class="min-h-10 flex-1 border border-white/8 bg-black/30 px-3 text-[13px] font-medium text-white outline-none transition-colors placeholder:text-white/20"
+        />
+        <button
+          type="button"
+          disabled={isPresetBusy() || state.canvasWidth <= 0}
+          onClick={() => void handleSavePreset()}
+          class="min-h-10 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[10px] font-bold uppercase tracking-[0.05em] text-white/70 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100 disabled:opacity-40"
+        >
+          Save
+        </button>
+      </div>
+      <Show when={presetStatus()}>
+        {(status) => <div class="text-[11px] font-medium text-white/45">{status()}</div>}
+      </Show>
+      <div class="flex flex-col gap-2">
+        <Show
+          when={presets().length > 0}
+          fallback={<div class="border border-dashed border-white/10 bg-white/[0.02] px-3 py-4 text-sm text-white/38">No presets saved yet.</div>}
+        >
+          {presets().map((preset) => (
+            <div class="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5">
+              <div class="min-w-0 flex-1 truncate text-[13px] font-semibold text-white/80">{preset.name}</div>
+              <button
+                type="button"
+                disabled={isPresetBusy() || state.canvasWidth <= 0}
+                onClick={() => void handleLoadPreset(preset.name)}
+                class="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-white/65 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100 disabled:opacity-40"
+              >
+                Load
+              </button>
+            </div>
+          ))}
+        </Show>
+      </div>
+    </div>
+  );
+
+  const DesktopEditPanel: Component = () => (
+    <div>
+      <div class="mb-4">
+        <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
+        <div class="mt-3 flex flex-col gap-1">
+          {[...state.layers].reverse().map((layer, reverseIdx) => {
+            const realIdx = state.layers.length - 1 - reverseIdx;
+            const layerName = layer.kind === "image"
+              ? "Image"
+              : layer.kind === "crop"
+                ? "Crop"
+              : layer.adjustments?.curves
+                ? "Curves"
+                : "Adjustment";
+            return (
+              <div
+                class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
+                  state.selectedLayerIdx === realIdx
+                    ? "border-white/16 bg-white/12 text-white"
+                    : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
+                }`}
+              >
+                <span
+                  class={`inline-flex w-4 items-center justify-center text-xs leading-none ${layer.visible ? "text-stone-100" : "text-white/30"}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void setLayerVisible(realIdx, !layer.visible);
+                  }}
+                >
+                  {layer.visible ? "●" : "○"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectLayer(realIdx)}
+                  class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
+                >
+                  {layerName}
+                </button>
+                <Show when={layer.kind !== "image"}>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteLayer(realIdx);
+                    }}
+                    class="inline-flex h-7 w-7 items-center justify-center text-white/28 transition-colors hover:text-white"
+                    title="Delete layer"
+                  >
+                    <TrashIcon />
+                  </button>
+                </Show>
+                <span class="text-[11px] text-white/34">{realIdx + 1}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void addLayer("adjustment")}
+            class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
+          >
+            <span class="[&>svg]:h-4 [&>svg]:w-4"><SparkIcon /></span>
+            <span>Add Adjustments</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void addLayer("crop")}
+            class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
+          >
+            <span class="[&>svg]:h-4 [&>svg]:w-4"><CropIcon /></span>
+            <span>Add Crop</span>
+          </button>
+        </div>
+      </div>
+
+      <Show
+        when={selectedCropLayer()}
+        fallback={
+          <Show
+            when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+            fallback={
+              <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
+                Open an image and select a layer to edit.
+              </div>
+            }
+          >
+            <div class="flex flex-col gap-3">
+              <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
+              <Slider
+                label="Exposure"
+                icon={<SparkIcon />}
+                value={tone().exposure}
+                defaultValue={DEFAULT_TONE.exposure}
+                min={-5}
+                max={5}
+                step={0.05}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ exposure: value });
+                }}
+              />
+              <Slider
+                label="Gamma"
+                icon={<ToneIcon />}
+                value={tone().gamma}
+                defaultValue={DEFAULT_TONE.gamma}
+                min={0.1}
+                max={3}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ gamma: value });
+                }}
+              />
+              <Slider
+                label="Contrast"
+                icon={<CircleIcon />}
+                value={tone().contrast}
+                defaultValue={DEFAULT_TONE.contrast}
+                min={-1.0}
+                max={1.0}
+                step={0.01}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ contrast: value });
+                }}
+              />
+              <Slider
+                label="Blacks"
+                icon={<ToneIcon />}
+                value={tone().blacks}
+                defaultValue={DEFAULT_TONE.blacks}
+                min={-0.05}
+                max={0.1}
+                step={0.001}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ blacks: value });
+                }}
+              />
+              <Slider
+                label="Whites"
+                icon={<ToneIcon />}
+                value={tone().whites}
+                defaultValue={DEFAULT_TONE.whites}
+                min={-0.1}
+                max={0.2}
+                step={0.001}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyTone({ whites: value });
+                }}
+              />
+              <Slider
+                label="Saturation"
+                icon={<DropletIcon />}
+                value={color().saturation}
+                defaultValue={DEFAULT_COLOR.saturation}
+                valueLabel={valueLabel(color().saturation)}
+                min={0}
+                max={2}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyColor({ saturation: value });
+                }}
+              />
+              <Slider
+                label="Temperature"
+                icon={<ToneIcon />}
+                value={color().temperature}
+                defaultValue={DEFAULT_COLOR.temperature}
+                valueLabel={valueLabel(color().temperature)}
+                min={-1}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyColor({ temperature: value });
+                }}
+              />
+              <Slider
+                label="Tint"
+                icon={<ToneIcon />}
+                value={color().tint}
+                defaultValue={DEFAULT_COLOR.tint}
+                valueLabel={valueLabel(color().tint)}
+                min={-1}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyColor({ tint: value });
+                }}
+              />
+              <CurvesEditor />
+              <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
+              <HslSection />
+              <Slider
+                label="Vignette"
+                icon={<CircleIcon />}
+                value={vignette().amount}
+                defaultValue={DEFAULT_VIGNETTE.amount}
+                valueLabel={valueLabel(vignette().amount)}
+                min={0}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
+                }}
+              />
+              <Slider
+                label="Sharpen"
+                icon={<ToneIcon />}
+                value={sharpen().amount}
+                defaultValue={DEFAULT_SHARPEN.amount}
+                valueLabel={valueLabel(sharpen().amount)}
+                min={0}
+                max={2}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
+                }}
+              />
+              <Slider
+                label="Grain"
+                icon={<GrainIcon />}
+                value={grain().amount}
+                defaultValue={DEFAULT_GRAIN.amount}
+                valueLabel={valueLabel(grain().amount)}
+                min={0}
+                max={1}
+                onChange={(value) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
+                }}
+              />
+            </div>
+          </Show>
+        }
+      >
+        <CropPanel />
+      </Show>
+    </div>
+  );
+
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
         <div class="flex-1 overflow-y-auto px-4 py-4">
-          <div class="mb-4">
-            <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Layers</div>
-            <div class="mt-3 flex flex-col gap-1">
-              {[...state.layers].reverse().map((layer, reverseIdx) => {
-                const realIdx = state.layers.length - 1 - reverseIdx;
-                const layerName = layer.kind === "image"
-                  ? "Image"
-                  : layer.kind === "crop"
-                    ? "Crop"
-                  : layer.adjustments?.curves
-                    ? "Curves"
-                    : "Adjustment";
-                return (
-                  <div
-                    class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
-                      state.selectedLayerIdx === realIdx
-                        ? "border-white/16 bg-white/12 text-white"
-                        : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    <span
-                      class={`inline-flex w-4 items-center justify-center text-xs leading-none ${layer.visible ? "text-stone-100" : "text-white/30"}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void setLayerVisible(realIdx, !layer.visible);
-                      }}
-                    >
-                      {layer.visible ? "●" : "○"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => selectLayer(realIdx)}
-                      class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
-                    >
-                      {layerName}
-                    </button>
-                    <Show when={layer.kind !== "image"}>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void deleteLayer(realIdx);
-                        }}
-                        class="inline-flex h-7 w-7 items-center justify-center text-white/28 transition-colors hover:text-white"
-                        title="Delete layer"
-                      >
-                        <TrashIcon />
-                      </button>
-                    </Show>
-                    <span class="text-[11px] text-white/34">{realIdx + 1}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div class="mt-3 grid grid-cols-2 gap-2">
+          <div class="mb-4 flex gap-1 rounded-xl border border-white/8 bg-white/[0.03] p-1">
+            {(["edit", "presets"] as const).map((tab) => (
               <button
                 type="button"
-                onClick={() => void addLayer("adjustment")}
-                class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
+                onClick={() => setInspectorTab(tab)}
+                class={`flex-1 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] transition-colors ${
+                  inspectorTab() === tab ? "bg-white/10 text-stone-100" : "text-white/34 hover:text-white/60"
+                }`}
               >
-                <span class="[&>svg]:h-4 [&>svg]:w-4"><SparkIcon /></span>
-                <span>Add Adjustments</span>
+                {tab}
               </button>
-              <button
-                type="button"
-                onClick={() => void addLayer("crop")}
-                class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100"
-              >
-                <span class="[&>svg]:h-4 [&>svg]:w-4"><CropIcon /></span>
-                <span>Add Crop</span>
-              </button>
-            </div>
+            ))}
           </div>
-
-          <Show
-            when={selectedCropLayer()}
-            fallback={
-              <Show
-                when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-                fallback={
-                  <div class="border border-dashed border-white/14 bg-white/[0.03] px-4 py-4 text-center text-sm text-white/42">
-                    Open an image and select a layer to edit.
-                  </div>
-                }
-              >
-                <div class="flex flex-col gap-3">
-                  <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">Adjustments</div>
-                  <Slider
-                    label="Exposure"
-                    icon={<SparkIcon />}
-                    value={tone().exposure}
-                    defaultValue={DEFAULT_TONE.exposure}
-                    min={-5}
-                    max={5}
-                    step={0.05}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ exposure: value });
-                    }}
-                  />
-                  <Slider
-                    label="Gamma"
-                    icon={<ToneIcon />}
-                    value={tone().gamma}
-                    defaultValue={DEFAULT_TONE.gamma}
-                    min={0.1}
-                    max={3}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ gamma: value });
-                    }}
-                  />
-                  <Slider
-                    label="Contrast"
-                    icon={<CircleIcon />}
-                    value={tone().contrast}
-                    defaultValue={DEFAULT_TONE.contrast}
-                    min={-1.0}
-                    max={1.0}
-                    step={0.01}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ contrast: value });
-                    }}
-                  />
-                  <Slider
-                    label="Blacks"
-                    icon={<ToneIcon />}
-                    value={tone().blacks}
-                    defaultValue={DEFAULT_TONE.blacks}
-                    min={-0.05}
-                    max={0.1}
-                    step={0.001}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ blacks: value });
-                    }}
-                  />
-                  <Slider
-                    label="Whites"
-                    icon={<ToneIcon />}
-                    value={tone().whites}
-                    defaultValue={DEFAULT_TONE.whites}
-                    min={-0.1}
-                    max={0.2}
-                    step={0.001}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyTone({ whites: value });
-                    }}
-                  />
-                  <Slider
-                    label="Saturation"
-                    icon={<DropletIcon />}
-                    value={color().saturation}
-                    defaultValue={DEFAULT_COLOR.saturation}
-                    valueLabel={valueLabel(color().saturation)}
-                    min={0}
-                    max={2}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyColor({ saturation: value });
-                    }}
-                  />
-                  <Slider
-                    label="Temperature"
-                    icon={<ToneIcon />}
-                    value={color().temperature}
-                    defaultValue={DEFAULT_COLOR.temperature}
-                    valueLabel={valueLabel(color().temperature)}
-                    min={-1}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyColor({ temperature: value });
-                    }}
-                  />
-                  <Slider
-                    label="Tint"
-                    icon={<ToneIcon />}
-                    value={color().tint}
-                    defaultValue={DEFAULT_COLOR.tint}
-                    valueLabel={valueLabel(color().tint)}
-                    min={-1}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyColor({ tint: value });
-                    }}
-                  />
-                  <CurvesEditor />
-                  <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">HSL Color Balance</div>
-                  <HslSection />
-                  <Slider
-                    label="Vignette"
-                    icon={<CircleIcon />}
-                    value={vignette().amount}
-                    defaultValue={DEFAULT_VIGNETTE.amount}
-                    valueLabel={valueLabel(vignette().amount)}
-                    min={0}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "vignette", vignette_amount: value });
-                    }}
-                  />
-                  <Slider
-                    label="Sharpen"
-                    icon={<ToneIcon />}
-                    value={sharpen().amount}
-                    defaultValue={DEFAULT_SHARPEN.amount}
-                    valueLabel={valueLabel(sharpen().amount)}
-                    min={0}
-                    max={2}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "sharpen", sharpen_amount: value });
-                    }}
-                  />
-                  <Slider
-                    label="Grain"
-                    icon={<GrainIcon />}
-                    value={grain().amount}
-                    defaultValue={DEFAULT_GRAIN.amount}
-                    valueLabel={valueLabel(grain().amount)}
-                    min={0}
-                    max={1}
-                    onChange={(value) => {
-                      selectedAdjustmentLayerOrThrow();
-                      void applyEdit({ layer_idx: state.selectedLayerIdx, op: "grain", grain_amount: value });
-                    }}
-                  />
-                </div>
-              </Show>
-            }
-          >
-            <CropPanel />
-          </Show>
+          {inspectorTab() === "presets" ? <PresetsPanel /> : <DesktopEditPanel />}
         </div>
       </div>
 
@@ -1076,21 +1202,40 @@ const Inspector: Component = () => {
         </div>
 
         <div class="px-4 pb-4">
-          <Show
-            when={selectedCropLayer()}
-            fallback={
-              <Show
-                when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-                fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
+          <div class="mb-4 flex gap-1 rounded-xl border border-white/8 bg-white/[0.03] p-1">
+            {(["edit", "presets"] as const).map((tab) => (
+              <button
+                type="button"
+                onClick={() => setInspectorTab(tab)}
+                class={`flex-1 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] transition-colors ${
+                  inspectorTab() === tab ? "bg-white/10 text-stone-100" : "text-white/34 hover:text-white/60"
+                }`}
               >
-                <div class="px-1">
-                  {renderLayerBody()}
-                </div>
-              </Show>
-            }
-          >
+                {tab}
+              </button>
+            ))}
+          </div>
+          <Show when={inspectorTab() === "presets"} fallback={
+            <Show
+              when={selectedCropLayer()}
+              fallback={
+                <Show
+                  when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                  fallback={<div class="px-1 pb-6 text-center text-sm text-white/42">Open an image and select a layer to edit.</div>}
+                >
+                  <div class="px-1">
+                    {renderLayerBody()}
+                  </div>
+                </Show>
+              }
+            >
+              <div class="px-1">
+                <CropPanel />
+              </div>
+            </Show>
+          }>
             <div class="px-1">
-              <CropPanel />
+              <PresetsPanel />
             </div>
           </Show>
         </div>
