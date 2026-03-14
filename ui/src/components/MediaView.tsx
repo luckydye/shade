@@ -1,16 +1,111 @@
-import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, Suspense } from "solid-js";
-import { PeerBrowser } from "./PeerBrowser";
-import { PeerDiscoveryPanel } from "./PeerDiscoveryPanel";
 import { open } from "@tauri-apps/plugin-dialog";
-import { addMediaLibrary, listLibraryImages, listMediaLibraries, removeMediaLibrary } from "../bridge/index";
+import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, Suspense } from "solid-js";
+import {
+  addMediaLibrary,
+  getPeerThumbnail,
+  listLibraryImages,
+  listMediaLibraries,
+  listPeerPictures,
+  removeMediaLibrary,
+  type MediaLibrary,
+  type SharedPicture,
+} from "../bridge/index";
 import { resolveMediaSrc } from "../media-source";
-import { openImage, state } from "../store/editor";
+import { openImage, openPeerImage, state } from "../store/editor";
+import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 
-const ImageTile: Component<{ path: string }> = (props) => {
+type PeerLibrary = {
+  id: string;
+  kind: "peer";
+  name: string;
+  path: null;
+  removable: true;
+  peerId: string;
+};
+
+type LibraryEntry = MediaLibrary | PeerLibrary;
+
+type MediaItem =
+  | { kind: "local"; id: string; name: string; path: string }
+  | { kind: "peer"; id: string; name: string; peerId: string };
+
+const TILE_MIN_WIDTH = 160;
+const GRID_GAP = 12;
+const TILE_LABEL_HEIGHT = 24;
+const OVERSCAN_ROWS = 2;
+
+function peerLibraryId(peerId: string) {
+  return `peer:${peerId}`;
+}
+
+function peerLibraryName(peerId: string) {
+  return `Peer ${peerId.slice(0, 8)}`;
+}
+
+function shortPeerId(peerId: string) {
+  if (peerId.length <= 18) {
+    return peerId;
+  }
+  return `${peerId.slice(0, 8)}...${peerId.slice(-8)}`;
+}
+
+function isPeerLibrary(library: LibraryEntry | null): library is PeerLibrary {
+  return library?.kind === "peer";
+}
+
+function pictureName(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
+function localMediaItem(path: string): MediaItem {
+  return {
+    kind: "local",
+    id: path,
+    name: pictureName(path),
+    path,
+  };
+}
+
+async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> {
+  if (!libraryId) {
+    return [];
+  }
+  if (libraryId.startsWith("peer:")) {
+    const peerId = libraryId.slice("peer:".length);
+    const pictures = await listPeerPictures(peerId);
+    return pictures.map((picture) => ({
+      kind: "peer",
+      id: picture.id,
+      name: picture.name,
+      peerId,
+    }));
+  }
+  const paths = await listLibraryImages(libraryId);
+  return paths.map(localMediaItem);
+}
+
+async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string> {
+  if (item.kind === "peer") {
+    if (signal.aborted) {
+      throw new DOMException("thumbnail load aborted", "AbortError");
+    }
+    return getPeerThumbnail(item.peerId, item.id);
+  }
+  return resolveMediaSrc(item.path, signal);
+}
+
+async function openMediaItem(item: MediaItem, src: string | null) {
+  if (item.kind === "peer") {
+    const picture: SharedPicture = { id: item.id, name: item.name };
+    await openPeerImage(item.peerId, picture, src);
+    return;
+  }
+  await openImage(item.path, src);
+}
+
+const ImageTile: Component<{ item: MediaItem }> = (props) => {
   const [isIntersecting, setIsIntersecting] = createSignal(false);
   const [src, setSrc] = createSignal<string | undefined>(undefined);
-  // PHAsset local identifiers (iOS) don't have a meaningful filename component.
-  const name = () => props.path.startsWith("/") ? (props.path.split("/").pop() ?? "") : null;
   const [loadError, setLoadError] = createSignal(false);
   let containerRef: HTMLButtonElement | undefined;
   let imgRef: HTMLImageElement | undefined;
@@ -30,42 +125,43 @@ const ImageTile: Component<{ path: string }> = (props) => {
     }
     const controller = new AbortController();
     setLoadError(false);
-    void resolveMediaSrc(props.path, controller.signal)
+    void loadItemSrc(props.item, controller.signal)
       .then((nextSrc) => setSrc(nextSrc))
-      .catch((error) => {
+      .catch(() => {
         if (controller.signal.aborted) {
           return;
         }
-        void error;
         setLoadError(true);
         errorTimer = setTimeout(() => setLoadError(false), 4000);
       });
     onCleanup(() => controller.abort());
   });
 
-  // Revoke blob URLs created for non-native formats.
   onCleanup(() => {
     const url = src();
-    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) URL.revokeObjectURL(url);
+    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) {
+      URL.revokeObjectURL(url);
+    }
     clearTimeout(errorTimer);
   });
 
   function handleClick() {
     setLoadError(false);
-    if (imgRef) imgRef.style.viewTransitionName = "active-media";
+    if (imgRef) {
+      imgRef.style.viewTransitionName = "active-media";
+    }
 
     const handleError = () => {
       setLoadError(true);
       errorTimer = setTimeout(() => setLoadError(false), 4000);
     };
 
-    // void the promise so startViewTransition captures the "after" state immediately
-    // (isLoading=true fires synchronously inside openImage), while still handling errors.
+    const currentSrc = src() ?? null;
     if (document.startViewTransition) {
-      document.startViewTransition(() => void openImage(props.path, src() ?? null).catch(handleError));
-    } else {
-      void openImage(props.path, src() ?? null).catch(handleError);
+      document.startViewTransition(() => void openMediaItem(props.item, currentSrc).catch(handleError));
+      return;
     }
+    void openMediaItem(props.item, currentSrc).catch(handleError);
   }
 
   return (
@@ -83,7 +179,7 @@ const ImageTile: Component<{ path: string }> = (props) => {
           <img
             ref={imgRef}
             src={src()}
-            alt={name() ?? undefined}
+            alt={props.item.name}
             class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
             loading="lazy"
           />
@@ -94,19 +190,16 @@ const ImageTile: Component<{ path: string }> = (props) => {
           </div>
         )}
       </div>
-      {name() && <span class="truncate px-0.5 text-[11px] text-white/40">{name()}</span>}
+      <span class="truncate px-0.5 text-[11px] text-white/40">{props.item.name}</span>
     </button>
   );
 };
 
 export const MediaView: Component = () => {
-  const TILE_MIN_WIDTH = 160;
-  const GRID_GAP = 12;
-  const TILE_LABEL_HEIGHT = 24;
-  const OVERSCAN_ROWS = 2;
   const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
-  const [images, { refetch: refetchImages }] = createResource(selectedLibraryId, listLibraryImages);
+  const [peerLibraries, setPeerLibraries] = createSignal<PeerLibrary[]>([]);
+  const [items, { refetch: refetchItems }] = createResource(selectedLibraryId, loadLibraryItems);
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [viewportHeight, setViewportHeight] = createSignal(0);
@@ -114,27 +207,52 @@ export const MediaView: Component = () => {
   const [scrollTop, setScrollTop] = createSignal(0);
   let scrollRef!: HTMLDivElement;
 
+  const discoveredPeerIds = createMemo(() => p2pState.peers.map((peer) => peer.endpoint_id));
+  const libraryEntries = createMemo<LibraryEntry[]>(() => [...(libraries() ?? []), ...peerLibraries()]);
+  const suggestedPeers = createMemo(() => {
+    const addedPeerIds = new Set(peerLibraries().map((library) => library.peerId));
+    return p2pState.peers.filter((peer) => !addedPeerIds.has(peer.endpoint_id));
+  });
+
   createEffect(() => {
-    const availableLibraries = libraries();
-    if (!availableLibraries?.length) {
+    const peerIds = new Set(discoveredPeerIds());
+    setPeerLibraries((current) => current.filter((library) => peerIds.has(library.peerId)));
+  });
+
+  createEffect(() => {
+    const availableLibraries = libraryEntries();
+    if (!availableLibraries.length) {
       setSelectedLibraryId(null);
       return;
     }
     const current = selectedLibraryId();
-    if (current && availableLibraries.some((library) => library.id === current)) return;
+    if (current && availableLibraries.some((library) => library.id === current)) {
+      return;
+    }
     setSelectedLibraryId(availableLibraries[0].id);
   });
 
-  const selectedLibrary = () => libraries()?.find((library) => library.id === selectedLibraryId()) ?? null;
+  const selectedLibrary = createMemo(() => (
+    libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null
+  ));
+  const selectedLibraryDetail = createMemo(() => {
+    const library = selectedLibrary();
+    if (!library) {
+      return "";
+    }
+    return isPeerLibrary(library) ? library.peerId : library.path ?? "";
+  });
   const columns = createMemo(() => Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))));
   const tileWidth = createMemo(() => {
     const width = viewportWidth();
     const columnCount = columns();
-    if (width <= 0) return TILE_MIN_WIDTH;
+    if (width <= 0) {
+      return TILE_MIN_WIDTH;
+    }
     return (width - GRID_GAP * (columnCount - 1)) / columnCount;
   });
   const rowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
-  const totalRows = createMemo(() => Math.ceil((images()?.length ?? 0) / columns()));
+  const totalRows = createMemo(() => Math.ceil((items()?.length ?? 0) / columns()));
   const visibleRowRange = createMemo(() => {
     const height = viewportHeight();
     const currentRowHeight = rowHeight();
@@ -148,16 +266,17 @@ export const MediaView: Component = () => {
     );
     return { start, end };
   });
-  const visibleImages = createMemo(() => {
-    const allImages = images() ?? [];
+  const visibleItems = createMemo(() => {
+    const allItems = items() ?? [];
     const { start, end } = visibleRowRange();
     const startIdx = start * columns();
-    const endIdx = Math.min(allImages.length, end * columns());
-    return allImages.slice(startIdx, endIdx);
+    const endIdx = Math.min(allItems.length, end * columns());
+    return allItems.slice(startIdx, endIdx);
   });
   const offsetY = createMemo(() => visibleRowRange().start * rowHeight());
 
   onMount(() => {
+    startP2pPolling();
     const updateViewport = () => {
       setViewportHeight(scrollRef.clientHeight);
       setViewportWidth(scrollRef.clientWidth - 48);
@@ -165,17 +284,24 @@ export const MediaView: Component = () => {
     updateViewport();
     const observer = new ResizeObserver(updateViewport);
     observer.observe(scrollRef);
-    onCleanup(() => observer.disconnect());
+    onCleanup(() => {
+      observer.disconnect();
+      stopP2pPolling();
+    });
   });
 
   createEffect(() => {
     selectedLibraryId();
     setScrollTop(0);
-    if (scrollRef) scrollRef.scrollTop = 0;
+    if (scrollRef) {
+      scrollRef.scrollTop = 0;
+    }
   });
 
   async function handleAddLibrary() {
-    if (isSubmitting()) return;
+    if (isSubmitting()) {
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
@@ -192,7 +318,7 @@ export const MediaView: Component = () => {
       const library = await addMediaLibrary(selectedPath);
       await refetchLibraries();
       setSelectedLibraryId(library.id);
-      await refetchImages();
+      await refetchItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -200,12 +326,46 @@ export const MediaView: Component = () => {
     }
   }
 
-  async function handleRemoveLibrary() {
-    const library = selectedLibrary();
-    if (!library?.removable) return;
+  async function handleAddPeerLibrary(peerId: string) {
+    if (isSubmitting()) {
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
+      const nextLibrary: PeerLibrary = {
+        id: peerLibraryId(peerId),
+        kind: "peer",
+        name: peerLibraryName(peerId),
+        path: null,
+        removable: true,
+        peerId,
+      };
+      setPeerLibraries((current) => {
+        if (current.some((library) => library.peerId === peerId)) {
+          return current;
+        }
+        return [...current, nextLibrary];
+      });
+      setSelectedLibraryId(nextLibrary.id);
+      await refetchItems();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRemoveLibrary() {
+    const library = selectedLibrary();
+    if (!library?.removable) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      if (isPeerLibrary(library)) {
+        setPeerLibraries((current) => current.filter((entry) => entry.id !== library.id));
+        return;
+      }
       await removeMediaLibrary(library.id);
       await refetchLibraries();
     } catch (err) {
@@ -216,18 +376,19 @@ export const MediaView: Component = () => {
   }
 
   return (
-    <div class="flex flex-1 flex-col overflow-hidden mt-[calc(env(safe-area-inset-top)+3.5rem)] md:mt-0">
+    <div class="mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0">
       <div class="border-b border-white/6 px-6 py-4">
         <div class="flex flex-col gap-4">
-          <h1 class="text-sm font-medium text-white/80">Media</h1>
-          <div class="grid gap-4 lg:grid-cols-2">
-            <PeerDiscoveryPanel />
-            <PeerBrowser />
+          <div class="flex items-center gap-3">
+            <h1 class="text-sm font-medium text-white/80">Media</h1>
+            <p class="truncate font-mono text-xs text-white/40">
+              {shortPeerId(p2pState.local_endpoint_id || "starting")}
+            </p>
           </div>
           <div class="flex items-center gap-8">
-            <h1 class="hidden md:block text-sm font-medium text-white/80">Libraries</h1>
+            <h1 class="hidden text-sm font-medium text-white/80 md:block">Libraries</h1>
             <div class="flex flex-1 gap-2 overflow-x-auto">
-              <For each={libraries()}>
+              <For each={libraryEntries()}>
                 {(library) => (
                   <button
                     type="button"
@@ -239,6 +400,18 @@ export const MediaView: Component = () => {
                     }`}
                   >
                     {library.name}
+                  </button>
+                )}
+              </For>
+              <For each={suggestedPeers()}>
+                {(peer) => (
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-full border border-dashed border-white/14 bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-white/60 transition-colors hover:border-white/24 hover:text-white"
+                    disabled={isSubmitting()}
+                    onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
+                  >
+                    {peerLibraryName(peer.endpoint_id)}
                   </button>
                 )}
               </For>
@@ -263,12 +436,10 @@ export const MediaView: Component = () => {
               </button>
             </div>
           </div>
-          {error() && (
-            <p class="text-sm text-red-300">{error()}</p>
-          )}
-          {selectedLibrary()?.path && (
-            <p class="truncate text-xs text-white/28">{selectedLibrary()!.path}</p>
-          )}
+          {error() && <p class="text-sm text-red-300">{error()}</p>}
+          <Show when={selectedLibraryDetail()}>
+            <p class="truncate text-xs text-white/28">{selectedLibraryDetail()}</p>
+          </Show>
         </div>
       </div>
       <div
@@ -278,7 +449,7 @@ export const MediaView: Component = () => {
       >
         <Suspense fallback={<p class="text-sm text-white/30">Loading…</p>}>
           <Show
-            when={(images()?.length ?? 0) > 0}
+            when={(items()?.length ?? 0) > 0}
             fallback={<p class="text-sm text-white/30">No images found in {selectedLibrary()?.name ?? "this library"}.</p>}
           >
             <div style={{ height: `${totalRows() * rowHeight()}px`, position: "relative" }}>
@@ -289,8 +460,8 @@ export const MediaView: Component = () => {
                   transform: `translateY(${offsetY()}px)`,
                 }}
               >
-                <For each={visibleImages()}>
-                  {(path) => <ImageTile path={path} />}
+                <For each={visibleItems()}>
+                  {(item) => <ImageTile item={item} />}
                 </For>
               </div>
             </div>

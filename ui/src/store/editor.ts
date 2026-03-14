@@ -509,11 +509,17 @@ export async function openImageFile(file: File) {
   }
 }
 
-export async function openPeerImage(peerEndpointId: string, picture: bridge.SharedPicture) {
-  setPreviewFrame(null);
-  setPreviewContextFrame(null);
-
-  setState("isLoading", true);
+export async function openPeerImage(
+  peerEndpointId: string,
+  picture: bridge.SharedPicture,
+  loadingMediaSrc: string | null = null,
+) {
+  clearLoadedImageState();
+  setState({
+    currentView: "editor",
+    isLoading: true,
+    loadingMediaSrc,
+  });
   try {
     const info = await bridge.openPeerImage(peerEndpointId, picture);
     resetPreviewState(info.canvas_width, info.canvas_height);
@@ -521,7 +527,13 @@ export async function openPeerImage(peerEndpointId: string, picture: bridge.Shar
     await refreshLayerStack();
     await refreshPreview();
   } finally {
-    setState("isLoading", false);
+    if (loadingMediaSrc?.startsWith("blob:")) {
+      URL.revokeObjectURL(loadingMediaSrc);
+    }
+    setState({
+      isLoading: false,
+      loadingMediaSrc: null,
+    });
   }
 }
 
