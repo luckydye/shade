@@ -1177,6 +1177,66 @@ mod tests {
             "expected brighter highlight to stay above SDR white after two adjustment layers, got {right}"
         );
     }
+
+    #[tokio::test]
+    async fn preview_crop_extracts_only_the_requested_region() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 4, 2);
+
+        let mut image_sources = HashMap::new();
+        image_sources.insert(
+            1,
+            FloatImage {
+                width: 4,
+                height: 2,
+                pixels: vec![
+                    10.0, 0.0, 0.0, 1.0,
+                    20.0, 0.0, 0.0, 1.0,
+                    30.0, 0.0, 0.0, 1.0,
+                    40.0, 0.0, 0.0, 1.0,
+                    50.0, 0.0, 0.0, 1.0,
+                    60.0, 0.0, 0.0, 1.0,
+                    70.0, 0.0, 0.0, 1.0,
+                    80.0, 0.0, 0.0, 1.0,
+                ],
+            },
+        );
+
+        let texture = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &image_sources,
+                4,
+                2,
+                2,
+                2,
+                Some(PreviewCrop {
+                    x: 2.0,
+                    y: 0.0,
+                    width: 2.0,
+                    height: 2.0,
+                }),
+            )
+            .expect("render stack preview texture");
+        let pixels = renderer
+            .readback_work_texture_to_f32(&texture, 2, 2)
+            .await
+            .expect("read back preview texture");
+
+        assert_eq!(
+            pixels,
+            vec![
+                30.0, 0.0, 0.0, 1.0,
+                40.0, 0.0, 0.0, 1.0,
+                70.0, 0.0, 0.0, 1.0,
+                80.0, 0.0, 0.0, 1.0,
+            ]
+        );
+    }
 }
 
 /// Round `value` up to the nearest multiple of `alignment`.

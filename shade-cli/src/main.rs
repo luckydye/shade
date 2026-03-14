@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use shade_core::{
-    AdjustmentOp, BlendMode, ColorParams, ColorSpace, FloatImage, GrainParams, LayerStack,
-    SharpenParams, ToneParams, VignetteParams,
+    AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect, FloatImage, GrainParams,
+    LayerStack, SharpenParams, ToneParams, VignetteParams,
 };
-use shade_gpu::Renderer;
+use shade_gpu::{PreviewCrop, Renderer};
 use shade_io::{
     from_linear_srgb_f32, load_image, load_image_f32_with_colorspace, quantize_rgba_f32,
     save_image, to_linear_srgb_f32,
@@ -134,7 +134,80 @@ enum Commands {
         /// Saturation for the adjustment layer (default: 1.0)
         #[arg(long, default_value_t = 1.0)]
         saturation: f32,
+
+        /// Preview output width. Required with `--preview-height` when previewing a crop.
+        #[arg(long)]
+        preview_width: Option<u32>,
+
+        /// Preview output height. Required with `--preview-width` when previewing a crop.
+        #[arg(long)]
+        preview_height: Option<u32>,
+
+        /// Crop origin X in source pixels.
+        #[arg(long)]
+        crop_x: Option<f32>,
+
+        /// Crop origin Y in source pixels.
+        #[arg(long)]
+        crop_y: Option<f32>,
+
+        /// Crop width in source pixels.
+        #[arg(long)]
+        crop_width: Option<f32>,
+
+        /// Crop height in source pixels.
+        #[arg(long)]
+        crop_height: Option<f32>,
     },
+}
+
+fn preview_crop_from_args(
+    crop_x: Option<f32>,
+    crop_y: Option<f32>,
+    crop_width: Option<f32>,
+    crop_height: Option<f32>,
+) -> Result<Option<PreviewCrop>> {
+    match (crop_x, crop_y, crop_width, crop_height) {
+        (None, None, None, None) => Ok(None),
+        (Some(x), Some(y), Some(width), Some(height)) => {
+            let rect = CropRect {
+                x,
+                y,
+                width,
+                height,
+            };
+            if rect.width <= 0.0 || rect.height <= 0.0 {
+                anyhow::bail!("crop_width and crop_height must be > 0");
+            }
+            Ok(Some(PreviewCrop {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            }))
+        }
+        _ => anyhow::bail!("crop preview requires crop_x, crop_y, crop_width, and crop_height"),
+    }
+}
+
+fn preview_target_size(
+    preview_width: Option<u32>,
+    preview_height: Option<u32>,
+    crop: Option<&PreviewCrop>,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<(u32, u32)> {
+    match (preview_width, preview_height, crop) {
+        (Some(width), Some(height), _) => {
+            if width == 0 || height == 0 {
+                anyhow::bail!("preview_width and preview_height must be > 0");
+            }
+            Ok((width, height))
+        }
+        (None, None, Some(crop)) => Ok((crop.width.ceil() as u32, crop.height.ceil() as u32)),
+        (None, None, None) => Ok((canvas_width, canvas_height)),
+        _ => anyhow::bail!("preview_width and preview_height must be provided together"),
+    }
 }
 
 #[tokio::main]
@@ -293,6 +366,12 @@ async fn main() -> Result<()> {
             exposure,
             vignette,
             saturation,
+            preview_width,
+            preview_height,
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height,
         } => {
             log::info!("Loading image: {}", input.display());
             let (pixels, width, height) = load_image(&input)?;
@@ -361,13 +440,35 @@ async fn main() -> Result<()> {
             log::info!("Initialising GPU renderer…");
             let renderer = Renderer::new().await?;
 
-            log::info!("Compositing layer stack ({} layers)…", stack.layers.len());
+            let crop = preview_crop_from_args(crop_x, crop_y, crop_width, crop_height)?;
+            let (target_width, target_height) = preview_target_size(
+                preview_width,
+                preview_height,
+                crop.as_ref(),
+                width,
+                height,
+            )?;
+
+            log::info!(
+                "Compositing layer stack ({} layers) to {}×{}…",
+                stack.layers.len(),
+                target_width,
+                target_height
+            );
             let result = renderer
-                .render_stack(&stack, &image_sources, width, height)
+                .render_stack_preview(
+                    &stack,
+                    &image_sources,
+                    width,
+                    height,
+                    target_width,
+                    target_height,
+                    crop,
+                )
                 .await?;
 
             log::info!("Saving output: {}", output.display());
-            save_image(&output, &result, width, height)?;
+            save_image(&output, &result, target_width, target_height)?;
             log::info!("Done.");
         }
     }
