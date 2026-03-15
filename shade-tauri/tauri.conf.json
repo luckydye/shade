@@ -28,7 +28,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/Pictures/**"]
+        "scope": [
+          "$HOME/Pictures/**"
+        ]
       }
     }
   },

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.0.4/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "formatter": {
+    "enabled": true,
+    "indentWidth": 2,
+    "lineWidth": 90,
+    "indentStyle": "space",
+    "formatWithErrors": true,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "quoteProperties": "asNeeded",
+      "jsxQuoteStyle": "double"
+    }
+  },
+  "css": {
+    "formatter": {
+      "enabled": true,
+      "lineWidth": 90,
+      "quoteStyle": "double",
+      "indentStyle": "space",
+      "indentWidth": 2
+    },
+    "linter": {
+      "enabled": true
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "json": {
+    "parser": {
+      "allowComments": true,
+      "allowTrailingCommas": true
+    },
+    "formatter": {
+      "trailingCommas": "none",
+      "lineWidth": 30
+    }
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!**/.mise",
+      "!**/.astro",
+      "!**/.nuxt",
+      "!**/.output",
+      "!**/vendor",
+      "!**/public",
+      "!**/dist"
+    ]
+  }
+}
