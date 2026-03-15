@@ -7,6 +7,7 @@ pub struct P2pState(pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::Loc
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
 pub struct ThumbnailService(pub std::sync::Arc<commands::ThumbnailQueue>);
 pub struct LibraryScanService(pub std::sync::Arc<commands::LibraryScanService>);
+pub struct CameraDiscoveryService(pub std::sync::Arc<commands::CameraDiscoveryService>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,6 +19,9 @@ pub fn run() {
         .manage(RenderService(commands::spawn_render_worker()))
         .manage(ThumbnailService(commands::spawn_thumbnail_workers()))
         .manage(LibraryScanService(commands::LibraryScanService::new()))
+        .manage(CameraDiscoveryService(
+            commands::CameraDiscoveryService::new(),
+        ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
             let handle = app.handle().clone();
@@ -33,6 +37,7 @@ pub fn run() {
             tauri::async_runtime::block_on(async {
                 *app.state::<P2pState>().0.write().await = Some(p2p);
             });
+            commands::spawn_camera_discovery(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

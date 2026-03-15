@@ -267,6 +267,16 @@ function valueLabel(value: number, scale = 100) {
 	return `${Math.round(value * scale)}`;
 }
 
+const TONE_THRESHOLD_BOUNDARIES = [
+	{ key: "shadows-start", value: 0, label: "Shadows begin" },
+	{
+		key: "midpoint",
+		value: 0.5,
+		label: "Shadows end / Highlights begin",
+	},
+	{ key: "highlights-end", value: 1, label: "Highlights end" },
+] as const;
+
 const SparkIcon = () => (
 	<svg
 		width="24px"
@@ -546,6 +556,8 @@ const Inspector: Component = () => {
 			graphPadding + (value / 255) * innerWidth();
 		const chartY = (value: number) =>
 			graphPadding + (1 - value) * innerHeight();
+		const chartThresholdX = (value: number) =>
+			graphPadding + value * innerWidth();
 		const curveSvgPath = () =>
 			remapPath(
 				curvePath(lut()),
@@ -645,6 +657,19 @@ const Inspector: Component = () => {
 							fill="#080808"
 							pointer-events="none"
 						/>
+						{TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
+							<line
+								x1={chartThresholdX(boundary.value)}
+								y1={graphPadding}
+								x2={chartThresholdX(boundary.value)}
+								y2={graphPadding + innerHeight()}
+								stroke={boundary.value === 0.5 ? "#f5f5f4" : "#737373"}
+								stroke-width={boundary.value === 0.5 ? "0.9" : "0.7"}
+								stroke-dasharray={boundary.value === 0.5 ? "4 4" : "2 6"}
+								opacity={boundary.value === 0.5 ? "0.4" : "0.28"}
+								pointer-events="none"
+							/>
+						))}
 						<Show when={histogramSvgPath()}>
 							{(path) => (
 								<path
@@ -724,6 +749,24 @@ const Inspector: Component = () => {
 									}}
 								/>
 							</>
+						))}
+						{TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
+							<text
+								x={chartThresholdX(boundary.value)}
+								y={svgSize().height - 2}
+								fill="#a3a3a3"
+								font-size="9"
+								text-anchor={
+									boundary.value === 0
+										? "start"
+										: boundary.value === 1
+										  ? "end"
+										  : "middle"
+								}
+								pointer-events="none"
+							>
+								{boundary.label}
+							</text>
 						))}
 					</svg>
 				</div>

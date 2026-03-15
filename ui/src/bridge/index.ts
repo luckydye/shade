@@ -573,9 +573,10 @@ export async function listPictures(): Promise<string[]> {
 export interface MediaLibrary {
 	id: string;
 	name: string;
-	kind: "directory";
+	kind: "directory" | "camera";
 	path?: string | null;
 	removable: boolean;
+	is_online?: boolean | null;
 }
 
 export interface PresetInfo {

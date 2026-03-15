@@ -9,6 +9,7 @@ use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_line
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -57,6 +58,7 @@ pub struct MediaLibrary {
     pub kind: String,
     pub path: Option<String>,
     pub removable: bool,
+    pub is_online: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -197,7 +199,8 @@ fn hash_file(path: &Path) -> Result<String, String> {
 }
 
 fn non_image_layers(stack: &LayerStack) -> Vec<shade_core::LayerEntry> {
-    stack.layers
+    stack
+        .layers
         .iter()
         .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
         .cloned()
@@ -259,9 +262,7 @@ fn unix_timestamp_millis() -> Result<i64, String> {
     i64::try_from(duration.as_millis()).map_err(|e| e.to_string())
 }
 
-async fn load_latest_edit_version(
-    file_hash: &str,
-) -> Result<Option<PersistedEditVersion>, String> {
+async fn load_latest_edit_version(file_hash: &str) -> Result<Option<PersistedEditVersion>, String> {
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
@@ -394,13 +395,8 @@ async fn persist_current_edit_version(
             st.current_edit_version,
         )
     };
-    let version = persist_edit_version(
-        &file_hash,
-        source_name.as_deref(),
-        current_version,
-        &layers,
-    )
-    .await?;
+    let version =
+        persist_edit_version(&file_hash, source_name.as_deref(), current_version, &layers).await?;
     let mut st = lock_editor_state(state)?;
     st.current_edit_version = Some(version);
     Ok(version)
@@ -415,7 +411,11 @@ async fn save_snapshot_version(
             .current_image_hash
             .clone()
             .ok_or_else(|| "cannot save a snapshot without a loaded image hash".to_string())?;
-        (file_hash, st.current_image_source.clone(), non_image_layers(&st.stack))
+        (
+            file_hash,
+            st.current_image_source.clone(),
+            non_image_layers(&st.stack),
+        )
     };
     let version = persist_edit_version(&file_hash, source_name.as_deref(), None, &layers).await?;
     let mut st = lock_editor_state(state)?;
@@ -475,7 +475,6 @@ async fn load_snapshot_version(
     ensure_non_image_layers(&layers)?;
     Ok(PersistedEditVersion { version, layers })
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PresetFile {
@@ -573,6 +572,39 @@ fn custom_library_id(path: &Path) -> String {
     format!("dir:{}", path.display())
 }
 
+fn ccapi_library_id(host: &str) -> String {
+    format!("ccapi:{host}")
+}
+
+fn ccapi_media_path(host: &str, file_path: &str) -> String {
+    format!("ccapi://{host}{file_path}")
+}
+
+fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
+    let path = path
+        .strip_prefix("ccapi://")
+        .ok_or_else(|| format!("invalid ccapi media path: {path}"))?;
+    let slash_idx = path
+        .find('/')
+        .ok_or_else(|| format!("invalid ccapi media path: ccapi://{path}"))?;
+    let (host, file_path) = path.split_at(slash_idx);
+    if host.is_empty() || file_path.is_empty() {
+        return Err(format!("invalid ccapi media path: ccapi://{path}"));
+    }
+    Ok((host, file_path))
+}
+
+fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> MediaLibrary {
+    MediaLibrary {
+        id: ccapi_library_id(host),
+        name: format!("Camera {host}"),
+        kind: "camera".into(),
+        path: Some(host.to_string()),
+        removable,
+        is_online: Some(is_online),
+    }
+}
+
 fn library_for_directory(path: PathBuf) -> MediaLibrary {
     let name = path
         .file_name()
@@ -585,10 +617,119 @@ fn library_for_directory(path: PathBuf) -> MediaLibrary {
         kind: "directory".into(),
         path: Some(path.display().to_string()),
         removable: true,
+        is_online: None,
     }
 }
 
-fn list_desktop_media_libraries() -> Result<Vec<MediaLibrary>, String> {
+async fn ccapi_host_is_online(host: &str) -> bool {
+    let api = ccapi::CCAPI::new(host);
+    tokio::time::timeout(std::time::Duration::from_millis(1200), api.index())
+        .await
+        .is_ok_and(|result| result.is_ok())
+}
+
+fn ipv4_to_u32(ip: Ipv4Addr) -> u32 {
+    u32::from_be_bytes(ip.octets())
+}
+
+fn u32_to_ipv4(value: u32) -> Ipv4Addr {
+    Ipv4Addr::from(value.to_be_bytes())
+}
+
+fn local_ipv4_scan_ranges() -> Result<Vec<(Ipv4Addr, Ipv4Addr)>, String> {
+    let mut ranges = Vec::new();
+    for iface in if_addrs::get_if_addrs().map_err(|e| e.to_string())? {
+        let if_addrs::IfAddr::V4(addr) = iface.addr else {
+            continue;
+        };
+        if addr.ip.is_loopback() {
+            continue;
+        }
+        let mask = ipv4_to_u32(addr.netmask);
+        let network = ipv4_to_u32(addr.ip) & mask;
+        let broadcast = network | !mask;
+        if broadcast <= network + 1 {
+            continue;
+        }
+        ranges.push((u32_to_ipv4(network + 1), u32_to_ipv4(broadcast - 1)));
+    }
+    ranges.sort_unstable();
+    ranges.dedup();
+    Ok(ranges)
+}
+
+async fn host_has_open_port_8080(ip: Ipv4Addr) -> bool {
+    tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        tokio::net::TcpStream::connect(SocketAddr::new(IpAddr::V4(ip), 8080)),
+    )
+    .await
+    .is_ok_and(|result| result.is_ok())
+}
+
+async fn scan_ccapi_hosts_on_local_subnets() -> Result<Vec<String>, String> {
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(128));
+    let mut join_set = tokio::task::JoinSet::new();
+    for (start, end) in local_ipv4_scan_ranges()? {
+        let mut current = ipv4_to_u32(start);
+        let end = ipv4_to_u32(end);
+        while current <= end {
+            let ip = u32_to_ipv4(current);
+            let permit = semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("camera discovery semaphore closed");
+            join_set.spawn(async move {
+                let _permit = permit;
+                if !host_has_open_port_8080(ip).await {
+                    return None;
+                }
+                let host = format!("{ip}:8080");
+                if !ccapi_host_is_online(&host).await {
+                    return None;
+                }
+                Some(host)
+            });
+            current += 1;
+        }
+    }
+    let mut hosts = Vec::new();
+    while let Some(result) = join_set.join_next().await {
+        let host = result.map_err(|e| e.to_string())?;
+        if let Some(host) = host {
+            hosts.push(host);
+        }
+    }
+    hosts.sort();
+    hosts.dedup();
+    Ok(hosts)
+}
+
+pub fn spawn_camera_discovery<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = app;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let hosts = scan_ccapi_hosts_on_local_subnets()
+                .await
+                .expect("camera discovery scan failed");
+            app.state::<crate::CameraDiscoveryService>()
+                .0
+                .replace_hosts(hosts)
+                .await;
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+    });
+}
+
+async fn list_desktop_media_libraries<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Vec<MediaLibrary>, String> {
     let pictures_dir = default_pictures_dir()?;
     let mut libraries = vec![MediaLibrary {
         id: "pictures".into(),
@@ -596,11 +737,20 @@ fn list_desktop_media_libraries() -> Result<Vec<MediaLibrary>, String> {
         kind: "directory".into(),
         path: Some(pictures_dir.display().to_string()),
         removable: false,
+        is_online: None,
     }];
     let config = load_app_config()?;
     for directory in config.directories {
         let path = PathBuf::from(directory);
         libraries.push(library_for_directory(path));
+    }
+    for host in app
+        .state::<crate::CameraDiscoveryService>()
+        .0
+        .snapshot()
+        .await
+    {
+        libraries.push(ccapi_library_for_host(&host, true, false));
     }
     Ok(libraries)
 }
@@ -617,6 +767,16 @@ fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
         }
     }
     Err(format!("unknown media library: {library_id}"))
+}
+
+fn resolve_ccapi_library_host(library_id: &str) -> Result<String, String> {
+    let host = library_id
+        .strip_prefix("ccapi:")
+        .ok_or_else(|| format!("unknown camera library: {library_id}"))?;
+    if host.is_empty() {
+        return Err(format!("unknown camera library: {library_id}"));
+    }
+    Ok(host.to_string())
 }
 
 fn modified_at_millis(mtime: std::time::SystemTime) -> Result<u64, String> {
@@ -673,6 +833,43 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
         .collect())
 }
 
+async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, String> {
+    let api = ccapi::CCAPI::new(host);
+    let storage = api.storage().await.map_err(|e| e.to_string())?;
+    let mut items = Vec::new();
+    for storage in storage.storagelist {
+        for file_path in api.files(&storage).await.map_err(|e| e.to_string())? {
+            let info = api.info(&file_path).await.map_err(|e| e.to_string())?;
+            items.push(LibraryImage {
+                name: picture_display_name(&file_path),
+                path: ccapi_media_path(host, &file_path),
+                modified_at: chrono_like_timestamp_millis(&info.lastmodifieddate)?,
+            });
+        }
+    }
+    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    Ok(LibraryImageListing {
+        items,
+        is_complete: true,
+    })
+}
+
+fn chrono_like_timestamp_millis(value: &str) -> Result<Option<u64>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let normalized = trimmed.replace(' ', "T");
+    let parsed = chrono::DateTime::parse_from_rfc2822(trimmed)
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(trimmed))
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{normalized}Z")))
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&normalized))
+        .map_err(|e| format!("invalid CCAPI timestamp `{trimmed}`: {e}"))?;
+    u64::try_from(parsed.timestamp_millis())
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 pub struct LibraryScanEntry {
     pub modified_at: u64,
     pub image: LibraryImage,
@@ -687,6 +884,10 @@ pub struct LibraryScanSnapshot {
 
 pub struct LibraryScanService {
     pub scans: Mutex<HashMap<String, Arc<Mutex<LibraryScanSnapshot>>>>,
+}
+
+pub struct CameraDiscoveryService {
+    pub hosts: tokio::sync::RwLock<Vec<String>>,
 }
 
 impl LibraryScanService {
@@ -742,6 +943,22 @@ impl LibraryScanService {
                 .collect(),
             is_complete: snapshot.is_complete,
         })
+    }
+}
+
+impl CameraDiscoveryService {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            hosts: tokio::sync::RwLock::new(Vec::new()),
+        })
+    }
+
+    pub async fn snapshot(&self) -> Vec<String> {
+        self.hosts.read().await.clone()
+    }
+
+    pub async fn replace_hosts(&self, hosts: Vec<String>) {
+        *self.hosts.write().await = hosts;
     }
 }
 
@@ -1247,6 +1464,29 @@ pub async fn open_image<R: tauri::Runtime>(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    if path.starts_with("ccapi://") {
+        let bytes = load_picture_bytes(app, &path).await?;
+        let file_hash = hash_bytes(&bytes);
+        let persisted = load_latest_edit_version(&file_hash).await?;
+        let file_name = parse_ccapi_media_path(&path)
+            .ok()
+            .map(|(_, file_path)| picture_display_name(file_path));
+        let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
+        let response = {
+            let mut st = lock_editor_state(&state)?;
+            let response = st.replace_with_image(
+                image.pixels.to_vec(),
+                image.width,
+                image.height,
+                info.bit_depth,
+                info.color_space,
+            );
+            restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
+            response
+        };
+        return Ok(response);
+    }
+
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
         let bytes = app
@@ -1764,9 +2004,8 @@ pub async fn apply_edit(
                             blue_sat: params.blue_sat.unwrap_or(0.0),
                             blue_lum: params.blue_lum.unwrap_or(0.0),
                         });
-                        if let Some(op) = ops
-                            .iter_mut()
-                            .find(|op| matches!(op, AdjustmentOp::Hsl(_)))
+                        if let Some(op) =
+                            ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Hsl(_)))
                         {
                             *op = next;
                         } else {
@@ -2001,6 +2240,15 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
+    if picture_id.starts_with("ccapi://") {
+        let (host, file_path) = parse_ccapi_media_path(picture_id)?;
+        return ccapi::CCAPI::new(host)
+            .thumbnail(file_path)
+            .await
+            .map(|bytes| bytes.to_vec())
+            .map_err(|e| e.to_string());
+    }
+
     #[cfg(target_os = "android")]
     if picture_id.starts_with("content://") {
         return app
@@ -2042,6 +2290,15 @@ pub async fn load_picture_bytes<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
+    if picture_id.starts_with("ccapi://") {
+        let (host, file_path) = parse_ccapi_media_path(picture_id)?;
+        return ccapi::CCAPI::new(host)
+            .original(file_path)
+            .await
+            .map(|bytes| bytes.to_vec())
+            .map_err(|e| e.to_string());
+    }
+
     #[cfg(target_os = "android")]
     if picture_id.starts_with("content://") {
         return _app
@@ -2155,6 +2412,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             kind: "directory".into(),
             path: None,
             removable: false,
+            is_online: None,
         }]);
     }
 
@@ -2167,13 +2425,13 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             kind: "directory".into(),
             path: None,
             removable: false,
+            is_online: None,
         }]);
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        let _ = _app;
-        list_desktop_media_libraries()
+        list_desktop_media_libraries(&_app).await
     }
 }
 
@@ -2239,6 +2497,9 @@ pub async fn list_library_images<R: tauri::Runtime>(
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
+        if library_id.starts_with("ccapi:") {
+            return list_ccapi_library_images(&resolve_ccapi_library_host(&library_id)?).await;
+        }
         let library_path = resolve_desktop_library_path(&library_id)?;
         _app.state::<crate::LibraryScanService>()
             .0

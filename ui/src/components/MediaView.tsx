@@ -83,6 +83,12 @@ function isPeerLibrary(library: LibraryEntry | null): library is PeerLibrary {
 	return library?.kind === "peer";
 }
 
+function isCameraLibrary(
+	library: LibraryEntry | null,
+): library is MediaLibrary & { kind: "camera" } {
+	return library?.kind === "camera";
+}
+
 function pictureName(path: string) {
 	return path.split("/").pop() ?? path;
 }
@@ -561,6 +567,9 @@ export const MediaView: Component = () => {
 
 	onMount(() => {
 		startP2pPolling();
+		const libraryRefreshTimer = window.setInterval(() => {
+			void Promise.resolve(refetchLibraries()).catch(() => undefined);
+		}, 3000);
 		const updateViewport = () => {
 			setViewportHeight(scrollRef.clientHeight);
 			setViewportWidth(scrollRef.clientWidth - 48);
@@ -570,6 +579,7 @@ export const MediaView: Component = () => {
 		observer.observe(scrollRef);
 		onCleanup(() => {
 			isDisposed = true;
+			window.clearInterval(libraryRefreshTimer);
 			observer.disconnect();
 			stopP2pPolling();
 		});
@@ -702,8 +712,11 @@ export const MediaView: Component = () => {
 								{(library) =>
 									(() => {
 										const offline =
-											isPeerLibrary(library) &&
-											!onlinePeerIds().has(library.peerId);
+											isPeerLibrary(library)
+												? !onlinePeerIds().has(library.peerId)
+												: isCameraLibrary(library)
+													? library.is_online === false
+													: false;
 										return (
 											<button
 												type="button"
@@ -719,7 +732,8 @@ export const MediaView: Component = () => {
 												}`}
 											>
 												<span class="flex items-center gap-2">
-													{isPeerLibrary(library) && (
+													{(isPeerLibrary(library) ||
+														isCameraLibrary(library)) && (
 														<span
 															class={`h-1.5 w-1.5 rounded-full ${
 																offline ? "bg-amber-400" : "bg-emerald-400"
