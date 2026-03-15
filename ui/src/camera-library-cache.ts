@@ -10,6 +10,24 @@ type CachedFailures = Map<string, { error: unknown; retryAt: number }>;
 
 const failedThumbnailLoads: CachedFailures = new Map();
 
+type CachedCameraItem = {
+	contentKey: string;
+	name: string;
+	modified_at: number | null;
+};
+
+function cameraContentKey(path: string) {
+	if (!path.startsWith("ccapi://")) {
+		return path;
+	}
+	const withoutScheme = path.slice("ccapi://".length);
+	const slashIndex = withoutScheme.indexOf("/");
+	if (slashIndex === -1) {
+		return path;
+	}
+	return withoutScheme.slice(slashIndex);
+}
+
 function normalizeModifiedAt(modifiedAt: unknown) {
 	return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
 		? modifiedAt
@@ -23,6 +41,22 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
 		modified_at: normalizeModifiedAt(
 			(image as LibraryImage & { modified_at?: unknown }).modified_at,
 		),
+	};
+}
+
+function toCachedCameraItem(image: LibraryImage): CachedCameraItem {
+	return {
+		contentKey: cameraContentKey(image.path),
+		name: image.name,
+		modified_at: normalizeModifiedAt(image.modified_at),
+	};
+}
+
+function toLibraryImage(host: string, item: CachedCameraItem): LibraryImage {
+	return {
+		path: `ccapi://${host}${item.contentKey}`,
+		name: item.name,
+		modified_at: normalizeModifiedAt(item.modified_at),
 	};
 }
 
@@ -91,23 +125,33 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 
 async function loadCameraLibraryItems(host: string) {
 	return withStores([ITEMS_STORE], "readonly", async (stores) => {
-		const result = await requestToPromise(stores[ITEMS_STORE].get(host));
+		const result = await requestToPromise(stores[ITEMS_STORE].getAll());
 		return Array.isArray(result)
-			? result.map((item) => normalizeLibraryImage(item as LibraryImage))
+			? result
+					.map((item) => item as CachedCameraItem)
+					.map((item) => toLibraryImage(host, item))
+					.sort((left, right) => left.name.localeCompare(right.name))
 			: [];
 	});
 }
 
-async function saveCameraLibraryItems(host: string, items: LibraryImage[]) {
+async function saveCameraLibraryItems(items: LibraryImage[]) {
 	await withStores([ITEMS_STORE], "readwrite", async (stores) => {
-		await requestToPromise(
-			stores[ITEMS_STORE].put(items.map(normalizeLibraryImage), host),
+		const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
+		await Promise.all(keys.map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))));
+		await Promise.all(
+			items
+				.map(normalizeLibraryImage)
+				.map(toCachedCameraItem)
+				.map((item) =>
+					requestToPromise(stores[ITEMS_STORE].put(item, item.contentKey)),
+				),
 		);
 	});
 }
 
 function thumbnailKey(path: string) {
-	return path;
+	return cameraContentKey(path);
 }
 
 async function getCachedThumbnail(path: string): Promise<Blob | null> {
@@ -159,7 +203,7 @@ export async function loadCameraLibraryItemsCachedOrRemote(
 ): Promise<LibraryImage[]> {
 	try {
 		const listing = await listLibraryImages(`ccapi:${host}`);
-		await saveCameraLibraryItems(host, listing.items);
+		await saveCameraLibraryItems(listing.items);
 		void warmCameraLibraryThumbnails(listing.items);
 		return listing.items.map(normalizeLibraryImage);
 	} catch (error) {
@@ -182,12 +226,13 @@ export async function resolveCameraThumbnailSrc(
 	if (cached) {
 		return URL.createObjectURL(cached);
 	}
-	const recentFailure = failedThumbnailLoads.get(path);
+	const failureKey = cameraContentKey(path);
+	const recentFailure = failedThumbnailLoads.get(failureKey);
 	if (recentFailure && recentFailure.retryAt > Date.now()) {
 		throw recentFailure.error;
 	}
 	const bytes = await getThumbnailBytes(path).catch((error) => {
-		failedThumbnailLoads.set(path, {
+		failedThumbnailLoads.set(failureKey, {
 			error,
 			retryAt: Date.now() + FAILURE_COOLDOWN_MS,
 		});
@@ -198,10 +243,10 @@ export async function resolveCameraThumbnailSrc(
 	}
 	const blob = new Blob([toBlobBuffer(bytes)], { type: "image/jpeg" });
 	await putCachedThumbnail(path, blob);
-	failedThumbnailLoads.delete(path);
+	failedThumbnailLoads.delete(failureKey);
 	return URL.createObjectURL(blob);
 }
 
 export function resetCameraThumbnailFailure(path: string) {
-	failedThumbnailLoads.delete(path);
+	failedThumbnailLoads.delete(cameraContentKey(path));
 }

@@ -27,6 +27,13 @@ export type PeerLibraryItem = {
 	modified_at: number | null;
 };
 
+type CachedPeerItem = {
+	peerId: string;
+	pictureId: string;
+	name: string;
+	modified_at: number | null;
+};
+
 function normalizeModifiedAt(modifiedAt: unknown) {
 	return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
 		? modifiedAt
@@ -147,36 +154,78 @@ function toPeerLibraryItems(
 
 async function loadPeerLibraryIds() {
 	return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
-		const result = await requestToPromise(
-			stores[LIBRARIES_STORE].get("peerIds"),
-		);
-		return Array.isArray(result)
-			? result.filter((value): value is string => typeof value === "string")
-			: [];
+		const keys = await requestToPromise(stores[LIBRARIES_STORE].getAllKeys());
+		return keys.filter((value): value is string => typeof value === "string");
 	});
 }
 
-async function savePeerLibraryIds(peerIds: string[]) {
+async function addPeerLibraryId(peerId: string) {
 	await withStores([LIBRARIES_STORE], "readwrite", async (stores) => {
-		await requestToPromise(stores[LIBRARIES_STORE].put(peerIds, "peerIds"));
+		await requestToPromise(stores[LIBRARIES_STORE].put(true, peerId));
 	});
+}
+
+async function removePeerLibraryId(peerId: string) {
+	await withStores([LIBRARIES_STORE], "readwrite", async (stores) => {
+		await requestToPromise(stores[LIBRARIES_STORE].delete(peerId));
+	});
+}
+
+function peerItemKey(peerId: string, pictureId: string) {
+	return `${peerId}:${pictureId}`;
+}
+
+function toCachedPeerItem(peerId: string, picture: SharedPicture): CachedPeerItem {
+	return {
+		peerId,
+		pictureId: picture.id,
+		name: picture.name,
+		modified_at: normalizeModifiedAt(picture.modified_at),
+	};
+}
+
+function toSharedPicture(item: CachedPeerItem): SharedPicture {
+	return {
+		id: item.pictureId,
+		name: item.name,
+		modified_at: normalizeModifiedAt(item.modified_at),
+	};
 }
 
 async function loadPeerLibraryItems(peerId: string) {
 	return withStores([ITEMS_STORE], "readonly", async (stores) => {
-		const result = await requestToPromise(stores[ITEMS_STORE].get(peerId));
+		const result = await requestToPromise(stores[ITEMS_STORE].getAll());
 		return Array.isArray(result)
-			? result.map((picture) =>
-					normalizeSharedPicture(picture as SharedPicture),
-			  )
+			? result
+					.map((item) => item as CachedPeerItem)
+					.filter((item) => item.peerId === peerId)
+					.map(toSharedPicture)
 			: [];
 	});
 }
 
 async function savePeerLibraryItems(peerId: string, pictures: SharedPicture[]) {
 	await withStores([ITEMS_STORE], "readwrite", async (stores) => {
-		await requestToPromise(
-			stores[ITEMS_STORE].put(pictures.map(normalizeSharedPicture), peerId),
+		const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
+		await Promise.all(
+			keys
+				.filter(
+					(key) => typeof key === "string" && key.startsWith(`${peerId}:`),
+				)
+				.map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))),
+		);
+		await Promise.all(
+			pictures
+				.map(normalizeSharedPicture)
+				.map((picture) => toCachedPeerItem(peerId, picture))
+				.map((picture) =>
+					requestToPromise(
+						stores[ITEMS_STORE].put(
+							picture,
+							peerItemKey(picture.peerId, picture.pictureId),
+						),
+					),
+				),
 		);
 	});
 }
@@ -261,17 +310,22 @@ export async function getCachedPeerLibraryItems(
 export async function addPeerLibrary(peerId: string): Promise<PeerLibrary> {
 	const peerIds = await loadPeerLibraryIds();
 	if (!peerIds.includes(peerId)) {
-		await savePeerLibraryIds([...peerIds, peerId]);
+		await addPeerLibraryId(peerId);
 	}
 	return toPeerLibrary(peerId);
 }
 
 export async function removePeerLibrary(peerId: string): Promise<void> {
-	await savePeerLibraryIds(
-		(await loadPeerLibraryIds()).filter((id) => id !== peerId),
-	);
+	await removePeerLibraryId(peerId);
 	await withStores([ITEMS_STORE], "readwrite", async (stores) => {
-		await requestToPromise(stores[ITEMS_STORE].delete(peerId));
+		const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
+		await Promise.all(
+			keys
+				.filter(
+					(key) => typeof key === "string" && key.startsWith(`${peerId}:`),
+				)
+				.map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))),
+		);
 	});
 	await deleteCachedPeerThumbnails(peerId);
 }
