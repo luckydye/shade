@@ -1,0 +1,269 @@
+import * as bridge from "../bridge/index";
+import {
+	fullCanvasCrop,
+	LayerInfo,
+	normalizeCropRect,
+	setPreviewContextFrame,
+	setPreviewFrame,
+	resolveSelectedLayerIdx,
+	setState,
+	state,
+} from "./editor-store";
+import { refreshPreview, resetPreviewViewport } from "./editor-preview";
+
+function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
+	return {
+		tone: null,
+		curves: null,
+		color: null,
+		vignette: null,
+		sharpen: null,
+		grain: null,
+		hsl: null,
+	};
+}
+
+async function runLayerMutation(work: () => Promise<unknown>) {
+	await work();
+	await refreshLayerStack();
+	await refreshPreview();
+}
+
+export async function refreshLayerStack() {
+	const info = await bridge.getLayerStack();
+	const layers = info.layers as LayerInfo[];
+	setState({
+		layers,
+		canvasWidth: info.canvas_width,
+		canvasHeight: info.canvas_height,
+		selectedLayerIdx:
+			layers.length === 0
+				? -1
+				: resolveSelectedLayerIdx(layers, state.selectedLayerIdx),
+	});
+}
+
+export async function setLayerVisible(idx: number, visible: boolean) {
+	await runLayerMutation(() => bridge.setLayerVisible(idx, visible));
+}
+
+export async function setLayerOpacity(idx: number, opacity: number) {
+	await runLayerMutation(() => bridge.setLayerOpacity(idx, opacity));
+}
+
+export async function deleteLayer(idx: number) {
+	await bridge.deleteLayer(idx);
+	await refreshLayerStack();
+	if (state.layers.length === 0) {
+		setPreviewFrame(null);
+		setPreviewContextFrame(null);
+	}
+	await refreshPreview();
+}
+
+function applyCropLayerEdit(layerIdx: number, params: Record<string, unknown>) {
+	if (params.op !== "crop") {
+		throw new Error("crop layers only accept the crop op");
+	}
+	setState("layers", layerIdx, "crop", {
+		x: params.crop_x as number,
+		y: params.crop_y as number,
+		width: params.crop_width as number,
+		height: params.crop_height as number,
+	});
+}
+
+function applyAdjustmentLayerEdit(
+	layerIdx: number,
+	params: Record<string, unknown>,
+) {
+	const adjustments = state.layers[layerIdx]?.adjustments ?? getEmptyAdjustments();
+	switch (params.op) {
+		case "tone":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				tone: {
+					exposure: params.exposure as number,
+					contrast: params.contrast as number,
+					blacks: params.blacks as number,
+					whites: params.whites as number,
+					highlights: params.highlights as number,
+					shadows: params.shadows as number,
+					gamma: params.gamma as number,
+				},
+			});
+			return;
+		case "color":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				color: {
+					saturation: params.saturation as number,
+					temperature: params.temperature as number,
+					tint: params.tint as number,
+				},
+			});
+			return;
+		case "curves":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				curves: {
+					lut_r: adjustments.curves?.lut_r ?? [],
+					lut_g: adjustments.curves?.lut_g ?? [],
+					lut_b: adjustments.curves?.lut_b ?? [],
+					lut_master: adjustments.curves?.lut_master ?? [],
+					per_channel: adjustments.curves?.per_channel ?? false,
+					control_points: params.curve_points as
+						| bridge.CurveControlPoint[]
+						| undefined,
+				},
+			});
+			return;
+		case "vignette":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				vignette: { amount: params.vignette_amount as number },
+			});
+			return;
+		case "sharpen":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				sharpen: { amount: params.sharpen_amount as number },
+			});
+			return;
+		case "grain":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				grain: { amount: params.grain_amount as number },
+			});
+			return;
+		case "hsl":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				hsl: {
+					red_hue: params.red_hue as number,
+					red_sat: params.red_sat as number,
+					red_lum: params.red_lum as number,
+					green_hue: params.green_hue as number,
+					green_sat: params.green_sat as number,
+					green_lum: params.green_lum as number,
+					blue_hue: params.blue_hue as number,
+					blue_sat: params.blue_sat as number,
+					blue_lum: params.blue_lum as number,
+				},
+			});
+			return;
+		default:
+			throw new Error(`unknown edit op: ${String(params.op)}`);
+	}
+}
+
+export async function applyEdit(params: Record<string, unknown>) {
+	const layerIdx = params.layer_idx;
+	if (typeof layerIdx !== "number") {
+		throw new Error("applyEdit requires a numeric layer_idx");
+	}
+	const layer = state.layers[layerIdx];
+	if (!layer) {
+		throw new Error("applyEdit target layer is out of bounds");
+	}
+	if (layer.kind === "crop") {
+		applyCropLayerEdit(layerIdx, params);
+		await bridge.applyEdit(params);
+		await refreshPreview();
+		return;
+	}
+	if (layer.kind !== "adjustment") {
+		throw new Error(
+			"applyEdit target layer must be an adjustment or crop layer",
+		);
+	}
+	applyAdjustmentLayerEdit(layerIdx, params);
+	await bridge.applyEdit(params);
+	await refreshPreview();
+}
+
+export function selectLayer(idx: number) {
+	if (idx === state.selectedLayerIdx) return;
+	setState("selectedLayerIdx", idx);
+}
+
+export function startCropMode() {
+	if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {
+		throw new Error("cannot start crop mode without a loaded image");
+	}
+	setState({
+		isCropMode: true,
+		cropDraft: state.crop,
+	});
+	void refreshPreview();
+}
+
+export function cancelCropMode() {
+	if (!state.isCropMode) return;
+	setState({
+		isCropMode: false,
+		cropDraft: null,
+	});
+	void refreshPreview();
+}
+
+export function updateCropDraft(next: {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}) {
+	if (!state.isCropMode) {
+		throw new Error("cannot update crop draft when crop mode is inactive");
+	}
+	setState("cropDraft", normalizeCropRect(next));
+}
+
+export function resetCrop() {
+	if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {
+		throw new Error("cannot reset crop without a loaded image");
+	}
+	const crop = fullCanvasCrop();
+	setState({
+		crop,
+		cropDraft: state.isCropMode ? crop : null,
+	});
+	resetPreviewViewport();
+}
+
+export function applyCrop() {
+	if (!state.isCropMode || !state.cropDraft) {
+		throw new Error("cannot apply crop without an active draft");
+	}
+	const crop = normalizeCropRect(state.cropDraft);
+	setState({
+		crop,
+		cropDraft: null,
+		isCropMode: false,
+		previewZoom: 1,
+		previewCenterX: crop.x + crop.width * 0.5,
+		previewCenterY: crop.y + crop.height * 0.5,
+	});
+	void refreshPreview();
+}
+
+export async function addLayer(kind: string) {
+	const idx = await bridge.addLayer(kind);
+	await refreshLayerStack();
+	setState("selectedLayerIdx", idx);
+	await refreshPreview();
+}
+
+export async function listPresets() {
+	return bridge.listPresets();
+}
+
+export async function savePreset(name: string) {
+	return bridge.savePreset(name);
+}
+
+export async function loadPreset(name: string) {
+	await bridge.loadPreset(name);
+	await refreshLayerStack();
+	await refreshPreview();
+}
