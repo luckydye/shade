@@ -19,7 +19,11 @@ import {
 	type MediaLibrary,
 	type SharedPicture,
 } from "../bridge/index";
-import { releaseMediaSrc, resolveMediaSrc } from "../media-source";
+import {
+	releaseMediaSrc,
+	resetMediaSrcFailure,
+	resolveMediaSrc,
+} from "../media-source";
 import {
 	addPeerLibrary,
 	getCachedPeerLibraryItems,
@@ -240,9 +244,10 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 	const [isIntersecting, setIsIntersecting] = createSignal(false);
 	const [src, setSrc] = createSignal<string | undefined>(undefined);
 	const [loadError, setLoadError] = createSignal(false);
+	const [isLoadingSrc, setIsLoadingSrc] = createSignal(false);
+	const [loadRequestVersion, setLoadRequestVersion] = createSignal(0);
 	let containerRef: HTMLButtonElement | undefined;
 	let imgRef: HTMLImageElement | undefined;
-	let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
 		const observer = new IntersectionObserver(
@@ -256,11 +261,13 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 	});
 
 	createEffect(() => {
-		if (!isIntersecting() || src()) {
+		loadRequestVersion();
+		if (!isIntersecting() || src() || isLoadingSrc()) {
 			return;
 		}
 		const controller = new AbortController();
 		setLoadError(false);
+		setIsLoadingSrc(true);
 		void loadItemSrc(props.item, controller.signal)
 			.then((nextSrc) => setSrc(nextSrc))
 			.catch(() => {
@@ -268,7 +275,11 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 					return;
 				}
 				setLoadError(true);
-				errorTimer = setTimeout(() => setLoadError(false), 4000);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) {
+					setIsLoadingSrc(false);
+				}
 			});
 		onCleanup(() => controller.abort());
 	});
@@ -282,18 +293,22 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 				URL.revokeObjectURL(url);
 			}
 		}
-		clearTimeout(errorTimer);
 	});
 
 	function handleClick() {
-		setLoadError(false);
+		if (!src()) {
+			if (props.item.kind === "local") {
+				resetMediaSrcFailure(props.item.path);
+			}
+			setLoadError(false);
+			setLoadRequestVersion((current) => current + 1);
+		}
 		if (imgRef) {
 			imgRef.style.viewTransitionName = "active-media";
 		}
 
 		const handleError = () => {
 			setLoadError(true);
-			errorTimer = setTimeout(() => setLoadError(false), 4000);
 		};
 
 		const currentSrc = src() ?? null;
@@ -331,7 +346,7 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 				{loadError() && (
 					<div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
 						<span class="text-[11px] font-medium text-red-400">
-							Failed to open
+							Thumbnail failed
 						</span>
 					</div>
 				)}

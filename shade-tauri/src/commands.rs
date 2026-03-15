@@ -623,9 +623,9 @@ fn library_for_directory(path: PathBuf) -> MediaLibrary {
 
 async fn ccapi_host_is_online(host: &str) -> bool {
     let api = ccapi::CCAPI::new(host);
-    tokio::time::timeout(std::time::Duration::from_millis(1200), api.index())
+    tokio::time::timeout(std::time::Duration::from_millis(1200), api.probe())
         .await
-        .is_ok_and(|result| result.is_ok())
+        .is_ok_and(|result| result)
 }
 
 fn ipv4_to_u32(ip: Ipv4Addr) -> u32 {
@@ -839,35 +839,18 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
     let mut items = Vec::new();
     for storage in storage.storagelist {
         for file_path in api.files(&storage).await.map_err(|e| e.to_string())? {
-            let info = api.info(&file_path).await.map_err(|e| e.to_string())?;
             items.push(LibraryImage {
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
-                modified_at: chrono_like_timestamp_millis(&info.lastmodifieddate)?,
+                modified_at: None,
             });
         }
     }
-    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    items.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(LibraryImageListing {
         items,
         is_complete: true,
     })
-}
-
-fn chrono_like_timestamp_millis(value: &str) -> Result<Option<u64>, String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    let normalized = trimmed.replace(' ', "T");
-    let parsed = chrono::DateTime::parse_from_rfc2822(trimmed)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(trimmed))
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{normalized}Z")))
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&normalized))
-        .map_err(|e| format!("invalid CCAPI timestamp `{trimmed}`: {e}"))?;
-    u64::try_from(parsed.timestamp_millis())
-        .map(Some)
-        .map_err(|e| e.to_string())
 }
 
 pub struct LibraryScanEntry {
@@ -888,6 +871,10 @@ pub struct LibraryScanService {
 
 pub struct CameraDiscoveryService {
     pub hosts: tokio::sync::RwLock<Vec<String>>,
+}
+
+pub struct CameraThumbnailService {
+    pub semaphores: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>,
 }
 
 impl LibraryScanService {
@@ -959,6 +946,28 @@ impl CameraDiscoveryService {
 
     pub async fn replace_hosts(&self, hosts: Vec<String>) {
         *self.hosts.write().await = hosts;
+    }
+}
+
+impl CameraThumbnailService {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            semaphores: tokio::sync::Mutex::new(HashMap::new()),
+        })
+    }
+
+    pub async fn acquire(&self, host: &str) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+        let semaphore = {
+            let mut semaphores = self.semaphores.lock().await;
+            semaphores
+                .entry(host.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+                .clone()
+        };
+        semaphore
+            .acquire_owned()
+            .await
+            .map_err(|_| format!("camera thumbnail throttler closed for {host}"))
     }
 }
 
@@ -2242,6 +2251,11 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
 ) -> Result<Vec<u8>, String> {
     if picture_id.starts_with("ccapi://") {
         let (host, file_path) = parse_ccapi_media_path(picture_id)?;
+        let _permit = app
+            .state::<crate::CameraThumbnailService>()
+            .0
+            .acquire(host)
+            .await?;
         return ccapi::CCAPI::new(host)
             .thumbnail(file_path)
             .await

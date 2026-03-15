@@ -1,8 +1,10 @@
 import { getThumbnail } from "./bridge/index";
 
 const MEDIA_SRC_CACHE_LIMIT = 256;
+const MEDIA_SRC_FAILURE_COOLDOWN_MS = 5_000;
 const mediaSrcCache = new Map<string, string>();
 const inFlightMediaSrc = new Map<string, Promise<string>>();
+const failedMediaSrc = new Map<string, { error: unknown; retryAt: number }>();
 
 function abortError() {
 	if (typeof DOMException !== "undefined") {
@@ -24,6 +26,10 @@ export async function resolveMediaSrc(
 		mediaSrcCache.set(path, cached);
 		return cached;
 	}
+	const recentFailure = failedMediaSrc.get(path);
+	if (recentFailure && recentFailure.retryAt > Date.now()) {
+		throw recentFailure.error;
+	}
 	const inFlight = inFlightMediaSrc.get(path);
 	if (inFlight) {
 		return waitForMediaSrc(inFlight, signal);
@@ -31,6 +37,7 @@ export async function resolveMediaSrc(
 	const pending = getThumbnail(path)
 		.then((src) => {
 			inFlightMediaSrc.delete(path);
+			failedMediaSrc.delete(path);
 			mediaSrcCache.set(path, src);
 			while (mediaSrcCache.size > MEDIA_SRC_CACHE_LIMIT) {
 				const oldestKey = mediaSrcCache.keys().next().value;
@@ -47,6 +54,10 @@ export async function resolveMediaSrc(
 		})
 		.catch((error) => {
 			inFlightMediaSrc.delete(path);
+			failedMediaSrc.set(path, {
+				error,
+				retryAt: Date.now() + MEDIA_SRC_FAILURE_COOLDOWN_MS,
+			});
 			throw error;
 		});
 	inFlightMediaSrc.set(path, pending);
@@ -86,4 +97,8 @@ export function releaseMediaSrc(url: string) {
 		}
 	}
 	URL.revokeObjectURL(url);
+}
+
+export function resetMediaSrcFailure(path: string) {
+	failedMediaSrc.delete(path);
 }

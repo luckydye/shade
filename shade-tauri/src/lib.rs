@@ -8,6 +8,7 @@ pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
 pub struct ThumbnailService(pub std::sync::Arc<commands::ThumbnailQueue>);
 pub struct LibraryScanService(pub std::sync::Arc<commands::LibraryScanService>);
 pub struct CameraDiscoveryService(pub std::sync::Arc<commands::CameraDiscoveryService>);
+pub struct CameraThumbnailService(pub std::sync::Arc<commands::CameraThumbnailService>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,6 +22,9 @@ pub fn run() {
         .manage(LibraryScanService(commands::LibraryScanService::new()))
         .manage(CameraDiscoveryService(
             commands::CameraDiscoveryService::new(),
+        ))
+        .manage(CameraThumbnailService(
+            commands::CameraThumbnailService::new(),
         ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
