@@ -5,6 +5,7 @@ use shade_core::{
     ToneParams,
 };
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use wgpu::{
     BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture, ImageDataLayout,
     MapMode, Origin3d, TextureAspect, TextureDescriptor, TextureDimension, TextureUsages,
@@ -24,6 +25,8 @@ use crate::{
     texture_cache::TextureCache,
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
 };
+
+const PREVIEW_SRGB_LUT_SIZE: usize = 8192;
 
 #[derive(Clone, Debug)]
 pub struct PreviewCrop {
@@ -268,11 +271,10 @@ impl Renderer {
             target_height,
             crop,
         )?;
-        let mut pixels = self
+        let pixels = self
             .readback_work_texture_to_f32(&final_accum, target_width, target_height)
             .await?;
-        encode_preview_pixels(&mut pixels, &ColorSpace::Srgb);
-        Ok(rgba_display_f32_to_u8(&pixels))
+        Ok(encode_preview_pixels_to_srgb_u8(&pixels))
     }
 
     pub async fn render_stack_preview_f16(
@@ -918,6 +920,18 @@ fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
     }
 }
 
+fn encode_preview_pixels_to_srgb_u8(pixels: &[f32]) -> Vec<u8> {
+    let lut = preview_srgb_lut();
+    let mut encoded = Vec::with_capacity(pixels.len());
+    for pixel in pixels.chunks_exact(4) {
+        encoded.push(linear_to_srgb_u8(pixel[0], lut));
+        encoded.push(linear_to_srgb_u8(pixel[1], lut));
+        encoded.push(linear_to_srgb_u8(pixel[2], lut));
+        encoded.push((pixel[3].clamp(0.0, 1.0) * 255.0).round() as u8);
+    }
+    encoded
+}
+
 fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
     match dst {
         ColorSpace::DisplayP3 => {
@@ -949,6 +963,26 @@ fn linear_to_srgb_display(value: f32) -> f32 {
     }
 }
 
+fn linear_to_srgb_u8(value: f32, lut: &[f32; PREVIEW_SRGB_LUT_SIZE + 1]) -> u8 {
+    let clamped = value.clamp(0.0, 1.0);
+    let scaled = clamped * PREVIEW_SRGB_LUT_SIZE as f32;
+    let index = scaled as usize;
+    let fraction = scaled - index as f32;
+    let lower = lut[index];
+    let upper = lut[index.min(PREVIEW_SRGB_LUT_SIZE - 1) + 1];
+    ((lower + (upper - lower) * fraction) * 255.0).round() as u8
+}
+
+fn preview_srgb_lut() -> &'static [f32; PREVIEW_SRGB_LUT_SIZE + 1] {
+    static LUT: OnceLock<[f32; PREVIEW_SRGB_LUT_SIZE + 1]> = OnceLock::new();
+    LUT.get_or_init(|| {
+        std::array::from_fn(|index| {
+            linear_to_srgb_display(index as f32 / PREVIEW_SRGB_LUT_SIZE as f32)
+        })
+    })
+}
+
+#[cfg(test)]
 fn rgba_display_f32_to_u8(pixels: &[f32]) -> Vec<u8> {
     pixels
         .iter()
