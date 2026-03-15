@@ -20,6 +20,12 @@ import {
 	type SharedPicture,
 } from "../bridge/index";
 import {
+	getCachedCameraLibraryItems,
+	loadCameraLibraryItemsCachedOrRemote,
+	resetCameraThumbnailFailure,
+	resolveCameraThumbnailSrc,
+} from "../camera-library-cache";
+import {
 	releaseMediaSrc,
 	resetMediaSrcFailure,
 	resolveMediaSrc,
@@ -28,7 +34,7 @@ import {
 	addPeerLibrary,
 	getCachedPeerLibraryItems,
 	listPeerLibraries,
-	loadPeerLibraryItems,
+	loadPeerLibraryItemsCachedOrRemote,
 	removePeerLibrary,
 	resolvePeerThumbnailSrc,
 	type PeerLibrary,
@@ -91,6 +97,13 @@ function isCameraLibrary(
 	library: LibraryEntry | null,
 ): library is MediaLibrary & { kind: "camera" } {
 	return library?.kind === "camera";
+}
+
+function cameraLibraryHost(libraryId: string) {
+	if (!libraryId.startsWith("ccapi:")) {
+		throw new Error(`invalid camera library id: ${libraryId}`);
+	}
+	return libraryId.slice("ccapi:".length);
 }
 
 function pictureName(path: string) {
@@ -176,7 +189,12 @@ async function loadLibraryItems(
 	}
 	if (libraryId.startsWith("peer:")) {
 		const peerId = libraryId.slice("peer:".length);
-		return (await loadPeerLibraryItems(peerId)).map(peerMediaItem);
+		return (await loadPeerLibraryItemsCachedOrRemote(peerId)).map(peerMediaItem);
+	}
+	if (libraryId.startsWith("ccapi:")) {
+		return (await loadCameraLibraryItemsCachedOrRemote(cameraLibraryHost(libraryId))).map(
+			localMediaItem,
+		);
 	}
 	const listing = await listLibraryImages(libraryId);
 	return listing.items.map(localMediaItem);
@@ -193,6 +211,14 @@ async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
 	}
 	try {
 		if (libraryId.startsWith("peer:")) {
+			return {
+				libraryId,
+				items: await loadLibraryItems(libraryId),
+				isComplete: true,
+				error: null,
+			};
+		}
+		if (libraryId.startsWith("ccapi:")) {
 			return {
 				libraryId,
 				items: await loadLibraryItems(libraryId),
@@ -223,6 +249,9 @@ async function loadItemSrc(
 ): Promise<string> {
 	if (item.kind === "peer") {
 		return resolvePeerThumbnailSrc(item.peerId, item.id, signal);
+	}
+	if (item.path.startsWith("ccapi://")) {
+		return resolveCameraThumbnailSrc(item.path, signal);
 	}
 	return resolveMediaSrc(item.path, signal);
 }
@@ -298,7 +327,11 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 	function handleClick() {
 		if (!src()) {
 			if (props.item.kind === "local") {
+				if (props.item.path.startsWith("ccapi://")) {
+					resetCameraThumbnailFailure(props.item.path);
+				} else {
 				resetMediaSrcFailure(props.item.path);
+				}
 			}
 			setLoadError(false);
 			setLoadRequestVersion((current) => current + 1);
@@ -364,13 +397,29 @@ export const MediaView: Component = () => {
 	const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(
 		null,
 	);
-	const [peerLibraries, setPeerLibraries] = createSignal<PeerLibrary[]>(
-		listPeerLibraries(),
-	);
+	const [peerLibraries, { mutate: setPeerLibraries, refetch: refetchPeerLibraries }] =
+		createResource(listPeerLibraries);
 	const [items, { refetch: refetchItems }] = createResource(
 		selectedLibraryId,
 		loadLibraryData,
 	);
+	const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] =
+		createResource(selectedLibraryId, async (libraryId) => {
+			if (!libraryId) {
+				return [];
+			}
+			if (libraryId.startsWith("peer:")) {
+				return (await getCachedPeerLibraryItems(
+					libraryId.slice("peer:".length),
+				)).map(peerMediaItem);
+			}
+			if (libraryId.startsWith("ccapi:")) {
+				return (await getCachedCameraLibraryItems(
+					cameraLibraryHost(libraryId),
+				)).map(localMediaItem);
+			}
+			return [];
+		});
 	const [isSubmitting, setIsSubmitting] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
 	const [viewportHeight, setViewportHeight] = createSignal(0);
@@ -385,11 +434,11 @@ export const MediaView: Component = () => {
 	const onlinePeerIds = createMemo(() => new Set(discoveredPeerIds()));
 	const libraryEntries = createMemo<LibraryEntry[]>(() => [
 		...(libraries() ?? []),
-		...peerLibraries(),
+		...(peerLibraries() ?? []),
 	]);
 	const suggestedPeers = createMemo(() => {
 		const addedPeerIds = new Set(
-			peerLibraries().map((library) => library.peerId),
+			(peerLibraries() ?? []).map((library) => library.peerId),
 		);
 		return p2pState.peers.filter((peer) => !addedPeerIds.has(peer.endpoint_id));
 	});
@@ -418,19 +467,12 @@ export const MediaView: Component = () => {
 			libraryEntries().find((library) => library.id === selectedLibraryId()) ??
 			null,
 	);
-	const selectedPeerCachedItems = createMemo(() => {
-		const library = selectedLibrary();
-		if (!isPeerLibrary(library)) {
-			return [];
-		}
-		return getCachedPeerLibraryItems(library.peerId).map(peerMediaItem);
-	});
 	const displayedItems = createMemo(() => {
 		const current = items();
 		if (current?.libraryId === selectedLibraryId()) {
 			return current.items;
 		}
-		return selectedPeerCachedItems();
+		return cachedLibraryItems() ?? [];
 	});
 	const stableDisplayedItems = createMemo<MediaItem[]>((previous) => {
 		const nextItems = displayedItems();
@@ -582,6 +624,7 @@ export const MediaView: Component = () => {
 
 	onMount(() => {
 		startP2pPolling();
+		void refetchPeerLibraries();
 		const libraryRefreshTimer = window.setInterval(() => {
 			void Promise.resolve(refetchLibraries()).catch(() => undefined);
 		}, 3000);
@@ -670,12 +713,14 @@ export const MediaView: Component = () => {
 		try {
 			const nextLibrary = await addPeerLibrary(peerId);
 			setPeerLibraries((current) => {
-				if (current.some((library) => library.peerId === peerId)) {
-					return current;
+				const libraries = current ?? [];
+				if (libraries.some((library) => library.peerId === peerId)) {
+					return libraries;
 				}
-				return [...current, nextLibrary];
+				return [...libraries, nextLibrary];
 			});
 			setSelectedLibraryId(nextLibrary.id);
+			await refetchCachedLibraryItems();
 			await refetchItems();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -695,8 +740,9 @@ export const MediaView: Component = () => {
 			if (isPeerLibrary(library)) {
 				await removePeerLibrary(library.peerId);
 				setPeerLibraries((current) =>
-					current.filter((entry) => entry.id !== library.id),
+					(current ?? []).filter((entry) => entry.id !== library.id),
 				);
+				await refetchCachedLibraryItems();
 				return;
 			}
 			await removeMediaLibrary(library.id);

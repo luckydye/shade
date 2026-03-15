@@ -541,7 +541,7 @@ export async function deleteLayer(idx: number): Promise<void> {
 }
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
-export async function getThumbnail(path: string): Promise<string> {
+export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
 	if (await isTauriRuntime()) {
 		const inv = await getTauriInvoke();
 		const result = (await inv("get_thumbnail", { path })) as
@@ -554,12 +554,18 @@ export async function getThumbnail(path: string): Promise<string> {
 				: result instanceof ArrayBuffer
 				  ? new Uint8Array(result)
 				  : Uint8Array.from(result as number[]);
-		const blobBytes = Uint8Array.from(bytes);
-		return URL.createObjectURL(
-			new Blob([blobBytes.buffer], { type: "image/jpeg" }),
-		);
+		return Uint8Array.from(bytes);
 	}
-	return "";
+	return new Uint8Array();
+}
+
+/** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
+export async function getThumbnail(path: string): Promise<string> {
+	const bytes = await getThumbnailBytes(path);
+	const blobBytes = Uint8Array.from(bytes);
+	return URL.createObjectURL(
+		new Blob([blobBytes.buffer], { type: "image/jpeg" }),
+	);
 }
 
 export async function listPictures(): Promise<string[]> {

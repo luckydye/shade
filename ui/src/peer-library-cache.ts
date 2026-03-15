@@ -4,10 +4,11 @@ import {
 	type SharedPicture,
 } from "./bridge/index";
 
-const LIBRARIES_KEY = "shade.peerLibraries.v1";
-const ITEMS_KEY = "shade.peerLibraryItems.v1";
 const DB_NAME = "shade-peer-cache";
-const STORE_NAME = "thumbnails";
+const DB_VERSION = 2;
+const LIBRARIES_STORE = "libraries";
+const ITEMS_STORE = "items";
+const THUMBNAILS_STORE = "thumbnails";
 
 export type PeerLibrary = {
 	id: string;
@@ -54,18 +55,6 @@ function thumbnailKey(peerId: string, pictureId: string) {
 	return `${peerId}:${pictureId}`;
 }
 
-function readJson<T>(key: string, fallback: T): T {
-	const raw = localStorage.getItem(key);
-	if (!raw) {
-		return fallback;
-	}
-	return JSON.parse(raw) as T;
-}
-
-function writeJson(key: string, value: unknown) {
-	localStorage.setItem(key, JSON.stringify(value));
-}
-
 function abortError() {
 	if (typeof DOMException !== "undefined") {
 		return new DOMException("thumbnail load aborted", "AbortError");
@@ -81,30 +70,39 @@ function toBlobBuffer(bytes: Uint8Array): ArrayBuffer {
 
 function openDb(): Promise<IDBDatabase> {
 	if (typeof indexedDB === "undefined") {
-		throw new Error("indexedDB is required for peer thumbnail caching");
+		throw new Error("indexedDB is required for peer caching");
 	}
 	return new Promise((resolve, reject) => {
-		const request = indexedDB.open(DB_NAME, 1);
+		const request = indexedDB.open(DB_NAME, DB_VERSION);
 		request.onerror = () => reject(request.error);
 		request.onupgradeneeded = () => {
 			const db = request.result;
-			if (!db.objectStoreNames.contains(STORE_NAME)) {
-				db.createObjectStore(STORE_NAME);
+			if (!db.objectStoreNames.contains(LIBRARIES_STORE)) {
+				db.createObjectStore(LIBRARIES_STORE);
+			}
+			if (!db.objectStoreNames.contains(ITEMS_STORE)) {
+				db.createObjectStore(ITEMS_STORE);
+			}
+			if (!db.objectStoreNames.contains(THUMBNAILS_STORE)) {
+				db.createObjectStore(THUMBNAILS_STORE);
 			}
 		};
 		request.onsuccess = () => resolve(request.result);
 	});
 }
 
-async function withStore<T>(
+async function withStores<T>(
+	storeNames: string[],
 	mode: IDBTransactionMode,
-	run: (store: IDBObjectStore) => Promise<T>,
+	run: (stores: Record<string, IDBObjectStore>) => Promise<T>,
 ): Promise<T> {
 	const db = await openDb();
-	const tx = db.transaction(STORE_NAME, mode);
-	const store = tx.objectStore(STORE_NAME);
+	const tx = db.transaction(storeNames, mode);
+	const stores = Object.fromEntries(
+		storeNames.map((name) => [name, tx.objectStore(name)]),
+	) as Record<string, IDBObjectStore>;
 	try {
-		const result = await run(store);
+		const result = await run(stores);
 		await new Promise<void>((resolve, reject) => {
 			tx.oncomplete = () => resolve();
 			tx.onerror = () => reject(tx.error);
@@ -120,63 +118,6 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 	return new Promise((resolve, reject) => {
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);
-	});
-}
-
-function loadPeerLibraryIds() {
-	return readJson<string[]>(LIBRARIES_KEY, []);
-}
-
-function savePeerLibraryIds(peerIds: string[]) {
-	writeJson(LIBRARIES_KEY, peerIds);
-}
-
-function loadPeerLibraryItemsMap() {
-	const raw = readJson<Record<string, SharedPicture[]>>(ITEMS_KEY, {});
-	return Object.fromEntries(
-		Object.entries(raw).map(([peerId, pictures]) => [
-			peerId,
-			pictures.map(normalizeSharedPicture),
-		]),
-	);
-}
-
-function savePeerLibraryItemsMap(items: Record<string, SharedPicture[]>) {
-	writeJson(ITEMS_KEY, items);
-}
-
-async function getCachedThumbnail(
-	peerId: string,
-	pictureId: string,
-): Promise<Blob | null> {
-	return withStore("readonly", async (store) => {
-		const result = await requestToPromise(
-			store.get(thumbnailKey(peerId, pictureId)),
-		);
-		return result instanceof Blob ? result : null;
-	});
-}
-
-async function putCachedThumbnail(
-	peerId: string,
-	pictureId: string,
-	blob: Blob,
-): Promise<void> {
-	await withStore("readwrite", async (store) => {
-		await requestToPromise(store.put(blob, thumbnailKey(peerId, pictureId)));
-	});
-}
-
-async function deleteCachedPeerThumbnails(peerId: string): Promise<void> {
-	await withStore("readwrite", async (store) => {
-		const keys = await requestToPromise(store.getAllKeys());
-		await Promise.all(
-			keys
-				.filter(
-					(key) => typeof key === "string" && key.startsWith(`${peerId}:`),
-				)
-				.map((key) => requestToPromise(store.delete(key))),
-		);
 	});
 }
 
@@ -204,10 +145,77 @@ function toPeerLibraryItems(
 	}));
 }
 
-function persistPeerLibraryItems(peerId: string, pictures: SharedPicture[]) {
-	const allItems = loadPeerLibraryItemsMap();
-	allItems[peerId] = pictures.map(normalizeSharedPicture);
-	savePeerLibraryItemsMap(allItems);
+async function loadPeerLibraryIds() {
+	return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
+		const result = await requestToPromise(
+			stores[LIBRARIES_STORE].get("peerIds"),
+		);
+		return Array.isArray(result)
+			? result.filter((value): value is string => typeof value === "string")
+			: [];
+	});
+}
+
+async function savePeerLibraryIds(peerIds: string[]) {
+	await withStores([LIBRARIES_STORE], "readwrite", async (stores) => {
+		await requestToPromise(stores[LIBRARIES_STORE].put(peerIds, "peerIds"));
+	});
+}
+
+async function loadPeerLibraryItems(peerId: string) {
+	return withStores([ITEMS_STORE], "readonly", async (stores) => {
+		const result = await requestToPromise(stores[ITEMS_STORE].get(peerId));
+		return Array.isArray(result)
+			? result.map((picture) =>
+					normalizeSharedPicture(picture as SharedPicture),
+			  )
+			: [];
+	});
+}
+
+async function savePeerLibraryItems(peerId: string, pictures: SharedPicture[]) {
+	await withStores([ITEMS_STORE], "readwrite", async (stores) => {
+		await requestToPromise(
+			stores[ITEMS_STORE].put(pictures.map(normalizeSharedPicture), peerId),
+		);
+	});
+}
+
+async function getCachedThumbnail(
+	peerId: string,
+	pictureId: string,
+): Promise<Blob | null> {
+	return withStores([THUMBNAILS_STORE], "readonly", async (stores) => {
+		const result = await requestToPromise(
+			stores[THUMBNAILS_STORE].get(thumbnailKey(peerId, pictureId)),
+		);
+		return result instanceof Blob ? result : null;
+	});
+}
+
+async function putCachedThumbnail(
+	peerId: string,
+	pictureId: string,
+	blob: Blob,
+): Promise<void> {
+	await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
+		await requestToPromise(
+			stores[THUMBNAILS_STORE].put(blob, thumbnailKey(peerId, pictureId)),
+		);
+	});
+}
+
+async function deleteCachedPeerThumbnails(peerId: string): Promise<void> {
+	await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
+		const keys = await requestToPromise(stores[THUMBNAILS_STORE].getAllKeys());
+		await Promise.all(
+			keys
+				.filter(
+					(key) => typeof key === "string" && key.startsWith(`${peerId}:`),
+				)
+				.map((key) => requestToPromise(stores[THUMBNAILS_STORE].delete(key))),
+		);
+	});
 }
 
 async function warmPeerLibraryThumbnails(
@@ -240,40 +248,44 @@ async function warmPeerLibraryThumbnails(
 	await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
-export function listPeerLibraries(): PeerLibrary[] {
-	return loadPeerLibraryIds().map(toPeerLibrary);
+export async function listPeerLibraries(): Promise<PeerLibrary[]> {
+	return (await loadPeerLibraryIds()).map(toPeerLibrary);
 }
 
-export function getCachedPeerLibraryItems(peerId: string): PeerLibraryItem[] {
-	return toPeerLibraryItems(peerId, loadPeerLibraryItemsMap()[peerId] ?? []);
+export async function getCachedPeerLibraryItems(
+	peerId: string,
+): Promise<PeerLibraryItem[]> {
+	return toPeerLibraryItems(peerId, await loadPeerLibraryItems(peerId));
 }
 
 export async function addPeerLibrary(peerId: string): Promise<PeerLibrary> {
-	const peerIds = loadPeerLibraryIds();
+	const peerIds = await loadPeerLibraryIds();
 	if (!peerIds.includes(peerId)) {
-		savePeerLibraryIds([...peerIds, peerId]);
+		await savePeerLibraryIds([...peerIds, peerId]);
 	}
 	return toPeerLibrary(peerId);
 }
 
 export async function removePeerLibrary(peerId: string): Promise<void> {
-	savePeerLibraryIds(loadPeerLibraryIds().filter((id) => id !== peerId));
-	const allItems = loadPeerLibraryItemsMap();
-	delete allItems[peerId];
-	savePeerLibraryItemsMap(allItems);
+	await savePeerLibraryIds(
+		(await loadPeerLibraryIds()).filter((id) => id !== peerId),
+	);
+	await withStores([ITEMS_STORE], "readwrite", async (stores) => {
+		await requestToPromise(stores[ITEMS_STORE].delete(peerId));
+	});
 	await deleteCachedPeerThumbnails(peerId);
 }
 
-export async function loadPeerLibraryItems(
+export async function loadPeerLibraryItemsCachedOrRemote(
 	peerId: string,
 ): Promise<PeerLibraryItem[]> {
 	try {
 		const pictures = await listPeerPictures(peerId);
-		persistPeerLibraryItems(peerId, pictures);
+		await savePeerLibraryItems(peerId, pictures);
 		void warmPeerLibraryThumbnails(peerId, pictures);
 		return toPeerLibraryItems(peerId, pictures);
 	} catch (error) {
-		const cachedItems = loadPeerLibraryItemsMap()[peerId] ?? [];
+		const cachedItems = await loadPeerLibraryItems(peerId);
 		if (cachedItems.length > 0) {
 			return toPeerLibraryItems(peerId, cachedItems);
 		}
