@@ -45,6 +45,10 @@ import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 
 type LibraryEntry = MediaLibrary | PeerLibrary;
 
+type MediaItemMetadata = {
+	hasSnapshots: boolean;
+};
+
 type MediaItem =
 	| {
 			kind: "local";
@@ -52,6 +56,7 @@ type MediaItem =
 			name: string;
 			path: string;
 			modifiedAt: number | null;
+			metadata: MediaItemMetadata;
 	  }
 	| {
 			kind: "peer";
@@ -59,6 +64,7 @@ type MediaItem =
 			name: string;
 			peerId: string;
 			modifiedAt: number | null;
+			metadata: MediaItemMetadata;
 	  };
 
 type MediaGridEntry =
@@ -145,6 +151,7 @@ function localMediaItem(image: LibraryImage): MediaItem {
 		name: image.name || pictureName(image.path),
 		path: image.path,
 		modifiedAt: normalizeModifiedAt(image.modified_at),
+		metadata: { hasSnapshots: image.metadata?.has_snapshots ?? false },
 	};
 }
 
@@ -155,6 +162,7 @@ function peerMediaItem(image: PeerLibraryItem): MediaItem {
 		name: image.name,
 		peerId: image.peerId,
 		modifiedAt: normalizeModifiedAt(image.modified_at),
+		metadata: { hasSnapshots: false },
 	};
 }
 
@@ -384,6 +392,9 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 						</span>
 					</div>
 				)}
+				{props.item.metadata.hasSnapshots && (
+					<div class="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-400/90 shadow-sm" />
+				)}
 			</div>
 			<span class="truncate px-0.5 text-[11px] text-white/40">
 				{props.item.name}
@@ -553,17 +564,47 @@ export const MediaView: Component = () => {
 		}
 		return rows;
 	});
+	const stableGridRows = createMemo<MediaGridRow[]>((previous) => {
+		const next = gridRows();
+		if (!previous || previous.length !== next.length) return next;
+		let allSame = true;
+		const result = next.map((row, i) => {
+			const prev = previous[i];
+			if (prev.kind !== row.kind) {
+				allSame = false;
+				return row;
+			}
+			if (row.kind === "date" && prev.kind === "date") {
+				if (row.modifiedAt === prev.modifiedAt) return prev;
+				allSame = false;
+				return row;
+			}
+			if (row.kind === "items" && prev.kind === "items") {
+				if (
+					row.items.length === prev.items.length &&
+					row.items.every((item, j) => item === prev.items[j])
+				) {
+					return prev;
+				}
+				allSame = false;
+				return row;
+			}
+			allSame = false;
+			return row;
+		});
+		return allSame ? previous : result;
+	});
 	const rowOffsets = createMemo(() => {
 		const offsets: number[] = [];
 		let offset = 0;
-		for (const row of gridRows()) {
+		for (const row of stableGridRows()) {
 			offsets.push(offset);
 			offset += row.kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight();
 		}
 		return offsets;
 	});
 	const totalHeight = createMemo(() => {
-		const rows = gridRows();
+		const rows = stableGridRows();
 		if (rows.length === 0) {
 			return 0;
 		}
@@ -575,7 +616,7 @@ export const MediaView: Component = () => {
 		);
 	});
 	const visibleRowRange = createMemo(() => {
-		const rows = gridRows();
+		const rows = stableGridRows();
 		const offsets = rowOffsets();
 		const height = viewportHeight();
 		const top = scrollTop();
@@ -607,14 +648,14 @@ export const MediaView: Component = () => {
 		};
 	});
 	const visibleRows = createMemo(() =>
-		gridRows().slice(visibleRowRange().start, visibleRowRange().end),
+		stableGridRows().slice(visibleRowRange().start, visibleRowRange().end),
 	);
 	const offsetY = createMemo(() => rowOffsets()[visibleRowRange().start] ?? 0);
 	const gridTemplateColumns = createMemo(
 		() => `repeat(${columns()}, minmax(0, 1fr))`,
 	);
 
-	const totalRows = createMemo(() => gridRows().length);
+	const totalRows = createMemo(() => stableGridRows().length);
 
 	const containerHeight = createMemo(() => {
 		if (totalRows() === 0) {

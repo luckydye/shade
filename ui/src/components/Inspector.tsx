@@ -268,13 +268,9 @@ function valueLabel(value: number, scale = 100) {
 }
 
 const TONE_THRESHOLD_BOUNDARIES = [
-	{ key: "shadows-start", value: 0, label: "Shadows begin" },
-	{
-		key: "midpoint",
-		value: 0.5,
-		label: "Shadows end / Highlights begin",
-	},
-	{ key: "highlights-end", value: 1, label: "Highlights end" },
+	{ key: "shadows", value: 0.25 },
+	{ key: "midtones", value: 0.5 },
+	{ key: "highlights", value: 0.75 },
 ] as const;
 
 const SparkIcon = () => (

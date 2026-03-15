@@ -107,10 +107,15 @@ export interface SharedPicture {
 	modified_at: number | null;
 }
 
+export interface LibraryImageMetadata {
+	has_snapshots: boolean;
+}
+
 export interface LibraryImage {
 	path: string;
 	name: string;
 	modified_at: number | null;
+	metadata: LibraryImageMetadata;
 }
 
 export interface LibraryImageListing {

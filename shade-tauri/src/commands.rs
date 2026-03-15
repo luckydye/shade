@@ -61,11 +61,18 @@ pub struct MediaLibrary {
     pub is_online: Option<bool>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct LibraryImageMetadata {
+    pub has_snapshots: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LibraryImage {
     pub path: String,
     pub name: String,
     pub modified_at: Option<u64>,
+    #[serde(default)]
+    pub metadata: LibraryImageMetadata,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -822,6 +829,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
                     name: picture_display_name(&path_string),
                     path: path_string,
                     modified_at: Some(modified_at_millis(mtime)?),
+                    metadata: Default::default(),
                 },
             ));
         }
@@ -850,6 +858,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
                 modified_at,
+                metadata: Default::default(),
             });
         }
     }
@@ -1070,6 +1079,7 @@ pub fn scan_library_into_snapshot(
                     name: picture_display_name(&path_string),
                     path: path_string,
                     modified_at: Some(modified_at),
+                    metadata: Default::default(),
                 },
             });
             if batch.len() >= 64 {
@@ -2472,9 +2482,40 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
     }
 }
 
+async fn enrich_listing_metadata(listing: &mut LibraryImageListing) -> Result<(), String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT DISTINCT i.source_name
+             FROM images i
+             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             WHERE i.source_name IS NOT NULL",
+            (),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut snapshot_paths = std::collections::HashSet::new();
+    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+        snapshot_paths.insert(row.get::<String>(0).map_err(|e| e.to_string())?);
+    }
+    for item in &mut listing.items {
+        item.metadata.has_snapshots = snapshot_paths.contains(&item.path);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_library_images<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
+    library_id: String,
+) -> Result<LibraryImageListing, String> {
+    let mut listing = build_library_listing(&_app, library_id).await?;
+    enrich_listing_metadata(&mut listing).await?;
+    Ok(listing)
+}
+
+async fn build_library_listing<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
     library_id: String,
 ) -> Result<LibraryImageListing, String> {
     #[cfg(target_os = "android")]
@@ -2493,6 +2534,7 @@ pub async fn list_library_images<R: tauri::Runtime>(
                         name: picture_display_name(&photo.uri),
                         path: photo.uri,
                         modified_at: photo.modified_at,
+                        metadata: Default::default(),
                     })
                     .collect(),
                 is_complete: true,
@@ -2522,6 +2564,7 @@ pub async fn list_library_images<R: tauri::Runtime>(
                             name: picture_display_name(&photo.id),
                             path: photo.id,
                             modified_at: photo.modified_at,
+                            metadata: Default::default(),
                         })
                         .collect(),
                     is_complete: true,
