@@ -74,7 +74,11 @@ fn compute_stats(path: &Path) -> Stats {
         let xi = x as i32;
         let yi = y as i32;
 
-        if xi < border || xi >= w as i32 - border || yi < border || yi >= h as i32 - border {
+        if xi < border
+            || xi >= w as i32 - border
+            || yi < border
+            || yi >= h as i32 - border
+        {
             corner_sum += lum;
             corner_count += 1;
         }
@@ -200,7 +204,8 @@ fn highlights_negative_dims_image() {
     let Some(expanded) = run_edit(&["--highlights", "1.0"]) else {
         return;
     };
-    let mean_compressed = (compressed.mean_r + compressed.mean_g + compressed.mean_b) / 3.0;
+    let mean_compressed =
+        (compressed.mean_r + compressed.mean_g + compressed.mean_b) / 3.0;
     let mean_expanded = (expanded.mean_r + expanded.mean_g + expanded.mean_b) / 3.0;
     assert!(
         mean_compressed < mean_expanded,

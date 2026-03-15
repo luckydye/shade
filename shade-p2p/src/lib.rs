@@ -128,7 +128,10 @@ impl LocalPeerDiscovery {
         }
     }
 
-    pub async fn list_peer_pictures(&self, peer_endpoint_id: &str) -> Result<Vec<SharedPicture>> {
+    pub async fn list_peer_pictures(
+        &self,
+        peer_endpoint_id: &str,
+    ) -> Result<Vec<SharedPicture>> {
         let mut pictures = Vec::new();
         let mut offset = 0;
         loop {
@@ -317,14 +320,15 @@ impl ProtocolHandler for BrowseProtocol {
             .read_to_end(MAX_REQUEST_MESSAGE_BYTES)
             .await
             .map_err(AcceptError::from_err)?;
-        let request =
-            serde_json::from_slice::<BrowseRequest>(&request).map_err(AcceptError::from_err)?;
+        let request = serde_json::from_slice::<BrowseRequest>(&request)
+            .map_err(AcceptError::from_err)?;
         let response = match request {
             BrowseRequest::ListPictures { offset, limit } => {
                 match self.media_provider.list_pictures().await {
                     Ok(pictures) => {
                         let total = pictures.len();
-                        let page = pictures.into_iter().skip(offset).take(limit).collect();
+                        let page =
+                            pictures.into_iter().skip(offset).take(limit).collect();
                         BrowseResponse::PicturesPage {
                             pictures: page,
                             has_more: offset.saturating_add(limit) < total,

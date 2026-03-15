@@ -2,11 +2,12 @@ use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
-    ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor, ShaderStages,
-    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureUsages,
-    TextureViewDescriptor, TextureViewDimension,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
+    BufferBindingType, BufferUsages, ComputePipeline, ComputePipelineDescriptor,
+    Extent3d, PipelineLayoutDescriptor, ShaderStages, StorageTextureAccess, Texture,
+    TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor,
+    TextureViewDimension,
 };
 
 use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
@@ -115,7 +116,12 @@ fn make_simple_pipeline(
 }
 
 /// Create an output texture (Rgba8Unorm, STORAGE_BINDING | COPY_SRC | TEXTURE_BINDING).
-fn create_output_texture(device: &wgpu::Device, width: u32, height: u32, label: &str) -> Texture {
+fn create_output_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    label: &str,
+) -> Texture {
     device.create_texture(&TextureDescriptor {
         label: Some(label),
         size: Extent3d {
@@ -198,15 +204,19 @@ impl CropPipeline {
         output_height: u32,
         params: CropUniform,
     ) -> Result<Texture> {
-        let output_tex =
-            create_output_texture(&ctx.device, output_width, output_height, "crop output");
-        let uniform_buf = ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("crop uniform"),
-                contents: bytemuck::bytes_of(&params),
-                usage: BufferUsages::UNIFORM,
-            });
+        let output_tex = create_output_texture(
+            &ctx.device,
+            output_width,
+            output_height,
+            "crop output",
+        );
+        let uniform_buf =
+            ctx.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("crop uniform"),
+                    contents: bytemuck::bytes_of(&params),
+                    usage: BufferUsages::UNIFORM,
+                });
         let in_view = input_tex.create_view(&TextureViewDescriptor::default());
         let out_view = output_tex.create_view(&TextureViewDescriptor::default());
         let bind_group = ctx.device.create_bind_group(&BindGroupDescriptor {
@@ -251,81 +261,84 @@ impl CurvesPipeline {
         let device = &ctx.device;
 
         // Custom layout: 7 bindings (tex_in, tex_out, lut_r, lut_g, lut_b, lut_master, uniform)
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("curves bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
+        let bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("curves bind group layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: false,
+                            },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: INTERNAL_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: INTERNAL_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
         let shader = ctx
             .device
@@ -334,13 +347,13 @@ impl CurvesPipeline {
                 source: wgpu::ShaderSource::Wgsl(CURVES_WGSL.into()),
             });
 
-        let pipeline_layout = ctx
-            .device
-            .create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("curves pipeline layout"),
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            ctx.device
+                .create_pipeline_layout(&PipelineLayoutDescriptor {
+                    label: Some("curves pipeline layout"),
+                    bind_group_layouts: &[&bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
         let pipeline = ctx
             .device
@@ -373,7 +386,8 @@ impl CurvesPipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let output_tex = create_output_texture(device, width, height, "curves output texture");
+        let output_tex =
+            create_output_texture(device, width, height, "curves output texture");
 
         let make_lut_buf = |data: &[f32], label: &str| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -459,7 +473,8 @@ pub struct ColorPipeline {
 impl ColorPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout = make_simple_bind_group_layout(device, "color bind group layout");
+        let bind_group_layout =
+            make_simple_bind_group_layout(device, "color bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             COLOR_WGSL,
@@ -484,7 +499,8 @@ impl ColorPipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let output_tex = create_output_texture(device, width, height, "color output texture");
+        let output_tex =
+            create_output_texture(device, width, height, "color output texture");
 
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("color params uniform"),
@@ -537,7 +553,8 @@ pub struct VignettePipeline {
 impl VignettePipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout = make_simple_bind_group_layout(device, "vignette bind group layout");
+        let bind_group_layout =
+            make_simple_bind_group_layout(device, "vignette bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             VIGNETTE_WGSL,
@@ -562,7 +579,8 @@ impl VignettePipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let output_tex = create_output_texture(device, width, height, "vignette output texture");
+        let output_tex =
+            create_output_texture(device, width, height, "vignette output texture");
 
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vignette params uniform"),
@@ -615,7 +633,8 @@ pub struct SharpenPipeline {
 impl SharpenPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout = make_simple_bind_group_layout(device, "sharpen bind group layout");
+        let bind_group_layout =
+            make_simple_bind_group_layout(device, "sharpen bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             SHARPEN_WGSL,
@@ -640,7 +659,8 @@ impl SharpenPipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let output_tex = create_output_texture(device, width, height, "sharpen output texture");
+        let output_tex =
+            create_output_texture(device, width, height, "sharpen output texture");
 
         // SharpenParams is 2×f32 = 8 bytes; pad to 16 for uniform alignment
         #[repr(C)]
@@ -707,7 +727,8 @@ pub struct GrainPipeline {
 impl GrainPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout = make_simple_bind_group_layout(device, "grain bind group layout");
+        let bind_group_layout =
+            make_simple_bind_group_layout(device, "grain bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             GRAIN_WGSL,
@@ -732,7 +753,8 @@ impl GrainPipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let output_tex = create_output_texture(device, width, height, "grain output texture");
+        let output_tex =
+            create_output_texture(device, width, height, "grain output texture");
 
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("grain params uniform"),
@@ -803,7 +825,8 @@ pub struct HslPipeline {
 impl HslPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
-        let bind_group_layout = make_simple_bind_group_layout(device, "hsl bind group layout");
+        let bind_group_layout =
+            make_simple_bind_group_layout(device, "hsl bind group layout");
         let pipeline = make_simple_pipeline(
             device,
             HSL_WGSL,
@@ -827,7 +850,8 @@ impl HslPipeline {
         let device = &ctx.device;
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
-        let output_tex = create_output_texture(device, width, height, "hsl output texture");
+        let output_tex =
+            create_output_texture(device, width, height, "hsl output texture");
         let gpu = HslParamsGpu::from(params);
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("hsl params uniform"),

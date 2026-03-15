@@ -5,7 +5,9 @@ use shade_core::{
     SharpenParams, VignetteParams,
 };
 use shade_io::SourceImageInfo;
-use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
+use shade_io::{
+    load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32,
+};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
@@ -27,7 +29,10 @@ extern "C" {
         height: i32,
         out_size: *mut i32,
     ) -> *mut u8;
-    fn ios_get_image_data(identifier: *const std::os::raw::c_char, out_size: *mut i32) -> *mut u8;
+    fn ios_get_image_data(
+        identifier: *const std::os::raw::c_char,
+        out_size: *mut i32,
+    ) -> *mut u8;
     fn ios_free_buffer(ptr: *mut u8);
     fn ios_free_string(ptr: *mut std::os::raw::c_char);
 }
@@ -90,13 +95,15 @@ struct AppConfig {
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif", "exr", "dng", "cr2", "cr3", "arw", "nef",
-    "orf", "raf", "rw2", "3fr",
+    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif", "exr", "dng", "cr2", "cr3",
+    "arw", "nef", "orf", "raf", "rw2", "3fr",
 ];
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn init_app_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+pub fn init_app_paths<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     APP_CONFIG_DIR
         .set(config_dir)
@@ -120,13 +127,19 @@ fn decode_image_bytes_with_info(
     catch_unwind(AssertUnwindSafe(|| {
         load_image_bytes_f32_with_info(bytes, name_hint)
     }))
-    .map_err(|payload| format!("image decode panicked: {}", panic_payload_message(payload)))?
+    .map_err(|payload| {
+        format!("image decode panicked: {}", panic_payload_message(payload))
+    })?
     .map_err(|e| e.to_string())
 }
 
-fn decode_image_path_with_info(path: &Path) -> Result<(FloatImage, SourceImageInfo), String> {
+fn decode_image_path_with_info(
+    path: &Path,
+) -> Result<(FloatImage, SourceImageInfo), String> {
     catch_unwind(AssertUnwindSafe(|| load_image_f32_with_info(path)))
-        .map_err(|payload| format!("image decode panicked: {}", panic_payload_message(payload)))?
+        .map_err(|payload| {
+            format!("image decode panicked: {}", panic_payload_message(payload))
+        })?
         .map_err(|e| e.to_string())
 }
 
@@ -269,7 +282,9 @@ fn unix_timestamp_millis() -> Result<i64, String> {
     i64::try_from(duration.as_millis()).map_err(|e| e.to_string())
 }
 
-async fn load_latest_edit_version(file_hash: &str) -> Result<Option<PersistedEditVersion>, String> {
+async fn load_latest_edit_version(
+    file_hash: &str,
+) -> Result<Option<PersistedEditVersion>, String> {
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
@@ -391,10 +406,9 @@ async fn persist_current_edit_version(
 ) -> Result<i64, String> {
     let (file_hash, source_name, layers, current_version) = {
         let st = lock_editor_state(state)?;
-        let file_hash = st
-            .current_image_hash
-            .clone()
-            .ok_or_else(|| "cannot persist edits without a loaded image hash".to_string())?;
+        let file_hash = st.current_image_hash.clone().ok_or_else(|| {
+            "cannot persist edits without a loaded image hash".to_string()
+        })?;
         (
             file_hash,
             st.current_image_source.clone(),
@@ -402,8 +416,13 @@ async fn persist_current_edit_version(
             st.current_edit_version,
         )
     };
-    let version =
-        persist_edit_version(&file_hash, source_name.as_deref(), current_version, &layers).await?;
+    let version = persist_edit_version(
+        &file_hash,
+        source_name.as_deref(),
+        current_version,
+        &layers,
+    )
+    .await?;
     let mut st = lock_editor_state(state)?;
     st.current_edit_version = Some(version);
     Ok(version)
@@ -414,17 +433,17 @@ async fn save_snapshot_version(
 ) -> Result<i64, String> {
     let (file_hash, source_name, layers) = {
         let st = lock_editor_state(state)?;
-        let file_hash = st
-            .current_image_hash
-            .clone()
-            .ok_or_else(|| "cannot save a snapshot without a loaded image hash".to_string())?;
+        let file_hash = st.current_image_hash.clone().ok_or_else(|| {
+            "cannot save a snapshot without a loaded image hash".to_string()
+        })?;
         (
             file_hash,
             st.current_image_source.clone(),
             non_image_layers(&st.stack),
         )
     };
-    let version = persist_edit_version(&file_hash, source_name.as_deref(), None, &layers).await?;
+    let version =
+        persist_edit_version(&file_hash, source_name.as_deref(), None, &layers).await?;
     let mut st = lock_editor_state(state)?;
     st.current_edit_version = Some(version);
     Ok(version)
@@ -847,13 +866,15 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
     let mut items = Vec::new();
     for storage in storage.storagelist {
         for file_path in api.files(&storage).await.map_err(|e| e.to_string())? {
-            let modified_at =
-                tokio::time::timeout(std::time::Duration::from_secs(2), api.info(&file_path))
-                    .await
-                    .ok()
-                    .and_then(Result::ok)
-                    .and_then(|info| chrono_like_timestamp_millis(&info.lastmodifieddate).ok())
-                    .flatten();
+            let modified_at = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                api.info(&file_path),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .and_then(|info| chrono_like_timestamp_millis(&info.lastmodifieddate).ok())
+            .flatten();
             items.push(LibraryImage {
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
@@ -988,7 +1009,10 @@ impl CameraThumbnailService {
         })
     }
 
-    pub async fn acquire(&self, host: &str) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+    pub async fn acquire(
+        &self,
+        host: &str,
+    ) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
         let semaphore = {
             let mut semaphores = self.semaphores.lock().await;
             semaphores
@@ -1181,7 +1205,8 @@ pub enum RenderJob {
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
-        response: tokio::sync::oneshot::Sender<Result<PreviewFrameFloat16Response, String>>,
+        response:
+            tokio::sync::oneshot::Sender<Result<PreviewFrameFloat16Response, String>>,
     },
 }
 
@@ -1224,7 +1249,8 @@ fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
         return std::fs::read(&cache_path).map_err(|e| e.to_string());
     }
 
-    let (pixels, width, height) = shade_io::load_image(source).map_err(|e| e.to_string())?;
+    let (pixels, width, height) =
+        shade_io::load_image(source).map_err(|e| e.to_string())?;
     let img = image::RgbaImage::from_raw(width, height, pixels)
         .ok_or("failed to wrap pixels in RgbaImage")?;
     let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
@@ -1557,7 +1583,8 @@ pub async fn open_image<R: tauri::Runtime>(
     if !path.starts_with('/') {
         let photo_id = path.clone();
         let bytes = tokio::task::spawn_blocking(move || {
-            let c_id = std::ffi::CString::new(photo_id.as_str()).map_err(|e| e.to_string())?;
+            let c_id =
+                std::ffi::CString::new(photo_id.as_str()).map_err(|e| e.to_string())?;
             let mut out_size: i32 = 0;
             let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
             if ptr.is_null() {
@@ -1694,7 +1721,9 @@ fn pack_preview_rgba_response(frame: PreviewFrameResponse) -> tauri::ipc::Respon
     tauri::ipc::Response::new(bytes)
 }
 
-fn pack_preview_float16_response(frame: PreviewFrameFloat16Response) -> tauri::ipc::Response {
+fn pack_preview_float16_response(
+    frame: PreviewFrameFloat16Response,
+) -> tauri::ipc::Response {
     let mut bytes = Vec::with_capacity(8 + frame.pixels.len() * 2);
     bytes.extend_from_slice(&frame.width.to_le_bytes());
     bytes.extend_from_slice(&frame.height.to_le_bytes());
@@ -1773,7 +1802,8 @@ pub async fn render_preview(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<tauri::ipc::Response, String> {
     let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
-    let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
+    let (stack, request) =
+        apply_preview_request(stack, canvas_width, canvas_height, request);
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     render_service
         .0
@@ -1810,7 +1840,8 @@ pub async fn render_preview_float16(
             st.canvas_height,
         )
     };
-    let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
+    let (stack, request) =
+        apply_preview_request(stack, canvas_width, canvas_height, request);
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     render_service
         .0
@@ -1977,7 +2008,8 @@ pub async fn apply_edit(
                         }
                     }
                     "curves" => {
-                        let curve_points = params.curve_points.ok_or("missing curve_points")?;
+                        let curve_points =
+                            params.curve_points.ok_or("missing curve_points")?;
                         let next = AdjustmentOp::Curves {
                             lut_r: linear_lut(),
                             lut_g: linear_lut(),
@@ -2060,7 +2092,9 @@ pub async fn apply_edit(
                     "denoise" => {
                         let next = AdjustmentOp::Denoise(DenoiseParams {
                             luma_strength: params.denoise_luma_strength.unwrap_or(0.0),
-                            chroma_strength: params.denoise_chroma_strength.unwrap_or(0.0),
+                            chroma_strength: params
+                                .denoise_chroma_strength
+                                .unwrap_or(0.0),
                             mode: params.denoise_mode.unwrap_or(0),
                             _pad: 0.0,
                         });
@@ -2335,9 +2369,11 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     if !picture_id.starts_with('/') {
         let picture_id = picture_id.to_owned();
         return tokio::task::spawn_blocking(move || {
-            let c_id = std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
+            let c_id =
+                std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
             let mut out_size: i32 = 0;
-            let ptr = unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
+            let ptr =
+                unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
             if ptr.is_null() {
                 return Err("failed to get thumbnail from photo library".to_string());
             }
@@ -2385,7 +2421,8 @@ pub async fn load_picture_bytes<R: tauri::Runtime>(
     if !picture_id.starts_with('/') {
         let picture_id = picture_id.to_owned();
         return tokio::task::spawn_blocking(move || {
-            let c_id = std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
+            let c_id =
+                std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
             let mut out_size: i32 = 0;
             let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
             if ptr.is_null() {
@@ -2509,7 +2546,9 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
     }
 }
 
-async fn enrich_listing_metadata(listing: &mut LibraryImageListing) -> Result<(), String> {
+async fn enrich_listing_metadata(
+    listing: &mut LibraryImageListing,
+) -> Result<(), String> {
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
@@ -2605,7 +2644,8 @@ async fn build_library_listing<R: tauri::Runtime>(
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         if library_id.starts_with("ccapi:") {
-            return list_ccapi_library_images(&resolve_ccapi_library_host(&library_id)?).await;
+            return list_ccapi_library_images(&resolve_ccapi_library_host(&library_id)?)
+                .await;
         }
         let library_path = resolve_desktop_library_path(&library_id)?;
         _app.state::<crate::LibraryScanService>()

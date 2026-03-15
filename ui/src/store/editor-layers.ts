@@ -99,6 +99,7 @@ function applyAdjustmentLayerEdit(
 				...adjustments,
 				color: {
 					saturation: params.saturation as number,
+					vibrancy: params.vibrancy as number,
 					temperature: params.temperature as number,
 					tint: params.tint as number,
 				},

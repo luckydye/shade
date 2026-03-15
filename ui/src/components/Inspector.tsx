@@ -93,6 +93,7 @@ const DEFAULT_TONE = {
 } as const;
 const DEFAULT_COLOR = {
 	saturation: 1,
+	vibrancy: 0,
 	temperature: 0,
 	tint: 0,
 } as const;
@@ -1155,6 +1156,27 @@ const Inspector: Component = () => {
 									layer_idx: state.selectedLayerIdx,
 									op: "color",
 									saturation: value,
+									vibrancy: color().vibrancy,
+									temperature: color().temperature,
+									tint: color().tint,
+								});
+							}}
+						/>
+						<Slider
+							label="Vibrancy"
+							icon={<DropletIcon />}
+							value={color().vibrancy}
+							defaultValue={DEFAULT_COLOR.vibrancy}
+							valueLabel={valueLabel(color().vibrancy)}
+							min={-1}
+							max={1}
+							onChange={(value) => {
+								selectedAdjustmentLayerOrThrow();
+								void applyEdit({
+									layer_idx: state.selectedLayerIdx,
+									op: "color",
+									saturation: color().saturation,
+									vibrancy: value,
 									temperature: color().temperature,
 									tint: color().tint,
 								});
@@ -1733,6 +1755,27 @@ const Inspector: Component = () => {
 													layer_idx: state.selectedLayerIdx,
 													op: "color",
 													saturation: value,
+													vibrancy: color().vibrancy,
+													temperature: color().temperature,
+													tint: color().tint,
+												});
+											}}
+										/>
+										<Slider
+											label="Vibrancy"
+											icon={<DropletIcon />}
+											value={color().vibrancy}
+											defaultValue={DEFAULT_COLOR.vibrancy}
+											valueLabel={valueLabel(color().vibrancy)}
+											min={-1}
+											max={1}
+											onChange={(value) => {
+												selectedAdjustmentLayerOrThrow();
+												void applyEdit({
+													layer_idx: state.selectedLayerIdx,
+													op: "color",
+													saturation: color().saturation,
+													vibrancy: value,
 													temperature: color().temperature,
 													tint: color().tint,
 												});
@@ -1752,6 +1795,7 @@ const Inspector: Component = () => {
 													layer_idx: state.selectedLayerIdx,
 													op: "color",
 													saturation: color().saturation,
+													vibrancy: color().vibrancy,
 													temperature: value,
 													tint: color().tint,
 												});
@@ -1771,6 +1815,7 @@ const Inspector: Component = () => {
 													layer_idx: state.selectedLayerIdx,
 													op: "color",
 													saturation: color().saturation,
+													vibrancy: color().vibrancy,
 													temperature: color().temperature,
 													tint: value,
 												});
@@ -1829,6 +1874,44 @@ const Inspector: Component = () => {
 													layer_idx: state.selectedLayerIdx,
 													op: "grain",
 													grain_amount: value,
+												});
+											}}
+										/>
+										<Slider
+											label="Denoise Luminance"
+											icon={<DenoiseIcon />}
+											value={denoise().luma_strength}
+											defaultValue={DEFAULT_DENOISE.luma_strength}
+											valueLabel={valueLabel(denoise().luma_strength)}
+											min={0}
+											max={1}
+											onChange={(value) => {
+												selectedAdjustmentLayerOrThrow();
+												void applyEdit({
+													layer_idx: state.selectedLayerIdx,
+													op: "denoise",
+													denoise_luma_strength: value,
+													denoise_chroma_strength: denoise().chroma_strength,
+													denoise_mode: denoise().mode,
+												});
+											}}
+										/>
+										<Slider
+											label="Denoise Color"
+											icon={<DenoiseIcon />}
+											value={denoise().chroma_strength}
+											defaultValue={DEFAULT_DENOISE.chroma_strength}
+											valueLabel={valueLabel(denoise().chroma_strength)}
+											min={0}
+											max={1}
+											onChange={(value) => {
+												selectedAdjustmentLayerOrThrow();
+												void applyEdit({
+													layer_idx: state.selectedLayerIdx,
+													op: "denoise",
+													denoise_luma_strength: denoise().luma_strength,
+													denoise_chroma_strength: value,
+													denoise_mode: denoise().mode,
 												});
 											}}
 										/>

@@ -186,7 +186,9 @@ fn preview_crop_from_args(
                 height: rect.height,
             }))
         }
-        _ => anyhow::bail!("crop preview requires crop_x, crop_y, crop_width, and crop_height"),
+        _ => anyhow::bail!(
+            "crop preview requires crop_x, crop_y, crop_width, and crop_height"
+        ),
     }
 }
 
@@ -204,7 +206,9 @@ fn preview_target_size(
             }
             Ok((width, height))
         }
-        (None, None, Some(crop)) => Ok((crop.width.ceil() as u32, crop.height.ceil() as u32)),
+        (None, None, Some(crop)) => {
+            Ok((crop.width.ceil() as u32, crop.height.ceil() as u32))
+        }
         (None, None, None) => Ok((canvas_width, canvas_height)),
         _ => anyhow::bail!("preview_width and preview_height must be provided together"),
     }
@@ -212,7 +216,8 @@ fn preview_target_size(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .init();
 
     let cli = Cli::parse();
 
@@ -299,7 +304,10 @@ async fn main() -> Result<()> {
                 gamma: 1.0,
             });
 
-            if saturation.is_some() || vibrancy.is_some() || temperature.is_some() || tint.is_some()
+            if saturation.is_some()
+                || vibrancy.is_some()
+                || temperature.is_some()
+                || tint.is_some()
             {
                 let color_params = ColorParams {
                     saturation: saturation.unwrap_or(1.0),
@@ -443,8 +451,13 @@ async fn main() -> Result<()> {
             let renderer = Renderer::new().await?;
 
             let crop = preview_crop_from_args(crop_x, crop_y, crop_width, crop_height)?;
-            let (target_width, target_height) =
-                preview_target_size(preview_width, preview_height, crop.as_ref(), width, height)?;
+            let (target_width, target_height) = preview_target_size(
+                preview_width,
+                preview_height,
+                crop.as_ref(),
+                width,
+                height,
+            )?;
 
             log::info!(
                 "Compositing layer stack ({} layers) to {}×{}…",

@@ -17,7 +17,11 @@ impl TextureCache {
     }
 
     /// Returns a cached texture for `key`, or creates and caches it.
-    pub fn get_or_insert_with(&self, key: u64, create: impl FnOnce() -> Texture) -> Arc<Texture> {
+    pub fn get_or_insert_with(
+        &self,
+        key: u64,
+        create: impl FnOnce() -> Texture,
+    ) -> Arc<Texture> {
         if let Some(texture) = self.map.borrow().get(&key) {
             return texture.clone();
         }

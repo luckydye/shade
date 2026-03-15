@@ -18,6 +18,7 @@ pub use composite::{
     CompositePipeline, CompositeUniform,
 };
 pub use context::GpuContext;
+pub use denoise::DenoisePipeline;
 pub use pipeline::TonePipeline;
 pub use pipelines::{
     ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GrainPipeline, HslPipeline,
@@ -25,6 +26,5 @@ pub use pipelines::{
 };
 pub use profiler::{GpuProfiler, PassTiming};
 pub use renderer::{PreviewCrop, Renderer};
-pub use denoise::DenoisePipeline;
 pub use sharpen2::SharpenTwoPassPipeline;
 pub use texture_cache::TextureCache;

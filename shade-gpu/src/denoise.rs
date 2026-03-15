@@ -189,7 +189,11 @@ fn make_pipeline(
 fn alloc_tex(device: &Device, w: u32, h: u32, label: &str) -> Texture {
     device.create_texture(&TextureDescriptor {
         label: Some(label),
-        size: Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
@@ -209,9 +213,9 @@ fn dispatch(
     h: u32,
     label: &str,
 ) {
-    let mut enc = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
-        label: Some(label),
-    });
+    let mut enc = ctx
+        .device
+        .create_command_encoder(&CommandEncoderDescriptor { label: Some(label) });
     {
         let mut pass = enc.begin_compute_pass(&ComputePassDescriptor {
             label: Some(label),
@@ -237,20 +241,55 @@ impl DenoisePipeline {
         let nlm_bgl = three_binding_bgl(device, "denoise_nlm_bgl");
 
         Self {
-            guide_h_pipeline: make_pipeline(device, GUIDE_H_WGSL, "denoise_guide_h", &guide_h_bgl, "denoise_guide_h_pl"),
+            guide_h_pipeline: make_pipeline(
+                device,
+                GUIDE_H_WGSL,
+                "denoise_guide_h",
+                &guide_h_bgl,
+                "denoise_guide_h_pl",
+            ),
             guide_h_bgl,
-            guide_v_pipeline: make_pipeline(device, GUIDE_V_WGSL, "denoise_guide_v", &guide_v_bgl, "denoise_guide_v_pl"),
+            guide_v_pipeline: make_pipeline(
+                device,
+                GUIDE_V_WGSL,
+                "denoise_guide_v",
+                &guide_v_bgl,
+                "denoise_guide_v_pl",
+            ),
             guide_v_bgl,
-            bilateral_h_pipeline: make_pipeline(device, BILATERAL_H_WGSL, "denoise_bilateral_h", &bilateral_h_bgl, "denoise_bilateral_h_pl"),
+            bilateral_h_pipeline: make_pipeline(
+                device,
+                BILATERAL_H_WGSL,
+                "denoise_bilateral_h",
+                &bilateral_h_bgl,
+                "denoise_bilateral_h_pl",
+            ),
             bilateral_h_bgl,
-            bilateral_v_pipeline: make_pipeline(device, BILATERAL_V_WGSL, "denoise_bilateral_v", &bilateral_v_bgl, "denoise_bilateral_v_pl"),
+            bilateral_v_pipeline: make_pipeline(
+                device,
+                BILATERAL_V_WGSL,
+                "denoise_bilateral_v",
+                &bilateral_v_bgl,
+                "denoise_bilateral_v_pl",
+            ),
             bilateral_v_bgl,
-            nlm_pipeline: make_pipeline(device, NLM_WGSL, "denoise_nlm", &nlm_bgl, "denoise_nlm_pl"),
+            nlm_pipeline: make_pipeline(
+                device,
+                NLM_WGSL,
+                "denoise_nlm",
+                &nlm_bgl,
+                "denoise_nlm_pl",
+            ),
             nlm_bgl,
         }
     }
 
-    pub fn process(&self, ctx: &GpuContext, input_tex: &Texture, params: DenoiseParams) -> Texture {
+    pub fn process(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        params: DenoiseParams,
+    ) -> Texture {
         let device = &ctx.device;
         let (w, h) = (input_tex.width(), input_tex.height());
 
@@ -273,23 +312,29 @@ impl DenoisePipeline {
         // ── Bilateral mode ────────────────────────────────────────────────────
         // 1. Build guide: H-blur → V-blur of the noisy input
         let guide_h_tex = alloc_tex(device, w, h, "denoise_guide_h");
-        let guide_tex   = alloc_tex(device, w, h, "denoise_guide");
+        let guide_tex = alloc_tex(device, w, h, "denoise_guide");
         let bilat_h_tex = alloc_tex(device, w, h, "denoise_bilateral_h");
-        let output_tex  = alloc_tex(device, w, h, "denoise_output");
+        let output_tex = alloc_tex(device, w, h, "denoise_output");
 
-        let in_view     = input_tex.create_view(&Default::default());
+        let in_view = input_tex.create_view(&Default::default());
         let guide_h_view = guide_h_tex.create_view(&Default::default());
-        let guide_view  = guide_tex.create_view(&Default::default());
+        let guide_view = guide_tex.create_view(&Default::default());
         let bilat_h_view = bilat_h_tex.create_view(&Default::default());
-        let out_view    = output_tex.create_view(&Default::default());
+        let out_view = output_tex.create_view(&Default::default());
 
         // Guide H pass
         let bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("denoise_guide_h_bg"),
             layout: &self.guide_h_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&in_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&guide_h_view) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&in_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&guide_h_view),
+                },
             ],
         });
         dispatch(ctx, &self.guide_h_pipeline, &bg, w, h, "denoise_guide_h");
@@ -299,8 +344,14 @@ impl DenoisePipeline {
             label: Some("denoise_guide_v_bg"),
             layout: &self.guide_v_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&guide_h_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&guide_view) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&guide_h_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&guide_view),
+                },
             ],
         });
         dispatch(ctx, &self.guide_v_pipeline, &bg, w, h, "denoise_guide_v");
@@ -310,26 +361,64 @@ impl DenoisePipeline {
             label: Some("denoise_bilateral_h_bg"),
             layout: &self.bilateral_h_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&in_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&guide_view) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&bilat_h_view) },
-                BindGroupEntry { binding: 3, resource: params_buf.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&in_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&guide_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&bilat_h_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
             ],
         });
-        dispatch(ctx, &self.bilateral_h_pipeline, &bg, w, h, "denoise_bilateral_h");
+        dispatch(
+            ctx,
+            &self.bilateral_h_pipeline,
+            &bg,
+            w,
+            h,
+            "denoise_bilateral_h",
+        );
 
         // Bilateral V pass: filter=bilat_h, guide=guide → output
         let bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("denoise_bilateral_v_bg"),
             layout: &self.bilateral_v_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&bilat_h_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&guide_view) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&out_view) },
-                BindGroupEntry { binding: 3, resource: params_buf.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&bilat_h_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&guide_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&out_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
             ],
         });
-        dispatch(ctx, &self.bilateral_v_pipeline, &bg, w, h, "denoise_bilateral_v");
+        dispatch(
+            ctx,
+            &self.bilateral_v_pipeline,
+            &bg,
+            w,
+            h,
+            "denoise_bilateral_v",
+        );
 
         output_tex
     }
@@ -344,15 +433,24 @@ impl DenoisePipeline {
     ) -> Texture {
         let device = &ctx.device;
         let output_tex = alloc_tex(device, w, h, "denoise_nlm_output");
-        let in_view  = input_tex.create_view(&Default::default());
+        let in_view = input_tex.create_view(&Default::default());
         let out_view = output_tex.create_view(&Default::default());
         let bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("denoise_nlm_bg"),
             layout: &self.nlm_bgl,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&in_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&out_view) },
-                BindGroupEntry { binding: 2, resource: params_buf.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&in_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&out_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
             ],
         });
         dispatch(ctx, &self.nlm_pipeline, &bg, w, h, "denoise_nlm");

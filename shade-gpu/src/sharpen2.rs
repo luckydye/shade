@@ -134,7 +134,12 @@ impl SharpenTwoPassPipeline {
         }
     }
 
-    pub fn process(&self, ctx: &GpuContext, input_tex: &Texture, params: SharpenParams) -> Texture {
+    pub fn process(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        params: SharpenParams,
+    ) -> Texture {
         let device = &ctx.device;
         let queue = &ctx.queue;
         let (w, h) = (input_tex.width(), input_tex.height());

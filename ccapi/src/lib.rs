@@ -12,7 +12,9 @@ enum StringOrNumber {
     Number(u64),
 }
 
-fn deserialize_string_or_number_as_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_string_or_number_as_string<'de, D>(
+    deserializer: D,
+) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -27,7 +29,9 @@ where
     D: Deserializer<'de>,
 {
     match StringOrNumber::deserialize(deserializer)? {
-        StringOrNumber::String(value) => value.parse::<u64>().map_err(serde::de::Error::custom),
+        StringOrNumber::String(value) => {
+            value.parse::<u64>().map_err(serde::de::Error::custom)
+        }
         StringOrNumber::Number(value) => Ok(value),
     }
 }
@@ -78,7 +82,8 @@ pub struct CCAPI {
     host: String,
 }
 
-static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+static APP_USER_AGENT: &str =
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 fn extract_error_message(payload: &str) -> String {
     serde_json::from_str::<Value>(payload)
@@ -92,7 +97,11 @@ fn extract_error_message(payload: &str) -> String {
         .unwrap_or_else(|| payload.to_string())
 }
 
-fn format_request_error(host: &str, endpoint: &str, error: reqwest::Error) -> anyhow::Error {
+fn format_request_error(
+    host: &str,
+    endpoint: &str,
+    error: reqwest::Error,
+) -> anyhow::Error {
     let target = format!("http://{host}{endpoint}");
     if error.is_connect() {
         return anyhow!("camera unavailable at {target}: {}", error);

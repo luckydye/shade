@@ -29,7 +29,10 @@ pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
 }
 
 #[wasm_bindgen]
-pub fn load_image_encoded(bytes: &[u8], file_name: Option<String>) -> Result<JsValue, JsValue> {
+pub fn load_image_encoded(
+    bytes: &[u8],
+    file_name: Option<String>,
+) -> Result<JsValue, JsValue> {
     ENGINE.with(|e| {
         let mut engine = e.borrow_mut();
         let (image, info) = load_image_bytes_f32_with_info(bytes, file_name.as_deref())
@@ -84,7 +87,13 @@ pub fn apply_tone(
 
 /// Apply color adjustments to a layer.
 #[wasm_bindgen]
-pub fn apply_color(layer_idx: usize, saturation: f32, vibrancy: f32, temperature: f32, tint: f32) {
+pub fn apply_color(
+    layer_idx: usize,
+    saturation: f32,
+    vibrancy: f32,
+    temperature: f32,
+    tint: f32,
+) {
     ENGINE.with(|e| {
         e.borrow_mut().apply_color(
             layer_idx,

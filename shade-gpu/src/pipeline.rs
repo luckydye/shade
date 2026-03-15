@@ -3,11 +3,12 @@ use bytemuck::{Pod, Zeroable};
 use shade_core::ToneParams;
 use wgpu::util::DeviceExt;
 use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
-    ComputePipeline, ComputePipelineDescriptor, Extent3d, PipelineLayoutDescriptor, ShaderStages,
-    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureUsages,
-    TextureViewDescriptor, TextureViewDimension,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
+    BufferBindingType, BufferUsages, ComputePipeline, ComputePipelineDescriptor,
+    Extent3d, PipelineLayoutDescriptor, ShaderStages, StorageTextureAccess, Texture,
+    TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor,
+    TextureViewDimension,
 };
 
 use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
@@ -66,41 +67,44 @@ impl TonePipeline {
         //   binding 0 — input texture (texture_2d<f32>, read via textureLoad)
         //   binding 1 — output storage texture (rgba8unorm, write)
         //   binding 2 — uniform buffer (ToneParams)
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("tone bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
+        let bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("tone bind group layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: false,
+                            },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: INTERNAL_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: INTERNAL_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("tone pipeline layout"),
@@ -188,9 +192,10 @@ impl TonePipeline {
         });
 
         // Dispatch compute shader.
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("tone"),
-        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("tone"),
+            });
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

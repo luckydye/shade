@@ -52,7 +52,9 @@ pub struct ColorParams {
 
 /// Vignette parameters.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
 pub struct VignetteParams {
     pub amount: f32,
     pub midpoint: f32,
@@ -83,7 +85,9 @@ pub struct SharpenParams {
 
 /// Film grain parameters.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
 pub struct GrainParams {
     pub amount: f32,
     pub size: f32,
@@ -222,7 +226,12 @@ pub struct DenoiseParams {
 
 impl Default for DenoiseParams {
     fn default() -> Self {
-        Self { luma_strength: 0.0, chroma_strength: 0.0, mode: 0, _pad: 0.0 }
+        Self {
+            luma_strength: 0.0,
+            chroma_strength: 0.0,
+            mode: 0,
+            _pad: 0.0,
+        }
     }
 }
 
@@ -417,7 +426,12 @@ impl LayerStack {
         idx
     }
 
-    pub fn add_image_layer(&mut self, texture_id: TextureId, _width: u32, _height: u32) -> usize {
+    pub fn add_image_layer(
+        &mut self,
+        texture_id: TextureId,
+        _width: u32,
+        _height: u32,
+    ) -> usize {
         let idx = self.layers.len();
         self.layers.push(LayerEntry {
             layer: Layer::Image {

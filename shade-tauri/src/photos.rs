@@ -70,7 +70,8 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             {
-                let handle = _api.register_android_plugin("com.shade.editor", "PhotosPlugin")?;
+                let handle =
+                    _api.register_android_plugin("com.shade.editor", "PhotosPlugin")?;
                 _app.manage(PhotosHandle(handle));
             }
             Ok(())

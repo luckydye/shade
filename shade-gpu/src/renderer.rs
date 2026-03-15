@@ -1,27 +1,28 @@
 use anyhow::Result;
 use half::f16;
 use shade_core::{
-    AdjustmentOp, ColorMatrix3x3, ColorSpace, CropRect, FloatImage, Layer, LayerStack, TextureId,
-    ToneParams,
+    AdjustmentOp, ColorMatrix3x3, ColorSpace, CropRect, FloatImage, Layer, LayerStack,
+    TextureId, ToneParams,
 };
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use wgpu::{
-    BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture, ImageDataLayout,
-    MapMode, Origin3d, TextureAspect, TextureDescriptor, TextureDimension, TextureUsages,
+    BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture,
+    ImageDataLayout, MapMode, Origin3d, TextureAspect, TextureDescriptor,
+    TextureDimension, TextureUsages,
 };
 
 use crate::{
     color_transform::{ColorTransformPipeline, ColorTransformUniform},
     composite::{
-        create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
-        CompositePipeline, CompositeUniform,
-    },
-    pipelines::{
-        ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GrainPipeline, HslPipeline,
-        SharpenPipeline, VignettePipeline,
+        create_rw_mask_texture, upload_mask_texture, BrushStampPipeline,
+        BrushStampUniform, CompositePipeline, CompositeUniform,
     },
     denoise::DenoisePipeline,
+    pipelines::{
+        ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GrainPipeline,
+        HslPipeline, SharpenPipeline, VignettePipeline,
+    },
     sharpen2::SharpenTwoPassPipeline,
     texture_cache::TextureCache,
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
@@ -136,8 +137,12 @@ impl Renderer {
         height: u32,
         ops: &[AdjustmentOp],
     ) -> Result<Vec<u8>> {
-        let input_tex =
-            self.upload_float_texture(&u8_rgba_to_f32(input_data), width, height, "input texture");
+        let input_tex = self.upload_float_texture(
+            &u8_rgba_to_f32(input_data),
+            width,
+            height,
+            "input texture",
+        );
         let final_tex = self.render_texture_with_ops(&input_tex, ops)?;
         self.readback_work_texture_to_u8(&final_tex, width, height)
             .await
@@ -150,7 +155,8 @@ impl Renderer {
         height: u32,
         ops: &[AdjustmentOp],
     ) -> Result<Vec<f32>> {
-        let input_tex = self.upload_float_texture(input_data, width, height, "input texture");
+        let input_tex =
+            self.upload_float_texture(input_data, width, height, "input texture");
         let final_tex = self.render_texture_with_ops(&input_tex, ops)?;
         self.readback_work_texture_to_f32(&final_tex, width, height)
             .await
@@ -223,7 +229,8 @@ impl Renderer {
                     self.hsl_pipeline.process(&self.ctx, current_tex, *params)?
                 }
                 AdjustmentOp::Denoise(params) => {
-                    self.denoise_pipeline.process(&self.ctx, current_tex, *params)
+                    self.denoise_pipeline
+                        .process(&self.ctx, current_tex, *params)
                 }
             };
             owned_textures.push(output);
@@ -419,7 +426,9 @@ impl Renderer {
                         },
                     )?
                 }
-                Layer::Adjustment { ops } => self.render_texture_with_ops(current_accum, ops)?,
+                Layer::Adjustment { ops } => {
+                    self.render_texture_with_ops(current_accum, ops)?
+                }
             };
 
             // 2b. Optional mask texture.
@@ -488,10 +497,10 @@ impl Renderer {
         pressure: f32,
         erase: bool,
     ) -> Result<()> {
-        let brush_stamp_pipeline = self
-            .brush_stamp_pipeline
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("brush stamping is unavailable on this GPU backend"))?;
+        let brush_stamp_pipeline =
+            self.brush_stamp_pipeline.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("brush stamping is unavailable on this GPU backend")
+            })?;
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
 
@@ -601,9 +610,10 @@ impl Renderer {
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback encoder"),
-        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback encoder"),
+            });
         encoder.copy_texture_to_buffer(
             ImageCopyTexture {
                 texture: tex,
@@ -668,9 +678,10 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback encoder"),
-        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback encoder"),
+            });
 
         encoder.copy_texture_to_buffer(
             ImageCopyTexture {
@@ -738,9 +749,10 @@ impl Renderer {
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback float encoder"),
-        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback float encoder"),
+            });
         encoder.copy_texture_to_buffer(
             ImageCopyTexture {
                 texture: tex,
@@ -828,7 +840,8 @@ fn crop_rect_to_target_space(
     let intersection = intersect_crop_rect(current_view, rect)?;
     Ok(CropRect {
         x: ((intersection.x - current_view.x) / current_view.width) * target_width as f32,
-        y: ((intersection.y - current_view.y) / current_view.height) * target_height as f32,
+        y: ((intersection.y - current_view.y) / current_view.height)
+            * target_height as f32,
         width: (intersection.width / current_view.width) * target_width as f32,
         height: (intersection.height / current_view.height) * target_height as f32,
     })
@@ -847,9 +860,11 @@ fn resample_mask_region(
         let src_y = sample_position(y, target_height, crop.y, crop.height, source_height);
         let y0 = src_y.round().clamp(0.0, (source_height - 1) as f32) as u32;
         for x in 0..target_width {
-            let src_x = sample_position(x, target_width, crop.x, crop.width, source_width);
+            let src_x =
+                sample_position(x, target_width, crop.x, crop.width, source_width);
             let x0 = src_x.round().clamp(0.0, (source_width - 1) as f32) as u32;
-            output[(y * target_width + x) as usize] = pixels[(y0 * source_width + x0) as usize];
+            output[(y * target_width + x) as usize] =
+                pixels[(y0 * source_width + x0) as usize];
         }
     }
     output
@@ -941,9 +956,10 @@ fn encode_preview_pixels_to_srgb_u8(pixels: &[f32]) -> Vec<u8> {
 
 fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
     match dst {
-        ColorSpace::DisplayP3 => {
-            encode_linear_rgb_to_display_p3(rgb, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3)
-        }
+        ColorSpace::DisplayP3 => encode_linear_rgb_to_display_p3(
+            rgb,
+            &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3,
+        ),
         _ => [
             linear_to_srgb_display(rgb[0]),
             linear_to_srgb_display(rgb[1]),
@@ -1027,7 +1043,8 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 mod tests {
     use super::{
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        resample_rgba_f32_region, rgba_display_f32_to_u8, FloatImage, PreviewCrop, Renderer,
+        resample_rgba_f32_region, rgba_display_f32_to_u8, FloatImage, PreviewCrop,
+        Renderer,
     };
     use shade_core::{AdjustmentOp, ColorSpace, LayerStack};
     use std::collections::HashMap;
@@ -1054,8 +1071,9 @@ mod tests {
     #[test]
     fn resample_rgba_region_reads_only_selected_crop() {
         let pixels = vec![
-            10.0, 0.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0, 30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0,
-            50.0, 0.0, 0.0, 1.0, 60.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0, 0.0, 1.0,
+            10.0, 0.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0, 30.0, 0.0, 0.0, 1.0, 40.0, 0.0,
+            0.0, 1.0, 50.0, 0.0, 0.0, 1.0, 60.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0,
+            80.0, 0.0, 0.0, 1.0,
         ];
         let output = resample_rgba_f32_region(
             &pixels,
@@ -1074,7 +1092,8 @@ mod tests {
         assert_eq!(
             output,
             vec![
-                30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0, 0.0, 1.0,
+                30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0,
+                0.0, 1.0,
             ]
         );
     }
@@ -1124,7 +1143,9 @@ mod tests {
     async fn renderer_or_skip() -> Option<Renderer> {
         match Renderer::new().await {
             Ok(renderer) => Some(renderer),
-            Err(error) if error.to_string().contains("No suitable wgpu adapter found") => {
+            Err(error)
+                if error.to_string().contains("No suitable wgpu adapter found") =>
+            {
                 eprintln!("skipping GPU test: {error}");
                 None
             }
@@ -1198,9 +1219,9 @@ mod tests {
                 width: 4,
                 height: 2,
                 pixels: vec![
-                    10.0, 0.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0, 30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0,
-                    1.0, 50.0, 0.0, 0.0, 1.0, 60.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0,
-                    0.0, 1.0,
+                    10.0, 0.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0, 30.0, 0.0, 0.0, 1.0, 40.0,
+                    0.0, 0.0, 1.0, 50.0, 0.0, 0.0, 1.0, 60.0, 0.0, 0.0, 1.0, 70.0, 0.0,
+                    0.0, 1.0, 80.0, 0.0, 0.0, 1.0,
                 ]
                 .into(),
             },
@@ -1230,7 +1251,8 @@ mod tests {
         assert_eq!(
             pixels,
             vec![
-                30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0, 0.0, 1.0,
+                30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0,
+                0.0, 1.0,
             ]
         );
     }

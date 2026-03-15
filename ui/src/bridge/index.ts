@@ -135,6 +135,7 @@ export interface ToneValues {
 
 export interface ColorValues {
 	saturation: number;
+	vibrancy: number;
 	temperature: number;
 	tint: number;
 }

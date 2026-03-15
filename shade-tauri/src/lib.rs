@@ -3,7 +3,9 @@ mod photos;
 
 use tauri::Manager;
 
-pub struct P2pState(pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>);
+pub struct P2pState(
+    pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>,
+);
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
 pub struct ThumbnailService(pub std::sync::Arc<commands::ThumbnailQueue>);
 pub struct LibraryScanService(pub std::sync::Arc<commands::LibraryScanService>);

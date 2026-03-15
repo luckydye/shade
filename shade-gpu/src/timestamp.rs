@@ -88,7 +88,8 @@ impl TimestampQueries {
         for (i, name) in pass_names.iter().enumerate() {
             let t_begin = timestamps[i * 2];
             let t_end = timestamps[i * 2 + 1];
-            let nanos = ((t_end.saturating_sub(t_begin)) as f32 * timestamp_period) as u64;
+            let nanos =
+                ((t_end.saturating_sub(t_begin)) as f32 * timestamp_period) as u64;
             results.push(PassTiming {
                 name: name.to_string(),
                 gpu_micros: nanos / 1000,

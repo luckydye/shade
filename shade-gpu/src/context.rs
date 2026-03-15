@@ -39,7 +39,8 @@ impl GpuContext {
         // native backends can use read-write storage textures for mask stamping.
         let optional_features = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
         let required_features = wgpu::Features::empty();
-        let enabled_features = required_features | (adapter.features() & optional_features);
+        let enabled_features =
+            required_features | (adapter.features() & optional_features);
 
         let (device, queue) = adapter
             .request_device(
