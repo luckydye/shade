@@ -413,7 +413,7 @@ export function resetPreviewViewport() {
 		previewCenterX: crop.x + crop.width * 0.5,
 		previewCenterY: crop.y + crop.height * 0.5,
 	});
-	void refreshPreview();
+	void refreshPreview("viewport");
 }
 
 export function setPreviewViewportSize(width: number, height: number) {
@@ -430,7 +430,7 @@ export function setPreviewViewportSize(width: number, height: number) {
 		previewViewportWidth: nextWidth,
 		previewViewportHeight: nextHeight,
 	});
-	void refreshPreview();
+	void refreshPreview("viewport");
 }
 
 export function zoomPreviewDelta(
@@ -475,7 +475,7 @@ export function zoomPreviewDelta(
 		previewCenterX: center.x,
 		previewCenterY: center.y,
 	});
-	void refreshPreview();
+	void refreshPreview("viewport");
 }
 
 export function panPreview(deltaX: number, deltaY: number) {
@@ -502,7 +502,7 @@ export function panPreview(deltaX: number, deltaY: number) {
 		previewCenterX: center.x,
 		previewCenterY: center.y,
 	});
-	void refreshPreview();
+	void refreshPreview("viewport");
 }
 
 function resetPreviewState(canvasWidth: number, canvasHeight: number) {
@@ -971,7 +971,15 @@ function resolveInteractiveWaiters(work: Promise<void>) {
 	return work;
 }
 
-function scheduleInteractivePreviewRefresh(version: number) {
+function rejectInteractiveWaiters(error: unknown) {
+	const waiters = previewRefreshInteractiveWaiters;
+	previewRefreshInteractiveWaiters = [];
+	for (const waiter of waiters) {
+		waiter.reject(error);
+	}
+}
+
+function scheduleDebouncedPreviewRefresh(version: number) {
 	if (previewRefreshInteractiveTimer !== null) {
 		clearTimeout(previewRefreshInteractiveTimer);
 	}
@@ -991,7 +999,35 @@ function scheduleInteractivePreviewRefresh(version: number) {
 	return completion;
 }
 
-export function refreshPreview(mode: "progressive" | "final" = "progressive") {
+function scheduleViewportPreviewRefresh(version: number) {
+	if (previewRefreshInteractiveTimer !== null) {
+		clearTimeout(previewRefreshInteractiveTimer);
+		previewRefreshInteractiveTimer = null;
+	}
+	const completion = new Promise<void>((resolve, reject) => {
+		previewRefreshInteractiveWaiters.push({ resolve, reject });
+	});
+	const interactive =
+		queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
+	void interactive.then(
+		() => {
+			if (version !== previewRefreshVersion) return;
+			previewRefreshInteractiveTimer = setTimeout(() => {
+				previewRefreshInteractiveTimer = null;
+				const work = queuePreviewRefresh(version, "final") ?? Promise.resolve();
+				resolveInteractiveWaiters(work);
+			}, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
+		},
+		(error) => {
+			rejectInteractiveWaiters(error);
+		},
+	);
+	return completion;
+}
+
+export function refreshPreview(
+	mode: "progressive" | "viewport" | "final" = "progressive",
+) {
 	previewRefreshVersion += 1;
 	const version = previewRefreshVersion;
 	if (mode === "final") {
@@ -1002,5 +1038,8 @@ export function refreshPreview(mode: "progressive" | "final" = "progressive") {
 		const work = queuePreviewRefresh(version, "final") ?? Promise.resolve();
 		return resolveInteractiveWaiters(work);
 	}
-	return scheduleInteractivePreviewRefresh(version);
+	if (mode === "viewport") {
+		return scheduleViewportPreviewRefresh(version);
+	}
+	return scheduleDebouncedPreviewRefresh(version);
 }

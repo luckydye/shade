@@ -286,6 +286,9 @@ const Canvas: Component = () => {
 	createEffect(() => {
 		state.previewViewportWidth;
 		state.previewViewportHeight;
+		state.previewZoom;
+		state.previewCenterX;
+		state.previewCenterY;
 		state.selectedLayerIdx;
 		state.layers;
 		previewContextFrame();
