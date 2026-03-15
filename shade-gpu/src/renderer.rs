@@ -21,6 +21,7 @@ use crate::{
         ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GrainPipeline, HslPipeline,
         SharpenPipeline, VignettePipeline,
     },
+    denoise::DenoisePipeline,
     sharpen2::SharpenTwoPassPipeline,
     texture_cache::TextureCache,
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
@@ -50,6 +51,7 @@ pub struct Renderer {
     pub composite_pipeline: CompositePipeline,
     pub brush_stamp_pipeline: Option<BrushStampPipeline>,
     pub sharpen2_pipeline: SharpenTwoPassPipeline,
+    pub denoise_pipeline: DenoisePipeline,
     pub texture_cache: TextureCache,
     pub color_transform_pipeline: ColorTransformPipeline,
 }
@@ -77,6 +79,7 @@ impl Renderer {
             None
         };
         let sharpen2_pipeline = SharpenTwoPassPipeline::new(&ctx);
+        let denoise_pipeline = DenoisePipeline::new(&ctx);
         let texture_cache = TextureCache::new();
         let color_transform_pipeline = ColorTransformPipeline::new(&ctx);
         Ok(Self {
@@ -92,6 +95,7 @@ impl Renderer {
             composite_pipeline,
             brush_stamp_pipeline,
             sharpen2_pipeline,
+            denoise_pipeline,
             texture_cache,
             color_transform_pipeline,
         })
@@ -217,6 +221,9 @@ impl Renderer {
                 }
                 AdjustmentOp::Hsl(params) => {
                     self.hsl_pipeline.process(&self.ctx, current_tex, *params)?
+                }
+                AdjustmentOp::Denoise(params) => {
+                    self.denoise_pipeline.process(&self.ctx, current_tex, *params)
                 }
             };
             owned_textures.push(output);

@@ -34,7 +34,8 @@ type MobileLayerFocus =
 	| "grain"
 	| "vignette"
 	| "sharpen"
-	| "hsl";
+	| "hsl"
+	| "denoise";
 type InspectorTab = "edit" | "presets";
 
 interface SliderProps {
@@ -98,6 +99,7 @@ const DEFAULT_COLOR = {
 const DEFAULT_VIGNETTE = { amount: 0 } as const;
 const DEFAULT_SHARPEN = { amount: 0 } as const;
 const DEFAULT_GRAIN = { amount: 0 } as const;
+const DEFAULT_DENOISE = { luma_strength: 0, chroma_strength: 0, mode: 0 } as const;
 const DEFAULT_CURVES = {
 	lut_r: IDENTITY_LUT,
 	lut_g: IDENTITY_LUT,
@@ -401,6 +403,22 @@ const TrashIcon = () => (
 	</svg>
 );
 
+const DenoiseIcon = () => (
+	<svg
+		width="24px"
+		height="24px"
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+	>
+		<path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3z" />
+		<path d="M9 9h.01M15 9h.01M9 15h.01M15 15h.01M12 12h.01" />
+	</svg>
+);
+
 const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
 	tone: () => <SparkIcon />,
 	curves: () => <CurveIcon />,
@@ -408,6 +426,7 @@ const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
 	vignette: () => <CircleIcon />,
 	sharpen: () => <DropletIcon />,
 	hsl: () => <HslIcon />,
+	denoise: () => <DenoiseIcon />,
 };
 
 const focusLabels: Record<MobileLayerFocus, string> = {
@@ -417,6 +436,7 @@ const focusLabels: Record<MobileLayerFocus, string> = {
 	vignette: "Vignette",
 	sharpen: "Sharpen",
 	hsl: "HSL",
+	denoise: "Denoise",
 };
 
 const Inspector: Component = () => {
@@ -469,6 +489,8 @@ const Inspector: Component = () => {
 	const grain = () =>
 		selectedAdjustmentLayer()?.adjustments?.grain ?? DEFAULT_GRAIN;
 	const hsl = () => selectedAdjustmentLayer()?.adjustments?.hsl ?? DEFAULT_HSL;
+	const denoise = () =>
+		selectedAdjustmentLayer()?.adjustments?.denoise ?? DEFAULT_DENOISE;
 
 	const applyCurves = (points: readonly ControlPoint[]) => {
 		const normalizedPoints = normalizePoints(points);
@@ -1204,6 +1226,49 @@ const Inspector: Component = () => {
 				);
 			case "hsl":
 				return <HslSection />;
+			case "denoise":
+				return (
+					<div class="flex flex-col gap-3">
+						<Slider
+							label="Luminance"
+							icon={<DenoiseIcon />}
+							value={denoise().luma_strength}
+							defaultValue={DEFAULT_DENOISE.luma_strength}
+							valueLabel={valueLabel(denoise().luma_strength)}
+							min={0}
+							max={1}
+							onChange={(value) => {
+								selectedAdjustmentLayerOrThrow();
+								void applyEdit({
+									layer_idx: state.selectedLayerIdx,
+									op: "denoise",
+									denoise_luma_strength: value,
+									denoise_chroma_strength: denoise().chroma_strength,
+									denoise_mode: denoise().mode,
+								});
+							}}
+						/>
+						<Slider
+							label="Color"
+							icon={<DenoiseIcon />}
+							value={denoise().chroma_strength}
+							defaultValue={DEFAULT_DENOISE.chroma_strength}
+							valueLabel={valueLabel(denoise().chroma_strength)}
+							min={0}
+							max={1}
+							onChange={(value) => {
+								selectedAdjustmentLayerOrThrow();
+								void applyEdit({
+									layer_idx: state.selectedLayerIdx,
+									op: "denoise",
+									denoise_luma_strength: denoise().luma_strength,
+									denoise_chroma_strength: value,
+									denoise_mode: denoise().mode,
+								});
+							}}
+						/>
+					</div>
+				);
 		}
 	};
 

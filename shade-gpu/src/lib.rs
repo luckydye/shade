@@ -1,6 +1,7 @@
 pub mod color_transform;
 pub mod composite;
 mod context;
+pub mod denoise;
 mod pipeline;
 pub mod pipelines;
 pub mod profiler;
@@ -24,5 +25,6 @@ pub use pipelines::{
 };
 pub use profiler::{GpuProfiler, PassTiming};
 pub use renderer::{PreviewCrop, Renderer};
+pub use denoise::DenoisePipeline;
 pub use sharpen2::SharpenTwoPassPipeline;
 pub use texture_cache::TextureCache;

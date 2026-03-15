@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use shade_core::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
-    CurveControlPoint, FloatImage, GrainParams, HslParams, LayerStack, SharpenParams,
-    VignetteParams,
+    CurveControlPoint, DenoiseParams, FloatImage, GrainParams, HslParams, LayerStack,
+    SharpenParams, VignetteParams,
 };
 use shade_io::SourceImageInfo;
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
@@ -1904,6 +1904,9 @@ pub struct EditParams {
     pub crop_y: Option<f32>,
     pub crop_width: Option<f32>,
     pub crop_height: Option<f32>,
+    pub denoise_luma_strength: Option<f32>,
+    pub denoise_chroma_strength: Option<f32>,
+    pub denoise_mode: Option<u32>,
 }
 
 #[tauri::command]
@@ -2048,6 +2051,22 @@ pub async fn apply_edit(
                         });
                         if let Some(op) =
                             ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Hsl(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "denoise" => {
+                        let next = AdjustmentOp::Denoise(DenoiseParams {
+                            luma_strength: params.denoise_luma_strength.unwrap_or(0.0),
+                            chroma_strength: params.denoise_chroma_strength.unwrap_or(0.0),
+                            mode: params.denoise_mode.unwrap_or(0),
+                            _pad: 0.0,
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Denoise(_)))
                         {
                             *op = next;
                         } else {
@@ -2211,6 +2230,14 @@ pub struct AdjustmentValues {
     pub sharpen: Option<SharpenValues>,
     pub grain: Option<GrainValues>,
     pub hsl: Option<HslValues>,
+    pub denoise: Option<DenoiseValues>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DenoiseValues {
+    pub luma_strength: f32,
+    pub chroma_strength: f32,
+    pub mode: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -2947,6 +2974,13 @@ pub async fn get_layer_stack(
                                     blue_hue: params.blue_hue,
                                     blue_sat: params.blue_sat,
                                     blue_lum: params.blue_lum,
+                                });
+                            }
+                            AdjustmentOp::Denoise(params) => {
+                                adjustments.denoise = Some(DenoiseValues {
+                                    luma_strength: params.luma_strength,
+                                    chroma_strength: params.chroma_strength,
+                                    mode: params.mode,
                                 });
                             }
                         }

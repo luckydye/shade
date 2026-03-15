@@ -201,6 +201,31 @@ pub fn build_curve_lut_from_points(points: &[CurveControlPoint]) -> Vec<f32> {
     lut
 }
 
+/// Denoiser parameters — must match the WGSL uniform struct layout.
+///
+/// Two algorithms are available:
+/// - mode 0 (bilateral): fast joint bilateral filter, suitable for interactive preview
+/// - mode 1 (NLM): non-local means with shared-memory tile caching, higher quality for export
+#[repr(C)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
+pub struct DenoiseParams {
+    /// Luminance noise reduction strength (0.0 = off, 1.0 = maximum).
+    pub luma_strength: f32,
+    /// Chroma (colour) noise reduction strength (0.0 = off, 1.0 = maximum).
+    pub chroma_strength: f32,
+    /// Algorithm: 0 = bilateral (fast), 1 = NLM (quality).
+    pub mode: u32,
+    pub _pad: f32,
+}
+
+impl Default for DenoiseParams {
+    fn default() -> Self {
+        Self { luma_strength: 0.0, chroma_strength: 0.0, mode: 0, _pad: 0.0 }
+    }
+}
+
 /// Per-color HSL adjustment parameters (red, green, blue ranges).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct HslParams {
@@ -241,6 +266,7 @@ pub enum AdjustmentOp {
     Sharpen(SharpenParams),
     Grain(GrainParams),
     Hsl(HslParams),
+    Denoise(DenoiseParams),
 }
 
 /// A unique identifier for a texture resource.

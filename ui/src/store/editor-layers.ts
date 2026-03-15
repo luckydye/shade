@@ -20,6 +20,7 @@ function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
 		sharpen: null,
 		grain: null,
 		hsl: null,
+		denoise: null,
 	};
 }
 
@@ -149,6 +150,16 @@ function applyAdjustmentLayerEdit(
 					blue_hue: params.blue_hue as number,
 					blue_sat: params.blue_sat as number,
 					blue_lum: params.blue_lum as number,
+				},
+			});
+			return;
+		case "denoise":
+			setState("layers", layerIdx, "adjustments", {
+				...adjustments,
+				denoise: {
+					luma_strength: params.denoise_luma_strength as number,
+					chroma_strength: params.denoise_chroma_strength as number,
+					mode: (params.denoise_mode as number | undefined) ?? 0,
 				},
 			});
 			return;

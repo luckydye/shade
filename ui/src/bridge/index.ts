@@ -164,6 +164,7 @@ export interface AdjustmentValues {
 	sharpen: { amount: number } | null;
 	grain: { amount: number } | null;
 	hsl: HslValues | null;
+	denoise: { luma_strength: number; chroma_strength: number; mode: number } | null;
 }
 
 export interface CurvesValues {
