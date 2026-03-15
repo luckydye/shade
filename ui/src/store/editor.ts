@@ -18,10 +18,16 @@ const [previewContextFrame, setPreviewContextFrame] =
 export { previewContextFrame };
 type PreviewQuality = "interactive" | "final";
 const INTERACTIVE_PREVIEW_SCALE = 0.33;
+const INTERACTIVE_PREVIEW_DEBOUNCE_MS = 16;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null =
 	null;
 let previewRefreshPromise: Promise<void> | null = null;
+let previewRefreshInteractiveTimer: ReturnType<typeof setTimeout> | null = null;
+let previewRefreshInteractiveWaiters: Array<{
+	resolve: () => void;
+	reject: (error: unknown) => void;
+}> = [];
 
 export interface LayerInfo {
 	kind: "image" | "adjustment" | "crop";
@@ -947,16 +953,54 @@ function queuePreviewRefresh(version: number, quality: PreviewQuality) {
 	return previewRefreshPromise;
 }
 
+function resolveInteractiveWaiters(work: Promise<void>) {
+	const waiters = previewRefreshInteractiveWaiters;
+	previewRefreshInteractiveWaiters = [];
+	void work.then(
+		() => {
+			for (const waiter of waiters) {
+				waiter.resolve();
+			}
+		},
+		(error) => {
+			for (const waiter of waiters) {
+				waiter.reject(error);
+			}
+		},
+	);
+	return work;
+}
+
+function scheduleInteractivePreviewRefresh(version: number) {
+	if (previewRefreshInteractiveTimer !== null) {
+		clearTimeout(previewRefreshInteractiveTimer);
+	}
+	const completion = new Promise<void>((resolve, reject) => {
+		previewRefreshInteractiveWaiters.push({ resolve, reject });
+	});
+	previewRefreshInteractiveTimer = setTimeout(() => {
+		previewRefreshInteractiveTimer = null;
+		const interactive =
+			queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
+		const work = interactive.finally(() => {
+			if (version !== previewRefreshVersion) return;
+			return queuePreviewRefresh(version, "final") ?? Promise.resolve();
+		});
+		resolveInteractiveWaiters(work);
+	}, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
+	return completion;
+}
+
 export function refreshPreview(mode: "progressive" | "final" = "progressive") {
 	previewRefreshVersion += 1;
 	const version = previewRefreshVersion;
 	if (mode === "final") {
-		return queuePreviewRefresh(version, "final");
+		if (previewRefreshInteractiveTimer !== null) {
+			clearTimeout(previewRefreshInteractiveTimer);
+			previewRefreshInteractiveTimer = null;
+		}
+		const work = queuePreviewRefresh(version, "final") ?? Promise.resolve();
+		return resolveInteractiveWaiters(work);
 	}
-	const interactive =
-		queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
-	return interactive.finally(() => {
-		if (version !== previewRefreshVersion) return;
-		return queuePreviewRefresh(version, "final") ?? Promise.resolve();
-	});
+	return scheduleInteractivePreviewRefresh(version);
 }
