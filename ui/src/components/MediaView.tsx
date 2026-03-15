@@ -273,10 +273,10 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 	const [isIntersecting, setIsIntersecting] = createSignal(false);
 	const [src, setSrc] = createSignal<string | undefined>(undefined);
 	const [loadError, setLoadError] = createSignal(false);
-	const [isLoadingSrc, setIsLoadingSrc] = createSignal(false);
 	const [loadRequestVersion, setLoadRequestVersion] = createSignal(0);
 	let containerRef: HTMLButtonElement | undefined;
 	let imgRef: HTMLImageElement | undefined;
+	let isLoadingSrc = false;
 
 	onMount(() => {
 		const observer = new IntersectionObserver(
@@ -291,12 +291,12 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 
 	createEffect(() => {
 		loadRequestVersion();
-		if (!isIntersecting() || src() || isLoadingSrc()) {
+		if (!isIntersecting() || src() || isLoadingSrc) {
 			return;
 		}
 		const controller = new AbortController();
 		setLoadError(false);
-		setIsLoadingSrc(true);
+		isLoadingSrc = true;
 		void loadItemSrc(props.item, controller.signal)
 			.then((nextSrc) => setSrc(nextSrc))
 			.catch(() => {
@@ -306,11 +306,12 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 				setLoadError(true);
 			})
 			.finally(() => {
-				if (!controller.signal.aborted) {
-					setIsLoadingSrc(false);
-				}
+				isLoadingSrc = false;
 			});
-		onCleanup(() => controller.abort());
+		onCleanup(() => {
+			controller.abort();
+			isLoadingSrc = false;
+		});
 	});
 
 	onCleanup(() => {

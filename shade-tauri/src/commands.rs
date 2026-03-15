@@ -839,18 +839,41 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
     let mut items = Vec::new();
     for storage in storage.storagelist {
         for file_path in api.files(&storage).await.map_err(|e| e.to_string())? {
+            let modified_at =
+                tokio::time::timeout(std::time::Duration::from_secs(2), api.info(&file_path))
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .and_then(|info| chrono_like_timestamp_millis(&info.lastmodifieddate).ok())
+                    .flatten();
             items.push(LibraryImage {
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
-                modified_at: None,
+                modified_at,
             });
         }
     }
-    items.sort_by(|left, right| left.name.cmp(&right.name));
+    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
     Ok(LibraryImageListing {
         items,
         is_complete: true,
     })
+}
+
+fn chrono_like_timestamp_millis(value: &str) -> Result<Option<u64>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let normalized = trimmed.replace(' ', "T");
+    let parsed = chrono::DateTime::parse_from_rfc2822(trimmed)
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(trimmed))
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{normalized}Z")))
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&normalized))
+        .map_err(|e| format!("invalid CCAPI timestamp `{trimmed}`: {e}"))?;
+    u64::try_from(parsed.timestamp_millis())
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 pub struct LibraryScanEntry {
