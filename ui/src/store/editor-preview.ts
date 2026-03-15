@@ -15,12 +15,15 @@ type PreviewQuality = "interactive" | "final";
 
 const INTERACTIVE_PREVIEW_SCALE = 0.33;
 const INTERACTIVE_PREVIEW_DEBOUNCE_MS = 16;
+const ZOOM_PREVIEW_DEBOUNCE_MS = 120;
+const PREVIEW_REQUEST_THROTTLE_MS = 250;
 
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null =
 	null;
 let previewRefreshPromise: Promise<void> | null = null;
 let previewRefreshInteractiveTimer: ReturnType<typeof setTimeout> | null = null;
+let previewLastRequestStartedAt = 0;
 let previewRefreshInteractiveWaiters: Array<{
 	resolve: () => void;
 	reject: (error: unknown) => void;
@@ -223,6 +226,21 @@ function toImageData(frame: bridge.PreviewFrame) {
 	return new ImageData(pixels, frame.width, frame.height);
 }
 
+function wait(ms: number) {
+	return new Promise<void>((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
+async function renderPreviewThrottled(request: bridge.PreviewRequest) {
+	const elapsed = Date.now() - previewLastRequestStartedAt;
+	if (elapsed < PREVIEW_REQUEST_THROTTLE_MS) {
+		await wait(PREVIEW_REQUEST_THROTTLE_MS - elapsed);
+	}
+	previewLastRequestStartedAt = Date.now();
+	return bridge.renderPreview(request);
+}
+
 export function getPreviewDisplaySize() {
 	const bounds = getPreviewBounds();
 	return fitPreviewSize(
@@ -306,7 +324,7 @@ export function zoomPreviewDelta(
 		previewCenterX: center.x,
 		previewCenterY: center.y,
 	});
-	void refreshPreview("viewport");
+	void refreshPreview("zoom");
 }
 
 export function panPreview(deltaX: number, deltaY: number) {
@@ -341,7 +359,7 @@ function performPreviewRefresh() {
 	const request = getPreviewRequest(queued.quality);
 	const contextRequest = getContextPreviewRequest(queued.quality);
 	if (!request || !contextRequest) return Promise.resolve();
-	return bridge.renderPreview(request).then(async (frame) => {
+	return renderPreviewThrottled(request).then(async (frame) => {
 		if (queued.version !== previewRefreshVersion) return;
 		if (frame.width === 0 || frame.height === 0) return;
 		const crop = request.crop;
@@ -387,7 +405,7 @@ function performPreviewRefresh() {
 		if (queued.quality === "interactive" && previewContextFrame()) {
 			return;
 		}
-		const contextFrame = await bridge.renderPreview(contextRequest);
+		const contextFrame = await renderPreviewThrottled(contextRequest);
 		if (queued.version !== previewRefreshVersion) return;
 		if (contextFrame.width === 0 || contextFrame.height === 0) return;
 		setPreviewContextFrame(toImageData(contextFrame));
@@ -439,7 +457,11 @@ function rejectInteractiveWaiters(error: unknown) {
 	}
 }
 
-function scheduleRefresh(version: number, immediateInteractive: boolean) {
+function scheduleRefresh(
+	version: number,
+	immediateInteractive: boolean,
+	interactiveDelayMs: number,
+) {
 	if (previewRefreshInteractiveTimer !== null) {
 		clearTimeout(previewRefreshInteractiveTimer);
 		previewRefreshInteractiveTimer = null;
@@ -464,7 +486,7 @@ function scheduleRefresh(version: number, immediateInteractive: boolean) {
 				return queuePreviewRefresh(version, "final") ?? Promise.resolve();
 			});
 			resolveInteractiveWaiters(work);
-		}, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
+		}, interactiveDelayMs);
 		return completion;
 	}
 	const interactive =
@@ -482,7 +504,7 @@ function scheduleRefresh(version: number, immediateInteractive: boolean) {
 }
 
 export function refreshPreview(
-	mode: "progressive" | "viewport" | "final" = "progressive",
+	mode: "progressive" | "viewport" | "zoom" | "final" = "progressive",
 ) {
 	previewRefreshVersion += 1;
 	const version = previewRefreshVersion;
@@ -494,5 +516,11 @@ export function refreshPreview(
 		const work = queuePreviewRefresh(version, "final") ?? Promise.resolve();
 		return resolveInteractiveWaiters(work);
 	}
-	return scheduleRefresh(version, mode === "viewport");
+	if (mode === "viewport") {
+		return scheduleRefresh(version, true, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
+	}
+	if (mode === "zoom") {
+		return scheduleRefresh(version, false, ZOOM_PREVIEW_DEBOUNCE_MS);
+	}
+	return scheduleRefresh(version, false, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
 }
