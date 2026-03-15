@@ -1,5 +1,7 @@
 import { Component, JSX, Show } from "solid-js";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
+	exportImage,
 	openImageFile,
 	showEditorView,
 	showMediaView,
@@ -100,6 +102,7 @@ export const Toolbar: Component = () => {
 	let fileInputRef: HTMLInputElement | undefined;
 	const hasImage = () => state.canvasWidth > 0 || state.isLoading;
 	const canResumeEditor = () => hasImage() && state.currentView === "media";
+	const canExport = () => state.canvasWidth > 0 && state.canvasHeight > 0;
 
 	const statusText = () => {
 		if (state.canvasWidth <= 0 || state.canvasHeight <= 0)
@@ -121,6 +124,20 @@ export const Toolbar: Component = () => {
 		const file = files?.[0];
 		if (file) await openImageFile(file);
 		if (fileInputRef) fileInputRef.value = "";
+	};
+
+	const handleExport = async () => {
+		const path = await save({
+			title: "Export Render",
+			filters: [
+				{ name: "PNG Image", extensions: ["png"] },
+				{ name: "JPEG Image", extensions: ["jpg", "jpeg"] },
+			],
+		});
+		if (!path) {
+			return;
+		}
+		await exportImage(path);
 	};
 
 	return (
@@ -193,11 +210,19 @@ export const Toolbar: Component = () => {
 					class="hidden"
 					onChange={handleFileChange}
 				/>
-				<ActionButton
-					label="Open"
-					icon={<UploadIcon />}
-					onClick={() => fileInputRef?.click()}
-				/>
+				<div class="flex items-center justify-end gap-2">
+					<ActionButton
+						label="Export"
+						icon={<SaveIcon />}
+						onClick={() => void handleExport()}
+						disabled={!canExport()}
+					/>
+					<ActionButton
+						label="Open"
+						icon={<UploadIcon />}
+						onClick={() => fileInputRef?.click()}
+					/>
+				</div>
 			</div>
 		</header>
 	);

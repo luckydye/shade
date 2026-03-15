@@ -14,6 +14,7 @@ export {
 } from "./editor-store";
 
 export {
+	exportImage,
 	closeImage,
 	openImage,
 	openImageFile,

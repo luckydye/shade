@@ -343,6 +343,15 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
 	return _loadEncodedBytes(new Uint8Array(await response.arrayBuffer()), path);
 }
 
+export async function exportImage(path: string): Promise<void> {
+	if (await isTauriRuntime()) {
+		const inv = await getTauriInvoke();
+		await inv("export_image", { path });
+		return;
+	}
+	throw new Error("exportImage is only implemented for Tauri");
+}
+
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
 	if (!(await isTauriRuntime())) {
 		return {

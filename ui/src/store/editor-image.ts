@@ -116,3 +116,7 @@ export async function openPeerImage(
 		loadingMediaSrc,
 	);
 }
+
+export async function exportImage(path: string) {
+	await bridge.exportImage(path);
+}

@@ -1549,11 +1549,38 @@ pub async fn render_preview_float16(
 
 #[tauri::command]
 pub async fn export_image(
-    _path: String,
-    _state: tauri::State<'_, Mutex<EditorState>>,
+    path: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
-    // Placeholder — full GPU render would go here.
-    // In a real implementation this would call renderer.render_stack()
+    let export_path = PathBuf::from(&path);
+    let ext = export_path
+        .extension()
+        .and_then(|segment| segment.to_str())
+        .map(|segment| segment.to_lowercase())
+        .ok_or_else(|| "export path must end in .png, .jpg, or .jpeg".to_string())?;
+    if ext != "png" && ext != "jpg" && ext != "jpeg" {
+        return Err("export format must be png, jpg, or jpeg".into());
+    }
+    let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let pixels = runtime.block_on(async {
+            let renderer = shade_gpu::Renderer::new()
+                .await
+                .map_err(|e| e.to_string())?;
+            renderer
+                .render_stack(&stack, &sources, canvas_width, canvas_height)
+                .await
+                .map_err(|e| e.to_string())
+        })?;
+        shade_io::save_image(&export_path, &pixels, canvas_width, canvas_height)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(())
 }
 
