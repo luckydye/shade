@@ -595,6 +595,33 @@ pub enum RenderJob {
     },
 }
 
+fn cancelled_preview_response() -> Result<PreviewFrameResponse, String> {
+    Ok(PreviewFrameResponse {
+        pixels: Vec::new(),
+        width: 0,
+        height: 0,
+    })
+}
+
+fn cancelled_preview_float16_response() -> Result<PreviewFrameFloat16Response, String> {
+    Ok(PreviewFrameFloat16Response {
+        pixels: Vec::new(),
+        width: 0,
+        height: 0,
+    })
+}
+
+fn cancel_render_job(job: RenderJob) {
+    match job {
+        RenderJob::Preview { response, .. } => {
+            let _ = response.send(cancelled_preview_response());
+        }
+        RenderJob::PreviewFloat16 { response, .. } => {
+            let _ = response.send(cancelled_preview_float16_response());
+        }
+    }
+}
+
 fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
     let source = std::path::Path::new(path);
     let mut source_file = std::fs::File::open(source).map_err(|e| e.to_string())?;
@@ -662,7 +689,11 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
             let renderer = runtime
                 .block_on(shade_gpu::Renderer::new())
                 .map_err(|e| e.to_string());
-            while let Ok(job) = receiver.recv() {
+            while let Ok(mut job) = receiver.recv() {
+                while let Ok(next_job) = receiver.try_recv() {
+                    cancel_render_job(job);
+                    job = next_job;
+                }
                 match job {
                     RenderJob::Preview {
                         stack,
