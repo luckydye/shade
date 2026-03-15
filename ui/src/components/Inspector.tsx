@@ -1697,7 +1697,7 @@ const Inspector: Component = () => {
 				</div>
 
 				{/* Layer tabs + add button */}
-				<div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-3">
+				<div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-4 pt-3">
 					{adjustmentLayers().map(({ idx }) => {
 						const focus = () => layerFocusTypes().get(idx) ?? "tone";
 						const isActive = () =>
@@ -1757,6 +1757,8 @@ const Inspector: Component = () => {
 				<div class="border-t border-white/6 px-4 pb-4 pt-3">
 					<InspectorTabs />
 				</div>
+				
+				<div class="pb-[calc(env(safe-area-inset-bottom)+1rem)]"></div>
 			</div>
 
 			{/* Add layer dialog */}
