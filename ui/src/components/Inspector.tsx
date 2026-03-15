@@ -345,32 +345,6 @@ const Inspector: Component = () => {
   const grain = () => selectedAdjustmentLayer()?.adjustments?.grain ?? DEFAULT_GRAIN;
   const hsl = () => selectedAdjustmentLayer()?.adjustments?.hsl ?? DEFAULT_HSL;
 
-  const applyTone = (next: Partial<ReturnType<typeof tone>>) => {
-    const current = tone();
-    return applyEdit({
-      layer_idx: state.selectedLayerIdx,
-      op: "tone",
-      exposure: next.exposure ?? current.exposure,
-      contrast: next.contrast ?? current.contrast,
-      blacks: next.blacks ?? current.blacks,
-      whites: next.whites ?? current.whites,
-      highlights: next.highlights ?? current.highlights,
-      shadows: next.shadows ?? current.shadows,
-      gamma: next.gamma ?? current.gamma,
-    });
-  };
-
-  const applyColor = (next: Partial<ReturnType<typeof color>>) => {
-    const current = color();
-    return applyEdit({
-      layer_idx: state.selectedLayerIdx,
-      op: "color",
-      saturation: next.saturation ?? current.saturation,
-      temperature: next.temperature ?? current.temperature,
-      tint: next.tint ?? current.tint,
-    });
-  };
-
   const applyCurves = (points: readonly ControlPoint[]) => {
     const normalizedPoints = normalizePoints(points);
     setCurvePointCache((prev) => new Map(prev).set(state.selectedLayerIdx, normalizedPoints));
@@ -703,7 +677,7 @@ const Inspector: Component = () => {
               min={-5}
               max={5}
               step={0.05}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ exposure: value }); }}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: value, contrast: tone().contrast, blacks: tone().blacks, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma }); }}
             />
             <Slider
               label="Gamma"
@@ -712,7 +686,7 @@ const Inspector: Component = () => {
               defaultValue={DEFAULT_TONE.gamma}
               min={0.1}
               max={3}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ gamma: value }); }}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: tone().contrast, blacks: tone().blacks, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: value }); }}
             />
             <Slider
               label="Contrast"
@@ -722,7 +696,7 @@ const Inspector: Component = () => {
               min={-1.0}
               max={1.0}
               step={0.01}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ contrast: value }); }}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: value, blacks: tone().blacks, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma }); }}
             />
             <Slider
               label="Blacks"
@@ -732,7 +706,7 @@ const Inspector: Component = () => {
               min={-0.05}
               max={0.1}
               step={0.001}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ blacks: value }); }}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: tone().contrast, blacks: value, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma }); }}
             />
             <Slider
               label="Whites"
@@ -742,7 +716,7 @@ const Inspector: Component = () => {
               min={-0.1}
               max={0.2}
               step={0.001}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyTone({ whites: value }); }}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: tone().contrast, blacks: tone().blacks, whites: value, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma }); }}
             />
             <Slider
               label="Saturation"
@@ -752,7 +726,7 @@ const Inspector: Component = () => {
               valueLabel={valueLabel(color().saturation)}
               min={0}
               max={2}
-              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyColor({ saturation: value }); }}
+              onChange={(value) => { selectedAdjustmentLayerOrThrow(); void applyEdit({ layer_idx: state.selectedLayerIdx, op: "color", saturation: value, temperature: color().temperature, tint: color().tint }); }}
             />
           </div>
         );
@@ -1074,7 +1048,7 @@ const Inspector: Component = () => {
                         step={0.05}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyTone({ exposure: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: value, contrast: tone().contrast, blacks: tone().blacks, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma });
                         }}
                       />
                       <Slider
@@ -1086,7 +1060,7 @@ const Inspector: Component = () => {
                         max={3}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyTone({ gamma: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: tone().contrast, blacks: tone().blacks, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: value });
                         }}
                       />
                       <Slider
@@ -1099,7 +1073,7 @@ const Inspector: Component = () => {
                         step={0.01}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyTone({ contrast: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: value, blacks: tone().blacks, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma });
                         }}
                       />
                       <Slider
@@ -1112,7 +1086,7 @@ const Inspector: Component = () => {
                         step={0.001}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyTone({ blacks: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: tone().contrast, blacks: value, whites: tone().whites, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma });
                         }}
                       />
                       <Slider
@@ -1125,7 +1099,7 @@ const Inspector: Component = () => {
                         step={0.001}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyTone({ whites: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "tone", exposure: tone().exposure, contrast: tone().contrast, blacks: tone().blacks, whites: value, highlights: tone().highlights, shadows: tone().shadows, gamma: tone().gamma });
                         }}
                       />
                       <Slider
@@ -1138,7 +1112,7 @@ const Inspector: Component = () => {
                         max={2}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyColor({ saturation: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "color", saturation: value, temperature: color().temperature, tint: color().tint });
                         }}
                       />
                       <Slider
@@ -1151,7 +1125,7 @@ const Inspector: Component = () => {
                         max={1}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyColor({ temperature: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "color", saturation: color().saturation, temperature: value, tint: color().tint });
                         }}
                       />
                       <Slider
@@ -1164,7 +1138,7 @@ const Inspector: Component = () => {
                         max={1}
                         onChange={(value) => {
                           selectedAdjustmentLayerOrThrow();
-                          void applyColor({ tint: value });
+                          void applyEdit({ layer_idx: state.selectedLayerIdx, op: "color", saturation: color().saturation, temperature: color().temperature, tint: value });
                         }}
                       />
                       <CurvesEditor />
