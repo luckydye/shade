@@ -8,7 +8,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 async-trait = "0.1"
-tauri = { version = "2", features = ["protocol-asset", "devtools"] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 blake3 = "1"
 crossbeam-channel = "0.5"
