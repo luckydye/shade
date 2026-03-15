@@ -1034,6 +1034,24 @@ pub struct PreviewFrameFloat16Response {
     pub height: u32,
 }
 
+fn pack_preview_rgba_response(frame: PreviewFrameResponse) -> tauri::ipc::Response {
+    let mut bytes = Vec::with_capacity(8 + frame.pixels.len());
+    bytes.extend_from_slice(&frame.width.to_le_bytes());
+    bytes.extend_from_slice(&frame.height.to_le_bytes());
+    bytes.extend_from_slice(&frame.pixels);
+    tauri::ipc::Response::new(bytes)
+}
+
+fn pack_preview_float16_response(frame: PreviewFrameFloat16Response) -> tauri::ipc::Response {
+    let mut bytes = Vec::with_capacity(8 + frame.pixels.len() * 2);
+    bytes.extend_from_slice(&frame.width.to_le_bytes());
+    bytes.extend_from_slice(&frame.height.to_le_bytes());
+    for word in frame.pixels {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    tauri::ipc::Response::new(bytes)
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PreviewCrop {
     pub x: f32,
@@ -1101,7 +1119,7 @@ pub async fn render_preview(
     request: Option<PreviewRenderRequest>,
     render_service: tauri::State<'_, crate::RenderService>,
     state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<PreviewFrameResponse, String> {
+) -> Result<tauri::ipc::Response, String> {
     let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
     let (stack, request) = apply_preview_request(stack, canvas_width, canvas_height, request);
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -1116,7 +1134,10 @@ pub async fn render_preview(
             response: response_tx,
         })
         .map_err(|e| e.to_string())?;
-    response_rx.await.map_err(|e| e.to_string())?
+    response_rx
+        .await
+        .map_err(|e| e.to_string())?
+        .map(pack_preview_rgba_response)
 }
 
 #[tauri::command]
@@ -1124,7 +1145,7 @@ pub async fn render_preview_float16(
     request: Option<PreviewRenderRequest>,
     render_service: tauri::State<'_, crate::RenderService>,
     state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<PreviewFrameFloat16Response, String> {
+) -> Result<tauri::ipc::Response, String> {
     let (stack, sources, canvas_width, canvas_height) = {
         let st = lock_editor_state(&state)?;
         if st.canvas_width == 0 {
@@ -1150,7 +1171,10 @@ pub async fn render_preview_float16(
             response: response_tx,
         })
         .map_err(|e| e.to_string())?;
-    response_rx.await.map_err(|e| e.to_string())?
+    response_rx
+        .await
+        .map_err(|e| e.to_string())?
+        .map(pack_preview_float16_response)
 }
 
 #[tauri::command]

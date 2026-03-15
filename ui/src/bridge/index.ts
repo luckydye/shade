@@ -210,7 +210,11 @@ export interface PreviewRequest {
 	ignore_crop_layers?: boolean;
 }
 
-type Float16ArrayCtor = new (buffer: ArrayBufferLike) => unknown;
+type Float16ArrayCtor = new (
+	buffer: ArrayBufferLike,
+	byteOffset?: number,
+	length?: number,
+) => unknown;
 
 let float16PreviewSupport: boolean | null = null;
 
@@ -243,6 +247,34 @@ function supportsFloat16Preview() {
 	return float16PreviewSupport;
 }
 
+interface ByteView {
+	buffer: ArrayBufferLike;
+	byteOffset: number;
+	byteLength: number;
+}
+
+function readPreviewHeader(view: ByteView) {
+	const header = new DataView(view.buffer, view.byteOffset, 8);
+	return {
+		width: header.getUint32(0, true),
+		height: header.getUint32(4, true),
+	};
+}
+
+function toByteView(value: ArrayBuffer | Uint8Array): ByteView {
+	return value instanceof Uint8Array
+		? {
+				buffer: value.buffer,
+				byteOffset: value.byteOffset,
+				byteLength: value.byteLength,
+			}
+		: {
+				buffer: value,
+				byteOffset: 0,
+				byteLength: value.byteLength,
+			};
+}
+
 export async function renderPreview(
 	request?: PreviewRequest,
 ): Promise<PreviewFrame> {
@@ -250,48 +282,38 @@ export async function renderPreview(
 		const inv = await getTauriInvoke();
 		if (supportsFloat16Preview()) {
 			const Float16 = (globalThis as any).Float16Array as Float16ArrayCtor;
-			const result = (await inv("render_preview_float16", { request })) as {
-				pixels: number[] | Uint16Array | ArrayBuffer;
-				width: number;
-				height: number;
-			};
-			const words =
-				result.pixels instanceof Uint16Array
-					? result.pixels
-					: result.pixels instanceof ArrayBuffer
-					  ? new Uint16Array(result.pixels)
-					  : Uint16Array.from(result.pixels);
-			const buffer =
-				words.byteOffset === 0 && words.byteLength === words.buffer.byteLength
-					? words.buffer
-					: words.buffer.slice(
-							words.byteOffset,
-							words.byteOffset + words.byteLength,
-						);
+			const result = toByteView(
+				(await inv("render_preview_float16", { request })) as
+					| ArrayBuffer
+					| Uint8Array,
+			);
+			const { width, height } = readPreviewHeader(result);
 			return {
 				kind: "rgba-float16",
-				pixels: new Float16(buffer),
-				width: result.width,
-				height: result.height,
+				pixels: new Float16(
+					result.buffer,
+					result.byteOffset + 8,
+					(result.byteLength - 8) / 2,
+				),
+				width,
+				height,
 				colorSpace: "display-p3",
 			};
 		}
-		const result = (await inv("render_preview", { request })) as {
-			pixels: number[] | Uint8Array | ArrayBuffer;
-			width: number;
-			height: number;
-		};
-		const pixels =
-			result.pixels instanceof Uint8Array
-				? result.pixels
-				: result.pixels instanceof ArrayBuffer
-				  ? new Uint8Array(result.pixels)
-				  : Uint8Array.from(result.pixels);
+		const result = toByteView(
+			(await inv("render_preview", { request })) as ArrayBuffer | Uint8Array,
+		);
+		const { width, height } = readPreviewHeader(result);
+		const pixels = new Uint8Array(
+			result.buffer,
+			result.byteOffset + 8,
+			result.byteLength - 8,
+		);
 		return {
 			kind: "rgba",
 			pixels,
-			width: result.width,
-			height: result.height,
+			width,
+			height,
 		};
 	}
 	await ensureWorkerReady();
