@@ -67,13 +67,9 @@ type MediaItem =
 			metadata: MediaItemMetadata;
 	  };
 
-type MediaGridEntry =
-	| { kind: "date"; modifiedAt: number | null }
-	| { kind: "item"; item: MediaItem };
-
 type MediaGridRow =
 	| { kind: "date"; modifiedAt: number | null }
-	| { kind: "items"; items: MediaItem[] };
+	| { kind: "items"; ids: string[] };
 
 type LibraryData = {
 	libraryId: string | null;
@@ -172,22 +168,6 @@ function mediaItemKey(item: MediaItem) {
 		: `local:${item.id}`;
 }
 
-function sameMediaItem(left: MediaItem, right: MediaItem) {
-	if (left.kind !== right.kind) {
-		return false;
-	}
-	if (
-		left.id !== right.id ||
-		left.name !== right.name ||
-		left.modifiedAt !== right.modifiedAt
-	) {
-		return false;
-	}
-	if (left.kind === "local") {
-		return true;
-	}
-	return right.kind === "peer" && left.peerId === right.peerId;
-}
 
 async function loadLibraryItems(
 	libraryId: string | null,
@@ -486,19 +466,9 @@ export const MediaView: Component = () => {
 		}
 		return cachedLibraryItems() ?? [];
 	});
-	const stableDisplayedItems = createMemo<MediaItem[]>((previous) => {
-		const nextItems = displayedItems();
-		const previousByKey = new Map(
-			(previous ?? []).map((item) => [mediaItemKey(item), item]),
-		);
-		return nextItems.map((item) => {
-			const existing = previousByKey.get(mediaItemKey(item));
-			if (existing && sameMediaItem(existing, item)) {
-				return existing;
-			}
-			return item;
-		});
-	});
+	const itemsById = createMemo(() =>
+		new Map(displayedItems().map((item) => [mediaItemKey(item), item])),
+	);
 	const isLibraryScanComplete = createMemo(() => {
 		const current = items();
 		if (!selectedLibraryId() || selectedLibraryId()?.startsWith("peer:")) {
@@ -542,35 +512,35 @@ export const MediaView: Component = () => {
 		const rows: MediaGridRow[] = [];
 		const currentColumns = columns();
 		let lastDateKey: string | null = null;
-		let currentRow: MediaItem[] = [];
-		for (const item of stableDisplayedItems()) {
+		let currentRow: string[] = [];
+		for (const item of displayedItems()) {
 			const dateKey = modificationMonthKey(item.modifiedAt);
 			if (lastDateKey !== dateKey) {
 				if (currentRow.length > 0) {
-					rows.push({ kind: "items", items: currentRow });
+					rows.push({ kind: "items", ids: currentRow });
 					currentRow = [];
 				}
 				rows.push({ kind: "date", modifiedAt: item.modifiedAt });
 				lastDateKey = dateKey;
 			}
-			currentRow.push(item);
+			currentRow.push(mediaItemKey(item));
 			if (currentRow.length === currentColumns) {
-				rows.push({ kind: "items", items: currentRow });
+				rows.push({ kind: "items", ids: currentRow });
 				currentRow = [];
 			}
 		}
 		if (currentRow.length > 0) {
-			rows.push({ kind: "items", items: currentRow });
+			rows.push({ kind: "items", ids: currentRow });
 		}
 		return rows;
 	});
 	const stableGridRows = createMemo<MediaGridRow[]>((previous) => {
 		const next = gridRows();
-		if (!previous || previous.length !== next.length) return next;
-		let allSame = true;
+		if (!previous) return next;
+		let allSame = next.length === previous.length;
 		const result = next.map((row, i) => {
 			const prev = previous[i];
-			if (prev.kind !== row.kind) {
+			if (!prev || prev.kind !== row.kind) {
 				allSame = false;
 				return row;
 			}
@@ -581,8 +551,8 @@ export const MediaView: Component = () => {
 			}
 			if (row.kind === "items" && prev.kind === "items") {
 				if (
-					row.items.length === prev.items.length &&
-					row.items.every((item, j) => item === prev.items[j])
+					row.ids.length === prev.ids.length &&
+					row.ids.every((id, j) => id === prev.ids[j])
 				) {
 					return prev;
 				}
@@ -888,7 +858,7 @@ export const MediaView: Component = () => {
 						<p class="truncate text-xs text-white/28">
 							{selectedLibraryDetail()}
 							{!isLibraryScanComplete() &&
-								` • indexing ${stableDisplayedItems().length} images`}
+								` • indexing ${displayedItems().length} images`}
 						</p>
 					</Show>
 				</div>
@@ -899,7 +869,7 @@ export const MediaView: Component = () => {
 				onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
 			>
 				<Show
-					when={stableDisplayedItems().length > 0}
+					when={displayedItems().length > 0}
 					fallback={
 						<p class="text-sm text-white/30">
 							{items.loading || !isLibraryScanComplete()
@@ -927,8 +897,11 @@ export const MediaView: Component = () => {
 											{formatModificationMonth(row.modifiedAt)}
 										</h2>
 									) : (
-										<For each={row.items}>
-											{(item) => <ImageTile item={item} />}
+										<For each={row.ids}>
+											{(id) => {
+												const item = itemsById().get(id);
+												return item && <ImageTile item={item} />;
+											}}
 										</For>
 									)
 								}
