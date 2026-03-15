@@ -357,20 +357,31 @@ impl Renderer {
             let layer_result: wgpu::Texture = match &entry.layer {
                 Layer::Image { texture_id, .. } => {
                     if let Some(image) = image_sources.get(texture_id) {
-                        let scaled = resample_rgba_f32_region(
-                            &image.pixels,
-                            image.width,
-                            image.height,
+                        let source_texture =
+                            self.texture_cache.get_or_insert_with(*texture_id, || {
+                                self.upload_float_texture(
+                                    &image.pixels,
+                                    image.width,
+                                    image.height,
+                                    "cached image layer texture",
+                                )
+                            });
+                        self.crop_pipeline.process_to_size(
+                            &self.ctx,
+                            &source_texture,
                             target_width,
                             target_height,
-                            &current_view,
-                        );
-                        self.upload_float_texture(
-                            &scaled,
-                            target_width,
-                            target_height,
-                            "image layer texture",
-                        )
+                            CropUniform {
+                                x: current_view.x,
+                                y: current_view.y,
+                                width: current_view.width,
+                                height: current_view.height,
+                                target_width: target_width as f32,
+                                target_height: target_height as f32,
+                                _pad0: 0.0,
+                                _pad1: 0.0,
+                            },
+                        )?
                     } else {
                         // No source image: skip this layer.
                         continue;
@@ -814,40 +825,6 @@ fn crop_rect_to_target_space(
     })
 }
 
-fn resample_rgba_f32_region(
-    pixels: &[f32],
-    source_width: u32,
-    source_height: u32,
-    target_width: u32,
-    target_height: u32,
-    crop: &PreviewCrop,
-) -> Vec<f32> {
-    let mut output = vec![0.0; (target_width * target_height * 4) as usize];
-    for y in 0..target_height {
-        let src_y = sample_position(y, target_height, crop.y, crop.height, source_height);
-        let y0 = src_y.floor() as u32;
-        let y1 = (y0 + 1).min(source_height - 1);
-        let wy = src_y - y0 as f32;
-        for x in 0..target_width {
-            let src_x = sample_position(x, target_width, crop.x, crop.width, source_width);
-            let x0 = src_x.floor() as u32;
-            let x1 = (x0 + 1).min(source_width - 1);
-            let wx = src_x - x0 as f32;
-            let top_left = rgba_at(pixels, source_width, x0, y0);
-            let top_right = rgba_at(pixels, source_width, x1, y0);
-            let bottom_left = rgba_at(pixels, source_width, x0, y1);
-            let bottom_right = rgba_at(pixels, source_width, x1, y1);
-            let index = ((y * target_width + x) * 4) as usize;
-            for channel in 0..4 {
-                let top = lerp(top_left[channel], top_right[channel], wx);
-                let bottom = lerp(bottom_left[channel], bottom_right[channel], wx);
-                output[index + channel] = lerp(top, bottom, wy);
-            }
-        }
-    }
-    output
-}
-
 fn resample_mask_region(
     pixels: &[u8],
     source_width: u32,
@@ -881,16 +858,6 @@ fn sample_position(
     }
     let t = (output_index as f32 + 0.5) / output_size as f32;
     (crop_start + t * crop_size - 0.5).clamp(0.0, (source_size - 1) as f32)
-}
-
-fn rgba_at(pixels: &[f32], width: u32, x: u32, y: u32) -> [f32; 4] {
-    let index = ((y * width + x) * 4) as usize;
-    [
-        pixels[index],
-        pixels[index + 1],
-        pixels[index + 2],
-        pixels[index + 3],
-    ]
 }
 
 fn u8_rgba_to_f32(pixels: &[u8]) -> Vec<f32> {
@@ -938,10 +905,6 @@ fn rgba_f32_to_f16_words(pixels: &[f32]) -> Vec<u16> {
         .iter()
         .map(|channel| f16::from_f32(*channel).to_bits())
         .collect()
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
 }
 
 fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
@@ -1153,7 +1116,7 @@ mod tests {
             FloatImage {
                 width: 2,
                 height: 1,
-                pixels: vec![2.0, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 1.0],
+                pixels: vec![2.0, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 1.0].into(),
             },
         );
 
@@ -1194,15 +1157,11 @@ mod tests {
                 width: 4,
                 height: 2,
                 pixels: vec![
-                    10.0, 0.0, 0.0, 1.0,
-                    20.0, 0.0, 0.0, 1.0,
-                    30.0, 0.0, 0.0, 1.0,
-                    40.0, 0.0, 0.0, 1.0,
-                    50.0, 0.0, 0.0, 1.0,
-                    60.0, 0.0, 0.0, 1.0,
-                    70.0, 0.0, 0.0, 1.0,
-                    80.0, 0.0, 0.0, 1.0,
-                ],
+                    10.0, 0.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0, 30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0,
+                    1.0, 50.0, 0.0, 0.0, 1.0, 60.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0,
+                    0.0, 1.0,
+                ]
+                .into(),
             },
         );
 
@@ -1230,10 +1189,7 @@ mod tests {
         assert_eq!(
             pixels,
             vec![
-                30.0, 0.0, 0.0, 1.0,
-                40.0, 0.0, 0.0, 1.0,
-                70.0, 0.0, 0.0, 1.0,
-                80.0, 0.0, 0.0, 1.0,
+                30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0, 0.0, 1.0,
             ]
         );
     }

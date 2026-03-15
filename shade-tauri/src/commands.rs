@@ -24,10 +24,7 @@ extern "C" {
         height: i32,
         out_size: *mut i32,
     ) -> *mut u8;
-    fn ios_get_image_data(
-        identifier: *const std::os::raw::c_char,
-        out_size: *mut i32,
-    ) -> *mut u8;
+    fn ios_get_image_data(identifier: *const std::os::raw::c_char, out_size: *mut i32) -> *mut u8;
     fn ios_free_buffer(ptr: *mut u8);
     fn ios_free_string(ptr: *mut std::os::raw::c_char);
 }
@@ -79,8 +76,8 @@ struct AppConfig {
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif",
-    "exr", "dng", "cr2", "cr3", "arw", "nef", "orf", "raf", "rw2", "3fr",
+    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif", "exr", "dng", "cr2", "cr3", "arw", "nef",
+    "orf", "raf", "rw2", "3fr",
 ];
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -106,9 +103,11 @@ fn decode_image_bytes_with_info(
     bytes: &[u8],
     name_hint: Option<&str>,
 ) -> Result<(FloatImage, SourceImageInfo), String> {
-    catch_unwind(AssertUnwindSafe(|| load_image_bytes_f32_with_info(bytes, name_hint)))
-        .map_err(|payload| format!("image decode panicked: {}", panic_payload_message(payload)))?
-        .map_err(|e| e.to_string())
+    catch_unwind(AssertUnwindSafe(|| {
+        load_image_bytes_f32_with_info(bytes, name_hint)
+    }))
+    .map_err(|payload| format!("image decode panicked: {}", panic_payload_message(payload)))?
+    .map_err(|e| e.to_string())
 }
 
 fn decode_image_path_with_info(path: &Path) -> Result<(FloatImage, SourceImageInfo), String> {
@@ -187,12 +186,15 @@ fn load_app_config() -> Result<AppConfig, String> {
         return Ok(AppConfig::default());
     }
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| format!("invalid app config at {}: {e}", path.display()))
+    serde_json::from_str(&json)
+        .map_err(|e| format!("invalid app config at {}: {e}", path.display()))
 }
 
 fn save_app_config(config: &AppConfig) -> Result<(), String> {
     let path = app_config_path()?;
-    let parent = path.parent().ok_or_else(|| format!("invalid config path: {}", path.display()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid config path: {}", path.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
@@ -211,12 +213,19 @@ pub fn save_p2p_secret_key(secret_key: [u8; 32]) -> Result<(), String> {
 }
 
 fn is_peer_paired(peer_endpoint_id: &str) -> Result<bool, String> {
-    Ok(load_app_config()?.paired_peers.iter().any(|peer| peer == peer_endpoint_id))
+    Ok(load_app_config()?
+        .paired_peers
+        .iter()
+        .any(|peer| peer == peer_endpoint_id))
 }
 
 fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
     let mut config = load_app_config()?;
-    if config.paired_peers.iter().any(|peer| peer == peer_endpoint_id) {
+    if config
+        .paired_peers
+        .iter()
+        .any(|peer| peer == peer_endpoint_id)
+    {
         return Ok(());
     }
     config.paired_peers.push(peer_endpoint_id.to_owned());
@@ -234,7 +243,8 @@ fn custom_library_id(path: &Path) -> String {
 }
 
 fn library_for_directory(path: PathBuf) -> MediaLibrary {
-    let name = path.file_name()
+    let name = path
+        .file_name()
         .and_then(|segment| segment.to_str())
         .map(str::to_string)
         .unwrap_or_else(|| path.display().to_string());
@@ -300,26 +310,36 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             if !path.is_file() {
                 continue;
             }
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                continue;
+            };
             if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
                 continue;
             }
-            let path_string = path.to_str()
+            let path_string = path
+                .to_str()
                 .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
                 .to_string();
-            let mtime = path.metadata()
+            let mtime = path
+                .metadata()
                 .map_err(|e| e.to_string())?
                 .modified()
                 .map_err(|e| e.to_string())?;
-            entries_with_mtime.push((mtime, LibraryImage {
-                name: picture_display_name(&path_string),
-                path: path_string,
-                modified_at: Some(modified_at_millis(mtime)?),
-            }));
+            entries_with_mtime.push((
+                mtime,
+                LibraryImage {
+                    name: picture_display_name(&path_string),
+                    path: path_string,
+                    modified_at: Some(modified_at_millis(mtime)?),
+                },
+            ));
         }
     }
     entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(entries_with_mtime.into_iter().map(|(_, entry)| entry).collect())
+    Ok(entries_with_mtime
+        .into_iter()
+        .map(|(_, entry)| entry)
+        .collect())
 }
 
 pub struct LibraryScanEntry {
@@ -345,9 +365,16 @@ impl LibraryScanService {
         })
     }
 
-    pub fn snapshot_for_library(&self, library_id: &str, root: PathBuf) -> Result<LibraryImageListing, String> {
+    pub fn snapshot_for_library(
+        &self,
+        library_id: &str,
+        root: PathBuf,
+    ) -> Result<LibraryImageListing, String> {
         let snapshot = {
-            let mut scans = self.scans.lock().map_err(|_| "library scan lock poisoned".to_string())?;
+            let mut scans = self
+                .scans
+                .lock()
+                .map_err(|_| "library scan lock poisoned".to_string())?;
             let should_restart = scans
                 .get(library_id)
                 .map(|snapshot| library_scan_should_restart(snapshot))
@@ -370,19 +397,29 @@ impl LibraryScanService {
                     .clone()
             }
         };
-        let snapshot = snapshot.lock().map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+        let snapshot = snapshot
+            .lock()
+            .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
         if let Some(error) = &snapshot.error {
             return Err(error.clone());
         }
         Ok(LibraryImageListing {
-            items: snapshot.items.iter().map(|entry| entry.image.clone()).collect(),
+            items: snapshot
+                .items
+                .iter()
+                .map(|entry| entry.image.clone())
+                .collect(),
             is_complete: snapshot.is_complete,
         })
     }
 }
 
-pub fn library_scan_should_restart(snapshot: &Arc<Mutex<LibraryScanSnapshot>>) -> Result<bool, String> {
-    let snapshot = snapshot.lock().map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+pub fn library_scan_should_restart(
+    snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
+) -> Result<bool, String> {
+    let snapshot = snapshot
+        .lock()
+        .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
     if !snapshot.is_complete {
         return Ok(false);
     }
@@ -398,11 +435,16 @@ pub fn spawn_library_scan(snapshot: Arc<Mutex<LibraryScanSnapshot>>, root: PathB
         .name("shade-library-scan".into())
         .spawn(move || {
             let result = scan_library_into_snapshot(&root, &snapshot);
-            let mut guard = snapshot.lock().expect("library scan snapshot lock poisoned");
+            let mut guard = snapshot
+                .lock()
+                .expect("library scan snapshot lock poisoned");
             if let Err(error) = result {
                 guard.error = Some(error);
             }
-            guard.completed_at = Some(modified_at_millis(std::time::SystemTime::now()).expect("current time must be valid"));
+            guard.completed_at = Some(
+                modified_at_millis(std::time::SystemTime::now())
+                    .expect("current time must be valid"),
+            );
             guard.is_complete = true;
         })
         .expect("failed to spawn library scan thread");
@@ -426,11 +468,14 @@ pub fn scan_library_into_snapshot(
             if !path.is_file() {
                 continue;
             }
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue; };
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                continue;
+            };
             if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
                 continue;
             }
-            let path_string = path.to_str()
+            let path_string = path
+                .to_str()
                 .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
                 .to_string();
             let modified_at = modified_at_millis(
@@ -463,9 +508,13 @@ pub fn flush_library_scan_batch(
     if batch.is_empty() {
         return Ok(());
     }
-    let mut guard = snapshot.lock().map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+    let mut guard = snapshot
+        .lock()
+        .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
     guard.items.extend(batch.drain(..));
-    guard.items.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+    guard
+        .items
+        .sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
     Ok(())
 }
 
@@ -568,14 +617,16 @@ fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
         return std::fs::read(&cache_path).map_err(|e| e.to_string());
     }
 
-    let (pixels, width, height) =
-        shade_io::load_image(source).map_err(|e| e.to_string())?;
+    let (pixels, width, height) = shade_io::load_image(source).map_err(|e| e.to_string())?;
     let img = image::RgbaImage::from_raw(width, height, pixels)
         .ok_or("failed to wrap pixels in RgbaImage")?;
     let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
     let mut jpeg: Vec<u8> = Vec::new();
     thumb
-        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )
         .map_err(|e| e.to_string())?;
     std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
     Ok(jpeg)
@@ -587,13 +638,11 @@ pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue> {
         let worker_queue = queue.clone();
         std::thread::Builder::new()
             .name(format!("shade-thumbnail-{worker_idx}"))
-            .spawn(move || {
-                loop {
-                    let job = worker_queue.pop_latest();
-                    let result = generate_desktop_thumbnail(&job.path);
-                    for response in job.responses {
-                        let _ = response.send(result.clone());
-                    }
+            .spawn(move || loop {
+                let job = worker_queue.pop_latest();
+                let result = generate_desktop_thumbnail(&job.path);
+                for response in job.responses {
+                    let _ = response.send(result.clone());
                 }
             })
             .expect("failed to spawn thumbnail worker thread");
@@ -610,7 +659,9 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                 .enable_all()
                 .build()
                 .expect("failed to create render runtime");
-            let renderer = runtime.block_on(shade_gpu::Renderer::new()).map_err(|e| e.to_string());
+            let renderer = runtime
+                .block_on(shade_gpu::Renderer::new())
+                .map_err(|e| e.to_string());
             while let Ok(job) = receiver.recv() {
                 match job {
                     RenderJob::Preview {
@@ -718,7 +769,7 @@ impl EditorState {
         self.image_sources.insert(
             texture_id,
             FloatImage {
-                pixels,
+                pixels: pixels.into(),
                 width,
                 height,
             },
@@ -815,7 +866,13 @@ pub async fn open_peer_image(
         .map_err(|error| error.to_string())?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
+    Ok(st.replace_with_image(
+        image.pixels.to_vec(),
+        image.width,
+        image.height,
+        info.bit_depth,
+        info.color_space,
+    ))
 }
 
 #[tauri::command]
@@ -833,7 +890,13 @@ pub async fn open_image<R: tauri::Runtime>(
             .await?;
         let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
         let mut st = state.lock().unwrap();
-        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space));
+        return Ok(st.replace_with_image(
+            image.pixels.to_vec(),
+            image.width,
+            image.height,
+            info.bit_depth,
+            info.color_space,
+        ));
     }
 
     #[cfg(target_os = "ios")]
@@ -857,12 +920,24 @@ pub async fn open_image<R: tauri::Runtime>(
 
         let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
         let mut st = state.lock().unwrap();
-        return Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space));
+        return Ok(st.replace_with_image(
+            image.pixels.to_vec(),
+            image.width,
+            image.height,
+            info.bit_depth,
+            info.color_space,
+        ));
     }
 
     let (image, info) = decode_image_path_with_info(std::path::Path::new(&path))?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
+    Ok(st.replace_with_image(
+        image.pixels.to_vec(),
+        image.width,
+        image.height,
+        info.bit_depth,
+        info.color_space,
+    ))
 }
 
 #[tauri::command]
@@ -873,7 +948,13 @@ pub async fn open_image_encoded_bytes(
 ) -> Result<LayerInfoResponse, String> {
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(image.pixels, image.width, image.height, info.bit_depth, info.color_space))
+    Ok(st.replace_with_image(
+        image.pixels.to_vec(),
+        image.width,
+        image.height,
+        info.bit_depth,
+        info.color_space,
+    ))
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
@@ -1220,15 +1301,15 @@ pub async fn apply_edit(
                 }
                 "hsl" => {
                     let next = AdjustmentOp::Hsl(HslParams {
-                        red_hue:   params.red_hue.unwrap_or(0.0),
-                        red_sat:   params.red_sat.unwrap_or(0.0),
-                        red_lum:   params.red_lum.unwrap_or(0.0),
+                        red_hue: params.red_hue.unwrap_or(0.0),
+                        red_sat: params.red_sat.unwrap_or(0.0),
+                        red_lum: params.red_lum.unwrap_or(0.0),
                         green_hue: params.green_hue.unwrap_or(0.0),
                         green_sat: params.green_sat.unwrap_or(0.0),
                         green_lum: params.green_lum.unwrap_or(0.0),
-                        blue_hue:  params.blue_hue.unwrap_or(0.0),
-                        blue_sat:  params.blue_sat.unwrap_or(0.0),
-                        blue_lum:  params.blue_lum.unwrap_or(0.0),
+                        blue_hue: params.blue_hue.unwrap_or(0.0),
+                        blue_sat: params.blue_sat.unwrap_or(0.0),
+                        blue_lum: params.blue_lum.unwrap_or(0.0),
                     });
                     if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Hsl(_))) {
                         *op = next;
@@ -1426,9 +1507,15 @@ pub struct GrainValues {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HslValues {
-    pub red_hue: f32, pub red_sat: f32, pub red_lum: f32,
-    pub green_hue: f32, pub green_sat: f32, pub green_lum: f32,
-    pub blue_hue: f32, pub blue_sat: f32, pub blue_lum: f32,
+    pub red_hue: f32,
+    pub red_sat: f32,
+    pub red_lum: f32,
+    pub green_hue: f32,
+    pub green_sat: f32,
+    pub green_lum: f32,
+    pub blue_hue: f32,
+    pub blue_sat: f32,
+    pub blue_lum: f32,
 }
 
 #[tauri::command]
@@ -1474,9 +1561,10 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     }
 
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    app.state::<crate::ThumbnailService>()
-        .0
-        .push(ThumbnailJob { path: picture_id.to_owned(), response: response_tx });
+    app.state::<crate::ThumbnailService>().0.push(ThumbnailJob {
+        path: picture_id.to_owned(),
+        response: response_tx,
+    });
     response_rx.await.map_err(|e| e.to_string())?
 }
 
@@ -1657,10 +1745,10 @@ pub async fn list_library_images<R: tauri::Runtime>(
                 return Ok(vec![]);
             }
             let json = unsafe {
-            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
-            ios_free_string(ptr);
-            s
-        };
+                let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+                ios_free_string(ptr);
+                s
+            };
             serde_json::from_str::<Vec<IosPhotoEntry>>(&json)
                 .map(|photos| LibraryImageListing {
                     items: photos
@@ -1682,8 +1770,7 @@ pub async fn list_library_images<R: tauri::Runtime>(
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         let library_path = resolve_desktop_library_path(&library_id)?;
-        _app
-            .state::<crate::LibraryScanService>()
+        _app.state::<crate::LibraryScanService>()
             .0
             .snapshot_for_library(&library_id, library_path)
     }
@@ -1696,10 +1783,15 @@ pub async fn add_media_library(path: String) -> Result<MediaLibrary, String> {
         return Err(format!("not a directory: {}", canonical.display()));
     }
     let mut config = load_app_config()?;
-    let canonical_string = canonical.to_str()
+    let canonical_string = canonical
+        .to_str()
         .ok_or_else(|| format!("non-utf8 path: {}", canonical.display()))?
         .to_string();
-    if !config.directories.iter().any(|existing| existing == &canonical_string) {
+    if !config
+        .directories
+        .iter()
+        .any(|existing| existing == &canonical_string)
+    {
         config.directories.push(canonical_string);
         save_app_config(&config)?;
     }
@@ -1713,7 +1805,9 @@ pub async fn remove_media_library(id: String) -> Result<(), String> {
     }
     let mut config = load_app_config()?;
     let before = config.directories.len();
-    config.directories.retain(|directory| custom_library_id(Path::new(directory)) != id);
+    config
+        .directories
+        .retain(|directory| custom_library_id(Path::new(directory)) != id);
     if config.directories.len() == before {
         return Err(format!("unknown media library: {id}"));
     }
@@ -1739,7 +1833,9 @@ pub async fn list_presets() -> Result<Vec<PresetInfo>, String> {
         let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
-        presets.push(PresetInfo { name: stem.to_string() });
+        presets.push(PresetInfo {
+            name: stem.to_string(),
+        });
     }
     presets.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(presets)
@@ -1751,7 +1847,9 @@ pub async fn save_preset(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<PresetInfo, String> {
     let path = preset_file_path(&name)?;
-    let parent = path.parent().ok_or_else(|| format!("invalid preset path: {}", path.display()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid preset path: {}", path.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let st = state.lock().unwrap();
     let layers = st
@@ -1764,7 +1862,9 @@ pub async fn save_preset(
     let file = PresetFile { version: 1, layers };
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(PresetInfo { name: name.trim().to_string() })
+    Ok(PresetInfo {
+        name: name.trim().to_string(),
+    })
 }
 
 #[tauri::command]
@@ -1796,13 +1896,20 @@ pub async fn load_preset(
 }
 
 fn picture_display_name(picture_id: &str) -> String {
-    if let Some(name) = Path::new(picture_id).file_name().and_then(|name| name.to_str()) {
+    if let Some(name) = Path::new(picture_id)
+        .file_name()
+        .and_then(|name| name.to_str())
+    {
         return name.to_owned();
     }
     let short = if picture_id.len() <= 20 {
         picture_id.to_owned()
     } else {
-        format!("{}...{}", &picture_id[..8], &picture_id[picture_id.len() - 8..])
+        format!(
+            "{}...{}",
+            &picture_id[..8],
+            &picture_id[picture_id.len() - 8..]
+        )
     };
     format!("Photo {short}")
 }
@@ -1963,9 +2070,15 @@ pub async fn get_layer_stack(
                             }
                             AdjustmentOp::Hsl(params) => {
                                 adjustments.hsl = Some(HslValues {
-                                    red_hue: params.red_hue, red_sat: params.red_sat, red_lum: params.red_lum,
-                                    green_hue: params.green_hue, green_sat: params.green_sat, green_lum: params.green_lum,
-                                    blue_hue: params.blue_hue, blue_sat: params.blue_sat, blue_lum: params.blue_lum,
+                                    red_hue: params.red_hue,
+                                    red_sat: params.red_sat,
+                                    red_lum: params.red_lum,
+                                    green_hue: params.green_hue,
+                                    green_sat: params.green_sat,
+                                    green_lum: params.green_lum,
+                                    blue_hue: params.blue_hue,
+                                    blue_sat: params.blue_sat,
+                                    blue_lum: params.blue_lum,
                                 });
                             }
                         }
@@ -1983,7 +2096,11 @@ pub async fn get_layer_stack(
     })
 }
 
-fn normalize_crop_rect(rect: CropRect, canvas_width: u32, canvas_height: u32) -> Result<CropRect, String> {
+fn normalize_crop_rect(
+    rect: CropRect,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<CropRect, String> {
     if canvas_width == 0 || canvas_height == 0 {
         return Err("cannot edit crop without a loaded image".into());
     }
@@ -1993,5 +2110,10 @@ fn normalize_crop_rect(rect: CropRect, canvas_width: u32, canvas_height: u32) ->
     let height = rect.height.clamp(1.0, max_height);
     let x = rect.x.clamp(0.0, max_width - width);
     let y = rect.y.clamp(0.0, max_height - height);
-    Ok(CropRect { x, y, width, height })
+    Ok(CropRect {
+        x,
+        y,
+        width,
+        height,
+    })
 }

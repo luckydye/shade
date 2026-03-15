@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Tone adjustment parameters — must match the WGSL uniform struct layout.
 #[repr(C)]
@@ -248,7 +249,7 @@ pub type TextureId = u64;
 /// Full-precision RGBA image data stored as linear or gamma-encoded `f32` samples.
 #[derive(Clone, Debug)]
 pub struct FloatImage {
-    pub pixels: Vec<f32>,
+    pub pixels: Arc<[f32]>,
     pub width: u32,
     pub height: u32,
 }

@@ -362,8 +362,11 @@ function toImageData(frame: bridge.PreviewFrame) {
 			colorSpace: frame.colorSpace,
 		} as any);
 	}
-	const pixels = new Uint8ClampedArray(frame.pixels.length);
-	pixels.set(frame.pixels);
+	const pixels = new Uint8ClampedArray(
+		frame.pixels.buffer,
+		frame.pixels.byteOffset,
+		frame.pixels.byteLength,
+	) as any;
 	return new ImageData(pixels, frame.width, frame.height);
 }
 
@@ -908,12 +911,18 @@ async function performPreviewRefresh() {
 		viewportWidth: currentVisible.viewportWidth,
 		viewportHeight: currentVisible.viewportHeight,
 	});
-	const contextFrame =
+	if (
 		request.crop &&
 		request.crop.width === state.canvasWidth &&
 		request.crop.height === state.canvasHeight
-			? frame
-			: await bridge.renderPreview(contextRequest);
+	) {
+		setPreviewContextFrame(toImageData(frame));
+		return;
+	}
+	if (queued.quality === "interactive" && previewContextFrame()) {
+		return;
+	}
+	const contextFrame = await bridge.renderPreview(contextRequest);
 	if (queued.version !== previewRefreshVersion) return;
 	if (contextFrame.width === 0 || contextFrame.height === 0) return;
 	setPreviewContextFrame(toImageData(contextFrame));

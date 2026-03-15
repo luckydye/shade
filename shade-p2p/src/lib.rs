@@ -2,17 +2,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use iroh::{
     address_lookup::{DiscoveryEvent, MdnsAddressLookup},
-    endpoint_info::UserData,
     endpoint::Connection,
+    endpoint_info::UserData,
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint, EndpointId, RelayMode, SecretKey,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::{
-    sync::RwLock,
-    task::JoinHandle,
-};
+use tokio::{sync::RwLock, task::JoinHandle};
 use tokio_stream::StreamExt;
 
 const SHADE_P2P_DISCOVERY_TAG: &str = "shade-p2p";
@@ -46,7 +43,10 @@ enum BrowseRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 enum BrowseResponse {
-    PicturesPage { pictures: Vec<SharedPicture>, has_more: bool },
+    PicturesPage {
+        pictures: Vec<SharedPicture>,
+        has_more: bool,
+    },
     Thumbnail(Vec<u8>),
     ImageBytes(Vec<u8>),
     Error(String),
@@ -143,7 +143,10 @@ impl LocalPeerDiscovery {
                 )
                 .await?
             {
-                BrowseResponse::PicturesPage { pictures: page, has_more } => {
+                BrowseResponse::PicturesPage {
+                    pictures: page,
+                    has_more,
+                } => {
                     offset += page.len();
                     pictures.extend(page);
                     if !has_more {
@@ -151,8 +154,16 @@ impl LocalPeerDiscovery {
                     }
                 }
                 BrowseResponse::Error(message) => return Err(anyhow::anyhow!(message)),
-                BrowseResponse::Thumbnail(_) => return Err(anyhow::anyhow!("received thumbnail response for picture list request")),
-                BrowseResponse::ImageBytes(_) => return Err(anyhow::anyhow!("received image response for picture list request")),
+                BrowseResponse::Thumbnail(_) => {
+                    return Err(anyhow::anyhow!(
+                        "received thumbnail response for picture list request"
+                    ))
+                }
+                BrowseResponse::ImageBytes(_) => {
+                    return Err(anyhow::anyhow!(
+                        "received image response for picture list request"
+                    ))
+                }
             }
         }
     }
@@ -174,8 +185,12 @@ impl LocalPeerDiscovery {
         {
             BrowseResponse::Thumbnail(bytes) => Ok(bytes),
             BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
-            BrowseResponse::PicturesPage { .. } => Err(anyhow::anyhow!("received picture list response for thumbnail request")),
-            BrowseResponse::ImageBytes(_) => Err(anyhow::anyhow!("received image response for thumbnail request")),
+            BrowseResponse::PicturesPage { .. } => Err(anyhow::anyhow!(
+                "received picture list response for thumbnail request"
+            )),
+            BrowseResponse::ImageBytes(_) => Err(anyhow::anyhow!(
+                "received image response for thumbnail request"
+            )),
         }
     }
 
@@ -196,8 +211,12 @@ impl LocalPeerDiscovery {
         {
             BrowseResponse::ImageBytes(bytes) => Ok(bytes),
             BrowseResponse::Error(message) => Err(anyhow::anyhow!(message)),
-            BrowseResponse::PicturesPage { .. } => Err(anyhow::anyhow!("received picture list response for image request")),
-            BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!("received thumbnail response for image request")),
+            BrowseResponse::PicturesPage { .. } => Err(anyhow::anyhow!(
+                "received picture list response for image request"
+            )),
+            BrowseResponse::Thumbnail(_) => Err(anyhow::anyhow!(
+                "received thumbnail response for image request"
+            )),
         }
     }
 
@@ -286,7 +305,9 @@ impl ProtocolHandler for BrowseProtocol {
             let (mut send, _) = connection.accept_bi().await?;
             let response = serde_json::to_vec(&BrowseResponse::Error(error.to_string()))
                 .map_err(AcceptError::from_err)?;
-            send.write_all(&response).await.map_err(AcceptError::from_err)?;
+            send.write_all(&response)
+                .await
+                .map_err(AcceptError::from_err)?;
             send.finish().map_err(AcceptError::from_err)?;
             connection.closed().await;
             return Ok(());
@@ -296,20 +317,22 @@ impl ProtocolHandler for BrowseProtocol {
             .read_to_end(MAX_REQUEST_MESSAGE_BYTES)
             .await
             .map_err(AcceptError::from_err)?;
-        let request = serde_json::from_slice::<BrowseRequest>(&request)
-            .map_err(AcceptError::from_err)?;
+        let request =
+            serde_json::from_slice::<BrowseRequest>(&request).map_err(AcceptError::from_err)?;
         let response = match request {
-            BrowseRequest::ListPictures { offset, limit } => match self.media_provider.list_pictures().await {
-                Ok(pictures) => {
-                    let total = pictures.len();
-                    let page = pictures.into_iter().skip(offset).take(limit).collect();
-                    BrowseResponse::PicturesPage {
-                        pictures: page,
-                        has_more: offset.saturating_add(limit) < total,
+            BrowseRequest::ListPictures { offset, limit } => {
+                match self.media_provider.list_pictures().await {
+                    Ok(pictures) => {
+                        let total = pictures.len();
+                        let page = pictures.into_iter().skip(offset).take(limit).collect();
+                        BrowseResponse::PicturesPage {
+                            pictures: page,
+                            has_more: offset.saturating_add(limit) < total,
+                        }
                     }
+                    Err(error) => BrowseResponse::Error(error.to_string()),
                 }
-                Err(error) => BrowseResponse::Error(error.to_string()),
-            },
+            }
             BrowseRequest::GetThumbnail { picture_id } => {
                 match self.media_provider.get_thumbnail(&picture_id).await {
                     Ok(bytes) => BrowseResponse::Thumbnail(bytes),
@@ -324,7 +347,9 @@ impl ProtocolHandler for BrowseProtocol {
             }
         };
         let response = serde_json::to_vec(&response).map_err(AcceptError::from_err)?;
-        send.write_all(&response).await.map_err(AcceptError::from_err)?;
+        send.write_all(&response)
+            .await
+            .map_err(AcceptError::from_err)?;
         send.finish().map_err(AcceptError::from_err)?;
         connection.closed().await;
         Ok(())

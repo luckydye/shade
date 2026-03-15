@@ -258,9 +258,10 @@ async fn main() -> Result<()> {
                 .unwrap_or(ColorSpace::Srgb);
 
             log::info!("Loading image: {}", input.display());
-            let (mut image, detected_cs) = load_image_f32_with_colorspace(&input)?;
+            let (image, detected_cs) = load_image_f32_with_colorspace(&input)?;
             let width = image.width;
             let height = image.height;
+            let mut pixels = image.pixels.to_vec();
             log::info!("Image loaded: {}×{} px", width, height);
 
             // Override detected colour space if the user provided one explicitly.
@@ -273,7 +274,7 @@ async fn main() -> Result<()> {
             log::info!("Display colour space: {}", display_cs.name());
 
             // Convert source pixels to linear sRGB (internal working space).
-            to_linear_srgb_f32(&mut image.pixels, &src_cs);
+            to_linear_srgb_f32(&mut pixels, &src_cs);
 
             let mut ops: Vec<AdjustmentOp> = Vec::new();
 
@@ -349,7 +350,7 @@ async fn main() -> Result<()> {
 
             log::info!("Running {} pipeline op(s)…", ops.len());
             let mut result = renderer
-                .render_with_ops_f32(&image.pixels, width, height, &ops)
+                .render_with_ops_f32(&pixels, width, height, &ops)
                 .await?;
 
             // Apply display/export colour space transform (linear sRGB → display_cs).
@@ -431,7 +432,8 @@ async fn main() -> Result<()> {
                     pixels: pixels
                         .into_iter()
                         .map(|channel| channel as f32 / 255.0)
-                        .collect(),
+                        .collect::<Vec<_>>()
+                        .into(),
                     width,
                     height,
                 },
@@ -441,13 +443,8 @@ async fn main() -> Result<()> {
             let renderer = Renderer::new().await?;
 
             let crop = preview_crop_from_args(crop_x, crop_y, crop_width, crop_height)?;
-            let (target_width, target_height) = preview_target_size(
-                preview_width,
-                preview_height,
-                crop.as_ref(),
-                width,
-                height,
-            )?;
+            let (target_width, target_height) =
+                preview_target_size(preview_width, preview_height, crop.as_ref(), width, height)?;
 
             log::info!(
                 "Compositing layer stack ({} layers) to {}×{}…",

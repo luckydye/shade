@@ -164,7 +164,8 @@ pub struct CropPipeline {
 
 impl CropPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
-        let bind_group_layout = make_simple_bind_group_layout(&ctx.device, "crop bind group layout");
+        let bind_group_layout =
+            make_simple_bind_group_layout(&ctx.device, "crop bind group layout");
         let pipeline = make_simple_pipeline(
             &ctx.device,
             CROP_WGSL,
@@ -186,12 +187,26 @@ impl CropPipeline {
         params: CropUniform,
     ) -> Result<Texture> {
         let size = input_tex.size();
-        let output_tex = create_output_texture(&ctx.device, size.width, size.height, "crop output");
-        let uniform_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crop uniform"),
-            contents: bytemuck::bytes_of(&params),
-            usage: BufferUsages::UNIFORM,
-        });
+        self.process_to_size(ctx, input_tex, size.width, size.height, params)
+    }
+
+    pub fn process_to_size(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        output_width: u32,
+        output_height: u32,
+        params: CropUniform,
+    ) -> Result<Texture> {
+        let output_tex =
+            create_output_texture(&ctx.device, output_width, output_height, "crop output");
+        let uniform_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crop uniform"),
+                contents: bytemuck::bytes_of(&params),
+                usage: BufferUsages::UNIFORM,
+            });
         let in_view = input_tex.create_view(&TextureViewDescriptor::default());
         let out_view = output_tex.create_view(&TextureViewDescriptor::default());
         let bind_group = ctx.device.create_bind_group(&BindGroupDescriptor {
@@ -212,7 +227,14 @@ impl CropPipeline {
                 },
             ],
         });
-        dispatch_simple(ctx, &self.pipeline, &bind_group, size.width, size.height, "crop pass");
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            output_width,
+            output_height,
+            "crop pass",
+        );
         Ok(output_tex)
     }
 }
@@ -758,17 +780,17 @@ impl GrainPipeline {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct HslParamsGpu {
-    red:   [f32; 4],  // hue, sat, lum, 0
+    red: [f32; 4], // hue, sat, lum, 0
     green: [f32; 4],
-    blue:  [f32; 4],
+    blue: [f32; 4],
 }
 
 impl From<shade_core::HslParams> for HslParamsGpu {
     fn from(p: shade_core::HslParams) -> Self {
         Self {
-            red:   [p.red_hue,   p.red_sat,   p.red_lum,   0.0],
+            red: [p.red_hue, p.red_sat, p.red_lum, 0.0],
             green: [p.green_hue, p.green_sat, p.green_lum, 0.0],
-            blue:  [p.blue_hue,  p.blue_sat,  p.blue_lum,  0.0],
+            blue: [p.blue_hue, p.blue_sat, p.blue_lum, 0.0],
         }
     }
 }
@@ -790,10 +812,18 @@ impl HslPipeline {
             "hsl compute pipeline",
             &bind_group_layout,
         );
-        Ok(Self { pipeline, bind_group_layout })
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
     }
 
-    pub fn process(&self, ctx: &GpuContext, input_tex: &Texture, params: shade_core::HslParams) -> Result<Texture> {
+    pub fn process(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        params: shade_core::HslParams,
+    ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
@@ -804,15 +834,24 @@ impl HslPipeline {
             contents: bytemuck::bytes_of(&gpu),
             usage: BufferUsages::UNIFORM,
         });
-        let input_view  = input_tex.create_view(&TextureViewDescriptor::default());
+        let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("hsl bind group"),
             layout: &self.bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&input_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&output_view) },
-                BindGroupEntry { binding: 2, resource: uniform_buf.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&input_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&output_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buf.as_entire_binding(),
+                },
             ],
         });
         dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "hsl pass");

@@ -261,9 +261,16 @@ export async function renderPreview(
 					: result.pixels instanceof ArrayBuffer
 					  ? new Uint16Array(result.pixels)
 					  : Uint16Array.from(result.pixels);
+			const buffer =
+				words.byteOffset === 0 && words.byteLength === words.buffer.byteLength
+					? words.buffer
+					: words.buffer.slice(
+							words.byteOffset,
+							words.byteOffset + words.byteLength,
+						);
 			return {
 				kind: "rgba-float16",
-				pixels: new Float16(words.buffer.slice(0)),
+				pixels: new Float16(buffer),
 				width: result.width,
 				height: result.height,
 				colorSpace: "display-p3",

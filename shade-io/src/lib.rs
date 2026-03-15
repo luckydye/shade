@@ -148,7 +148,7 @@ pub fn load_image_bytes_f32_with_colorspace(
     let (width, height) = rgba.dimensions();
     Ok((
         FloatImage {
-            pixels: rgba.into_raw(),
+            pixels: rgba.into_raw().into(),
             width,
             height,
         },
@@ -185,7 +185,7 @@ pub fn load_image_bytes_f32_with_info(
         let (width, height) = rgba.dimensions();
         return Ok((
             FloatImage {
-                pixels: rgba.into_raw(),
+                pixels: rgba.into_raw().into(),
                 width,
                 height,
             },
@@ -222,7 +222,7 @@ pub fn load_image_bytes_f32_with_info(
     let (width, height) = rgba.dimensions();
     Ok((
         FloatImage {
-            pixels: rgba.into_raw(),
+            pixels: rgba.into_raw().into(),
             width,
             height,
         },
@@ -585,7 +585,7 @@ fn decode_exr_f32(bytes: &[u8]) -> Result<FloatImage> {
         .context("EXR decode failed")?;
 
     Ok(FloatImage {
-        pixels: image.layer_data.channel_data.pixels.data,
+        pixels: image.layer_data.channel_data.pixels.data.into(),
         width: u32::try_from(image.layer_data.size.width()).context("EXR width exceeds u32")?,
         height: u32::try_from(image.layer_data.size.height()).context("EXR height exceeds u32")?,
     })
@@ -627,7 +627,7 @@ fn decode_camera_raw_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatI
     .to_rgba32f();
     let (width, height) = rgba.dimensions();
     Ok(FloatImage {
-        pixels: rgba.into_raw(),
+        pixels: rgba.into_raw().into(),
         width,
         height,
     })
@@ -818,7 +818,11 @@ fn identify_icc_profile(icc: &[u8]) -> ColorSpace {
     let cs_sig = &icc[16..20];
     // ICC profile descriptions are often stored as UTF-16LE (null bytes between each char).
     // Strip null bytes to get an ASCII-comparable string for common profile names.
-    let ascii: String = icc.iter().filter(|&&b| b != 0).map(|&b| b as char).collect();
+    let ascii: String = icc
+        .iter()
+        .filter(|&&b| b != 0)
+        .map(|&b| b as char)
+        .collect();
     if ascii.contains("Adobe RGB") || ascii.contains("AdobeRGB") {
         return ColorSpace::AdobeRgb;
     }
