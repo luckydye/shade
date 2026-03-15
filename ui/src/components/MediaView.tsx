@@ -13,7 +13,6 @@ import {
 import {
 	addMediaLibrary,
 	type LibraryImage,
-	listLibraryImages,
 	listMediaLibraries,
 	removeMediaLibrary,
 	type MediaLibrary,
@@ -26,11 +25,6 @@ import {
 	resolveCameraThumbnailSrc,
 } from "../camera-library-cache";
 import {
-	releaseMediaSrc,
-	resetMediaSrcFailure,
-	resolveMediaSrc,
-} from "../media-source";
-import {
 	addPeerLibrary,
 	getCachedPeerLibraryItems,
 	listPeerLibraries,
@@ -40,6 +34,12 @@ import {
 	type PeerLibrary,
 	type PeerLibraryItem,
 } from "../peer-library-cache";
+import {
+	getCachedLocalLibraryItems,
+	loadLocalLibraryItemsCachedOrRemote,
+	resetLocalThumbnailFailure,
+	resolveLocalThumbnailSrc,
+} from "../local-library-cache";
 import { openImage, openPeerImage, state } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 
@@ -184,8 +184,9 @@ async function loadLibraryItems(
 			localMediaItem,
 		);
 	}
-	const listing = await listLibraryImages(libraryId);
-	return listing.items.map(localMediaItem);
+	return (await loadLocalLibraryItemsCachedOrRemote(libraryId)).items.map(
+		localMediaItem,
+	);
 }
 
 async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
@@ -214,7 +215,7 @@ async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
 				error: null,
 			};
 		}
-		const listing = await listLibraryImages(libraryId);
+		const listing = await loadLocalLibraryItemsCachedOrRemote(libraryId);
 		return {
 			libraryId,
 			items: listing.items.map(localMediaItem),
@@ -241,7 +242,7 @@ async function loadItemSrc(
 	if (item.path.startsWith("ccapi://")) {
 		return resolveCameraThumbnailSrc(item.path, signal);
 	}
-	return resolveMediaSrc(item.path, signal);
+	return resolveLocalThumbnailSrc(item.path, signal);
 }
 
 async function openMediaItem(item: MediaItem, src: string | null) {
@@ -305,11 +306,7 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 	onCleanup(() => {
 		const url = src();
 		if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) {
-			if (props.item.kind === "local") {
-				releaseMediaSrc(url);
-			} else {
-				URL.revokeObjectURL(url);
-			}
+			URL.revokeObjectURL(url);
 		}
 	});
 
@@ -319,7 +316,7 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
 				if (props.item.path.startsWith("ccapi://")) {
 					resetCameraThumbnailFailure(props.item.path);
 				} else {
-				resetMediaSrcFailure(props.item.path);
+					resetLocalThumbnailFailure(props.item.path);
 				}
 			}
 			setLoadError(false);
@@ -410,7 +407,7 @@ export const MediaView: Component = () => {
 					cameraLibraryHost(libraryId),
 				)).map(localMediaItem);
 			}
-			return [];
+			return (await getCachedLocalLibraryItems(libraryId)).map(localMediaItem);
 		});
 	const [isSubmitting, setIsSubmitting] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
