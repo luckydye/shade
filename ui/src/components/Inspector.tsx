@@ -16,9 +16,12 @@ import {
 	findCropLayerIdx,
 	isDrawerOpen,
 	listPresets,
+	listSnapshots,
 	loadPreset,
+	loadSnapshot,
 	previewContextFrame,
 	savePreset,
+	saveSnapshot,
 	selectLayer,
 	setIsDrawerOpen,
 	setLayerVisible,
@@ -421,6 +424,9 @@ const Inspector: Component = () => {
 	const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
 	const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
 	const [presets, setPresets] = createSignal<{ name: string }[]>([]);
+	const [snapshots, setSnapshots] = createSignal<
+		{ version: number; created_at: number; is_current: boolean }[]
+	>([]);
 	const [presetName, setPresetName] = createSignal("");
 	const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
 	const [isPresetBusy, setIsPresetBusy] = createSignal(false);
@@ -884,10 +890,14 @@ const Inspector: Component = () => {
 	const refreshPresetList = async () => {
 		try {
 			setPresets(await listPresets());
+			setSnapshots(await listSnapshots());
 		} catch (error) {
 			setPresetStatus(error instanceof Error ? error.message : String(error));
 		}
 	};
+
+	const formatSnapshotDate = (createdAt: number) =>
+		new Date(createdAt).toLocaleString();
 
 	createEffect(() => {
 		if (inspectorTab() !== "presets") return;
@@ -917,6 +927,33 @@ const Inspector: Component = () => {
 		try {
 			await loadPreset(name);
 			setPresetStatus(`Loaded ${name}`);
+			await refreshPresetList();
+		} catch (error) {
+			setPresetStatus(error instanceof Error ? error.message : String(error));
+		} finally {
+			setIsPresetBusy(false);
+		}
+	};
+
+	const handleLoadSnapshot = async (version: number) => {
+		setIsPresetBusy(true);
+		try {
+			await loadSnapshot(version);
+			setPresetStatus(`Loaded snapshot ${version}`);
+			await refreshPresetList();
+		} catch (error) {
+			setPresetStatus(error instanceof Error ? error.message : String(error));
+		} finally {
+			setIsPresetBusy(false);
+		}
+	};
+
+	const handleSaveSnapshot = async () => {
+		setIsPresetBusy(true);
+		try {
+			const snapshot = await saveSnapshot();
+			setPresetStatus(`Saved snapshot ${snapshot.version}`);
+			await refreshPresetList();
 		} catch (error) {
 			setPresetStatus(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -1276,6 +1313,57 @@ const Inspector: Component = () => {
 						</div>
 					))}
 				</Show>
+			</div>
+			<div class="flex flex-col gap-2 pt-2">
+				<div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">
+					Image Snapshots
+				</div>
+				<Show
+					when={snapshots().length > 0}
+					fallback={
+						<div class="border border-dashed border-white/10 bg-white/[0.02] px-3 py-4 text-sm text-white/38">
+							No snapshots yet.
+						</div>
+					}
+				>
+					{snapshots().map((snapshot) => (
+						<div class="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5">
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-[13px] font-semibold text-white/80">
+									{`Version ${snapshot.version}`}
+								</div>
+								<div class="text-[11px] text-white/38">
+									{formatSnapshotDate(snapshot.created_at)}
+								</div>
+							</div>
+							<Show when={snapshot.is_current}>
+								<div class="rounded-lg border border-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.05em] text-white/55">
+									Current
+								</div>
+							</Show>
+							<button
+								type="button"
+								disabled={
+									isPresetBusy() ||
+									state.canvasWidth <= 0 ||
+									snapshot.is_current
+								}
+								onClick={() => void handleLoadSnapshot(snapshot.version)}
+								class="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-white/65 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100 disabled:opacity-40"
+							>
+								Load
+							</button>
+						</div>
+					))}
+				</Show>
+				<button
+					type="button"
+					disabled={isPresetBusy() || state.canvasWidth <= 0}
+					onClick={() => void handleSaveSnapshot()}
+					class="mt-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.05em] text-white/70 transition-colors hover:border-white/18 hover:bg-white/[0.08] hover:text-stone-100 disabled:opacity-40"
+				>
+					Save Snapshot
+				</button>
 			</div>
 		</div>
 	);

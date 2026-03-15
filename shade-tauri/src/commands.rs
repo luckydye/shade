@@ -7,6 +7,8 @@ use shade_core::{
 use shade_io::SourceImageInfo;
 use shade_io::{load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32};
 use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::io::Read;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -43,6 +45,9 @@ pub struct EditorState {
     pub canvas_height: u32,
     pub next_texture_id: u64,
     pub source_bit_depth: String,
+    pub current_image_hash: Option<String>,
+    pub current_image_source: Option<String>,
+    pub current_edit_version: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -169,6 +174,309 @@ fn preset_file_path(name: &str) -> Result<PathBuf, String> {
     Ok(presets_dir_path()?.join(format!("{trimmed}.json")))
 }
 
+fn edits_db_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("edits.db"))
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    blake3::hash(bytes).to_hex().to_string()
+}
+
+fn hash_file(path: &Path) -> Result<String, String> {
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn non_image_layers(stack: &LayerStack) -> Vec<shade_core::LayerEntry> {
+    stack.layers
+        .iter()
+        .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect()
+}
+
+fn ensure_non_image_layers(layers: &[shade_core::LayerEntry]) -> Result<(), String> {
+    if layers
+        .iter()
+        .any(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+    {
+        return Err("persisted edit versions cannot contain image layers".into());
+    }
+    Ok(())
+}
+
+async fn open_edits_db() -> Result<libsql::Connection, String> {
+    let path = edits_db_path()?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid edits db path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let db = libsql::Builder::new_local(path)
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    let conn = db.connect().map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS images (
+            file_hash TEXT PRIMARY KEY NOT NULL,
+            source_name TEXT,
+            created_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS edit_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_hash TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            layers_json TEXT NOT NULL,
+            FOREIGN KEY (file_hash) REFERENCES images(file_hash),
+            UNIQUE(file_hash, version)
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
+fn unix_timestamp_millis() -> Result<i64, String> {
+    let duration = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?;
+    i64::try_from(duration.as_millis()).map_err(|e| e.to_string())
+}
+
+async fn load_latest_edit_version(
+    file_hash: &str,
+) -> Result<Option<PersistedEditVersion>, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT version, layers_json
+             FROM edit_versions
+             WHERE file_hash = ?1
+             ORDER BY version DESC
+             LIMIT 1",
+            [file_hash],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
+    let layers_json = row.get::<String>(1).map_err(|e| e.to_string())?;
+    let layers: Vec<shade_core::LayerEntry> =
+        serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+    ensure_non_image_layers(&layers)?;
+    Ok(Some(PersistedEditVersion { version, layers }))
+}
+
+async fn persist_edit_version(
+    file_hash: &str,
+    source_name: Option<&str>,
+    version: Option<i64>,
+    layers: &[shade_core::LayerEntry],
+) -> Result<i64, String> {
+    ensure_non_image_layers(layers)?;
+    let conn = open_edits_db().await?;
+    let now = unix_timestamp_millis()?;
+    conn.execute(
+        "INSERT INTO images (file_hash, source_name, created_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(file_hash) DO UPDATE SET source_name = excluded.source_name",
+        libsql::params![file_hash, source_name, now],
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let version = if let Some(version) = version {
+        conn.execute(
+            "INSERT INTO edit_versions (file_hash, version, created_at, layers_json)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(file_hash, version)
+             DO UPDATE SET created_at = excluded.created_at, layers_json = excluded.layers_json",
+            libsql::params![
+                file_hash,
+                version,
+                now,
+                serde_json::to_string(layers).map_err(|e| e.to_string())?
+            ],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        version
+    } else {
+        let mut rows = conn
+            .query(
+                "SELECT COALESCE(MAX(version), 0) + 1
+                 FROM edit_versions
+                 WHERE file_hash = ?1",
+                [file_hash],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
+            return Err("failed to compute next edit version".into());
+        };
+        let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO edit_versions (file_hash, version, created_at, layers_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![
+                file_hash,
+                version,
+                now,
+                serde_json::to_string(layers).map_err(|e| e.to_string())?
+            ],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        version
+    };
+    Ok(version)
+}
+
+fn restore_persisted_layers(
+    state: &mut EditorState,
+    file_hash: String,
+    source_name: Option<String>,
+    persisted: Option<PersistedEditVersion>,
+) -> Result<(), String> {
+    state.current_image_hash = Some(file_hash);
+    state.current_image_source = source_name;
+    state.current_edit_version = persisted.as_ref().map(|version| version.version);
+    let Some(persisted) = persisted else {
+        return Ok(());
+    };
+    ensure_non_image_layers(&persisted.layers)?;
+    let image_layers: Vec<_> = state
+        .stack
+        .layers
+        .iter()
+        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    if image_layers.is_empty() {
+        return Err("cannot restore persisted edits without an image layer".into());
+    }
+    state.stack.layers = image_layers;
+    state.stack.layers.extend(persisted.layers);
+    state.stack.generation += 1;
+    Ok(())
+}
+
+async fn persist_current_edit_version(
+    state: &tauri::State<'_, Mutex<EditorState>>,
+) -> Result<i64, String> {
+    let (file_hash, source_name, layers, current_version) = {
+        let st = lock_editor_state(state)?;
+        let file_hash = st
+            .current_image_hash
+            .clone()
+            .ok_or_else(|| "cannot persist edits without a loaded image hash".to_string())?;
+        (
+            file_hash,
+            st.current_image_source.clone(),
+            non_image_layers(&st.stack),
+            st.current_edit_version,
+        )
+    };
+    let version = persist_edit_version(
+        &file_hash,
+        source_name.as_deref(),
+        current_version,
+        &layers,
+    )
+    .await?;
+    let mut st = lock_editor_state(state)?;
+    st.current_edit_version = Some(version);
+    Ok(version)
+}
+
+async fn save_snapshot_version(
+    state: &tauri::State<'_, Mutex<EditorState>>,
+) -> Result<i64, String> {
+    let (file_hash, source_name, layers) = {
+        let st = lock_editor_state(state)?;
+        let file_hash = st
+            .current_image_hash
+            .clone()
+            .ok_or_else(|| "cannot save a snapshot without a loaded image hash".to_string())?;
+        (file_hash, st.current_image_source.clone(), non_image_layers(&st.stack))
+    };
+    let version = persist_edit_version(&file_hash, source_name.as_deref(), None, &layers).await?;
+    let mut st = lock_editor_state(state)?;
+    st.current_edit_version = Some(version);
+    Ok(version)
+}
+
+async fn list_snapshot_versions(
+    file_hash: &str,
+    current_version: Option<i64>,
+) -> Result<Vec<SnapshotInfo>, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT version, created_at
+             FROM edit_versions
+             WHERE file_hash = ?1
+             ORDER BY version DESC",
+            [file_hash],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut snapshots = Vec::new();
+    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+        let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
+        let created_at = row.get::<i64>(1).map_err(|e| e.to_string())?;
+        snapshots.push(SnapshotInfo {
+            version,
+            created_at,
+            is_current: current_version == Some(version),
+        });
+    }
+    Ok(snapshots)
+}
+
+async fn load_snapshot_version(
+    file_hash: &str,
+    version: i64,
+) -> Result<PersistedEditVersion, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT layers_json
+             FROM edit_versions
+             WHERE file_hash = ?1 AND version = ?2
+             LIMIT 1",
+            libsql::params![file_hash, version],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
+        return Err(format!("unknown snapshot version: {version}"));
+    };
+    let layers_json = row.get::<String>(0).map_err(|e| e.to_string())?;
+    let layers: Vec<shade_core::LayerEntry> =
+        serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+    ensure_non_image_layers(&layers)?;
+    Ok(PersistedEditVersion { version, layers })
+}
+
+
 #[derive(Serialize, Deserialize, Debug)]
 struct PresetFile {
     version: u32,
@@ -176,8 +484,31 @@ struct PresetFile {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+struct PersistedEditVersion {
+    version: i64,
+    layers: Vec<shade_core::LayerEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct PresetInfo {
     pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EditSnapshotInfo {
+    pub version: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SnapshotInfo {
+    pub version: i64,
+    pub created_at: i64,
+    pub is_current: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LoadSnapshotParams {
+    pub version: i64,
 }
 
 fn load_app_config() -> Result<AppConfig, String> {
@@ -624,17 +955,7 @@ fn cancel_render_job(job: RenderJob) {
 
 fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
     let source = std::path::Path::new(path);
-    let mut source_file = std::fs::File::open(source).map_err(|e| e.to_string())?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = std::io::Read::read(&mut source_file, &mut buffer).map_err(|e| e.to_string())?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    let cache_key = hasher.finalize().to_hex().to_string();
+    let cache_key = hash_file(source)?;
 
     let cache_dir = std::env::temp_dir().join("shade-thumbnails");
     std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
@@ -779,6 +1100,9 @@ impl Default for EditorState {
             canvas_height: 1080,
             next_texture_id: 1,
             source_bit_depth: "Unknown".into(),
+            current_image_hash: None,
+            current_image_source: None,
+            current_edit_version: None,
         }
     }
 }
@@ -808,6 +1132,9 @@ impl EditorState {
         self.canvas_width = width;
         self.canvas_height = height;
         self.source_bit_depth = source_bit_depth.clone();
+        self.current_image_hash = None;
+        self.current_image_source = None;
+        self.current_edit_version = None;
         self.stack.add_image_layer(texture_id, width, height);
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
@@ -895,15 +1222,22 @@ pub async fn open_peer_image(
         .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
         .await
         .map_err(|error| error.to_string())?;
+    let file_hash = hash_bytes(&bytes);
+    let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
-    let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(
-        image.pixels.to_vec(),
-        image.width,
-        image.height,
-        info.bit_depth,
-        info.color_space,
-    ))
+    let response = {
+        let mut st = lock_editor_state(&state)?;
+        let response = st.replace_with_image(
+            image.pixels.to_vec(),
+            image.width,
+            image.height,
+            info.bit_depth,
+            info.color_space,
+        );
+        restore_persisted_layers(&mut st, file_hash, file_name, persisted)?;
+        response
+    };
+    Ok(response)
 }
 
 #[tauri::command]
@@ -919,21 +1253,29 @@ pub async fn open_image<R: tauri::Runtime>(
             .state::<crate::photos::PhotosHandle<R>>()
             .get_image_data(&path)
             .await?;
+        let file_hash = hash_bytes(&bytes);
+        let persisted = load_latest_edit_version(&file_hash).await?;
         let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
-        let mut st = state.lock().unwrap();
-        return Ok(st.replace_with_image(
-            image.pixels.to_vec(),
-            image.width,
-            image.height,
-            info.bit_depth,
-            info.color_space,
-        ));
+        let response = {
+            let mut st = lock_editor_state(&state)?;
+            let response = st.replace_with_image(
+                image.pixels.to_vec(),
+                image.width,
+                image.height,
+                info.bit_depth,
+                info.color_space,
+            );
+            restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
+            response
+        };
+        return Ok(response);
     }
 
     #[cfg(target_os = "ios")]
     if !path.starts_with('/') {
+        let photo_id = path.clone();
         let bytes = tokio::task::spawn_blocking(move || {
-            let c_id = std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
+            let c_id = std::ffi::CString::new(photo_id.as_str()).map_err(|e| e.to_string())?;
             let mut out_size: i32 = 0;
             let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
             if ptr.is_null() {
@@ -949,26 +1291,40 @@ pub async fn open_image<R: tauri::Runtime>(
         .await
         .map_err(|e| e.to_string())??;
 
+        let file_hash = hash_bytes(&bytes);
+        let persisted = load_latest_edit_version(&file_hash).await?;
         let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
-        let mut st = state.lock().unwrap();
-        return Ok(st.replace_with_image(
+        let response = {
+            let mut st = lock_editor_state(&state)?;
+            let response = st.replace_with_image(
+                image.pixels.to_vec(),
+                image.width,
+                image.height,
+                info.bit_depth,
+                info.color_space,
+            );
+            restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
+            response
+        };
+        return Ok(response);
+    }
+
+    let file_hash = hash_file(std::path::Path::new(&path))?;
+    let persisted = load_latest_edit_version(&file_hash).await?;
+    let (image, info) = decode_image_path_with_info(std::path::Path::new(&path))?;
+    let response = {
+        let mut st = lock_editor_state(&state)?;
+        let response = st.replace_with_image(
             image.pixels.to_vec(),
             image.width,
             image.height,
             info.bit_depth,
             info.color_space,
-        ));
-    }
-
-    let (image, info) = decode_image_path_with_info(std::path::Path::new(&path))?;
-    let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(
-        image.pixels.to_vec(),
-        image.width,
-        image.height,
-        info.bit_depth,
-        info.color_space,
-    ))
+        );
+        restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
+        response
+    };
+    Ok(response)
 }
 
 #[tauri::command]
@@ -977,15 +1333,22 @@ pub async fn open_image_encoded_bytes(
     file_name: Option<String>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    let file_hash = hash_bytes(&bytes);
+    let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
-    let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(
-        image.pixels.to_vec(),
-        image.width,
-        image.height,
-        info.bit_depth,
-        info.color_space,
-    ))
+    let response = {
+        let mut st = lock_editor_state(&state)?;
+        let response = st.replace_with_image(
+            image.pixels.to_vec(),
+            image.width,
+            image.height,
+            info.bit_depth,
+            info.color_space,
+        );
+        restore_persisted_layers(&mut st, file_hash, file_name, persisted)?;
+        response
+    };
+    Ok(response)
 }
 
 /// Accept raw RGBA8 bytes decoded in the webview (file picker / drag-drop).
@@ -1007,17 +1370,24 @@ pub async fn open_image_bytes(
             pixels.len()
         ));
     }
-    let mut st = state.lock().unwrap();
-    Ok(st.replace_with_image(
-        pixels
-            .into_iter()
-            .map(|channel| channel as f32 / 255.0)
-            .collect(),
-        width,
-        height,
-        "8-bit".into(),
-        shade_core::ColorSpace::Srgb,
-    ))
+    let file_hash = hash_bytes(&pixels);
+    let persisted = load_latest_edit_version(&file_hash).await?;
+    let response = {
+        let mut st = lock_editor_state(&state)?;
+        let response = st.replace_with_image(
+            pixels
+                .into_iter()
+                .map(|channel| channel as f32 / 255.0)
+                .collect(),
+            width,
+            height,
+            "8-bit".into(),
+            shade_core::ColorSpace::Srgb,
+        );
+        restore_persisted_layers(&mut st, file_hash, None, persisted)?;
+        response
+    };
+    Ok(response)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1232,152 +1602,158 @@ pub async fn apply_edit(
     params: EditParams,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
-    let mut st = state.lock().unwrap();
-    let canvas_width = st.canvas_width;
-    let canvas_height = st.canvas_height;
-    if params.layer_idx >= st.stack.layers.len() {
-        return Err("layer index out of bounds".into());
-    }
-    let layer = &mut st.stack.layers[params.layer_idx];
-    match &mut layer.layer {
-        shade_core::Layer::Crop { rect } => {
-            if params.op != "crop" {
-                return Err("target layer is a crop layer".into());
-            }
-            *rect = normalize_crop_rect(
-                CropRect {
-                    x: params.crop_x.ok_or("missing crop_x")?,
-                    y: params.crop_y.ok_or("missing crop_y")?,
-                    width: params.crop_width.ok_or("missing crop_width")?,
-                    height: params.crop_height.ok_or("missing crop_height")?,
-                },
-                canvas_width,
-                canvas_height,
-            )?;
-            st.stack.generation += 1;
+    {
+        let mut st = lock_editor_state(&state)?;
+        let canvas_width = st.canvas_width;
+        let canvas_height = st.canvas_height;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("layer index out of bounds".into());
         }
-        shade_core::Layer::Adjustment { ops } => {
-            match params.op.as_str() {
-                "tone" => {
-                    let next = AdjustmentOp::Tone {
-                        exposure: params.exposure.unwrap_or(0.0),
-                        contrast: params.contrast.unwrap_or(0.0),
-                        blacks: params.blacks.unwrap_or(0.0),
-                        whites: params.whites.unwrap_or(0.0),
-                        highlights: params.highlights.unwrap_or(0.0),
-                        shadows: params.shadows.unwrap_or(0.0),
-                        gamma: params.gamma.unwrap_or(1.0),
-                    };
-                    if let Some(op) = ops
-                        .iter_mut()
-                        .find(|op| matches!(op, AdjustmentOp::Tone { .. }))
-                    {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
+        let layer = &mut st.stack.layers[params.layer_idx];
+        match &mut layer.layer {
+            shade_core::Layer::Crop { rect } => {
+                if params.op != "crop" {
+                    return Err("target layer is a crop layer".into());
                 }
-                "color" => {
-                    let next = AdjustmentOp::Color(ColorParams {
-                        saturation: params.saturation.unwrap_or(1.0),
-                        vibrancy: params.vibrancy.unwrap_or(0.0),
-                        temperature: params.temperature.unwrap_or(0.0),
-                        tint: params.tint.unwrap_or(0.0),
-                    });
-                    if let Some(op) = ops
-                        .iter_mut()
-                        .find(|op| matches!(op, AdjustmentOp::Color(_)))
-                    {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
-                }
-                "curves" => {
-                    let curve_points = params.curve_points.ok_or("missing curve_points")?;
-                    let next = AdjustmentOp::Curves {
-                        lut_r: linear_lut(),
-                        lut_g: linear_lut(),
-                        lut_b: linear_lut(),
-                        lut_master: build_curve_lut_from_points(&curve_points),
-                        per_channel: false,
-                        control_points: Some(curve_points),
-                    };
-                    if let Some(op) = ops
-                        .iter_mut()
-                        .find(|op| matches!(op, AdjustmentOp::Curves { .. }))
-                    {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
-                }
-                "vignette" => {
-                    let next = AdjustmentOp::Vignette(VignetteParams {
-                        amount: params.vignette_amount.unwrap_or(0.0),
-                        ..Default::default()
-                    });
-                    if let Some(op) = ops
-                        .iter_mut()
-                        .find(|op| matches!(op, AdjustmentOp::Vignette(_)))
-                    {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
-                }
-                "sharpen" => {
-                    let next = AdjustmentOp::Sharpen(SharpenParams {
-                        amount: params.sharpen_amount.unwrap_or(0.0),
-                        threshold: 0.1,
-                    });
-                    if let Some(op) = ops
-                        .iter_mut()
-                        .find(|op| matches!(op, AdjustmentOp::Sharpen(_)))
-                    {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
-                }
-                "grain" => {
-                    let next = AdjustmentOp::Grain(GrainParams {
-                        amount: params.grain_amount.unwrap_or(0.0),
-                        ..Default::default()
-                    });
-                    if let Some(op) = ops
-                        .iter_mut()
-                        .find(|op| matches!(op, AdjustmentOp::Grain(_)))
-                    {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
-                }
-                "hsl" => {
-                    let next = AdjustmentOp::Hsl(HslParams {
-                        red_hue: params.red_hue.unwrap_or(0.0),
-                        red_sat: params.red_sat.unwrap_or(0.0),
-                        red_lum: params.red_lum.unwrap_or(0.0),
-                        green_hue: params.green_hue.unwrap_or(0.0),
-                        green_sat: params.green_sat.unwrap_or(0.0),
-                        green_lum: params.green_lum.unwrap_or(0.0),
-                        blue_hue: params.blue_hue.unwrap_or(0.0),
-                        blue_sat: params.blue_sat.unwrap_or(0.0),
-                        blue_lum: params.blue_lum.unwrap_or(0.0),
-                    });
-                    if let Some(op) = ops.iter_mut().find(|op| matches!(op, AdjustmentOp::Hsl(_))) {
-                        *op = next;
-                    } else {
-                        ops.push(next);
-                    }
-                }
-                _ => return Err(format!("unknown op: {}", params.op)),
+                *rect = normalize_crop_rect(
+                    CropRect {
+                        x: params.crop_x.ok_or("missing crop_x")?,
+                        y: params.crop_y.ok_or("missing crop_y")?,
+                        width: params.crop_width.ok_or("missing crop_width")?,
+                        height: params.crop_height.ok_or("missing crop_height")?,
+                    },
+                    canvas_width,
+                    canvas_height,
+                )?;
+                st.stack.generation += 1;
             }
-            st.stack.generation += 1;
+            shade_core::Layer::Adjustment { ops } => {
+                match params.op.as_str() {
+                    "tone" => {
+                        let next = AdjustmentOp::Tone {
+                            exposure: params.exposure.unwrap_or(0.0),
+                            contrast: params.contrast.unwrap_or(0.0),
+                            blacks: params.blacks.unwrap_or(0.0),
+                            whites: params.whites.unwrap_or(0.0),
+                            highlights: params.highlights.unwrap_or(0.0),
+                            shadows: params.shadows.unwrap_or(0.0),
+                            gamma: params.gamma.unwrap_or(1.0),
+                        };
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Tone { .. }))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "color" => {
+                        let next = AdjustmentOp::Color(ColorParams {
+                            saturation: params.saturation.unwrap_or(1.0),
+                            vibrancy: params.vibrancy.unwrap_or(0.0),
+                            temperature: params.temperature.unwrap_or(0.0),
+                            tint: params.tint.unwrap_or(0.0),
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Color(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "curves" => {
+                        let curve_points = params.curve_points.ok_or("missing curve_points")?;
+                        let next = AdjustmentOp::Curves {
+                            lut_r: linear_lut(),
+                            lut_g: linear_lut(),
+                            lut_b: linear_lut(),
+                            lut_master: build_curve_lut_from_points(&curve_points),
+                            per_channel: false,
+                            control_points: Some(curve_points),
+                        };
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Curves { .. }))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "vignette" => {
+                        let next = AdjustmentOp::Vignette(VignetteParams {
+                            amount: params.vignette_amount.unwrap_or(0.0),
+                            ..Default::default()
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Vignette(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "sharpen" => {
+                        let next = AdjustmentOp::Sharpen(SharpenParams {
+                            amount: params.sharpen_amount.unwrap_or(0.0),
+                            threshold: 0.1,
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Sharpen(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "grain" => {
+                        let next = AdjustmentOp::Grain(GrainParams {
+                            amount: params.grain_amount.unwrap_or(0.0),
+                            ..Default::default()
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Grain(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "hsl" => {
+                        let next = AdjustmentOp::Hsl(HslParams {
+                            red_hue: params.red_hue.unwrap_or(0.0),
+                            red_sat: params.red_sat.unwrap_or(0.0),
+                            red_lum: params.red_lum.unwrap_or(0.0),
+                            green_hue: params.green_hue.unwrap_or(0.0),
+                            green_sat: params.green_sat.unwrap_or(0.0),
+                            green_lum: params.green_lum.unwrap_or(0.0),
+                            blue_hue: params.blue_hue.unwrap_or(0.0),
+                            blue_sat: params.blue_sat.unwrap_or(0.0),
+                            blue_lum: params.blue_lum.unwrap_or(0.0),
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Hsl(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    _ => return Err(format!("unknown op: {}", params.op)),
+                }
+                st.stack.generation += 1;
+            }
+            _ => return Err("target layer is not editable by apply_edit".into()),
         }
-        _ => return Err("target layer is not editable by apply_edit".into()),
     }
+    persist_current_edit_version(&state).await?;
     Ok(())
 }
 
@@ -1386,35 +1762,38 @@ pub async fn add_layer(
     kind: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<usize, String> {
-    let mut st = state.lock().unwrap();
-    let canvas_width = st.canvas_width;
-    let canvas_height = st.canvas_height;
-    let idx = match kind.as_str() {
-        "adjustment" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
-            exposure: 0.0,
-            contrast: 0.0,
-            blacks: 0.0,
-            whites: 0.0,
-            highlights: 0.0,
-            shadows: 0.0,
-            gamma: 1.0,
-        }]),
-        "curves" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Curves {
-            lut_r: linear_lut(),
-            lut_g: linear_lut(),
-            lut_b: linear_lut(),
-            lut_master: linear_lut(),
-            per_channel: false,
-            control_points: None,
-        }]),
-        "crop" => st.stack.add_crop_layer(CropRect {
-            x: 0.0,
-            y: 0.0,
-            width: canvas_width as f32,
-            height: canvas_height as f32,
-        }),
-        _ => return Err(format!("unknown layer kind: {kind}")),
+    let idx = {
+        let mut st = lock_editor_state(&state)?;
+        let canvas_width = st.canvas_width;
+        let canvas_height = st.canvas_height;
+        match kind.as_str() {
+            "adjustment" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+                exposure: 0.0,
+                contrast: 0.0,
+                blacks: 0.0,
+                whites: 0.0,
+                highlights: 0.0,
+                shadows: 0.0,
+                gamma: 1.0,
+            }]),
+            "curves" => st.stack.add_adjustment_layer(vec![AdjustmentOp::Curves {
+                lut_r: linear_lut(),
+                lut_g: linear_lut(),
+                lut_b: linear_lut(),
+                lut_master: linear_lut(),
+                per_channel: false,
+                control_points: None,
+            }]),
+            "crop" => st.stack.add_crop_layer(CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: canvas_width as f32,
+                height: canvas_height as f32,
+            }),
+            _ => return Err(format!("unknown layer kind: {kind}")),
+        }
     };
+    persist_current_edit_version(&state).await?;
     Ok(idx)
 }
 
@@ -1429,12 +1808,15 @@ pub async fn set_layer_visible(
     params: LayerVisibility,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
-    let mut st = state.lock().unwrap();
-    if params.layer_idx >= st.stack.layers.len() {
-        return Err("index out of bounds".into());
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        st.stack.layers[params.layer_idx].visible = params.visible;
+        st.stack.generation += 1;
     }
-    st.stack.layers[params.layer_idx].visible = params.visible;
-    st.stack.generation += 1;
+    persist_current_edit_version(&state).await?;
     Ok(())
 }
 
@@ -1449,12 +1831,15 @@ pub async fn set_layer_opacity(
     params: LayerOpacityParams,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
-    let mut st = state.lock().unwrap();
-    if params.layer_idx >= st.stack.layers.len() {
-        return Err("index out of bounds".into());
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        st.stack.layers[params.layer_idx].opacity = params.opacity.clamp(0.0, 1.0);
+        st.stack.generation += 1;
     }
-    st.stack.layers[params.layer_idx].opacity = params.opacity.clamp(0.0, 1.0);
-    st.stack.generation += 1;
+    persist_current_edit_version(&state).await?;
     Ok(())
 }
 
@@ -1468,15 +1853,18 @@ pub async fn delete_layer(
     params: DeleteLayerParams,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
-    let mut st = state.lock().unwrap();
-    if params.layer_idx >= st.stack.layers.len() {
-        return Err("index out of bounds".into());
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        if let Some(mask_id) = st.stack.layers[params.layer_idx].mask {
+            st.stack.masks.remove(&mask_id);
+        }
+        st.stack.layers.remove(params.layer_idx);
+        st.stack.generation += 1;
     }
-    if let Some(mask_id) = st.stack.layers[params.layer_idx].mask {
-        st.stack.masks.remove(&mask_id);
-    }
-    st.stack.layers.remove(params.layer_idx);
-    st.stack.generation += 1;
+    persist_current_edit_version(&state).await?;
     Ok(())
 }
 
@@ -1933,20 +2321,77 @@ pub async fn load_preset(
     if file.version != 1 {
         return Err(format!("unsupported preset version: {}", file.version));
     }
-    let mut st = state.lock().unwrap();
-    let image_layers: Vec<_> = st
-        .stack
-        .layers
-        .iter()
-        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
-        .cloned()
-        .collect();
-    if image_layers.is_empty() {
-        return Err("cannot load a preset without a loaded image".into());
+    {
+        let mut st = lock_editor_state(&state)?;
+        let image_layers: Vec<_> = st
+            .stack
+            .layers
+            .iter()
+            .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+            .cloned()
+            .collect();
+        if image_layers.is_empty() {
+            return Err("cannot load a preset without a loaded image".into());
+        }
+        st.stack.layers = image_layers;
+        st.stack.layers.extend(file.layers);
+        st.stack.generation += 1;
     }
-    st.stack.layers = image_layers;
-    st.stack.layers.extend(file.layers);
-    st.stack.generation += 1;
+    persist_current_edit_version(&state).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_snapshot(
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<EditSnapshotInfo, String> {
+    let version = save_snapshot_version(&state).await?;
+    Ok(EditSnapshotInfo { version })
+}
+
+#[tauri::command]
+pub async fn list_snapshots(
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<Vec<SnapshotInfo>, String> {
+    let (file_hash, current_version) = {
+        let st = lock_editor_state(&state)?;
+        (st.current_image_hash.clone(), st.current_edit_version)
+    };
+    let Some(file_hash) = file_hash else {
+        return Ok(Vec::new());
+    };
+    list_snapshot_versions(&file_hash, current_version).await
+}
+
+#[tauri::command]
+pub async fn load_snapshot(
+    params: LoadSnapshotParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    let file_hash = {
+        let st = lock_editor_state(&state)?;
+        st.current_image_hash
+            .clone()
+            .ok_or_else(|| "cannot load a snapshot without a loaded image".to_string())?
+    };
+    let snapshot = load_snapshot_version(&file_hash, params.version).await?;
+    {
+        let mut st = lock_editor_state(&state)?;
+        let image_layers: Vec<_> = st
+            .stack
+            .layers
+            .iter()
+            .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+            .cloned()
+            .collect();
+        if image_layers.is_empty() {
+            return Err("cannot load a snapshot without a loaded image".into());
+        }
+        st.stack.layers = image_layers;
+        st.stack.layers.extend(snapshot.layers);
+        st.stack.generation += 1;
+        st.current_edit_version = Some(params.version);
+    }
     Ok(())
 }
 

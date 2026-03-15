@@ -258,12 +258,26 @@ export async function listPresets() {
 	return bridge.listPresets();
 }
 
+export async function listSnapshots() {
+	return bridge.listSnapshots();
+}
+
 export async function savePreset(name: string) {
 	return bridge.savePreset(name);
 }
 
 export async function loadPreset(name: string) {
 	await bridge.loadPreset(name);
+	await refreshLayerStack();
+	await refreshPreview();
+}
+
+export async function saveSnapshot() {
+	return bridge.saveSnapshot();
+}
+
+export async function loadSnapshot(version: number) {
+	await bridge.loadSnapshot(version);
 	await refreshLayerStack();
 	await refreshPreview();
 }

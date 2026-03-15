@@ -3,7 +3,6 @@ import {
 	state,
 	selectLayer,
 	setLayerVisible,
-	refreshLayerStack,
 	addLayer,
 	deleteLayer,
 } from "../store/editor";

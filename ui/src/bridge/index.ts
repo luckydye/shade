@@ -573,6 +573,16 @@ export interface PresetInfo {
 	name: string;
 }
 
+export interface EditSnapshotInfo {
+	version: number;
+}
+
+export interface SnapshotInfo {
+	version: number;
+	created_at: number;
+	is_current: boolean;
+}
+
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
 	if (await isTauriRuntime()) {
 		const inv = await getTauriInvoke();
@@ -633,6 +643,31 @@ export async function loadPreset(name: string): Promise<void> {
 		return;
 	}
 	throw new Error("loadPreset is only implemented for Tauri");
+}
+
+export async function saveSnapshot(): Promise<EditSnapshotInfo> {
+	if (await isTauriRuntime()) {
+		const inv = await getTauriInvoke();
+		return inv("save_snapshot") as Promise<EditSnapshotInfo>;
+	}
+	throw new Error("saveSnapshot is only implemented for Tauri");
+}
+
+export async function listSnapshots(): Promise<SnapshotInfo[]> {
+	if (await isTauriRuntime()) {
+		const inv = await getTauriInvoke();
+		return inv("list_snapshots") as Promise<SnapshotInfo[]>;
+	}
+	throw new Error("listSnapshots is only implemented for Tauri");
+}
+
+export async function loadSnapshot(version: number): Promise<void> {
+	if (await isTauriRuntime()) {
+		const inv = await getTauriInvoke();
+		await inv("load_snapshot", { params: { version } });
+		return;
+	}
+	throw new Error("loadSnapshot is only implemented for Tauri");
 }
 
 export async function addLayer(kind: string): Promise<number> {
