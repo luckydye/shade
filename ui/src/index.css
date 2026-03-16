@@ -13,7 +13,7 @@
 }
 
 input.slider {
-  background: rgb(255 255 255 / 0.18);
+  background: rgb(255 255 255 / 0.25);
 }
 
 input.slider::-webkit-slider-runnable-track {

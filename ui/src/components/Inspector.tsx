@@ -1655,7 +1655,7 @@ const Inspector: Component = () => {
 
       {/* Mobile: drawer overlay */}
       <div
-        class={`fixed bottom-0 left-0 right-0 z-30  bg-black/50 transition-transform duration-300 ease-out lg:hidden ${
+        class={`fixed bottom-0 left-0 right-0 z-30  bg-black/30 transition-transform duration-300 ease-out lg:hidden ${
           isDrawerOpen() ? "translate-y-0" : "translate-y-[calc(100%-4.5rem)]"
         }`}
       >

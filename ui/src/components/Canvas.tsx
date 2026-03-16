@@ -544,9 +544,9 @@ const Canvas: Component = () => {
 
         <div
           ref={viewportRef}
-          class="relative flex h-[calc(100%-6.25rem)] w-full items-center justify-center lg:h-full"
+          class="relative flex h-full w-full items-center justify-center lg:h-full"
           style={{
-            height: isDrawerOpen() ? "calc(100% - 45vh)" : undefined,
+            height: isDrawerOpen() ? "calc(100% - 30vh)" : undefined,
           }}
         >
           <canvas
