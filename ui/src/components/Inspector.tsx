@@ -1850,11 +1850,11 @@ const Inspector: Component = () => {
           </Show>
         </div>
 
-        <div class="border-t border-white/6 px-4 pb-4 pt-3">
+        <div class="border-t border-white/6 px-4 pt-3">
           <InspectorTabs />
         </div>
 
-        <div class="pb-[calc(env(safe-area-inset-bottom)+1rem)]"></div>
+        <div class="pb-[env(safe-area-inset-bottom)]"></div>
       </div>
 
       {/* Add layer dialog */}
