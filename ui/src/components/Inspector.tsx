@@ -1666,7 +1666,7 @@ const Inspector: Component = () => {
           <div class="mb-2 h-1.5 w-14 rounded-full bg-white/14" />
         </div>
 
-        <div class="px-4 pb-4">
+        <div class="px-4 pb-2">
           <Show
             when={inspectorTab() === "presets"}
             fallback={
@@ -1676,7 +1676,7 @@ const Inspector: Component = () => {
                   <Show
                     when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
                     fallback={
-                      <div class="px-1 pb-6 text-center text-sm text-white/42">
+                      <div class="px-1 text-center text-sm text-white/42">
                         Open an image and select a layer to edit.
                       </div>
                     }
@@ -1684,7 +1684,7 @@ const Inspector: Component = () => {
                     <div class="px-1">{renderLayerBody()}</div>
                     
                     {/* Layer tabs + add button */}
-                    <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-4 pt-3">
+                    <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 py-3">
                       {adjustmentLayers().map(({ idx }) => {
                         const focus = () => layerFocusTypes().get(idx) ?? "light";
                         const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
