@@ -60,6 +60,19 @@ export async function deleteLayer(idx: number) {
   await refreshPreview();
 }
 
+function getMovedLayerIndex(idx: number, fromIdx: number, toIdx: number) {
+  if (idx === fromIdx) {
+    return toIdx > fromIdx ? toIdx - 1 : toIdx;
+  }
+  if (toIdx > fromIdx && idx > fromIdx && idx < toIdx) {
+    return idx - 1;
+  }
+  if (toIdx < fromIdx && idx >= toIdx && idx < fromIdx) {
+    return idx + 1;
+  }
+  return idx;
+}
+
 function applyCropLayerEdit(layerIdx: number, params: Record<string, unknown>) {
   if (params.op !== "crop") {
     throw new Error("crop layers only accept the crop op");
@@ -264,6 +277,28 @@ export async function addLayer(kind: string) {
   const idx = await bridge.addLayer(kind);
   await refreshLayerStack();
   setState("selectedLayerIdx", idx);
+  await refreshPreview();
+}
+
+export async function moveLayer(fromIdx: number, toIdx: number) {
+  if (fromIdx === toIdx || fromIdx + 1 === toIdx) {
+    return;
+  }
+  if (fromIdx < 0 || fromIdx >= state.layers.length) {
+    throw new Error("source layer index is out of bounds");
+  }
+  if (toIdx < 0 || toIdx > state.layers.length) {
+    throw new Error("target layer index is out of bounds");
+  }
+  const nextSelectedIdx =
+    state.selectedLayerIdx < 0
+      ? -1
+      : getMovedLayerIndex(state.selectedLayerIdx, fromIdx, toIdx);
+  await bridge.moveLayer(fromIdx, toIdx);
+  await refreshLayerStack();
+  if (nextSelectedIdx >= 0) {
+    setState("selectedLayerIdx", nextSelectedIdx);
+  }
   await refreshPreview();
 }
 

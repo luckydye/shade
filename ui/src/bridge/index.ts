@@ -534,6 +534,21 @@ export async function deleteLayer(idx: number): Promise<void> {
   throw new Error("deleteLayer is not implemented for WASM");
 }
 
+export async function moveLayer(fromIdx: number, toIdx: number): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("move_layer", {
+      params: { from_idx: fromIdx, to_idx: toIdx },
+    }) as Promise<number>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ layerIdx: number }>(
+    { type: "move_layer", fromIdx, toIdx },
+    "layer_moved",
+  );
+  return result.layerIdx;
+}
+
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
 export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
   if (await isTauriRuntime()) {

@@ -7,12 +7,16 @@ import {
   deleteLayer,
   applyGradientMask,
   removeMask,
+  moveLayer,
 } from "../store/editor";
 
 type GradientKind = "linear" | "radial";
+type DropTarget = { layerIdx: number; position: "before" | "after" };
 
 const LayerPanel: Component = () => {
   const [maskTarget, setMaskTarget] = createSignal<number | null>(null);
+  const [dropTarget, setDropTarget] = createSignal<DropTarget | null>(null);
+  let draggedLayerIdx: number | null = null;
 
   const addAdjustmentLayer = async () => {
     await addLayer("adjustment");
@@ -49,6 +53,43 @@ const LayerPanel: Component = () => {
     setMaskTarget(null);
   };
 
+  const resolveDropIndex = (target: DropTarget) =>
+    target.position === "before" ? target.layerIdx + 1 : target.layerIdx;
+
+  const clearDragState = () => {
+    draggedLayerIdx = null;
+    setDropTarget(null);
+  };
+
+  const updateDropTarget = (event: DragEvent, layerIdx: number) => {
+    const currentTarget = event.currentTarget;
+    if (!(currentTarget instanceof HTMLDivElement)) {
+      throw new Error("layer drop target must be a div");
+    }
+    const bounds = currentTarget.getBoundingClientRect();
+    const position =
+      event.clientY < bounds.top + bounds.height * 0.5 ? "before" : "after";
+    setDropTarget({ layerIdx, position });
+  };
+
+  const startLayerDrag = (event: DragEvent, layerIdx: number) => {
+    draggedLayerIdx = layerIdx;
+    event.dataTransfer?.setData("text/plain", String(layerIdx));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  };
+
+  const commitDrop = async () => {
+    const fromIdx = draggedLayerIdx;
+    const target = dropTarget();
+    clearDragState();
+    if (fromIdx === null || target === null) {
+      return;
+    }
+    await moveLayer(fromIdx, resolveDropIndex(target));
+  };
+
   return (
     <div class="w-48 bg-panel border-r border-gray-700 flex flex-col">
       <div class="p-2 border-b border-gray-700 text-xs font-semibold text-gray-400 uppercase tracking-wider">
@@ -58,16 +99,38 @@ const LayerPanel: Component = () => {
         <For each={[...state.layers].reverse()}>
           {(layer, i) => {
             const realIdx = state.layers.length - 1 - i();
+            const rowDropTarget = () => dropTarget();
             return (
               <div>
+                <Show when={rowDropTarget()?.layerIdx === realIdx && rowDropTarget()?.position === "before"}>
+                  <div class="pointer-events-none px-2">
+                    <div class="h-0.5 rounded-full bg-blue-400" />
+                  </div>
+                </Show>
                 <div
+                  draggable
                   class={`flex items-center gap-2 px-2 py-1.5 cursor-pointer border-b border-gray-800 text-xs
                     ${
                       state.selectedLayerIdx === realIdx
                         ? "bg-blue-900/40"
                         : "hover:bg-gray-800"
                     }`}
+                  style={{ "-webkit-user-drag": "element", "user-drag": "element" }}
                   onClick={() => selectLayer(realIdx)}
+                  onDragStart={(event) => startLayerDrag(event, realIdx)}
+                  onDragEnd={clearDragState}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (draggedLayerIdx === null || draggedLayerIdx === realIdx) {
+                      setDropTarget(null);
+                      return;
+                    }
+                    updateDropTarget(event, realIdx);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void commitDrop();
+                  }}
                 >
                   <button
                     class={`w-4 h-4 flex-shrink-0 rounded-sm border text-center leading-none
@@ -142,6 +205,11 @@ const LayerPanel: Component = () => {
                     >
                       Radial
                     </button>
+                  </div>
+                </Show>
+                <Show when={rowDropTarget()?.layerIdx === realIdx && rowDropTarget()?.position === "after"}>
+                  <div class="pointer-events-none px-2">
+                    <div class="h-0.5 rounded-full bg-blue-400" />
                   </div>
                 </Show>
               </div>

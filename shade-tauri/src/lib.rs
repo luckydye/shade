@@ -56,6 +56,7 @@ pub fn run() {
             commands::apply_edit,
             commands::add_layer,
             commands::delete_layer,
+            commands::move_layer,
             commands::set_layer_visible,
             commands::set_layer_opacity,
             commands::get_layer_stack,

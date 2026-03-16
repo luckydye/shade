@@ -238,6 +238,14 @@ export function getPreviewDisplaySize() {
   );
 }
 
+export function getPreviewZoomPercent() {
+  const previewScale = getPreviewFitScale();
+  if (!previewScale) {
+    return null;
+  }
+  return Math.round(previewScale.fitScale * state.previewZoom * 100);
+}
+
 export function getMaxPreviewZoom() {
   const previewScale = getPreviewFitScale();
   if (!previewScale) {

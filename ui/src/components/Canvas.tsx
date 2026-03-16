@@ -3,6 +3,7 @@ import {
   applyEdit,
   applyGradientMask,
   getCommittedCropRect,
+  getPreviewZoomPercent,
   state,
   isDrawerOpen,
   openImageFile,
@@ -134,6 +135,9 @@ const Canvas: Component = () => {
     if (!layer?.has_mask || !layer.mask_params) return null;
     return layer.mask_params;
   };
+
+  const shouldShowZoomIndicator = () => state.previewZoom > 1.001 || state.previewZoom < 0.999;
+  const previewZoomPercent = () => getPreviewZoomPercent();
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
 
@@ -862,6 +866,12 @@ const Canvas: Component = () => {
               <span class="text-white/35">
                 {activeMask()!.kind === "linear" ? "Linear" : "Radial"}
               </span>
+            </div>
+          )}
+          {shouldShowZoomIndicator() && previewZoomPercent() !== null && (
+            <div class="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
+              <span>Zoom</span>
+              <span class="text-white/35">{previewZoomPercent()}%</span>
             </div>
           )}
           {state.layers.length === 0 && !state.isLoading && (

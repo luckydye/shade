@@ -44,6 +44,7 @@ export {
   startCropMode,
   updateCropDraft,
   deleteLayer,
+  moveLayer,
 } from "./editor-layers";
 
 export {
@@ -51,6 +52,7 @@ export {
   getMaxPreviewZoom,
   getPreviewBounds,
   getPreviewDisplaySize,
+  getPreviewZoomPercent,
   panPreview,
   refreshPreview,
   resetPreviewViewport,

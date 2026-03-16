@@ -218,13 +218,19 @@ fn hash_file(path: &Path) -> Result<String, String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-fn non_image_layers(stack: &LayerStack) -> Vec<shade_core::LayerEntry> {
-    stack
+fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
+    let layers: Vec<_> = stack
         .layers
         .iter()
         .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
         .cloned()
-        .collect()
+        .collect();
+    let mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams> = layers
+        .iter()
+        .filter_map(|entry| entry.mask)
+        .filter_map(|id| stack.mask_params.get(&id).map(|p| (id, p.clone())))
+        .collect();
+    PersistedLayerData { layers, mask_params }
 }
 
 fn ensure_non_image_layers(layers: &[shade_core::LayerEntry]) -> Result<(), String> {
@@ -235,6 +241,46 @@ fn ensure_non_image_layers(layers: &[shade_core::LayerEntry]) -> Result<(), Stri
         return Err("persisted edit versions cannot contain image layers".into());
     }
     Ok(())
+}
+
+fn parse_layer_data(json: &str) -> Result<PersistedLayerData, String> {
+    if let Ok(data) = serde_json::from_str::<PersistedLayerData>(json) {
+        return Ok(data);
+    }
+    let layers: Vec<shade_core::LayerEntry> =
+        serde_json::from_str(json).map_err(|e| e.to_string())?;
+    Ok(PersistedLayerData {
+        layers,
+        mask_params: HashMap::new(),
+    })
+}
+
+fn restore_masks_from_params(
+    stack: &mut LayerStack,
+    base_idx: usize,
+    saved_params: &HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    width: u32,
+    height: u32,
+) {
+    for i in base_idx..stack.layers.len() {
+        let Some(old_id) = stack.layers[i].mask else {
+            continue;
+        };
+        let Some(params) = saved_params.get(&old_id) else {
+            stack.layers[i].mask = None;
+            continue;
+        };
+        let mut mask = shade_core::MaskData::new_empty(width, height);
+        match params {
+            shade_core::MaskParams::Linear { x1, y1, x2, y2 } => {
+                mask.fill_linear_gradient(*x1, *y1, *x2, *y2);
+            }
+            shade_core::MaskParams::Radial { cx, cy, radius } => {
+                mask.fill_radial_gradient(*cx, *cy, *radius);
+            }
+        }
+        stack.set_mask_with_params(i, mask, params.clone());
+    }
 }
 
 async fn open_edits_db() -> Result<libsql::Connection, String> {
@@ -302,19 +348,18 @@ async fn load_latest_edit_version(
     };
     let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
     let layers_json = row.get::<String>(1).map_err(|e| e.to_string())?;
-    let layers: Vec<shade_core::LayerEntry> =
-        serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
-    ensure_non_image_layers(&layers)?;
-    Ok(Some(PersistedEditVersion { version, layers }))
+    let data = parse_layer_data(&layers_json)?;
+    ensure_non_image_layers(&data.layers)?;
+    Ok(Some(PersistedEditVersion { version, data }))
 }
 
 async fn persist_edit_version(
     file_hash: &str,
     source_name: Option<&str>,
     version: Option<i64>,
-    layers: &[shade_core::LayerEntry],
+    data: &PersistedLayerData,
 ) -> Result<i64, String> {
-    ensure_non_image_layers(layers)?;
+    ensure_non_image_layers(&data.layers)?;
     let conn = open_edits_db().await?;
     let now = unix_timestamp_millis()?;
     conn.execute(
@@ -335,7 +380,7 @@ async fn persist_edit_version(
                 file_hash,
                 version,
                 now,
-                serde_json::to_string(layers).map_err(|e| e.to_string())?
+                serde_json::to_string(data).map_err(|e| e.to_string())?
             ],
         )
         .await
@@ -362,7 +407,7 @@ async fn persist_edit_version(
                 file_hash,
                 version,
                 now,
-                serde_json::to_string(layers).map_err(|e| e.to_string())?
+                serde_json::to_string(data).map_err(|e| e.to_string())?
             ],
         )
         .await
@@ -384,7 +429,7 @@ fn restore_persisted_layers(
     let Some(persisted) = persisted else {
         return Ok(());
     };
-    ensure_non_image_layers(&persisted.layers)?;
+    ensure_non_image_layers(&persisted.data.layers)?;
     let image_layers: Vec<_> = state
         .stack
         .layers
@@ -396,7 +441,17 @@ fn restore_persisted_layers(
         return Err("cannot restore persisted edits without an image layer".into());
     }
     state.stack.layers = image_layers;
-    state.stack.layers.extend(persisted.layers);
+    state.stack.masks.clear();
+    state.stack.mask_params.clear();
+    let base_idx = state.stack.layers.len();
+    state.stack.layers.extend(persisted.data.layers);
+    restore_masks_from_params(
+        &mut state.stack,
+        base_idx,
+        &persisted.data.mask_params,
+        state.canvas_width,
+        state.canvas_height,
+    );
     state.stack.generation += 1;
     Ok(())
 }
@@ -404,7 +459,7 @@ fn restore_persisted_layers(
 async fn persist_current_edit_version(
     state: &tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<i64, String> {
-    let (file_hash, source_name, layers, current_version) = {
+    let (file_hash, source_name, data, current_version) = {
         let st = lock_editor_state(state)?;
         let file_hash = st.current_image_hash.clone().ok_or_else(|| {
             "cannot persist edits without a loaded image hash".to_string()
@@ -412,7 +467,7 @@ async fn persist_current_edit_version(
         (
             file_hash,
             st.current_image_source.clone(),
-            non_image_layers(&st.stack),
+            non_image_layer_data(&st.stack),
             st.current_edit_version,
         )
     };
@@ -420,7 +475,7 @@ async fn persist_current_edit_version(
         &file_hash,
         source_name.as_deref(),
         current_version,
-        &layers,
+        &data,
     )
     .await?;
     let mut st = lock_editor_state(state)?;
@@ -431,7 +486,7 @@ async fn persist_current_edit_version(
 async fn save_snapshot_version(
     state: &tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<i64, String> {
-    let (file_hash, source_name, layers) = {
+    let (file_hash, source_name, data) = {
         let st = lock_editor_state(state)?;
         let file_hash = st.current_image_hash.clone().ok_or_else(|| {
             "cannot save a snapshot without a loaded image hash".to_string()
@@ -439,11 +494,11 @@ async fn save_snapshot_version(
         (
             file_hash,
             st.current_image_source.clone(),
-            non_image_layers(&st.stack),
+            non_image_layer_data(&st.stack),
         )
     };
     let version =
-        persist_edit_version(&file_hash, source_name.as_deref(), None, &layers).await?;
+        persist_edit_version(&file_hash, source_name.as_deref(), None, &data).await?;
     let mut st = lock_editor_state(state)?;
     st.current_edit_version = Some(version);
     Ok(version)
@@ -496,22 +551,30 @@ async fn load_snapshot_version(
         return Err(format!("unknown snapshot version: {version}"));
     };
     let layers_json = row.get::<String>(0).map_err(|e| e.to_string())?;
-    let layers: Vec<shade_core::LayerEntry> =
-        serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
-    ensure_non_image_layers(&layers)?;
-    Ok(PersistedEditVersion { version, layers })
+    let data = parse_layer_data(&layers_json)?;
+    ensure_non_image_layers(&data.layers)?;
+    Ok(PersistedEditVersion { version, data })
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PersistedLayerData {
+    layers: Vec<shade_core::LayerEntry>,
+    #[serde(default)]
+    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PresetFile {
     version: u32,
     layers: Vec<shade_core::LayerEntry>,
+    #[serde(default)]
+    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 struct PersistedEditVersion {
     version: i64,
-    layers: Vec<shade_core::LayerEntry>,
+    data: PersistedLayerData,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -2238,6 +2301,43 @@ pub async fn delete_layer(
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct MoveLayerParams {
+    pub from_idx: usize,
+    pub to_idx: usize,
+}
+
+#[tauri::command]
+pub async fn move_layer(
+    params: MoveLayerParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<usize, String> {
+    let new_idx = {
+        let mut st = lock_editor_state(&state)?;
+        let len = st.stack.layers.len();
+        if params.from_idx >= len {
+            return Err("source index out of bounds".into());
+        }
+        if params.to_idx > len {
+            return Err("target index out of bounds".into());
+        }
+        if params.to_idx == params.from_idx || params.to_idx == params.from_idx + 1 {
+            return Ok(params.from_idx);
+        }
+        let entry = st.stack.layers.remove(params.from_idx);
+        let insert_idx = if params.to_idx > params.from_idx {
+            params.to_idx - 1
+        } else {
+            params.to_idx
+        };
+        st.stack.layers.insert(insert_idx, entry);
+        st.stack.generation += 1;
+        insert_idx
+    };
+    persist_current_edit_version(&state).await?;
+    Ok(new_idx)
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct LayerStackInfo {
     pub layers: Vec<LayerEntryInfo>,
     pub canvas_width: u32,
@@ -2783,14 +2883,12 @@ pub async fn save_preset(
         .ok_or_else(|| format!("invalid preset path: {}", path.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let st = state.lock().unwrap();
-    let layers = st
-        .stack
-        .layers
-        .iter()
-        .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
-        .cloned()
-        .collect();
-    let file = PresetFile { version: 1, layers };
+    let layer_data = non_image_layer_data(&st.stack);
+    let file = PresetFile {
+        version: 1,
+        layers: layer_data.layers,
+        mask_params: layer_data.mask_params,
+    };
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
     Ok(PresetInfo {
@@ -2822,7 +2920,13 @@ pub async fn load_preset(
             return Err("cannot load a preset without a loaded image".into());
         }
         st.stack.layers = image_layers;
+        st.stack.masks.clear();
+        st.stack.mask_params.clear();
+        let base_idx = st.stack.layers.len();
         st.stack.layers.extend(file.layers);
+        let w = st.canvas_width;
+        let h = st.canvas_height;
+        restore_masks_from_params(&mut st.stack, base_idx, &file.mask_params, w, h);
         st.stack.generation += 1;
     }
     persist_current_edit_version(&state).await?;
@@ -2876,7 +2980,13 @@ pub async fn load_snapshot(
             return Err("cannot load a snapshot without a loaded image".into());
         }
         st.stack.layers = image_layers;
-        st.stack.layers.extend(snapshot.layers);
+        st.stack.masks.clear();
+        st.stack.mask_params.clear();
+        let base_idx = st.stack.layers.len();
+        st.stack.layers.extend(snapshot.data.layers);
+        let w = st.canvas_width;
+        let h = st.canvas_height;
+        restore_masks_from_params(&mut st.stack, base_idx, &snapshot.data.mask_params, w, h);
         st.stack.generation += 1;
         st.current_edit_version = Some(params.version);
     }

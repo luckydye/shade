@@ -178,6 +178,24 @@ pub fn set_layer_opacity(layer_idx: usize, opacity: f32) {
     });
 }
 
+#[wasm_bindgen]
+pub fn move_layer(from_idx: usize, to_idx: usize) -> usize {
+    ENGINE.with(|e| {
+        let mut eng = e.borrow_mut();
+        let len = eng.stack.layers.len();
+        assert!(from_idx < len, "source index out of bounds");
+        assert!(to_idx <= len, "target index out of bounds");
+        if to_idx == from_idx || to_idx == from_idx + 1 {
+            return from_idx;
+        }
+        let entry = eng.stack.layers.remove(from_idx);
+        let insert_idx = if to_idx > from_idx { to_idx - 1 } else { to_idx };
+        eng.stack.layers.insert(insert_idx, entry);
+        eng.stack.generation += 1;
+        insert_idx
+    })
+}
+
 /// Returns a JSON string describing the current layer stack.
 #[wasm_bindgen]
 pub fn get_stack_json() -> String {

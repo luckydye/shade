@@ -106,6 +106,13 @@ self.onmessage = async (e: MessageEvent) => {
       break;
     }
 
+    case "move_layer": {
+      if (!wasm) return;
+      const layerIdx = wasm.move_layer(msg.fromIdx, msg.toIdx);
+      self.postMessage({ type: "layer_moved", layerIdx });
+      break;
+    }
+
     case "get_stack": {
       if (!wasm) return;
       const json = wasm.get_stack_json();

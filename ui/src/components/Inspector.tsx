@@ -21,6 +21,7 @@ import {
   loadPreset,
   loadSnapshot,
   previewContextFrame,
+  moveLayer,
   removeMask,
   savePreset,
   saveSnapshot,
@@ -43,6 +44,7 @@ type MobileLayerFocus =
   | "hsl"
   | "denoise";
 type InspectorTab = "edit" | "presets";
+type LayerDropTarget = { layerIdx: number; position: "before" | "after" };
 
 interface SliderProps {
   label: string;
@@ -555,6 +557,9 @@ const Inspector: Component = () => {
   const [presetName, setPresetName] = createSignal("");
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);
+  const [draggedLayerIdx, setDraggedLayerIdx] = createSignal<number | null>(null);
+  const [dropTarget, setDropTarget] = createSignal<LayerDropTarget | null>(null);
+  let desktopLayerListRef: HTMLDivElement | undefined;
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
   const selectedCropLayer = () => {
@@ -587,6 +592,106 @@ const Inspector: Component = () => {
   const hsl = () => selectedAdjustmentLayer()?.adjustments?.hsl ?? DEFAULT_HSL;
   const denoise = () =>
     selectedAdjustmentLayer()?.adjustments?.denoise ?? DEFAULT_DENOISE;
+
+  const clearLayerDragState = () => {
+    setDraggedLayerIdx(null);
+    setDropTarget(null);
+  };
+
+  const updateLayerDropTarget = (target: LayerDropTarget) => {
+    setDropTarget(target);
+  };
+
+  const commitLayerDrop = async () => {
+    const fromIdx = draggedLayerIdx();
+    const target = dropTarget();
+    clearLayerDragState();
+    if (fromIdx === null || target === null) {
+      return;
+    }
+    await moveLayer(
+      fromIdx,
+      target.position === "before" ? target.layerIdx + 1 : target.layerIdx,
+    );
+  };
+
+  const resolveDesktopDropTarget = (container: HTMLDivElement, clientY: number) => {
+    const rows = Array.from(
+      container.querySelectorAll<HTMLDivElement>("[data-layer-idx]"),
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    for (const row of rows) {
+      const layerIdx = Number(row.dataset.layerIdx);
+      if (!Number.isInteger(layerIdx)) {
+        throw new Error("desktop layer row is missing a valid layer index");
+      }
+      const bounds = row.getBoundingClientRect();
+      const midY = bounds.top + bounds.height * 0.5;
+      if (clientY < midY) {
+        return { layerIdx, position: "before" } as LayerDropTarget;
+      }
+      if (clientY <= bounds.bottom) {
+        return { layerIdx, position: "after" } as LayerDropTarget;
+      }
+    }
+    const lastLayerIdx = Number(rows[rows.length - 1]?.dataset.layerIdx);
+    if (!Number.isInteger(lastLayerIdx)) {
+      throw new Error("desktop layer row is missing a valid layer index");
+    }
+    return { layerIdx: lastLayerIdx, position: "after" } as LayerDropTarget;
+  };
+
+  const getDesktopDropCursorStyle = () => {
+    const container = desktopLayerListRef;
+    const target = dropTarget();
+    if (!container || !target) {
+      return { opacity: 0 };
+    }
+    const row = container.querySelector<HTMLDivElement>(
+      `[data-layer-idx="${target.layerIdx}"]`,
+    );
+    if (!row) {
+      return { opacity: 0 };
+    }
+    const containerBounds = container.getBoundingClientRect();
+    const rowBounds = row.getBoundingClientRect();
+    const top =
+      target.position === "before"
+        ? rowBounds.top - containerBounds.top
+        : rowBounds.bottom - containerBounds.top;
+    return {
+      opacity: 1,
+      transform: `translateY(${top}px)`,
+    };
+  };
+
+  const startDesktopLayerDrag = (event: PointerEvent, layerIdx: number) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    setDraggedLayerIdx(layerIdx);
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const container = desktopLayerListRef;
+      if (!container) {
+        throw new Error("desktop layer list is required for drag reordering");
+      }
+      const target = resolveDesktopDropTarget(container, moveEvent.clientY);
+      if (target) {
+        updateLayerDropTarget(target);
+      }
+    };
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      void commitLayerDrop();
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    onPointerMove(event);
+  };
 
   const applyCurves = (points: readonly ControlPoint[]) => {
     const normalizedPoints = normalizePoints(points);
@@ -1648,7 +1753,14 @@ const Inspector: Component = () => {
         <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">
           Layers
         </div>
-        <div class="mt-3 flex flex-col gap-1">
+        <div
+          ref={desktopLayerListRef}
+          class="relative mt-3 flex flex-col gap-1"
+        >
+          <div
+            class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-blue-400 transition-opacity"
+            style={getDesktopDropCursorStyle()}
+          />
           {[...state.layers].reverse().map((layer, reverseIdx) => {
             const realIdx = state.layers.length - 1 - reverseIdx;
             const layerName =
@@ -1656,22 +1768,37 @@ const Inspector: Component = () => {
                 ? "Image"
                 : layer.kind === "crop"
                   ? "Crop"
-                  : layer.adjustments?.curves
-                    ? "Curves"
-                    : "Adjustment";
+                  : "Adjustment";
             return (
               <>
                 <div
-                  class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
+                  data-layer-idx={realIdx}
+                  class={`flex min-h-9 w-full items-center gap-2 border px-2.5 text-left text-white/76 transition-colors ${
                     state.selectedLayerIdx === realIdx
                       ? "border-white/16 bg-white/12 text-white"
                       : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
-                  }`}
+                  } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
                 >
+                  <button
+                    type="button"
+                    onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
+                    class="inline-flex h-5 w-5 cursor-grab items-center justify-center text-white/24 transition-colors hover:text-white/60 active:cursor-grabbing"
+                    title="Reorder layer"
+                  >
+                    <span class="grid grid-cols-2 gap-[2px]">
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    </span>
+                  </button>
                   <span
                     class={`inline-flex w-4 items-center justify-center text-xs leading-none ${
                       layer.visible ? "text-stone-100" : "text-white/30"
                     }`}
+                    onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
                       void setLayerVisible(realIdx, !layer.visible);
@@ -1681,8 +1808,9 @@ const Inspector: Component = () => {
                   </span>
                   <button
                     type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
                     onClick={() => selectLayer(realIdx)}
-                    class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
+                    class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em] py-1.5"
                   >
                     {layerName}
                   </button>
@@ -1690,6 +1818,7 @@ const Inspector: Component = () => {
                     {layer.has_mask ? (
                       <button
                         type="button"
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
                           void handleRemoveMask(realIdx);
@@ -1702,6 +1831,7 @@ const Inspector: Component = () => {
                     ) : (
                       <button
                         type="button"
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
                           setMaskPickerLayer(maskPickerLayer() === realIdx ? null : realIdx);
@@ -1716,6 +1846,7 @@ const Inspector: Component = () => {
                   <Show when={layer.kind !== "image"}>
                     <button
                       type="button"
+                      onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
                         void deleteLayer(realIdx);
@@ -1726,7 +1857,6 @@ const Inspector: Component = () => {
                       <TrashIcon />
                     </button>
                   </Show>
-                  <span class="text-[11px] text-white/34">{realIdx + 1}</span>
                 </div>
                 <Show when={maskPickerLayer() === realIdx}>
                   <div class="flex gap-1 border border-white/5 bg-white/[0.02] px-2.5 py-1.5">
