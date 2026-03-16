@@ -29,7 +29,10 @@ import {
 } from "../store/editor";
 
 type MobileLayerFocus =
-  | "tone"
+  | "light"
+  | "levels"
+  | "color"
+  | "wb"
   | "curves"
   | "grain"
   | "vignette"
@@ -412,7 +415,10 @@ const DenoiseIcon = () => (
 );
 
 const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
-  tone: () => <SparkIcon />,
+  light: () => <SparkIcon />,
+  levels: () => <ToneIcon />,
+  color: () => <DropletIcon />,
+  wb: () => <ToneIcon />,
   curves: () => <CurveIcon />,
   grain: () => <GrainIcon />,
   vignette: () => <CircleIcon />,
@@ -422,7 +428,10 @@ const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
 };
 
 const focusLabels: Record<MobileLayerFocus, string> = {
-  tone: "Tone",
+  light: "Light",
+  levels: "Levels",
+  color: "Color",
+  wb: "WB",
   curves: "Curves",
   grain: "Grain",
   vignette: "Vignette",
@@ -507,6 +516,35 @@ const Inspector: Component = () => {
       blue_hue: next.blue_hue ?? current.blue_hue,
       blue_sat: next.blue_sat ?? current.blue_sat,
       blue_lum: next.blue_lum ?? current.blue_lum,
+    });
+  };
+
+  const applyTone = (overrides: Partial<ReturnType<typeof tone>>) => {
+    selectedAdjustmentLayerOrThrow();
+    const t = tone();
+    void applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "tone",
+      exposure: overrides.exposure ?? t.exposure,
+      contrast: overrides.contrast ?? t.contrast,
+      blacks: overrides.blacks ?? t.blacks,
+      whites: overrides.whites ?? t.whites,
+      highlights: overrides.highlights ?? t.highlights,
+      shadows: overrides.shadows ?? t.shadows,
+      gamma: overrides.gamma ?? t.gamma,
+    });
+  };
+
+  const applyColor = (overrides: Partial<ReturnType<typeof color>>) => {
+    selectedAdjustmentLayerOrThrow();
+    const c = color();
+    void applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "color",
+      saturation: overrides.saturation ?? c.saturation,
+      vibrancy: overrides.vibrancy ?? c.vibrancy,
+      temperature: overrides.temperature ?? c.temperature,
+      tint: overrides.tint ?? c.tint,
     });
   };
 
@@ -866,13 +904,245 @@ const Inspector: Component = () => {
     );
   };
 
+  const LightSliders: Component = () => (
+    <>
+      <Slider
+        label="Exposure"
+        icon={<SparkIcon />}
+        value={tone().exposure}
+        defaultValue={DEFAULT_TONE.exposure}
+        min={-5}
+        max={5}
+        step={0.05}
+        onChange={(v) => applyTone({ exposure: v })}
+      />
+      <Slider
+        label="Gamma"
+        icon={<ToneIcon />}
+        value={tone().gamma}
+        defaultValue={DEFAULT_TONE.gamma}
+        min={0.1}
+        max={3}
+        onChange={(v) => applyTone({ gamma: v })}
+      />
+      <Slider
+        label="Contrast"
+        icon={<CircleIcon />}
+        value={tone().contrast}
+        defaultValue={DEFAULT_TONE.contrast}
+        min={-1.0}
+        max={1.0}
+        step={0.01}
+        onChange={(v) => applyTone({ contrast: v })}
+      />
+    </>
+  );
+
+  const LevelSliders: Component = () => (
+    <>
+      <Slider
+        label="Blacks"
+        icon={<ToneIcon />}
+        value={tone().blacks}
+        defaultValue={DEFAULT_TONE.blacks}
+        min={-0.05}
+        max={0.1}
+        step={0.001}
+        onChange={(v) => applyTone({ blacks: v })}
+      />
+      <Slider
+        label="Whites"
+        icon={<ToneIcon />}
+        value={tone().whites}
+        defaultValue={DEFAULT_TONE.whites}
+        min={-0.1}
+        max={0.2}
+        step={0.001}
+        onChange={(v) => applyTone({ whites: v })}
+      />
+    </>
+  );
+
+  const SaturationSliders: Component = () => (
+    <>
+      <Slider
+        label="Saturation"
+        icon={<DropletIcon />}
+        value={color().saturation}
+        defaultValue={DEFAULT_COLOR.saturation}
+        valueLabel={valueLabel(color().saturation)}
+        min={0}
+        max={2}
+        onChange={(v) => applyColor({ saturation: v })}
+      />
+      <Slider
+        label="Vibrancy"
+        icon={<DropletIcon />}
+        value={color().vibrancy}
+        defaultValue={DEFAULT_COLOR.vibrancy}
+        valueLabel={valueLabel(color().vibrancy)}
+        min={-1}
+        max={1}
+        onChange={(v) => applyColor({ vibrancy: v })}
+      />
+    </>
+  );
+
+  const WhiteBalanceSliders: Component = () => (
+    <>
+      <Slider
+        label="Temperature"
+        icon={<ToneIcon />}
+        value={color().temperature}
+        defaultValue={DEFAULT_COLOR.temperature}
+        valueLabel={valueLabel(color().temperature)}
+        min={-1}
+        max={1}
+        onChange={(v) => applyColor({ temperature: v })}
+      />
+      <Slider
+        label="Tint"
+        icon={<ToneIcon />}
+        value={color().tint}
+        defaultValue={DEFAULT_COLOR.tint}
+        valueLabel={valueLabel(color().tint)}
+        min={-1}
+        max={1}
+        onChange={(v) => applyColor({ tint: v })}
+      />
+    </>
+  );
+
+  const GrainSliders: Component = () => (
+    <>
+      <Slider
+        label="Grain"
+        icon={<GrainIcon />}
+        value={grain().amount}
+        defaultValue={DEFAULT_GRAIN.amount}
+        valueLabel={valueLabel(grain().amount)}
+        min={0}
+        max={1}
+        onChange={(v) => {
+          selectedAdjustmentLayerOrThrow();
+          void applyEdit({
+            layer_idx: state.selectedLayerIdx,
+            op: "grain",
+            grain_amount: v,
+          });
+        }}
+      />
+      <Slider
+        label="Size"
+        icon={<GrainIcon />}
+        value={grain().size ?? DEFAULT_GRAIN.size}
+        defaultValue={DEFAULT_GRAIN.size}
+        valueLabel={`${(grain().size ?? DEFAULT_GRAIN.size).toFixed(1)}`}
+        min={1}
+        max={8}
+        step={0.01}
+        onChange={(v) => {
+          selectedAdjustmentLayerOrThrow();
+          void applyEdit({
+            layer_idx: state.selectedLayerIdx,
+            op: "grain",
+            grain_size: v,
+          });
+        }}
+      />
+    </>
+  );
+
+  const VignetteSlider: Component = () => (
+    <Slider
+      label="Vignette"
+      icon={<CircleIcon />}
+      value={vignette().amount}
+      defaultValue={DEFAULT_VIGNETTE.amount}
+      valueLabel={valueLabel(vignette().amount)}
+      min={0}
+      max={1}
+      onChange={(v) => {
+        selectedAdjustmentLayerOrThrow();
+        void applyEdit({
+          layer_idx: state.selectedLayerIdx,
+          op: "vignette",
+          vignette_amount: v,
+        });
+      }}
+    />
+  );
+
+  const SharpenSlider: Component = () => (
+    <Slider
+      label="Sharpen"
+      icon={<DropletIcon />}
+      value={sharpen().amount}
+      defaultValue={DEFAULT_SHARPEN.amount}
+      valueLabel={valueLabel(sharpen().amount)}
+      min={0}
+      max={1}
+      onChange={(v) => {
+        selectedAdjustmentLayerOrThrow();
+        void applyEdit({
+          layer_idx: state.selectedLayerIdx,
+          op: "sharpen",
+          sharpen_amount: v,
+        });
+      }}
+    />
+  );
+
+  const DenoiseSliders: Component = () => (
+    <>
+      <Slider
+        label="Luminance"
+        icon={<DenoiseIcon />}
+        value={denoise().luma_strength}
+        defaultValue={DEFAULT_DENOISE.luma_strength}
+        valueLabel={valueLabel(denoise().luma_strength)}
+        min={0}
+        max={1}
+        onChange={(v) => {
+          selectedAdjustmentLayerOrThrow();
+          void applyEdit({
+            layer_idx: state.selectedLayerIdx,
+            op: "denoise",
+            denoise_luma_strength: v,
+            denoise_chroma_strength: denoise().chroma_strength,
+            denoise_mode: denoise().mode,
+          });
+        }}
+      />
+      <Slider
+        label="Color"
+        icon={<DenoiseIcon />}
+        value={denoise().chroma_strength}
+        defaultValue={DEFAULT_DENOISE.chroma_strength}
+        valueLabel={valueLabel(denoise().chroma_strength)}
+        min={0}
+        max={1}
+        onChange={(v) => {
+          selectedAdjustmentLayerOrThrow();
+          void applyEdit({
+            layer_idx: state.selectedLayerIdx,
+            op: "denoise",
+            denoise_luma_strength: denoise().luma_strength,
+            denoise_chroma_strength: v,
+            denoise_mode: denoise().mode,
+          });
+        }}
+      />
+    </>
+  );
+
   const adjustmentLayers = () =>
     state.layers
       .map((layer, idx) => ({ layer, idx }))
       .filter(({ layer }) => layer.kind === "adjustment");
 
   const selectedFocus = (): MobileLayerFocus =>
-    layerFocusTypes().get(state.selectedLayerIdx) ?? "tone";
+    layerFocusTypes().get(state.selectedLayerIdx) ?? "light";
 
   const displayedCrop = () =>
     selectedCropLayer()?.crop ?? {
@@ -998,292 +1268,26 @@ const Inspector: Component = () => {
 
   const renderLayerBody = () => {
     switch (selectedFocus()) {
-      case "tone":
-        return (
-          <div class="space-y-4">
-            <Slider
-              label="Exposure"
-              icon={<SparkIcon />}
-              value={tone().exposure}
-              defaultValue={DEFAULT_TONE.exposure}
-              min={-5}
-              max={5}
-              step={0.05}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "tone",
-                  exposure: value,
-                  contrast: tone().contrast,
-                  blacks: tone().blacks,
-                  whites: tone().whites,
-                  highlights: tone().highlights,
-                  shadows: tone().shadows,
-                  gamma: tone().gamma,
-                });
-              }}
-            />
-            <Slider
-              label="Gamma"
-              icon={<ToneIcon />}
-              value={tone().gamma}
-              defaultValue={DEFAULT_TONE.gamma}
-              min={0.1}
-              max={3}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "tone",
-                  exposure: tone().exposure,
-                  contrast: tone().contrast,
-                  blacks: tone().blacks,
-                  whites: tone().whites,
-                  highlights: tone().highlights,
-                  shadows: tone().shadows,
-                  gamma: value,
-                });
-              }}
-            />
-            <Slider
-              label="Contrast"
-              icon={<CircleIcon />}
-              value={tone().contrast}
-              defaultValue={DEFAULT_TONE.contrast}
-              min={-1.0}
-              max={1.0}
-              step={0.01}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "tone",
-                  exposure: tone().exposure,
-                  contrast: value,
-                  blacks: tone().blacks,
-                  whites: tone().whites,
-                  highlights: tone().highlights,
-                  shadows: tone().shadows,
-                  gamma: tone().gamma,
-                });
-              }}
-            />
-            <Slider
-              label="Blacks"
-              icon={<ToneIcon />}
-              value={tone().blacks}
-              defaultValue={DEFAULT_TONE.blacks}
-              min={-0.05}
-              max={0.1}
-              step={0.001}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "tone",
-                  exposure: tone().exposure,
-                  contrast: tone().contrast,
-                  blacks: value,
-                  whites: tone().whites,
-                  highlights: tone().highlights,
-                  shadows: tone().shadows,
-                  gamma: tone().gamma,
-                });
-              }}
-            />
-            <Slider
-              label="Whites"
-              icon={<ToneIcon />}
-              value={tone().whites}
-              defaultValue={DEFAULT_TONE.whites}
-              min={-0.1}
-              max={0.2}
-              step={0.001}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "tone",
-                  exposure: tone().exposure,
-                  contrast: tone().contrast,
-                  blacks: tone().blacks,
-                  whites: value,
-                  highlights: tone().highlights,
-                  shadows: tone().shadows,
-                  gamma: tone().gamma,
-                });
-              }}
-            />
-            <Slider
-              label="Saturation"
-              icon={<DropletIcon />}
-              value={color().saturation}
-              defaultValue={DEFAULT_COLOR.saturation}
-              valueLabel={valueLabel(color().saturation)}
-              min={0}
-              max={2}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "color",
-                  saturation: value,
-                  vibrancy: color().vibrancy,
-                  temperature: color().temperature,
-                  tint: color().tint,
-                });
-              }}
-            />
-            <Slider
-              label="Vibrancy"
-              icon={<DropletIcon />}
-              value={color().vibrancy}
-              defaultValue={DEFAULT_COLOR.vibrancy}
-              valueLabel={valueLabel(color().vibrancy)}
-              min={-1}
-              max={1}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "color",
-                  saturation: color().saturation,
-                  vibrancy: value,
-                  temperature: color().temperature,
-                  tint: color().tint,
-                });
-              }}
-            />
-          </div>
-        );
+      case "light":
+        return <LightSliders />;
+      case "levels":
+        return <LevelSliders />;
+      case "color":
+        return <SaturationSliders />;
+      case "wb":
+        return <WhiteBalanceSliders />;
       case "curves":
         return <CurvesEditor />;
       case "grain":
-        return (
-          <>
-            <Slider
-              label="Grain"
-              icon={<GrainIcon />}
-              value={grain().amount}
-              defaultValue={DEFAULT_GRAIN.amount}
-              valueLabel={valueLabel(grain().amount)}
-              min={0}
-              max={1}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "grain",
-                  grain_amount: value,
-                });
-              }}
-            />
-            <Slider
-              label="Size"
-              icon={<GrainIcon />}
-              value={grain().size ?? DEFAULT_GRAIN.size}
-              defaultValue={DEFAULT_GRAIN.size}
-              valueLabel={`${(grain().size ?? DEFAULT_GRAIN.size).toFixed(1)}`}
-              min={1}
-              max={8}
-              step={0.01}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "grain",
-                  grain_size: value,
-                });
-              }}
-            />
-          </>
-        );
+        return <GrainSliders />;
       case "vignette":
-        return (
-          <Slider
-            label="Vignette"
-            icon={<CircleIcon />}
-            value={vignette().amount}
-            defaultValue={DEFAULT_VIGNETTE.amount}
-            valueLabel={valueLabel(vignette().amount)}
-            min={0}
-            max={1}
-            onChange={(value) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyEdit({
-                layer_idx: state.selectedLayerIdx,
-                op: "vignette",
-                vignette_amount: value,
-              });
-            }}
-          />
-        );
+        return <VignetteSlider />;
       case "sharpen":
-        return (
-          <Slider
-            label="Sharpen"
-            icon={<DropletIcon />}
-            value={sharpen().amount}
-            defaultValue={DEFAULT_SHARPEN.amount}
-            valueLabel={valueLabel(sharpen().amount)}
-            min={0}
-            max={1}
-            onChange={(value) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyEdit({
-                layer_idx: state.selectedLayerIdx,
-                op: "sharpen",
-                sharpen_amount: value,
-              });
-            }}
-          />
-        );
+        return <SharpenSlider />;
       case "hsl":
         return <HslSection />;
       case "denoise":
-        return (
-          <div class="flex flex-col gap-3">
-            <Slider
-              label="Luminance"
-              icon={<DenoiseIcon />}
-              value={denoise().luma_strength}
-              defaultValue={DEFAULT_DENOISE.luma_strength}
-              valueLabel={valueLabel(denoise().luma_strength)}
-              min={0}
-              max={1}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "denoise",
-                  denoise_luma_strength: value,
-                  denoise_chroma_strength: denoise().chroma_strength,
-                  denoise_mode: denoise().mode,
-                });
-              }}
-            />
-            <Slider
-              label="Color"
-              icon={<DenoiseIcon />}
-              value={denoise().chroma_strength}
-              defaultValue={DEFAULT_DENOISE.chroma_strength}
-              valueLabel={valueLabel(denoise().chroma_strength)}
-              min={0}
-              max={1}
-              onChange={(value) => {
-                selectedAdjustmentLayerOrThrow();
-                void applyEdit({
-                  layer_idx: state.selectedLayerIdx,
-                  op: "denoise",
-                  denoise_luma_strength: denoise().luma_strength,
-                  denoise_chroma_strength: value,
-                  denoise_mode: denoise().mode,
-                });
-              }}
-            />
-          </div>
-        );
+        return <DenoiseSliders />;
     }
   };
 
@@ -1626,367 +1630,19 @@ const Inspector: Component = () => {
                     <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">
                       Adjustments
                     </div>
-                    <Slider
-                      label="Exposure"
-                      icon={<SparkIcon />}
-                      value={tone().exposure}
-                      defaultValue={DEFAULT_TONE.exposure}
-                      min={-5}
-                      max={5}
-                      step={0.05}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "tone",
-                          exposure: value,
-                          contrast: tone().contrast,
-                          blacks: tone().blacks,
-                          whites: tone().whites,
-                          highlights: tone().highlights,
-                          shadows: tone().shadows,
-                          gamma: tone().gamma,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Gamma"
-                      icon={<ToneIcon />}
-                      value={tone().gamma}
-                      defaultValue={DEFAULT_TONE.gamma}
-                      min={0.1}
-                      max={3}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "tone",
-                          exposure: tone().exposure,
-                          contrast: tone().contrast,
-                          blacks: tone().blacks,
-                          whites: tone().whites,
-                          highlights: tone().highlights,
-                          shadows: tone().shadows,
-                          gamma: value,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Contrast"
-                      icon={<CircleIcon />}
-                      value={tone().contrast}
-                      defaultValue={DEFAULT_TONE.contrast}
-                      min={-1.0}
-                      max={1.0}
-                      step={0.01}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "tone",
-                          exposure: tone().exposure,
-                          contrast: value,
-                          blacks: tone().blacks,
-                          whites: tone().whites,
-                          highlights: tone().highlights,
-                          shadows: tone().shadows,
-                          gamma: tone().gamma,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Blacks"
-                      icon={<ToneIcon />}
-                      value={tone().blacks}
-                      defaultValue={DEFAULT_TONE.blacks}
-                      min={-0.05}
-                      max={0.1}
-                      step={0.001}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "tone",
-                          exposure: tone().exposure,
-                          contrast: tone().contrast,
-                          blacks: value,
-                          whites: tone().whites,
-                          highlights: tone().highlights,
-                          shadows: tone().shadows,
-                          gamma: tone().gamma,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Whites"
-                      icon={<ToneIcon />}
-                      value={tone().whites}
-                      defaultValue={DEFAULT_TONE.whites}
-                      min={-0.1}
-                      max={0.2}
-                      step={0.001}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "tone",
-                          exposure: tone().exposure,
-                          contrast: tone().contrast,
-                          blacks: tone().blacks,
-                          whites: value,
-                          highlights: tone().highlights,
-                          shadows: tone().shadows,
-                          gamma: tone().gamma,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Saturation"
-                      icon={<DropletIcon />}
-                      value={color().saturation}
-                      defaultValue={DEFAULT_COLOR.saturation}
-                      valueLabel={valueLabel(color().saturation)}
-                      min={0}
-                      max={2}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "color",
-                          saturation: value,
-                          vibrancy: color().vibrancy,
-                          temperature: color().temperature,
-                          tint: color().tint,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Vibrancy"
-                      icon={<DropletIcon />}
-                      value={color().vibrancy}
-                      defaultValue={DEFAULT_COLOR.vibrancy}
-                      valueLabel={valueLabel(color().vibrancy)}
-                      min={-1}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "color",
-                          saturation: color().saturation,
-                          vibrancy: value,
-                          temperature: color().temperature,
-                          tint: color().tint,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Temperature"
-                      icon={<ToneIcon />}
-                      value={color().temperature}
-                      defaultValue={DEFAULT_COLOR.temperature}
-                      valueLabel={valueLabel(color().temperature)}
-                      min={-1}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "color",
-                          saturation: color().saturation,
-                          vibrancy: color().vibrancy,
-                          temperature: value,
-                          tint: color().tint,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Tint"
-                      icon={<ToneIcon />}
-                      value={color().tint}
-                      defaultValue={DEFAULT_COLOR.tint}
-                      valueLabel={valueLabel(color().tint)}
-                      min={-1}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "color",
-                          saturation: color().saturation,
-                          vibrancy: color().vibrancy,
-                          temperature: color().temperature,
-                          tint: value,
-                        });
-                      }}
-                    />
+                    <LightSliders />
+                    <LevelSliders />
+                    <SaturationSliders />
+                    <WhiteBalanceSliders />
                     <CurvesEditor />
                     <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">
                       HSL Color Balance
                     </div>
                     <HslSection />
-                    <Slider
-                      label="Vignette"
-                      icon={<CircleIcon />}
-                      value={vignette().amount}
-                      defaultValue={DEFAULT_VIGNETTE.amount}
-                      valueLabel={valueLabel(vignette().amount)}
-                      min={0}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "vignette",
-                          vignette_amount: value,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Sharpen"
-                      icon={<ToneIcon />}
-                      value={sharpen().amount}
-                      defaultValue={DEFAULT_SHARPEN.amount}
-                      valueLabel={valueLabel(sharpen().amount)}
-                      min={0}
-                      max={2}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "sharpen",
-                          sharpen_amount: value,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Grain"
-                      icon={<GrainIcon />}
-                      value={grain().amount}
-                      defaultValue={DEFAULT_GRAIN.amount}
-                      valueLabel={valueLabel(grain().amount)}
-                      min={0}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "grain",
-                          grain_amount: value,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Grain Size"
-                      icon={<GrainIcon />}
-                      value={grain().size ?? DEFAULT_GRAIN.size}
-                      defaultValue={DEFAULT_GRAIN.size}
-                      valueLabel={`${(grain().size ?? DEFAULT_GRAIN.size).toFixed(1)}`}
-                      min={1}
-                      max={8}
-                      step={0.01}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "grain",
-                          grain_size: value,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Denoise Luminance"
-                      icon={<DenoiseIcon />}
-                      value={denoise().luma_strength}
-                      defaultValue={DEFAULT_DENOISE.luma_strength}
-                      valueLabel={valueLabel(denoise().luma_strength)}
-                      min={0}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "denoise",
-                          denoise_luma_strength: value,
-                          denoise_chroma_strength: denoise().chroma_strength,
-                          denoise_mode: denoise().mode,
-                        });
-                      }}
-                    />
-                    <Slider
-                      label="Denoise Color"
-                      icon={<DenoiseIcon />}
-                      value={denoise().chroma_strength}
-                      defaultValue={DEFAULT_DENOISE.chroma_strength}
-                      valueLabel={valueLabel(denoise().chroma_strength)}
-                      min={0}
-                      max={1}
-                      onChange={(value) => {
-                        selectedAdjustmentLayerOrThrow();
-                        void applyEdit({
-                          layer_idx: state.selectedLayerIdx,
-                          op: "denoise",
-                          denoise_luma_strength: denoise().luma_strength,
-                          denoise_chroma_strength: value,
-                          denoise_mode: denoise().mode,
-                        });
-                      }}
-                    />
-                  </div>
-          
-                  {/* Layer tabs + add button */}
-                  <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-4 pt-3">
-                    {adjustmentLayers().map(({ idx }) => {
-                      const focus = () => layerFocusTypes().get(idx) ?? "tone";
-                      const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            selectLayer(idx);
-                            setIsDrawerOpen(true);
-                            setIsPickerOpen(false);
-                          }}
-                          class={`flex min-w-[3.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
-                            isActive() ? "text-stone-100" : "text-white/34"
-                          }`}
-                        >
-                          <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
-                          <span>{focusLabels[focus()]}</span>
-                        </button>
-                      );
-                    })}
-          
-                    <div class="flex-1"></div>
-          
-                    <button
-                      type="button"
-                      onClick={() => setIsPickerOpen((v) => !v)}
-                      class={`ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
-                        isPickerOpen() ? "text-stone-100" : "text-white/34"
-                      }`}
-                    >
-                      <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
-                        +
-                      </span>
-                      <span>Add</span>
-                    </button>
-          
-                    <Show
-                      when={
-                        state.selectedLayerIdx >= 0 &&
-                        state.layers[state.selectedLayerIdx]?.kind !== "image"
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteSelectedLayer()}
-                        class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
-                      >
-                        <TrashIcon />
-                        <span>Delete</span>
-                      </button>
-                    </Show>
+                    <VignetteSlider />
+                    <SharpenSlider />
+                    <GrainSliders />
+                    <DenoiseSliders />
                   </div>
                 </Show>
               }
@@ -2026,6 +1682,61 @@ const Inspector: Component = () => {
                     }
                   >
                     <div class="px-1">{renderLayerBody()}</div>
+                    
+                    {/* Layer tabs + add button */}
+                    <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-4 pt-3">
+                      {adjustmentLayers().map(({ idx }) => {
+                        const focus = () => layerFocusTypes().get(idx) ?? "light";
+                        const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              selectLayer(idx);
+                              setIsDrawerOpen(true);
+                              setIsPickerOpen(false);
+                            }}
+                            class={`flex min-w-[3.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+                              isActive() ? "text-stone-100" : "text-white/34"
+                            }`}
+                          >
+                            <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
+                            <span>{focusLabels[focus()]}</span>
+                          </button>
+                        );
+                      })}
+            
+                      <div class="flex-1"></div>
+            
+                      <button
+                        type="button"
+                        onClick={() => setIsPickerOpen((v) => !v)}
+                        class={`ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+                          isPickerOpen() ? "text-stone-100" : "text-white/34"
+                        }`}
+                      >
+                        <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
+                          +
+                        </span>
+                        <span>Add</span>
+                      </button>
+            
+                      <Show
+                        when={
+                          state.selectedLayerIdx >= 0 &&
+                          state.layers[state.selectedLayerIdx]?.kind !== "image"
+                        }
+                      >
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteSelectedLayer()}
+                          class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
+                        >
+                          <TrashIcon />
+                          <span>Delete</span>
+                        </button>
+                      </Show>
+                    </div>
                   </Show>
                 }
               >
@@ -2062,7 +1773,7 @@ const Inspector: Component = () => {
               Add adjustment layer
             </div>
             <div class="grid grid-rows-6 gap-2">
-              {(["tone", "curves", "grain", "vignette", "sharpen", "hsl"] as const).map(
+              {(["light", "levels", "color", "wb", "curves", "grain", "vignette", "sharpen", "hsl", "denoise"] as const).map(
                 (focus) => (
                   <button
                     type="button"
