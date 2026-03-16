@@ -12,6 +12,7 @@ import {
 import {
   addLayer,
   applyEdit,
+  applyGradientMask,
   deleteLayer,
   findCropLayerIdx,
   isDrawerOpen,
@@ -20,6 +21,7 @@ import {
   loadPreset,
   loadSnapshot,
   previewContextFrame,
+  removeMask,
   savePreset,
   saveSnapshot,
   selectLayer,
@@ -543,6 +545,7 @@ const Inspector: Component = () => {
     new Map<number, ControlPoint[]>(),
   );
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
+  const [maskPickerLayer, setMaskPickerLayer] = createSignal<number | null>(null);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
   const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
   const [presets, setPresets] = createSignal<{ name: string }[]>([]);
@@ -1279,6 +1282,30 @@ const Inspector: Component = () => {
     setIsDrawerOpen(true);
   };
 
+  const handleApplyLinearMask = async (idx: number) => {
+    const w = state.canvasWidth;
+    const h = state.canvasHeight;
+    await applyGradientMask({ kind: "linear", layer_idx: idx, x1: 0, y1: 0, x2: 0, y2: h });
+    setMaskPickerLayer(null);
+  };
+
+  const handleApplyRadialMask = async (idx: number) => {
+    const w = state.canvasWidth;
+    const h = state.canvasHeight;
+    await applyGradientMask({
+      kind: "radial",
+      layer_idx: idx,
+      cx: w / 2,
+      cy: h / 2,
+      radius: Math.min(w, h) / 2,
+    });
+    setMaskPickerLayer(null);
+  };
+
+  const handleRemoveMask = async (idx: number) => {
+    await removeMask(idx);
+  };
+
   const handleDeleteSelectedLayer = async () => {
     if (state.selectedLayerIdx < 0) {
       throw new Error("cannot delete without a selected layer");
@@ -1633,46 +1660,93 @@ const Inspector: Component = () => {
                     ? "Curves"
                     : "Adjustment";
             return (
-              <div
-                class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
-                  state.selectedLayerIdx === realIdx
-                    ? "border-white/16 bg-white/12 text-white"
-                    : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
-                }`}
-              >
-                <span
-                  class={`inline-flex w-4 items-center justify-center text-xs leading-none ${
-                    layer.visible ? "text-stone-100" : "text-white/30"
+              <>
+                <div
+                  class={`flex min-h-9 w-full items-center gap-2 border px-2.5 py-1.5 text-left text-white/76 transition-colors ${
+                    state.selectedLayerIdx === realIdx
+                      ? "border-white/16 bg-white/12 text-white"
+                      : "border-white/5 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.05]"
                   }`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void setLayerVisible(realIdx, !layer.visible);
-                  }}
                 >
-                  {layer.visible ? "●" : "○"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => selectLayer(realIdx)}
-                  class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
-                >
-                  {layerName}
-                </button>
-                <Show when={layer.kind !== "image"}>
-                  <button
-                    type="button"
+                  <span
+                    class={`inline-flex w-4 items-center justify-center text-xs leading-none ${
+                      layer.visible ? "text-stone-100" : "text-white/30"
+                    }`}
                     onClick={(event) => {
                       event.stopPropagation();
-                      void deleteLayer(realIdx);
+                      void setLayerVisible(realIdx, !layer.visible);
                     }}
-                    class="inline-flex h-5 w-5 items-center justify-center text-white/28 transition-colors hover:text-white"
-                    title="Delete layer"
                   >
-                    <TrashIcon />
+                    {layer.visible ? "●" : "○"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => selectLayer(realIdx)}
+                    class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em]"
+                  >
+                    {layerName}
                   </button>
+                  <Show when={layer.kind !== "crop"}>
+                    {layer.has_mask ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleRemoveMask(realIdx);
+                        }}
+                        class="text-[10px] font-bold text-blue-400 transition-colors hover:text-red-400"
+                        title="Remove mask"
+                      >
+                        M
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setMaskPickerLayer(maskPickerLayer() === realIdx ? null : realIdx);
+                        }}
+                        class="text-[10px] font-bold text-white/28 transition-colors hover:text-white"
+                        title="Add gradient mask"
+                      >
+                        +M
+                      </button>
+                    )}
+                  </Show>
+                  <Show when={layer.kind !== "image"}>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteLayer(realIdx);
+                      }}
+                      class="inline-flex h-5 w-5 items-center justify-center text-white/28 transition-colors hover:text-white"
+                      title="Delete layer"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </Show>
+                  <span class="text-[11px] text-white/34">{realIdx + 1}</span>
+                </div>
+                <Show when={maskPickerLayer() === realIdx}>
+                  <div class="flex gap-1 border border-white/5 bg-white/[0.02] px-2.5 py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void handleApplyLinearMask(realIdx)}
+                      class="flex-1 rounded-md border border-white/10 bg-white/[0.04] py-1 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:bg-white/[0.1] hover:text-white"
+                    >
+                      Linear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleApplyRadialMask(realIdx)}
+                      class="flex-1 rounded-md border border-white/10 bg-white/[0.04] py-1 text-[10px] font-bold uppercase tracking-[0.05em] text-white/60 transition-colors hover:bg-white/[0.1] hover:text-white"
+                    >
+                      Radial
+                    </button>
+                  </div>
                 </Show>
-                <span class="text-[11px] text-white/34">{realIdx + 1}</span>
-              </div>
+              </>
             );
           })}
         </div>

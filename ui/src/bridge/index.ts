@@ -174,11 +174,24 @@ export interface CurvesValues {
   control_points?: CurveControlPoint[] | null;
 }
 
+export interface MaskParamsInfo {
+  kind: "linear" | "radial";
+  x1?: number | null;
+  y1?: number | null;
+  x2?: number | null;
+  y2?: number | null;
+  cx?: number | null;
+  cy?: number | null;
+  radius?: number | null;
+}
+
 export interface LayerInfo {
   kind: string;
   visible: boolean;
   opacity: number;
   blend_mode?: string;
+  has_mask?: boolean;
+  mask_params?: MaskParamsInfo | null;
   adjustments?: AdjustmentValues | null;
   crop?: CropValues | null;
 }
@@ -670,4 +683,41 @@ export async function addLayer(kind: string): Promise<number> {
   }
   // Web: not yet implemented for WASM (layer add would go via worker)
   return 0;
+}
+
+export interface LinearGradientMask {
+  kind: "linear";
+  layer_idx: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface RadialGradientMask {
+  kind: "radial";
+  layer_idx: number;
+  cx: number;
+  cy: number;
+  radius: number;
+}
+
+export type GradientMaskParams = LinearGradientMask | RadialGradientMask;
+
+export async function applyGradientMask(params: GradientMaskParams): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("apply_gradient_mask", { params });
+    return;
+  }
+  throw new Error("applyGradientMask is not implemented for WASM");
+}
+
+export async function removeMask(idx: number): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("remove_mask", { params: { layer_idx: idx } });
+    return;
+  }
+  throw new Error("removeMask is not implemented for WASM");
 }

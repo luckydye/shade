@@ -76,6 +76,8 @@ pub fn run() {
             commands::get_peer_thumbnail,
             commands::get_peer_image_bytes,
             commands::open_peer_image,
+            commands::apply_gradient_mask,
+            commands::remove_mask,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

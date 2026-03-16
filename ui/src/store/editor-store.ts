@@ -16,6 +16,8 @@ export interface LayerInfo {
   visible: boolean;
   opacity: number;
   blend_mode?: string;
+  has_mask?: boolean;
+  mask_params?: bridge.MaskParamsInfo | null;
   adjustments?: bridge.AdjustmentValues | null;
   crop?: bridge.CropValues | null;
 }

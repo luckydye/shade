@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use shade_core::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
     CurveControlPoint, DenoiseParams, FloatImage, GrainParams, HslParams, LayerStack,
-    SharpenParams, VignetteParams,
+    MaskData, MaskParams, SharpenParams, VignetteParams,
 };
 use shade_io::SourceImageInfo;
 use shade_io::{
@@ -2246,11 +2246,54 @@ pub struct LayerStackInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct MaskParamsInfo {
+    pub kind: String,
+    // linear
+    pub x1: Option<f32>,
+    pub y1: Option<f32>,
+    pub x2: Option<f32>,
+    pub y2: Option<f32>,
+    // radial
+    pub cx: Option<f32>,
+    pub cy: Option<f32>,
+    pub radius: Option<f32>,
+}
+
+impl From<&MaskParams> for MaskParamsInfo {
+    fn from(p: &MaskParams) -> Self {
+        match p {
+            MaskParams::Linear { x1, y1, x2, y2 } => MaskParamsInfo {
+                kind: "linear".into(),
+                x1: Some(*x1),
+                y1: Some(*y1),
+                x2: Some(*x2),
+                y2: Some(*y2),
+                cx: None,
+                cy: None,
+                radius: None,
+            },
+            MaskParams::Radial { cx, cy, radius } => MaskParamsInfo {
+                kind: "radial".into(),
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                cx: Some(*cx),
+                cy: Some(*cy),
+                radius: Some(*radius),
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct LayerEntryInfo {
     pub kind: String,
     pub visible: bool,
     pub opacity: f32,
     pub blend_mode: String,
+    pub has_mask: bool,
+    pub mask_params: Option<MaskParamsInfo>,
     pub adjustments: Option<AdjustmentValues>,
     pub crop: Option<CropValues>,
 }
@@ -2939,6 +2982,8 @@ pub async fn get_layer_stack(
             visible: l.visible,
             opacity: l.opacity,
             blend_mode: format!("{:?}", l.blend_mode),
+            has_mask: l.mask.is_some(),
+            mask_params: l.mask.and_then(|id| st.stack.mask_params.get(&id)).map(MaskParamsInfo::from),
             crop: match &l.layer {
                 shade_core::Layer::Crop { rect } => Some(CropValues {
                     x: rect.x,
@@ -3048,6 +3093,79 @@ pub async fn get_layer_stack(
         canvas_height: st.canvas_height,
         generation: st.stack.generation,
     })
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GradientMaskParams {
+    pub layer_idx: usize,
+    pub kind: String,
+    // linear: x1, y1, x2, y2
+    pub x1: Option<f32>,
+    pub y1: Option<f32>,
+    pub x2: Option<f32>,
+    pub y2: Option<f32>,
+    // radial: cx, cy, radius
+    pub cx: Option<f32>,
+    pub cy: Option<f32>,
+    pub radius: Option<f32>,
+}
+
+#[tauri::command]
+pub async fn apply_gradient_mask(
+    params: GradientMaskParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        let w = st.canvas_width;
+        let h = st.canvas_height;
+        let mut mask = MaskData::new_empty(w, h);
+        let mp = match params.kind.as_str() {
+            "linear" => {
+                let x1 = params.x1.ok_or("linear gradient requires x1")?;
+                let y1 = params.y1.ok_or("linear gradient requires y1")?;
+                let x2 = params.x2.ok_or("linear gradient requires x2")?;
+                let y2 = params.y2.ok_or("linear gradient requires y2")?;
+                mask.fill_linear_gradient(x1, y1, x2, y2);
+                MaskParams::Linear { x1, y1, x2, y2 }
+            }
+            "radial" => {
+                let cx = params.cx.ok_or("radial gradient requires cx")?;
+                let cy = params.cy.ok_or("radial gradient requires cy")?;
+                let radius = params.radius.ok_or("radial gradient requires radius")?;
+                mask.fill_radial_gradient(cx, cy, radius);
+                MaskParams::Radial { cx, cy, radius }
+            }
+            other => return Err(format!("unknown gradient kind: {other}")),
+        };
+        st.stack.set_mask_with_params(params.layer_idx, mask, mp);
+    }
+    persist_current_edit_version(&state).await?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RemoveMaskParams {
+    pub layer_idx: usize,
+}
+
+#[tauri::command]
+pub async fn remove_mask(
+    params: RemoveMaskParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        st.stack.remove_mask(params.layer_idx);
+    }
+    persist_current_edit_version(&state).await?;
+    Ok(())
 }
 
 fn normalize_crop_rect(

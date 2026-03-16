@@ -26,6 +26,7 @@ export {
 export {
   applyCrop,
   applyEdit,
+  applyGradientMask,
   addLayer,
   cancelCropMode,
   listPresets,
@@ -39,6 +40,7 @@ export {
   selectLayer,
   setLayerOpacity,
   setLayerVisible,
+  removeMask,
   startCropMode,
   updateCropDraft,
   deleteLayer,

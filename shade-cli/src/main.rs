@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use shade_core::{
     AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect, FloatImage, GrainParams,
-    LayerStack, SharpenParams, ToneParams, VignetteParams,
+    LayerStack, MaskData, MaskParams, SharpenParams, ToneParams, VignetteParams,
 };
 use shade_gpu::{PreviewCrop, Renderer};
 use shade_io::{
@@ -162,6 +162,38 @@ enum Commands {
         /// Crop rotation in radians.
         #[arg(long, default_value_t = 0.0)]
         crop_rotation: f32,
+
+        /// Apply a gradient mask to the adjustment layer: "linear" or "radial"
+        #[arg(long)]
+        mask: Option<String>,
+
+        /// Linear mask start X (default: 0)
+        #[arg(long)]
+        mask_x1: Option<f32>,
+
+        /// Linear mask start Y (default: 0)
+        #[arg(long)]
+        mask_y1: Option<f32>,
+
+        /// Linear mask end X (default: 0)
+        #[arg(long)]
+        mask_x2: Option<f32>,
+
+        /// Linear mask end Y (default: canvas height)
+        #[arg(long)]
+        mask_y2: Option<f32>,
+
+        /// Radial mask center X (default: canvas center)
+        #[arg(long)]
+        mask_cx: Option<f32>,
+
+        /// Radial mask center Y (default: canvas center)
+        #[arg(long)]
+        mask_cy: Option<f32>,
+
+        /// Radial mask radius (default: min(width,height)/2)
+        #[arg(long)]
+        mask_radius: Option<f32>,
     },
 }
 
@@ -387,6 +419,14 @@ async fn main() -> Result<()> {
             crop_width,
             crop_height,
             crop_rotation: _,
+            mask,
+            mask_x1,
+            mask_y1,
+            mask_x2,
+            mask_y2,
+            mask_cx,
+            mask_cy,
+            mask_radius,
         } => {
             log::info!("Loading image: {}", input.display());
             let (pixels, width, height) = load_image(&input)?;
@@ -430,7 +470,32 @@ async fn main() -> Result<()> {
                 }));
             }
 
-            stack.add_adjustment_layer(adj_ops);
+            let adj_idx = stack.add_adjustment_layer(adj_ops);
+
+            // Apply gradient mask to the adjustment layer if requested.
+            if let Some(ref mask_kind) = mask {
+                let mut mask_data = MaskData::new_empty(width, height);
+                let mp = match mask_kind.as_str() {
+                    "linear" => {
+                        let x1 = mask_x1.unwrap_or(0.0);
+                        let y1 = mask_y1.unwrap_or(0.0);
+                        let x2 = mask_x2.unwrap_or(0.0);
+                        let y2 = mask_y2.unwrap_or(height as f32);
+                        mask_data.fill_linear_gradient(x1, y1, x2, y2);
+                        MaskParams::Linear { x1, y1, x2, y2 }
+                    }
+                    "radial" => {
+                        let cx = mask_cx.unwrap_or(width as f32 / 2.0);
+                        let cy = mask_cy.unwrap_or(height as f32 / 2.0);
+                        let r = mask_radius.unwrap_or(width.min(height) as f32 / 2.0);
+                        mask_data.fill_radial_gradient(cx, cy, r);
+                        MaskParams::Radial { cx, cy, radius: r }
+                    }
+                    other => anyhow::bail!("unknown mask kind: {other}"),
+                };
+                stack.set_mask_with_params(adj_idx, mask_data, mp);
+                log::info!("Applied {mask_kind} gradient mask to adjustment layer");
+            }
 
             // Set blend modes (Normal = 0, full opacity).
             stack.layers[0].blend_mode = BlendMode::Normal;

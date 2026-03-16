@@ -292,6 +292,14 @@ pub struct FloatImage {
 /// A unique identifier for a mask resource.
 pub type MaskId = u64;
 
+/// Parameters that define how a gradient mask was generated.
+/// Stored alongside pixel data so the UI can draw interactive handles.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum MaskParams {
+    Linear { x1: f32, y1: f32, x2: f32, y2: f32 },
+    Radial { cx: f32, cy: f32, radius: f32 },
+}
+
 /// R8 mask data (one byte per pixel, 0=transparent, 255=opaque).
 /// Stored as Rgba8 internally but only the R channel is used.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -316,6 +324,39 @@ impl MaskData {
             width,
             height,
             pixels: vec![0u8; (width * height) as usize],
+        }
+    }
+
+    /// Fill with a linear gradient from (x1,y1) to (x2,y2).
+    /// Pixels before the start line are 0, after the end line are 255.
+    pub fn fill_linear_gradient(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) {
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let len_sq = dx * dx + dy * dy;
+        assert!(len_sq > 0.0, "gradient start and end must differ");
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let px = col as f32 + 0.5;
+                let py = row as f32 + 0.5;
+                let t = ((px - x1) * dx + (py - y1) * dy) / len_sq;
+                let t = t.clamp(0.0, 1.0);
+                self.pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
+            }
+        }
+    }
+
+    /// Fill with a radial gradient centered at (cx,cy) with given radius.
+    /// Center is 255, edge (at radius) is 0.
+    pub fn fill_radial_gradient(&mut self, cx: f32, cy: f32, radius: f32) {
+        assert!(radius > 0.0, "gradient radius must be positive");
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let px = col as f32 + 0.5;
+                let py = row as f32 + 0.5;
+                let dist = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+                let t = (1.0 - dist / radius).clamp(0.0, 1.0);
+                self.pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
+            }
         }
     }
 }
@@ -404,6 +445,7 @@ pub struct LayerEntry {
 pub struct LayerStack {
     pub layers: Vec<LayerEntry>,
     pub masks: HashMap<MaskId, MaskData>,
+    pub mask_params: HashMap<MaskId, MaskParams>,
     next_mask_id: u64,
     pub generation: u64,
 }
@@ -472,9 +514,26 @@ impl LayerStack {
         id
     }
 
+    pub fn set_mask_with_params(
+        &mut self,
+        layer_idx: usize,
+        mask: MaskData,
+        params: MaskParams,
+    ) -> MaskId {
+        let id = self.set_mask(layer_idx, mask);
+        self.mask_params.insert(id, params);
+        id
+    }
+
+    pub fn get_mask_params(&self, layer_idx: usize) -> Option<&MaskParams> {
+        let id = self.layers[layer_idx].mask?;
+        self.mask_params.get(&id)
+    }
+
     pub fn remove_mask(&mut self, layer_idx: usize) {
         if let Some(id) = self.layers[layer_idx].mask.take() {
             self.masks.remove(&id);
+            self.mask_params.remove(&id);
         }
         self.generation += 1;
     }
@@ -625,5 +684,205 @@ impl EditGraph {
 
     pub fn bump_generation(&mut self) {
         self.generation += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_new_full_is_all_opaque() {
+        let m = MaskData::new_full(4, 4);
+        assert!(m.pixels.iter().all(|&p| p == 255));
+    }
+
+    #[test]
+    fn mask_new_empty_is_all_transparent() {
+        let m = MaskData::new_empty(4, 4);
+        assert!(m.pixels.iter().all(|&p| p == 0));
+    }
+
+    // ── Linear gradient ──────────────────────────────────────────────────────
+
+    #[test]
+    fn linear_gradient_top_to_bottom() {
+        let mut m = MaskData::new_empty(1, 256);
+        m.fill_linear_gradient(0.0, 0.0, 0.0, 256.0);
+        // First pixel near 0, last pixel near 255
+        assert!(m.pixels[0] < 2, "top should be ~0, got {}", m.pixels[0]);
+        assert!(m.pixels[255] > 253, "bottom should be ~255, got {}", m.pixels[255]);
+        // Monotonically non-decreasing
+        for i in 1..256 {
+            assert!(m.pixels[i] >= m.pixels[i - 1]);
+        }
+    }
+
+    #[test]
+    fn linear_gradient_left_to_right() {
+        let mut m = MaskData::new_empty(256, 1);
+        m.fill_linear_gradient(0.0, 0.0, 256.0, 0.0);
+        assert!(m.pixels[0] < 2);
+        assert!(m.pixels[255] > 253);
+        for i in 1..256 {
+            assert!(m.pixels[i] >= m.pixels[i - 1]);
+        }
+    }
+
+    #[test]
+    fn linear_gradient_clamps_outside_range() {
+        let mut m = MaskData::new_empty(100, 1);
+        // Gradient from x=25 to x=75 — pixels before 25 should be 0, after 75 should be 255
+        m.fill_linear_gradient(25.0, 0.0, 75.0, 0.0);
+        assert_eq!(m.pixels[0], 0, "before gradient start should be 0");
+        assert_eq!(m.pixels[99], 255, "after gradient end should be 255");
+    }
+
+    #[test]
+    fn linear_gradient_reversed_direction() {
+        let mut m = MaskData::new_empty(1, 100);
+        // Bottom to top: y2 < y1
+        m.fill_linear_gradient(0.0, 100.0, 0.0, 0.0);
+        // First row (y=0) is the "end" → near 255, last row (y=99) is the "start" → near 0
+        assert!(m.pixels[0] > 250, "top should be bright, got {}", m.pixels[0]);
+        assert!(m.pixels[99] < 5, "bottom should be dark, got {}", m.pixels[99]);
+    }
+
+    // ── Radial gradient ──────────────────────────────────────────────────────
+
+    #[test]
+    fn radial_gradient_center_is_bright_edge_is_dark() {
+        let mut m = MaskData::new_empty(101, 101);
+        m.fill_radial_gradient(50.5, 50.5, 50.0);
+        let center = m.pixels[50 * 101 + 50];
+        let corner = m.pixels[0]; // (0,0)
+        assert!(center > 250, "center should be ~255, got {center}");
+        assert!(corner < 5, "corner should be ~0, got {corner}");
+    }
+
+    #[test]
+    fn radial_gradient_symmetry() {
+        let mut m = MaskData::new_empty(100, 100);
+        m.fill_radial_gradient(50.0, 50.0, 40.0);
+        // Check horizontal symmetry around center
+        for y in 0..100 {
+            let left = m.pixels[y * 100 + 10];
+            let right = m.pixels[y * 100 + 89];
+            assert!((left as i16 - right as i16).unsigned_abs() <= 1,
+                "row {y}: left={left}, right={right} should be symmetric");
+        }
+    }
+
+    #[test]
+    fn radial_gradient_outside_radius_is_zero() {
+        let mut m = MaskData::new_empty(200, 200);
+        m.fill_radial_gradient(100.0, 100.0, 30.0);
+        // Pixel at (0, 0) is well outside radius=30 from center=(100,100)
+        assert_eq!(m.pixels[0], 0);
+        // Pixel at (199, 199) also outside
+        assert_eq!(m.pixels[199 * 200 + 199], 0);
+    }
+
+    // ── LayerStack mask management ───────────────────────────────────────────
+
+    #[test]
+    fn set_mask_attaches_to_layer() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let mask = MaskData::new_full(10, 10);
+        let id = stack.set_mask(0, mask);
+        assert_eq!(stack.layers[0].mask, Some(id));
+        assert!(stack.masks.contains_key(&id));
+    }
+
+    #[test]
+    fn remove_mask_detaches_from_layer() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let mask = MaskData::new_full(10, 10);
+        let id = stack.set_mask(0, mask);
+        stack.remove_mask(0);
+        assert_eq!(stack.layers[0].mask, None);
+        assert!(!stack.masks.contains_key(&id));
+    }
+
+    #[test]
+    fn set_mask_bumps_generation() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let gen_before = stack.generation;
+        stack.set_mask(0, MaskData::new_empty(1, 1));
+        assert!(stack.generation > gen_before);
+    }
+
+    #[test]
+    fn multiple_masks_get_unique_ids() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        stack.add_adjustment_layer(vec![]);
+        let id1 = stack.set_mask(0, MaskData::new_full(1, 1));
+        let id2 = stack.set_mask(1, MaskData::new_empty(1, 1));
+        assert_ne!(id1, id2);
+    }
+
+    // ── MaskParams storage ───────────────────────────────────────────────
+
+    #[test]
+    fn set_mask_with_params_stores_params() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let mask = MaskData::new_empty(100, 100);
+        let params = MaskParams::Linear { x1: 0.0, y1: 0.0, x2: 0.0, y2: 100.0 };
+        let id = stack.set_mask_with_params(0, mask, params);
+        assert!(stack.mask_params.contains_key(&id));
+        match stack.get_mask_params(0) {
+            Some(MaskParams::Linear { y2, .. }) => assert_eq!(*y2, 100.0),
+            other => panic!("expected Linear params, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn set_mask_with_params_radial() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let mask = MaskData::new_empty(100, 100);
+        let params = MaskParams::Radial { cx: 50.0, cy: 50.0, radius: 40.0 };
+        stack.set_mask_with_params(0, mask, params);
+        match stack.get_mask_params(0) {
+            Some(MaskParams::Radial { cx, cy, radius }) => {
+                assert_eq!(*cx, 50.0);
+                assert_eq!(*cy, 50.0);
+                assert_eq!(*radius, 40.0);
+            }
+            other => panic!("expected Radial params, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn remove_mask_clears_params() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let mask = MaskData::new_empty(10, 10);
+        let params = MaskParams::Linear { x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0 };
+        let id = stack.set_mask_with_params(0, mask, params);
+        stack.remove_mask(0);
+        assert!(!stack.mask_params.contains_key(&id));
+        assert!(stack.get_mask_params(0).is_none());
+    }
+
+    #[test]
+    fn get_mask_params_returns_none_without_mask() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        assert!(stack.get_mask_params(0).is_none());
+    }
+
+    #[test]
+    fn set_mask_without_params_has_no_params() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        stack.set_mask(0, MaskData::new_full(10, 10));
+        // set_mask (not set_mask_with_params) should not store params
+        assert!(stack.get_mask_params(0).is_none());
     }
 }

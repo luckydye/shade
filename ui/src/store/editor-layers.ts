@@ -252,6 +252,14 @@ export function applyCrop() {
   void refreshPreview();
 }
 
+export async function applyGradientMask(params: bridge.GradientMaskParams) {
+  await runLayerMutation(() => bridge.applyGradientMask(params));
+}
+
+export async function removeMask(idx: number) {
+  await runLayerMutation(() => bridge.removeMask(idx));
+}
+
 export async function addLayer(kind: string) {
   const idx = await bridge.addLayer(kind);
   await refreshLayerStack();

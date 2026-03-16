@@ -1,6 +1,7 @@
 import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import {
   applyEdit,
+  applyGradientMask,
   getCommittedCropRect,
   state,
   isDrawerOpen,
@@ -12,6 +13,7 @@ import {
   setPreviewViewportSize,
   zoomPreviewDelta,
 } from "../store/editor";
+import type { MaskParamsInfo } from "../bridge/index";
 
 type CropHandle =
   | "move"
@@ -24,6 +26,8 @@ type CropHandle =
   | "bottom-left"
   | "left"
   | "rotate";
+
+type MaskHandle = "start" | "end" | "center" | "edge";
 
 interface ImageBounds {
   x: number;
@@ -95,6 +99,7 @@ const Canvas: Component = () => {
     height: number;
     rotation: number;
   } | null>(null);
+  const [draftMask, setDraftMask] = createSignal<MaskParamsInfo | null>(null);
   const activePointers = new Map<number, { x: number; y: number }>();
   let gesture:
     | { kind: "pan"; x: number; y: number }
@@ -107,6 +112,14 @@ const Canvas: Component = () => {
         startY: number;
         crop: { x: number; y: number; width: number; height: number; rotation: number };
       }
+    | {
+        kind: "mask";
+        pointerId: number;
+        handle: MaskHandle;
+        startX: number;
+        startY: number;
+        params: MaskParamsInfo;
+      }
     | null = null;
 
   const selectedCropLayer = () => {
@@ -115,6 +128,134 @@ const Canvas: Component = () => {
   };
 
   const activeCrop = () => draftCrop() ?? selectedCropLayer()?.crop ?? null;
+
+  const selectedMaskParams = (): MaskParamsInfo | null => {
+    const layer = state.layers[state.selectedLayerIdx];
+    if (!layer?.has_mask || !layer.mask_params) return null;
+    return layer.mask_params;
+  };
+
+  const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
+
+  function maskHandleAtPoint(sx: number, sy: number): MaskHandle | null {
+    if (!stageRef) return null;
+    const mp = activeMask();
+    if (!mp) return null;
+    const crop = getCommittedCropRect();
+    const bounds = getDisplayBounds(stageRef.clientWidth, stageRef.clientHeight, crop);
+    if (bounds.scale <= 0) return null;
+
+    const toScreen = (canvasX: number, canvasY: number) => ({
+      x: bounds.x + (canvasX - crop.x) * bounds.scale,
+      y: bounds.y + (canvasY - crop.y) * bounds.scale,
+    });
+
+    const GRAB_R = 14;
+
+    if (mp.kind === "linear") {
+      const s = toScreen(mp.x1 ?? 0, mp.y1 ?? 0);
+      const e = toScreen(mp.x2 ?? 0, mp.y2 ?? 0);
+      if (Math.hypot(sx - s.x, sy - s.y) <= GRAB_R) return "start";
+      if (Math.hypot(sx - e.x, sy - e.y) <= GRAB_R) return "end";
+    } else {
+      const c = toScreen(mp.cx ?? 0, mp.cy ?? 0);
+      const edgeX = (mp.cx ?? 0) + (mp.radius ?? 0);
+      const edgeY = mp.cy ?? 0;
+      const e = toScreen(edgeX, edgeY);
+      if (Math.hypot(sx - e.x, sy - e.y) <= GRAB_R) return "edge";
+      if (Math.hypot(sx - c.x, sy - c.y) <= GRAB_R) return "center";
+    }
+    return null;
+  }
+
+  function drawMaskOverlay(
+    ctx: CanvasRenderingContext2D,
+    _cssWidth: number,
+    _cssHeight: number,
+  ) {
+    if (!stageRef) return;
+    const mp = activeMask();
+    if (!mp) return;
+    const crop = getCommittedCropRect();
+    const bounds = getDisplayBounds(stageRef.clientWidth, stageRef.clientHeight, crop);
+    if (bounds.scale <= 0) return;
+
+    const toScreen = (canvasX: number, canvasY: number) => ({
+      x: bounds.x + (canvasX - crop.x) * bounds.scale,
+      y: bounds.y + (canvasY - crop.y) * bounds.scale,
+    });
+
+    ctx.save();
+
+    const drawHandle = (x: number, y: number, filled: boolean) => {
+      // Black border for visibility on light images
+      ctx.beginPath();
+      ctx.arc(x, y, 8.5, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      // White handle
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      if (filled) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    };
+
+    if (mp.kind === "linear") {
+      const s = toScreen(mp.x1 ?? 0, mp.y1 ?? 0);
+      const e = toScreen(mp.x2 ?? 0, mp.y2 ?? 0);
+
+      // Line between handles — black shadow then white
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      drawHandle(s.x, s.y, false);
+      drawHandle(e.x, e.y, true);
+    } else {
+      const c = toScreen(mp.cx ?? 0, mp.cy ?? 0);
+      const r = (mp.radius ?? 0) * bounds.scale;
+
+      // Circle outline — black shadow then white
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.3)";
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      drawHandle(c.x, c.y, true);
+
+      const edgeX = (mp.cx ?? 0) + (mp.radius ?? 0);
+      const edgeY = mp.cy ?? 0;
+      const e = toScreen(edgeX, edgeY);
+      drawHandle(e.x, e.y, false);
+    }
+    ctx.restore();
+  }
 
   function cropHandleAtPoint(x: number, y: number) {
     if (!stageRef || !selectedCropLayer()) return null;
@@ -300,6 +441,7 @@ const Canvas: Component = () => {
       );
     }
     drawCropOverlay(ctx, cssWidth, cssHeight);
+    drawMaskOverlay(ctx, cssWidth, cssHeight);
   }
 
   createEffect(() => {
@@ -394,6 +536,25 @@ const Canvas: Component = () => {
       drawFrame();
       return;
     }
+    // Mask handle interaction
+    if (activeMask()) {
+      const rect = stageRef.getBoundingClientRect();
+      const handle = maskHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
+      if (handle) {
+        const params = activeMask()!;
+        gesture = {
+          kind: "mask",
+          pointerId: e.pointerId,
+          handle,
+          startX: e.clientX,
+          startY: e.clientY,
+          params: { ...params },
+        };
+        stageRef.setPointerCapture(e.pointerId);
+        drawFrame();
+        return;
+      }
+    }
     if (activePointers.size === 2) {
       const [p1, p2] = [...activePointers.values()];
       const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -431,6 +592,37 @@ const Canvas: Component = () => {
         gesture = { kind: "pinch", dist: newDist, midX: newMidX, midY: newMidY };
         drawFrame();
       }
+      return;
+    }
+    if (gesture.kind === "mask") {
+      const crop = getCommittedCropRect();
+      const bounds = getDisplayBounds(stageRef.clientWidth, stageRef.clientHeight, crop);
+      if (bounds.scale <= 0) return;
+      const dx = (e.clientX - gesture.startX) / bounds.scale;
+      const dy = (e.clientY - gesture.startY) / bounds.scale;
+      const p = gesture.params;
+      let next: MaskParamsInfo;
+      if (p.kind === "linear") {
+        const sx = p.x1 ?? 0, sy = p.y1 ?? 0, ex = p.x2 ?? 0, ey = p.y2 ?? 0;
+        if (gesture.handle === "start") {
+          next = { ...p, x1: sx + dx, y1: sy + dy };
+        } else {
+          next = { ...p, x2: ex + dx, y2: ey + dy };
+        }
+      } else {
+        const cx = p.cx ?? 0, cy = p.cy ?? 0, r = p.radius ?? 0;
+        if (gesture.handle === "center") {
+          next = { ...p, cx: cx + dx, cy: cy + dy };
+        } else {
+          // Edge handle: adjust radius based on distance from center
+          const newEdgeX = cx + r + dx;
+          const newEdgeY = cy + dy;
+          const newR = Math.max(1, Math.hypot(newEdgeX - cx, newEdgeY - cy));
+          next = { ...p, radius: newR };
+        }
+      }
+      setDraftMask(next);
+      drawFrame();
       return;
     }
     const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
@@ -533,12 +725,39 @@ const Canvas: Component = () => {
       activePointers.delete(e.pointerId);
     }
     if (
-      gesture?.kind === "crop" &&
+      (gesture?.kind === "crop" || gesture?.kind === "mask") &&
       stageRef &&
       e &&
       stageRef.hasPointerCapture(e.pointerId)
     ) {
       stageRef.releasePointerCapture(e.pointerId);
+    }
+    if (gesture?.kind === "mask") {
+      const mp = draftMask();
+      if (mp) {
+        const idx = state.selectedLayerIdx;
+        if (mp.kind === "linear") {
+          void applyGradientMask({
+            kind: "linear",
+            layer_idx: idx,
+            x1: mp.x1 ?? 0,
+            y1: mp.y1 ?? 0,
+            x2: mp.x2 ?? 0,
+            y2: mp.y2 ?? 0,
+          });
+        } else {
+          void applyGradientMask({
+            kind: "radial",
+            layer_idx: idx,
+            cx: mp.cx ?? 0,
+            cy: mp.cy ?? 0,
+            radius: mp.radius ?? 0,
+          });
+        }
+        setDraftMask(null);
+      }
+      gesture = null;
+      return;
     }
     if (gesture?.kind === "crop") {
       const crop = draftCrop();
@@ -634,6 +853,14 @@ const Canvas: Component = () => {
               <span class="text-white/35">
                 {activeCrop()!.width} × {activeCrop()!.height}
                 {Math.abs(activeCrop()!.rotation) > 0.001 && ` ${Math.round(activeCrop()!.rotation * 180 / Math.PI)}°`}
+              </span>
+            </div>
+          )}
+          {activeMask() && (
+            <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
+              <span>Mask</span>
+              <span class="text-white/35">
+                {activeMask()!.kind === "linear" ? "Linear" : "Radial"}
               </span>
             </div>
           )}
