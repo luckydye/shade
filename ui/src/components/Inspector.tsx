@@ -55,33 +55,104 @@ interface SliderProps {
   accentColor?: string;
 }
 
-const Slider: Component<SliderProps> = (props) => (
-  <div class={props.class ?? "mb-3"}>
-    <div class="mb-1 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
-        <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4">{props.icon}</span>
-        <span>{props.label}</span>
+const Slider: Component<SliderProps> = (props) => {
+  let trackRef!: HTMLDivElement;
+  const [dragging, setDragging] = createSignal(false);
+
+  const fraction = () =>
+    clamp((props.value - props.min) / (props.max - props.min), 0, 1);
+  const defaultFrac = () =>
+    clamp((props.defaultValue - props.min) / (props.max - props.min), 0, 1);
+  const isBipolar = () => defaultFrac() > 0.01 && defaultFrac() < 0.99;
+  const fillLeft = () => Math.min(fraction(), defaultFrac()) * 100;
+  const fillWidth = () => Math.abs(fraction() - defaultFrac()) * 100;
+  const accent = () => props.accentColor ?? "#f5f5f4";
+
+  const resolve = (clientX: number) => {
+    const rect = trackRef.getBoundingClientRect();
+    const t = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const raw = props.min + t * (props.max - props.min);
+    const step = props.step ?? 0.01;
+    return clamp(Math.round(raw / step) * step, props.min, props.max);
+  };
+
+  return (
+    <div class={props.class ?? ""}>
+      <div class="mb-1 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
+          <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4">{props.icon}</span>
+          <span>{props.label}</span>
+        </div>
+        <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">
+          {props.valueLabel ?? props.value.toFixed(2)}
+        </span>
       </div>
-      <span class="text-[11px] font-semibold tracking-[0.03em] text-white/62">
-        {props.valueLabel ?? props.value.toFixed(2)}
-      </span>
+      <div
+        ref={trackRef!}
+        class="relative h-8 cursor-pointer select-none touch-none"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          trackRef.setPointerCapture(e.pointerId);
+          setDragging(true);
+          props.onChange(resolve(e.clientX));
+        }}
+        onPointerMove={(e) => {
+          if (!dragging()) return;
+          props.onChange(resolve(e.clientX));
+        }}
+        onPointerUp={(e) => {
+          if (trackRef.hasPointerCapture(e.pointerId))
+            trackRef.releasePointerCapture(e.pointerId);
+          setDragging(false);
+        }}
+        onDblClick={() => props.onChange(props.defaultValue)}
+      >
+        {/* track */}
+        <div class="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-white/[0.08]" />
+        {/* fill */}
+        <div
+          class="absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full"
+          style={{
+            left: `${fillLeft()}%`,
+            width: `${fillWidth()}%`,
+            background: accent(),
+            opacity: 0.65,
+            transition: dragging()
+              ? "none"
+              : "left 140ms ease-out, width 140ms ease-out",
+          }}
+        />
+        {/* default notch */}
+        <Show when={isBipolar()}>
+          <div
+            class="absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/20"
+            style={{ left: `${defaultFrac() * 100}%` }}
+          />
+        </Show>
+        {/* thumb */}
+        <div
+          class="absolute top-1/2"
+          style={{
+            left: `${fraction() * 100}%`,
+            transform: `translate(-50%, -50%) scale(${dragging() ? 1.2 : 1})`,
+            transition: dragging()
+              ? "none"
+              : "left 140ms ease-out, transform 100ms ease-out",
+          }}
+        >
+          <div
+            class="h-[14px] w-[14px] rounded-full border-2 border-[#111111]"
+            style={{
+              background: accent(),
+              "box-shadow":
+                "0 0 0 1px rgb(255 255 255 / 0.1), 0 1px 3px rgb(0 0 0 / 0.4)",
+            }}
+          />
+        </div>
+      </div>
     </div>
-    <input
-      type="range"
-      min={props.min}
-      max={props.max}
-      step={props.step ?? 0.01}
-      value={props.value}
-      onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))}
-      onDblClick={() => props.onChange(props.defaultValue)}
-      class="slider h-2 w-full cursor-pointer appearance-none rounded-full"
-      style={{
-        "accent-color": props.accentColor ?? "#ffffff",
-        "--slider-accent": props.accentColor ?? "#ffffff",
-      }}
-    />
-  </div>
-);
+  );
+};
 
 const CURVE_SAMPLE_INDICES = [64, 128, 192] as const;
 const IDENTITY_LUT = Array.from({ length: 256 }, (_, idx) => idx / 255);

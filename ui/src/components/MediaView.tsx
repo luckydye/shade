@@ -741,12 +741,6 @@ export const MediaView: Component = () => {
     <div class="mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0">
       <div class="border-b border-white/6 px-6 py-4">
         <div class="flex flex-col gap-4">
-          <div class="flex items-center gap-3">
-            <h1 class="text-sm font-medium text-white/80">Media</h1>
-            <p class="truncate font-mono text-xs text-white/40">
-              {shortPeerId(p2pState.local_endpoint_id || "starting")}
-            </p>
-          </div>
           <div class="flex items-center gap-8">
             <h1 class="hidden text-sm font-medium text-white/80 md:block">Libraries</h1>
             <div class="flex flex-1 gap-2 overflow-x-auto">
