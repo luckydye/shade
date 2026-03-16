@@ -830,7 +830,7 @@ const Canvas: Component = () => {
                   ? "active-editor-media"
                   : "none",
             }}
-            class={`bg-[#111111] ${
+            class={`${
               state.layers.length === 0 ? "opacity-0" : "opacity-100"
             }`}
           />

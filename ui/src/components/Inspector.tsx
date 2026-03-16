@@ -1926,7 +1926,7 @@ const Inspector: Component = () => {
 
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
-      <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
+      <div class="hidden h-full border border-white/6 bg-[#111111]/92 lg:flex lg:flex-col m-2 rounded-md">
         <div class="flex-1 overflow-y-auto px-4 py-2">
           <DesktopEditPanel />
           {inspectorTab() === "presets" ? (
@@ -2085,7 +2085,7 @@ const Inspector: Component = () => {
           onClick={() => setIsPickerOpen(false)}
         >
           <div
-            class="mx-6 w-full max-w-xs rounded-2xl border border-white/10 bg-[#111111] p-5 shadow-2xl"
+            class="mx-6 w-full max-w-xs rounded-2xl border border-white/10 p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div class="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-white/30">
