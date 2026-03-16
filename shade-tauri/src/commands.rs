@@ -2625,7 +2625,7 @@ async fn build_library_listing<R: tauri::Runtime>(
         return tokio::task::spawn_blocking(|| {
             let ptr = unsafe { ios_list_photos() };
             if ptr.is_null() {
-                return Ok(vec![]);
+                return Ok(LibraryImageListing { items: vec![], is_complete: true });
             }
             let json = unsafe {
                 let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
