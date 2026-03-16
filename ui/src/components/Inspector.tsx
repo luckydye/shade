@@ -657,10 +657,27 @@ const Inspector: Component = () => {
     }
     const containerBounds = container.getBoundingClientRect();
     const rowBounds = row.getBoundingClientRect();
+    const rows = Array.from(
+      container.querySelectorAll<HTMLDivElement>("[data-layer-idx]"),
+    );
+    const rowIndex = rows.findIndex(
+      (candidate) => Number(candidate.dataset.layerIdx) === target.layerIdx,
+    );
+    if (rowIndex < 0) {
+      return { opacity: 0 };
+    }
+    const previousRow = rows[rowIndex - 1];
+    const nextRow = rows[rowIndex + 1];
     const top =
       target.position === "before"
-        ? rowBounds.top - containerBounds.top
-        : rowBounds.bottom - containerBounds.top;
+        ? previousRow
+          ? (previousRow.getBoundingClientRect().bottom + rowBounds.top) * 0.5 -
+            containerBounds.top
+          : rowBounds.top - containerBounds.top
+        : nextRow
+          ? (rowBounds.bottom + nextRow.getBoundingClientRect().top) * 0.5 -
+            containerBounds.top
+          : rowBounds.bottom - containerBounds.top;
     return {
       opacity: 1,
       transform: `translateY(${top}px)`,
@@ -1755,7 +1772,7 @@ const Inspector: Component = () => {
         </div>
         <div
           ref={desktopLayerListRef}
-          class="relative mt-3 flex flex-col gap-1"
+          class="relative mt-3 flex flex-col gap-[2px]"
         >
           <div
             class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-blue-400 transition-opacity"
@@ -1910,7 +1927,7 @@ const Inspector: Component = () => {
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border-l border-white/6 bg-[#111111]/92 lg:flex lg:flex-col">
-        <div class="flex-1 overflow-y-auto px-4 py-4">
+        <div class="flex-1 overflow-y-auto px-4 py-2">
           <DesktopEditPanel />
           {inspectorTab() === "presets" ? (
             <PresetsPanel />
