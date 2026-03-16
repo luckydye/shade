@@ -9,38 +9,29 @@ struct GrainParams {
 @group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: GrainParams;
 
-// High-quality hash returning a value in [0, 1)
-fn hash2(p: vec2<f32>) -> f32 {
-    var q = fract(p * vec2<f32>(127.1, 311.7));
-    q += dot(q, q.yx + 19.19);
-    return fract((q.x + q.y) * q.x);
+// PCG hash — much higher quality than float hash tricks, no visible patterns
+fn pcg(v: u32) -> u32 {
+    let state = v * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-// Box-Muller transform: two uniform samples → Gaussian sample (mean=0, stddev=1)
-fn gaussian(u1: f32, u2: f32) -> f32 {
-    let eps = 0.0001;
-    let safe_u1 = max(u1, eps);
-    return sqrt(-2.0 * log(safe_u1)) * cos(6.28318530718 * u2);
+fn u32_to_f01(h: u32) -> f32 {
+    return f32(h) * (1.0 / 4294967296.0);
 }
 
-// Sample one Gaussian noise value for a given pixel coordinate + channel offset
-fn film_grain(coord: vec2<f32>, channel_offset: f32) -> f32 {
-    let base = coord + vec2<f32>(params.seed * 13.7 + channel_offset, params.seed * 7.3 + channel_offset * 1.7);
+// Returns a Gaussian sample (mean=0, stddev=1) for the given pixel+channel
+fn gaussian_grain(px: vec2<u32>, channel: u32) -> f32 {
+    let seed_u = bitcast<u32>(params.seed);
+    // Mix all inputs into a single seed, avoiding trivial collisions
+    let key = px.x ^ (px.y * 2654435761u) ^ (channel * 1234567891u) ^ (seed_u * 3266489917u);
+    let h1 = pcg(key);
+    let h2 = pcg(h1 ^ 2891336453u);
 
-    // Two independent uniform samples for Box-Muller
-    let u1 = hash2(base);
-    let u2 = hash2(base + vec2<f32>(53.1, 91.7));
-
-    // Mix in a second coarser octave (2x scale) to simulate crystal clustering
-    let coarse_base = floor(coord * 0.5) + vec2<f32>(params.seed * 13.7 + channel_offset, params.seed * 7.3);
-    let u3 = hash2(coarse_base);
-    let u4 = hash2(coarse_base + vec2<f32>(37.3, 61.1));
-
-    let fine   = gaussian(u1, u2);
-    let coarse = gaussian(u3, u4);
-
-    // 70% fine, 30% coarse — mimics silver halide crystal structure
-    return fine * 0.7 + coarse * 0.3;
+    // Box-Muller: two uniform → one Gaussian
+    let u1 = max(u32_to_f01(h1), 0.00001);
+    let u2 = u32_to_f01(h2);
+    return sqrt(-2.0 * log(u1)) * cos(6.28318530718 * u2);
 }
 
 @compute @workgroup_size(16, 16)
@@ -49,26 +40,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
 
+    // Grain coordinate: size > 1 groups pixels into blocks (coarser grain)
+    let grain_px = vec2<u32>(gid.xy) / u32(max(params.size, 1.0));
+
+    // Independent Gaussian noise per channel — film emulsion layers are independent
+    let gr = gaussian_grain(grain_px, 0u);
+    let gg = gaussian_grain(grain_px, 1u);
+    let gb = gaussian_grain(grain_px, 2u);
+
     let luma = dot(c.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
 
-    // Grain coordinate respects the size param (larger size = blockier grain)
-    let grain_coord = floor(vec2<f32>(gid.xy) / params.size);
+    // Tonal weighting: grain peaks in midtones, rolls off in deep shadows and
+    // bright highlights. roughness controls how aggressively it rolls off.
+    let shadow_lift    = smoothstep(0.0, 0.25, luma);
+    let highlight_drop = smoothstep(1.0, 0.65, luma);
+    let tonal_weight   = mix(1.0, shadow_lift * highlight_drop, params.roughness);
 
-    // Separate grain per channel — each film emulsion layer has independent grain
-    let gr = film_grain(grain_coord, 0.0);
-    let gg = film_grain(grain_coord, 100.0);
-    let gb = film_grain(grain_coord, 200.0);
-
-    // Luminance weighting: film grain peaks in midtones (~0.4 luma), rolls off
-    // in deep shadows (underexposed = less grain) and in bright highlights.
-    // roughness controls how strongly grain avoids the extremes.
-    let shadow_rolloff    = smoothstep(0.0, 0.2, luma);
-    let highlight_rolloff = smoothstep(1.0, 0.7, luma);
-    let tonal_weight = mix(1.0, shadow_rolloff * highlight_rolloff, params.roughness);
-
-    // Gaussian noise has stddev ≈ 1; scale so amount=1 gives visible but not
-    // overwhelming grain (0.08 is roughly equivalent to ISO 3200 film).
-    let scale = params.amount * 0.08 * tonal_weight;
+    // Stddev ≈ 1 from Gaussian; 0.05 maps amount=1 to strong but realistic grain
+    let scale = params.amount * 0.05 * tonal_weight;
 
     c = vec4<f32>(
         c.r + gr * scale,
