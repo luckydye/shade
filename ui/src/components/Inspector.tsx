@@ -56,7 +56,7 @@ interface SliderProps {
 }
 
 const Slider: Component<SliderProps> = (props) => (
-  <div class={props.class ?? ""}>
+  <div class={props.class ?? "mb-3"}>
     <div class="mb-1 flex items-center justify-between gap-3">
       <div class="flex items-center gap-2 text-[13px] font-medium text-white/82">
         <span class="text-white/42 [&>svg]:h-4 [&>svg]:w-4">{props.icon}</span>
@@ -1684,7 +1684,7 @@ const Inspector: Component = () => {
                     <div class="px-1">{renderLayerBody()}</div>
                     
                     {/* Layer tabs + add button */}
-                    <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 py-3">
+                    <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 py-3">
                       {adjustmentLayers().map(({ idx }) => {
                         const focus = () => layerFocusTypes().get(idx) ?? "light";
                         const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
