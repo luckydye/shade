@@ -1922,6 +1922,7 @@ pub struct EditParams {
     pub vignette_amount: Option<f32>,
     pub sharpen_amount: Option<f32>,
     pub grain_amount: Option<f32>,
+    pub grain_size: Option<f32>,
     pub red_hue: Option<f32>,
     pub red_sat: Option<f32>,
     pub red_lum: Option<f32>,
@@ -2056,9 +2057,13 @@ pub async fn apply_edit(
                         }
                     }
                     "grain" => {
+                        let existing = ops.iter().find_map(|op| {
+                            if let AdjustmentOp::Grain(p) = op { Some(*p) } else { None }
+                        }).unwrap_or_default();
                         let next = AdjustmentOp::Grain(GrainParams {
-                            amount: params.grain_amount.unwrap_or(0.0),
-                            ..Default::default()
+                            amount: params.grain_amount.unwrap_or(existing.amount),
+                            size: params.grain_size.unwrap_or(existing.size),
+                            ..existing
                         });
                         if let Some(op) = ops
                             .iter_mut()
@@ -2315,6 +2320,7 @@ pub struct SharpenValues {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GrainValues {
     pub amount: f32,
+    pub size: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3001,6 +3007,7 @@ pub async fn get_layer_stack(
                             AdjustmentOp::Grain(params) => {
                                 adjustments.grain = Some(GrainValues {
                                     amount: params.amount,
+                                    size: params.size,
                                 });
                             }
                             AdjustmentOp::Hsl(params) => {

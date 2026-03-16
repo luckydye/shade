@@ -99,7 +99,7 @@ const DEFAULT_COLOR = {
 } as const;
 const DEFAULT_VIGNETTE = { amount: 0 } as const;
 const DEFAULT_SHARPEN = { amount: 0 } as const;
-const DEFAULT_GRAIN = { amount: 0 } as const;
+const DEFAULT_GRAIN = { amount: 0, size: 1 } as const;
 const DEFAULT_DENOISE = { luma_strength: 0, chroma_strength: 0, mode: 0 } as const;
 const DEFAULT_CURVES = {
   lut_r: IDENTITY_LUT,
@@ -1159,23 +1159,43 @@ const Inspector: Component = () => {
         return <CurvesEditor />;
       case "grain":
         return (
-          <Slider
-            label="Grain"
-            icon={<GrainIcon />}
-            value={grain().amount}
-            defaultValue={DEFAULT_GRAIN.amount}
-            valueLabel={valueLabel(grain().amount)}
-            min={0}
-            max={1}
-            onChange={(value) => {
-              selectedAdjustmentLayerOrThrow();
-              void applyEdit({
-                layer_idx: state.selectedLayerIdx,
-                op: "grain",
-                grain_amount: value,
-              });
-            }}
-          />
+          <>
+            <Slider
+              label="Grain"
+              icon={<GrainIcon />}
+              value={grain().amount}
+              defaultValue={DEFAULT_GRAIN.amount}
+              valueLabel={valueLabel(grain().amount)}
+              min={0}
+              max={1}
+              onChange={(value) => {
+                selectedAdjustmentLayerOrThrow();
+                void applyEdit({
+                  layer_idx: state.selectedLayerIdx,
+                  op: "grain",
+                  grain_amount: value,
+                });
+              }}
+            />
+            <Slider
+              label="Size"
+              icon={<GrainIcon />}
+              value={grain().size ?? DEFAULT_GRAIN.size}
+              defaultValue={DEFAULT_GRAIN.size}
+              valueLabel={`${(grain().size ?? DEFAULT_GRAIN.size).toFixed(1)}`}
+              min={1}
+              max={8}
+              step={0.01}
+              onChange={(value) => {
+                selectedAdjustmentLayerOrThrow();
+                void applyEdit({
+                  layer_idx: state.selectedLayerIdx,
+                  op: "grain",
+                  grain_size: value,
+                });
+              }}
+            />
+          </>
         );
       case "vignette":
         return (
@@ -1837,6 +1857,24 @@ const Inspector: Component = () => {
                           layer_idx: state.selectedLayerIdx,
                           op: "grain",
                           grain_amount: value,
+                        });
+                      }}
+                    />
+                    <Slider
+                      label="Grain Size"
+                      icon={<GrainIcon />}
+                      value={grain().size ?? DEFAULT_GRAIN.size}
+                      defaultValue={DEFAULT_GRAIN.size}
+                      valueLabel={`${(grain().size ?? DEFAULT_GRAIN.size).toFixed(1)}`}
+                      min={1}
+                      max={8}
+                      step={0.01}
+                      onChange={(value) => {
+                        selectedAdjustmentLayerOrThrow();
+                        void applyEdit({
+                          layer_idx: state.selectedLayerIdx,
+                          op: "grain",
+                          grain_size: value,
                         });
                       }}
                     />

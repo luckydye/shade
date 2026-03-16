@@ -128,7 +128,7 @@ function applyAdjustmentLayerEdit(layerIdx: number, params: Record<string, unkno
     case "grain":
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
-        grain: { amount: params.grain_amount as number },
+        grain: { amount: params.grain_amount as number, size: params.grain_size as number },
       });
       return;
     case "hsl":

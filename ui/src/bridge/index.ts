@@ -160,7 +160,7 @@ export interface AdjustmentValues {
   color: ColorValues | null;
   vignette: { amount: number } | null;
   sharpen: { amount: number } | null;
-  grain: { amount: number } | null;
+  grain: { amount: number; size: number } | null;
   hsl: HslValues | null;
   denoise: { luma_strength: number; chroma_strength: number; mode: number } | null;
 }
