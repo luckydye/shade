@@ -1936,6 +1936,7 @@ pub struct EditParams {
     pub crop_y: Option<f32>,
     pub crop_width: Option<f32>,
     pub crop_height: Option<f32>,
+    pub crop_rotation: Option<f32>,
     pub denoise_luma_strength: Option<f32>,
     pub denoise_chroma_strength: Option<f32>,
     pub denoise_mode: Option<u32>,
@@ -1965,6 +1966,7 @@ pub async fn apply_edit(
                         y: params.crop_y.ok_or("missing crop_y")?,
                         width: params.crop_width.ok_or("missing crop_width")?,
                         height: params.crop_height.ok_or("missing crop_height")?,
+                        rotation: params.crop_rotation.unwrap_or(rect.rotation),
                     },
                     canvas_width,
                     canvas_height,
@@ -2155,6 +2157,7 @@ pub async fn add_layer(
                 y: 0.0,
                 width: canvas_width as f32,
                 height: canvas_height as f32,
+                rotation: 0.0,
             }),
             _ => return Err(format!("unknown layer kind: {kind}")),
         }
@@ -2258,6 +2261,7 @@ pub struct CropValues {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub rotation: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -2941,6 +2945,7 @@ pub async fn get_layer_stack(
                     y: rect.y,
                     width: rect.width,
                     height: rect.height,
+                    rotation: rect.rotation,
                 }),
                 _ => None,
             },
@@ -3064,5 +3069,6 @@ fn normalize_crop_rect(
         y,
         width,
         height,
+        rotation: rect.rotation,
     })
 }

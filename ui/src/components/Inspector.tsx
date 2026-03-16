@@ -880,8 +880,9 @@ const Inspector: Component = () => {
       y: 0,
       width: state.canvasWidth,
       height: state.canvasHeight,
+      rotation: 0,
     };
-  const setCropField = (field: "x" | "y" | "width" | "height", value: number) => {
+  const setCropField = (field: "x" | "y" | "width" | "height" | "rotation", value: number) => {
     if (!Number.isFinite(value)) {
       throw new Error(`crop ${field} must be a finite number`);
     }
@@ -896,6 +897,7 @@ const Inspector: Component = () => {
       crop_y: field === "y" ? value : crop.y,
       crop_width: field === "width" ? value : crop.width,
       crop_height: field === "height" ? value : crop.height,
+      crop_rotation: field === "rotation" ? value : crop.rotation,
     });
   };
 
@@ -1319,6 +1321,19 @@ const Inspector: Component = () => {
               />
             </label>
           ))}
+          <label class="col-span-2 flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/36">
+            <span>Rotation</span>
+            <input
+              type="number"
+              value={Math.round(crop().rotation * 180 / Math.PI * 10) / 10}
+              disabled={!selectedCropLayer()}
+              step="0.5"
+              onInput={(event) =>
+                setCropField("rotation", event.currentTarget.valueAsNumber * Math.PI / 180)
+              }
+              class="min-h-10 border border-white/8 bg-black/30 px-3 text-[13px] font-medium text-white outline-none transition-colors disabled:opacity-45"
+            />
+          </label>
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
           <Show
@@ -1357,6 +1372,7 @@ const Inspector: Component = () => {
                   crop_y: 0,
                   crop_width: state.canvasWidth,
                   crop_height: state.canvasHeight,
+                  crop_rotation: 0,
                 });
               }}
               class="min-h-10 border border-white/8 bg-white/[0.04] px-3 text-[12px] font-semibold text-white/80 transition-colors hover:border-white/12 hover:bg-white/[0.08] hover:text-white"
@@ -1917,6 +1933,61 @@ const Inspector: Component = () => {
                       }}
                     />
                   </div>
+          
+                  {/* Layer tabs + add button */}
+                  <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-4 pt-3">
+                    {adjustmentLayers().map(({ idx }) => {
+                      const focus = () => layerFocusTypes().get(idx) ?? "tone";
+                      const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            selectLayer(idx);
+                            setIsDrawerOpen(true);
+                            setIsPickerOpen(false);
+                          }}
+                          class={`flex min-w-[3.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+                            isActive() ? "text-stone-100" : "text-white/34"
+                          }`}
+                        >
+                          <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
+                          <span>{focusLabels[focus()]}</span>
+                        </button>
+                      );
+                    })}
+          
+                    <div class="flex-1"></div>
+          
+                    <button
+                      type="button"
+                      onClick={() => setIsPickerOpen((v) => !v)}
+                      class={`ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
+                        isPickerOpen() ? "text-stone-100" : "text-white/34"
+                      }`}
+                    >
+                      <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
+                        +
+                      </span>
+                      <span>Add</span>
+                    </button>
+          
+                    <Show
+                      when={
+                        state.selectedLayerIdx >= 0 &&
+                        state.layers[state.selectedLayerIdx]?.kind !== "image"
+                      }
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteSelectedLayer()}
+                        class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
+                      >
+                        <TrashIcon />
+                        <span>Delete</span>
+                      </button>
+                    </Show>
+                  </div>
                 </Show>
               }
             >
@@ -1967,61 +2038,6 @@ const Inspector: Component = () => {
             <div class="px-1">
               <PresetsPanel />
             </div>
-          </Show>
-        </div>
-
-        {/* Layer tabs + add button */}
-        <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 px-4 pb-4 pt-3">
-          {adjustmentLayers().map(({ idx }) => {
-            const focus = () => layerFocusTypes().get(idx) ?? "tone";
-            const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
-            return (
-              <button
-                type="button"
-                onClick={() => {
-                  selectLayer(idx);
-                  setIsDrawerOpen(true);
-                  setIsPickerOpen(false);
-                }}
-                class={`flex min-w-[3.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
-                  isActive() ? "text-stone-100" : "text-white/34"
-                }`}
-              >
-                <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
-                <span>{focusLabels[focus()]}</span>
-              </button>
-            );
-          })}
-
-          <div class="flex-1"></div>
-
-          <button
-            type="button"
-            onClick={() => setIsPickerOpen((v) => !v)}
-            class={`ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
-              isPickerOpen() ? "text-stone-100" : "text-white/34"
-            }`}
-          >
-            <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
-              +
-            </span>
-            <span>Add</span>
-          </button>
-
-          <Show
-            when={
-              state.selectedLayerIdx >= 0 &&
-              state.layers[state.selectedLayerIdx]?.kind !== "image"
-            }
-          >
-            <button
-              type="button"
-              onClick={() => void handleDeleteSelectedLayer()}
-              class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
-            >
-              <TrashIcon />
-              <span>Delete</span>
-            </button>
           </Show>
         </div>
 

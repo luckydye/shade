@@ -158,6 +158,10 @@ enum Commands {
         /// Crop height in source pixels.
         #[arg(long)]
         crop_height: Option<f32>,
+
+        /// Crop rotation in radians.
+        #[arg(long, default_value_t = 0.0)]
+        crop_rotation: f32,
     },
 }
 
@@ -175,6 +179,7 @@ fn preview_crop_from_args(
                 y,
                 width,
                 height,
+                rotation: 0.0,
             };
             if rect.width <= 0.0 || rect.height <= 0.0 {
                 anyhow::bail!("crop_width and crop_height must be > 0");
@@ -381,6 +386,7 @@ async fn main() -> Result<()> {
             crop_y,
             crop_width,
             crop_height,
+            crop_rotation: _,
         } => {
             log::info!("Loading image: {}", input.display());
             let (pixels, width, height) = load_image(&input)?;

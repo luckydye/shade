@@ -464,8 +464,8 @@ impl Renderer {
                                 height: current_view.height,
                                 target_width: target_width as f32,
                                 target_height: target_height as f32,
-                                _pad0: 0.0,
-                                _pad1: 0.0,
+                                cos_r: 1.0,
+                                sin_r: 0.0,
                             },
                         )?
                     } else {
@@ -491,8 +491,8 @@ impl Renderer {
                             height: relative_crop.height,
                             target_width: target_width as f32,
                             target_height: target_height as f32,
-                            _pad0: 0.0,
-                            _pad1: 0.0,
+                            cos_r: rect.rotation.cos(),
+                            sin_r: rect.rotation.sin(),
                         },
                     )?
                 }
@@ -930,6 +930,7 @@ fn crop_rect_to_target_space(
             * target_height as f32,
         width: (intersection.width / current_view.width) * target_width as f32,
         height: (intersection.height / current_view.height) * target_height as f32,
+        rotation: rect.rotation,
     })
 }
 

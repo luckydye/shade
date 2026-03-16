@@ -22,7 +22,8 @@ type CropHandle =
   | "bottom-right"
   | "bottom"
   | "bottom-left"
-  | "left";
+  | "left"
+  | "rotate";
 
 interface ImageBounds {
   x: number;
@@ -92,6 +93,7 @@ const Canvas: Component = () => {
     y: number;
     width: number;
     height: number;
+    rotation: number;
   } | null>(null);
   let gesture:
     | { kind: "pan"; x: number; y: number }
@@ -101,7 +103,7 @@ const Canvas: Component = () => {
         handle: CropHandle;
         startX: number;
         startY: number;
-        crop: { x: number; y: number; width: number; height: number };
+        crop: { x: number; y: number; width: number; height: number; rotation: number };
       }
     | null = null;
 
@@ -118,15 +120,32 @@ const Canvas: Component = () => {
     if (bounds.scale <= 0) return null;
     const draft = activeCrop();
     if (!draft) return null;
+    const cx = bounds.x + (draft.x + draft.width * 0.5) * bounds.scale;
+    const cy = bounds.y + (draft.y + draft.height * 0.5) * bounds.scale;
+    const cos = Math.cos(-draft.rotation);
+    const sin = Math.sin(-draft.rotation);
+    const dx = x - cx;
+    const dy = y - cy;
+    const lx = dx * cos - dy * sin + cx;
+    const ly = dx * sin + dy * cos + cy;
+    // Rotate handle: 30px above top-center
+    const rotHandleX = cx;
+    const rotHandleY = cy - (draft.height * 0.5) * bounds.scale - 30;
+    // Check rotate handle in unrotated space (rotate the handle position back)
+    const rhDx = rotHandleX - cx;
+    const rhDy = rotHandleY - cy;
+    const rhScreenX = cx + rhDx * Math.cos(draft.rotation) - rhDy * Math.sin(draft.rotation);
+    const rhScreenY = cy + rhDx * Math.sin(draft.rotation) + rhDy * Math.cos(draft.rotation);
+    if (Math.hypot(x - rhScreenX, y - rhScreenY) <= HANDLE_SIZE + 4) return "rotate" as CropHandle;
     const left = bounds.x + draft.x * bounds.scale;
     const top = bounds.y + draft.y * bounds.scale;
     const right = left + draft.width * bounds.scale;
     const bottom = top + draft.height * bounds.scale;
-    const nearLeft = Math.abs(x - left) <= HANDLE_SIZE;
-    const nearRight = Math.abs(x - right) <= HANDLE_SIZE;
-    const nearTop = Math.abs(y - top) <= HANDLE_SIZE;
-    const nearBottom = Math.abs(y - bottom) <= HANDLE_SIZE;
-    const inside = x >= left && x <= right && y >= top && y <= bottom;
+    const nearLeft = Math.abs(lx - left) <= HANDLE_SIZE;
+    const nearRight = Math.abs(lx - right) <= HANDLE_SIZE;
+    const nearTop = Math.abs(ly - top) <= HANDLE_SIZE;
+    const nearBottom = Math.abs(ly - bottom) <= HANDLE_SIZE;
+    const inside = lx >= left && lx <= right && ly >= top && ly <= bottom;
     if (nearLeft && nearTop) return "top-left";
     if (nearRight && nearTop) return "top-right";
     if (nearRight && nearBottom) return "bottom-right";
@@ -149,43 +168,62 @@ const Canvas: Component = () => {
     if (bounds.scale <= 0) return;
     const draft = activeCrop();
     if (!draft) return;
-    const left = bounds.x + draft.x * bounds.scale;
-    const top = bounds.y + draft.y * bounds.scale;
     const width = draft.width * bounds.scale;
     const height = draft.height * bounds.scale;
+    const cx = bounds.x + (draft.x + draft.width * 0.5) * bounds.scale;
+    const cy = bounds.y + (draft.y + draft.height * 0.5) * bounds.scale;
     ctx.save();
+    // Dimmed overlay with rotated cutout
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.beginPath();
     ctx.rect(0, 0, cssWidth, cssHeight);
-    ctx.rect(left, top, width, height);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(draft.rotation);
+    ctx.rect(-width / 2, -height / 2, width, height);
+    ctx.restore();
     ctx.fill("evenodd");
+    // Draw crop rect and grid in rotated space
+    ctx.translate(cx, cy);
+    ctx.rotate(draft.rotation);
     ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
     ctx.lineWidth = 1;
-    ctx.strokeRect(left, top, width, height);
+    ctx.strokeRect(-width / 2, -height / 2, width, height);
     ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
     ctx.beginPath();
-    ctx.moveTo(left + width / 3, top);
-    ctx.lineTo(left + width / 3, top + height);
-    ctx.moveTo(left + (width * 2) / 3, top);
-    ctx.lineTo(left + (width * 2) / 3, top + height);
-    ctx.moveTo(left, top + height / 3);
-    ctx.lineTo(left + width, top + height / 3);
-    ctx.moveTo(left, top + (height * 2) / 3);
-    ctx.lineTo(left + width, top + (height * 2) / 3);
+    ctx.moveTo(-width / 2 + width / 3, -height / 2);
+    ctx.lineTo(-width / 2 + width / 3, height / 2);
+    ctx.moveTo(-width / 2 + (width * 2) / 3, -height / 2);
+    ctx.lineTo(-width / 2 + (width * 2) / 3, height / 2);
+    ctx.moveTo(-width / 2, -height / 2 + height / 3);
+    ctx.lineTo(width / 2, -height / 2 + height / 3);
+    ctx.moveTo(-width / 2, -height / 2 + (height * 2) / 3);
+    ctx.lineTo(width / 2, -height / 2 + (height * 2) / 3);
     ctx.stroke();
+    // Corner and edge handles
     ctx.fillStyle = "#ffffff";
-    for (const [handleX, handleY] of [
-      [left, top],
-      [left + width / 2, top],
-      [left + width, top],
-      [left + width, top + height / 2],
-      [left + width, top + height],
-      [left + width / 2, top + height],
-      [left, top + height],
-      [left, top + height / 2],
+    for (const [hx, hy] of [
+      [-width / 2, -height / 2],
+      [0, -height / 2],
+      [width / 2, -height / 2],
+      [width / 2, 0],
+      [width / 2, height / 2],
+      [0, height / 2],
+      [-width / 2, height / 2],
+      [-width / 2, 0],
     ]) {
-      ctx.fillRect(handleX - 3, handleY - 3, 6, 6);
+      ctx.fillRect(hx - 3, hy - 3, 6, 6);
     }
+    // Rotation handle: circle above top-center
+    ctx.beginPath();
+    ctx.arc(0, -height / 2 - 30, 5, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.beginPath();
+    ctx.moveTo(0, -height / 2);
+    ctx.lineTo(0, -height / 2 - 25);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -372,9 +410,25 @@ const Canvas: Component = () => {
     if (bounds.scale <= 0) {
       throw new Error("crop mode requires visible image bounds");
     }
-    const deltaX = Math.round((e.clientX - gesture.startX) / bounds.scale);
-    const deltaY = Math.round((e.clientY - gesture.startY) / bounds.scale);
     const start = gesture.crop;
+    if (gesture.handle === "rotate") {
+      const cx = bounds.x + (start.x + start.width * 0.5) * bounds.scale;
+      const cy = bounds.y + (start.y + start.height * 0.5) * bounds.scale;
+      const rect = stageRef.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const angle = Math.atan2(mx - cx, -(my - cy));
+      setDraftCrop({ ...start, rotation: angle });
+      drawFrame();
+      return;
+    }
+    // Project screen delta into crop-local axes
+    const rawDx = (e.clientX - gesture.startX) / bounds.scale;
+    const rawDy = (e.clientY - gesture.startY) / bounds.scale;
+    const cos = Math.cos(-start.rotation);
+    const sin = Math.sin(-start.rotation);
+    const deltaX = Math.round(rawDx * cos - rawDy * sin);
+    const deltaY = Math.round(rawDx * sin + rawDy * cos);
     let next = start;
     switch (gesture.handle) {
       case "move":
@@ -386,6 +440,7 @@ const Canvas: Component = () => {
         break;
       case "top-left":
         next = {
+          ...start,
           x: start.x + deltaX,
           y: start.y + deltaY,
           width: start.width - deltaX,
@@ -397,6 +452,7 @@ const Canvas: Component = () => {
         break;
       case "top-right":
         next = {
+          ...start,
           x: start.x,
           y: start.y + deltaY,
           width: start.width + deltaX,
@@ -418,6 +474,7 @@ const Canvas: Component = () => {
         break;
       case "bottom-left":
         next = {
+          ...start,
           x: start.x + deltaX,
           y: start.y,
           width: start.width - deltaX,
@@ -426,6 +483,7 @@ const Canvas: Component = () => {
         break;
       case "left":
         next = {
+          ...start,
           x: start.x + deltaX,
           y: start.y,
           width: start.width - deltaX,
@@ -438,6 +496,7 @@ const Canvas: Component = () => {
       y: Math.max(0, next.y),
       width: Math.max(1, next.width),
       height: Math.max(1, next.height),
+      rotation: next.rotation,
     });
     drawFrame();
   };
@@ -461,6 +520,7 @@ const Canvas: Component = () => {
           crop_y: crop.y,
           crop_width: crop.width,
           crop_height: crop.height,
+          crop_rotation: crop.rotation,
         });
       }
     }
@@ -530,6 +590,7 @@ const Canvas: Component = () => {
               <span>Crop</span>
               <span class="text-white/35">
                 {activeCrop()!.width} × {activeCrop()!.height}
+                {Math.abs(activeCrop()!.rotation) > 0.001 && ` ${Math.round(activeCrop()!.rotation * 180 / Math.PI)}°`}
               </span>
             </div>
           )}

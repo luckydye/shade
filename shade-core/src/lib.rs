@@ -336,6 +336,7 @@ pub struct CropRect {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub rotation: f32,
 }
 
 /// A layer in the edit stack.

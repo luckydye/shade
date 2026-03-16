@@ -38,7 +38,7 @@ function clearLoadedImageState() {
     previewRenderHeight: 0,
     previewDisplayColorSpace: "Unknown",
     sourceBitDepth: "Unknown",
-    crop: { x: 0, y: 0, width: 0, height: 0 },
+    crop: { x: 0, y: 0, width: 0, height: 0, rotation: 0 },
     cropDraft: null,
     isCropMode: false,
   });

@@ -69,6 +69,7 @@ function applyCropLayerEdit(layerIdx: number, params: Record<string, unknown>) {
     y: params.crop_y as number,
     width: params.crop_width as number,
     height: params.crop_height as number,
+    rotation: (params.crop_rotation as number | undefined) ?? state.layers[layerIdx]?.crop?.rotation ?? 0,
   });
 }
 
@@ -215,6 +216,7 @@ export function updateCropDraft(next: {
   y: number;
   width: number;
   height: number;
+  rotation: number;
 }) {
   if (!state.isCropMode) {
     throw new Error("cannot update crop draft when crop mode is inactive");

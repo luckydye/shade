@@ -39,8 +39,8 @@ pub struct CropUniform {
     pub height: f32,
     pub target_width: f32,
     pub target_height: f32,
-    pub _pad0: f32,
-    pub _pad1: f32,
+    pub cos_r: f32,
+    pub sin_r: f32,
 }
 
 // ─── Helper: create a simple 3-binding compute pipeline ──────────────────────

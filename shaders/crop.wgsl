@@ -5,8 +5,8 @@ struct CropParams {
   height: f32,
   target_width: f32,
   target_height: f32,
-  _pad0: f32,
-  _pad1: f32,
+  cos_r: f32,
+  sin_r: f32,
 }
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -20,14 +20,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
 
+  let in_size = textureDimensions(input_tex);
+  let center_x = params.x + params.width * 0.5;
+  let center_y = params.y + params.height * 0.5;
   let u = (f32(gid.x) + 0.5) / params.target_width;
   let v = (f32(gid.y) + 0.5) / params.target_height;
-  let src_x = clamp(params.x + u * params.width - 0.5, params.x, params.x + params.width - 1.0);
-  let src_y = clamp(params.y + v * params.height - 0.5, params.y, params.y + params.height - 1.0);
+  let lu = (u - 0.5) * params.width;
+  let lv = (v - 0.5) * params.height;
+  let rx = lu * params.cos_r + lv * params.sin_r;
+  let ry = -lu * params.sin_r + lv * params.cos_r;
+  let src_x = clamp(center_x + rx - 0.5, 0.0, f32(in_size.x) - 1.0);
+  let src_y = clamp(center_y + ry - 0.5, 0.0, f32(in_size.y) - 1.0);
   let x0 = u32(floor(src_x));
   let y0 = u32(floor(src_y));
-  let x1 = min(x0 + 1u, u32(params.x + params.width - 1.0));
-  let y1 = min(y0 + 1u, u32(params.y + params.height - 1.0));
+  let x1 = min(x0 + 1u, u32(in_size.x) - 1u);
+  let y1 = min(y0 + 1u, u32(in_size.y) - 1u);
   let wx = src_x - f32(x0);
   let wy = src_y - f32(y0);
   let top_left = textureLoad(input_tex, vec2<i32>(i32(x0), i32(y0)), 0);

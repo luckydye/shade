@@ -188,6 +188,7 @@ export interface CropValues {
   y: number;
   width: number;
   height: number;
+  rotation: number;
 }
 
 export type PreviewFrame =
