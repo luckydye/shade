@@ -27,6 +27,7 @@ import {
   setLayerVisible,
   state,
 } from "../store/editor";
+import type { LayerInfo } from "../store/editor";
 
 type MobileLayerFocus =
   | "light"
@@ -511,8 +512,31 @@ const focusLabels: Record<MobileLayerFocus, string> = {
   denoise: "Denoise",
 };
 
+const ADJUSTMENT_FOCUS_MAP: readonly {
+  key: keyof NonNullable<LayerInfo["adjustments"]>;
+  focus: MobileLayerFocus;
+}[] = [
+  { key: "tone", focus: "light" },
+  { key: "color", focus: "color" },
+  { key: "curves", focus: "curves" },
+  { key: "grain", focus: "grain" },
+  { key: "vignette", focus: "vignette" },
+  { key: "sharpen", focus: "sharpen" },
+  { key: "hsl", focus: "hsl" },
+  { key: "denoise", focus: "denoise" },
+] as const;
+
+function inferFocus(layer: LayerInfo | undefined): MobileLayerFocus {
+  const adj = layer?.adjustments;
+  if (!adj) return "light";
+  for (const { key, focus } of ADJUSTMENT_FOCUS_MAP) {
+    if (adj[key] != null) return focus;
+  }
+  return "light";
+}
+
 const Inspector: Component = () => {
-  const [layerFocusTypes, setLayerFocusTypes] = createSignal(
+  const [layerFocusOverrides, setLayerFocusOverrides] = createSignal(
     new Map<number, MobileLayerFocus>(),
   );
   const [curvePointCache, setCurvePointCache] = createSignal(
@@ -1213,7 +1237,8 @@ const Inspector: Component = () => {
       .filter(({ layer }) => layer.kind === "adjustment");
 
   const selectedFocus = (): MobileLayerFocus =>
-    layerFocusTypes().get(state.selectedLayerIdx) ?? "light";
+    layerFocusOverrides().get(state.selectedLayerIdx) ??
+    inferFocus(state.layers[state.selectedLayerIdx]);
 
   const displayedCrop = () =>
     selectedCropLayer()?.crop ?? {
@@ -1250,7 +1275,7 @@ const Inspector: Component = () => {
       await addLayer("adjustment");
     }
     const newIdx = state.selectedLayerIdx;
-    setLayerFocusTypes((prev) => new Map(prev).set(newIdx, focus));
+    setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
     setIsDrawerOpen(true);
   };
 
@@ -1757,7 +1782,9 @@ const Inspector: Component = () => {
                     {/* Layer tabs + add button */}
                     <div class="flex items-center gap-1 overflow-x-auto border-t border-white/6 py-3">
                       {adjustmentLayers().map(({ idx }) => {
-                        const focus = () => layerFocusTypes().get(idx) ?? "light";
+                        const focus = () =>
+                          layerFocusOverrides().get(idx) ??
+                          inferFocus(state.layers[idx]);
                         const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
                         return (
                           <button
