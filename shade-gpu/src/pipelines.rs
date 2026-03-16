@@ -545,6 +545,19 @@ impl ColorPipeline {
 
 // ─── VignettePipeline ─────────────────────────────────────────────────────────
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct VignetteGpuUniform {
+    amount: f32,
+    midpoint: f32,
+    feather: f32,
+    roundness: f32,
+    uv_offset_x: f32,
+    uv_offset_y: f32,
+    uv_scale_x: f32,
+    uv_scale_y: f32,
+}
+
 pub struct VignettePipeline {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
@@ -574,6 +587,8 @@ impl VignettePipeline {
         ctx: &GpuContext,
         input_tex: &Texture,
         params: shade_core::VignetteParams,
+        uv_offset: (f32, f32),
+        uv_scale: (f32, f32),
     ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();
@@ -582,9 +597,19 @@ impl VignettePipeline {
         let output_tex =
             create_output_texture(device, width, height, "vignette output texture");
 
+        let gpu_params = VignetteGpuUniform {
+            amount: params.amount,
+            midpoint: params.midpoint,
+            feather: params.feather,
+            roundness: params.roundness,
+            uv_offset_x: uv_offset.0,
+            uv_offset_y: uv_offset.1,
+            uv_scale_x: uv_scale.0,
+            uv_scale_y: uv_scale.1,
+        };
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vignette params uniform"),
-            contents: bytemuck::bytes_of(&params),
+            contents: bytemuck::bytes_of(&gpu_params),
             usage: BufferUsages::UNIFORM,
         });
 

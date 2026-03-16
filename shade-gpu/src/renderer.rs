@@ -143,7 +143,8 @@ impl Renderer {
             height,
             "input texture",
         );
-        let final_tex = self.render_texture_with_ops(&input_tex, ops)?;
+        let final_tex =
+            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false)?;
         self.readback_work_texture_to_u8(&final_tex, width, height)
             .await
     }
@@ -157,7 +158,8 @@ impl Renderer {
     ) -> Result<Vec<f32>> {
         let input_tex =
             self.upload_float_texture(input_data, width, height, "input texture");
-        let final_tex = self.render_texture_with_ops(&input_tex, ops)?;
+        let final_tex =
+            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false)?;
         self.readback_work_texture_to_f32(&final_tex, width, height)
             .await
     }
@@ -166,10 +168,20 @@ impl Renderer {
         &self,
         input_tex: &wgpu::Texture,
         ops: &[AdjustmentOp],
+        // Full-image UV offset/scale for vignette (use (0,0)/(1,1) when no crop).
+        vignette_uv_offset: (f32, f32),
+        vignette_uv_scale: (f32, f32),
+        // When true, Denoise and Sharpen are skipped (already applied at full-res).
+        skip_res_ops: bool,
     ) -> Result<wgpu::Texture> {
         let mut current_tex: &wgpu::Texture = input_tex;
         let mut owned_textures: Vec<wgpu::Texture> = Vec::new();
         for op in ops {
+            if skip_res_ops
+                && matches!(op, AdjustmentOp::Denoise(_) | AdjustmentOp::Sharpen(_))
+            {
+                continue;
+            }
             let output = match op {
                 AdjustmentOp::Tone {
                     exposure,
@@ -213,10 +225,13 @@ impl Renderer {
                     self.color_pipeline
                         .process(&self.ctx, current_tex, *params)?
                 }
-                AdjustmentOp::Vignette(params) => {
-                    self.vignette_pipeline
-                        .process(&self.ctx, current_tex, *params)?
-                }
+                AdjustmentOp::Vignette(params) => self.vignette_pipeline.process(
+                    &self.ctx,
+                    current_tex,
+                    *params,
+                    vignette_uv_offset,
+                    vignette_uv_scale,
+                )?,
                 AdjustmentOp::Sharpen(params) => {
                     self.sharpen2_pipeline
                         .process(&self.ctx, current_tex, *params)
@@ -361,8 +376,12 @@ impl Renderer {
         // Because wgpu textures aren't Clone, we keep a Vec and always work with the last.
         let mut accum_owned: Vec<wgpu::Texture> = vec![accum_tex];
 
+        // Tracks which layer index had its Denoise/Sharpen pre-applied to the full-res
+        // source image (so they can be skipped when that adjustment layer is processed).
+        let mut pre_applied_adj_idx: Option<usize> = None;
+
         // 2. For each visible layer, composite it onto the accumulator.
-        for entry in &stack.layers {
+        for (idx, entry) in stack.layers.iter().enumerate() {
             if !entry.visible {
                 continue;
             }
@@ -382,9 +401,60 @@ impl Renderer {
                                     "cached image layer texture",
                                 )
                             });
+
+                        // Pre-apply Denoise and Sharpen to the full-res source before
+                        // crop/downscale so the kernels operate at the correct scale.
+                        // Look ahead for the immediately next visible Layer::Adjustment.
+                        let next_adj = stack.layers[idx + 1..]
+                            .iter()
+                            .enumerate()
+                            .find(|(_, e)| {
+                                e.visible && matches!(e.layer, Layer::Adjustment { .. })
+                            })
+                            .map(|(j, e)| (idx + 1 + j, e));
+
+                        let mut preprocess_owned: Vec<wgpu::Texture> = Vec::new();
+                        if let Some((adj_idx, adj_entry)) = next_adj {
+                            if let Layer::Adjustment { ops } = &adj_entry.layer {
+                                for op in ops.iter() {
+                                    let tex_in = preprocess_owned
+                                        .last()
+                                        .map(|t| t as &wgpu::Texture)
+                                        .unwrap_or(&*source_texture);
+                                    match op {
+                                        AdjustmentOp::Denoise(params)
+                                            if params.luma_strength > 0.0
+                                                || params.chroma_strength > 0.0 =>
+                                        {
+                                            preprocess_owned.push(
+                                                self.denoise_pipeline
+                                                    .process(&self.ctx, tex_in, *params),
+                                            );
+                                        }
+                                        AdjustmentOp::Sharpen(params)
+                                            if params.amount > 0.0 =>
+                                        {
+                                            preprocess_owned.push(
+                                                self.sharpen2_pipeline
+                                                    .process(&self.ctx, tex_in, *params),
+                                            );
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                if !preprocess_owned.is_empty() {
+                                    pre_applied_adj_idx = Some(adj_idx);
+                                }
+                            }
+                        }
+
+                        let crop_input = preprocess_owned
+                            .last()
+                            .map(|t| t as &wgpu::Texture)
+                            .unwrap_or(&*source_texture);
                         self.crop_pipeline.process_to_size(
                             &self.ctx,
-                            &source_texture,
+                            crop_input,
                             target_width,
                             target_height,
                             CropUniform {
@@ -427,7 +497,23 @@ impl Renderer {
                     )?
                 }
                 Layer::Adjustment { ops } => {
-                    self.render_texture_with_ops(current_accum, ops)?
+                    // Vignette UV maps preview pixels back to full-image UV space.
+                    let vignette_uv_offset = (
+                        current_view.x / canvas_width as f32,
+                        current_view.y / canvas_height as f32,
+                    );
+                    let vignette_uv_scale = (
+                        current_view.width / canvas_width as f32,
+                        current_view.height / canvas_height as f32,
+                    );
+                    let skip_res_ops = pre_applied_adj_idx == Some(idx);
+                    self.render_texture_with_ops(
+                        current_accum,
+                        ops,
+                        vignette_uv_offset,
+                        vignette_uv_scale,
+                        skip_res_ops,
+                    )?
                 }
             };
 

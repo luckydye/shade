@@ -1,8 +1,12 @@
 struct VignetteParams {
-    amount: f32,     // 0.0 = none, 1.0 = full black corners
-    midpoint: f32,   // 0.0–1.0, default 0.5
-    feather: f32,    // softness, default 0.2
-    roundness: f32,  // 1.0 = circular, <1 = elliptical
+    amount: f32,       // 0.0 = none, 1.0 = full black corners
+    midpoint: f32,     // 0.0–1.0, default 0.5
+    feather: f32,      // softness, default 0.2
+    roundness: f32,    // 1.0 = circular, <1 = elliptical
+    uv_offset_x: f32,  // crop offset x in full-image UV space (0.0 for no crop)
+    uv_offset_y: f32,  // crop offset y in full-image UV space (0.0 for no crop)
+    uv_scale_x: f32,   // crop scale x in full-image UV space (1.0 for no crop)
+    uv_scale_y: f32,   // crop scale y in full-image UV space (1.0 for no crop)
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -15,7 +19,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
 
-    let uv = vec2<f32>(f32(gid.x) / f32(dims.x), f32(gid.y) / f32(dims.y));
+    // Map pixel position to full-image UV space (accounts for preview crop).
+    let raw_uv = vec2<f32>(f32(gid.x) / f32(dims.x), f32(gid.y) / f32(dims.y));
+    let uv = vec2<f32>(
+        params.uv_offset_x + raw_uv.x * params.uv_scale_x,
+        params.uv_offset_y + raw_uv.y * params.uv_scale_y,
+    );
     let centered = (uv - 0.5) * vec2<f32>(params.roundness, 1.0);
     let dist = length(centered);
     let v = smoothstep(params.midpoint - params.feather, params.midpoint + params.feather, dist);

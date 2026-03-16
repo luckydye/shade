@@ -200,6 +200,7 @@ fn alloc_tex(device: &Device, w: u32, h: u32, label: &str) -> Texture {
         format: INTERNAL_TEXTURE_FORMAT,
         usage: TextureUsages::STORAGE_BINDING
             | TextureUsages::COPY_SRC
+            | TextureUsages::COPY_DST
             | TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     })
@@ -292,6 +293,20 @@ impl DenoisePipeline {
     ) -> Texture {
         let device = &ctx.device;
         let (w, h) = (input_tex.width(), input_tex.height());
+
+        if params.luma_strength == 0.0 && params.chroma_strength == 0.0 {
+            let output = alloc_tex(device, w, h, "denoise_passthrough");
+            let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("denoise_passthrough"),
+            });
+            encoder.copy_texture_to_texture(
+                input_tex.as_image_copy(),
+                output.as_image_copy(),
+                Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            );
+            ctx.queue.submit(std::iter::once(encoder.finish()));
+            return output;
+        }
 
         let uniform = DenoiseUniform {
             luma_strength: params.luma_strength,
