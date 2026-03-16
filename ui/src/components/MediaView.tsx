@@ -334,8 +334,8 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
     <button
       type="button"
       ref={containerRef}
-      class={`group flex flex-col gap-1.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 ${
-        loadError() ? "ring-1 ring-red-500/50" : "hover:bg-white/[0.06]"
+      class={`group flex flex-col gap-1.5 p-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 ${
+        loadError() ? "ring-1 ring-red-500/50" : "hover:bg-white/[0.06] active:bg-white/[0.14]"
       }`}
       onClick={handleClick}
     >
@@ -841,7 +841,7 @@ export const MediaView: Component = () => {
         >
           <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
             <div
-              class="grid gap-3"
+              class="grid gap-1"
               style={{
                 "grid-template-columns": gridTemplateColumns(),
                 transform: `translateY(${offsetY()}px)`,
