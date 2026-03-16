@@ -402,7 +402,6 @@ const Canvas: Component = () => {
       gesture = { kind: "pinch", dist, midX, midY };
       return;
     }
-    if (state.previewZoom <= 1) return;
     gesture = { kind: "pan", x: e.clientX, y: e.clientY };
   };
 
@@ -558,7 +557,7 @@ const Canvas: Component = () => {
       return;
     }
     if (gesture?.kind === "pinch") {
-      if (activePointers.size === 1 && state.previewZoom > 1) {
+      if (activePointers.size === 1) {
         const [p] = [...activePointers.values()];
         gesture = { kind: "pan", x: p.x, y: p.y };
       } else {
