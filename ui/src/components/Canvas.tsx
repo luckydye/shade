@@ -95,8 +95,10 @@ const Canvas: Component = () => {
     height: number;
     rotation: number;
   } | null>(null);
+  const activePointers = new Map<number, { x: number; y: number }>();
   let gesture:
     | { kind: "pan"; x: number; y: number }
+    | { kind: "pinch"; dist: number; midX: number; midY: number }
     | {
         kind: "crop";
         pointerId: number;
@@ -371,6 +373,7 @@ const Canvas: Component = () => {
     if (!stageRef) {
       throw new Error("preview stage is required for pointer interaction");
     }
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (selectedCropLayer()) {
       const rect = stageRef.getBoundingClientRect();
       const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
@@ -391,12 +394,20 @@ const Canvas: Component = () => {
       drawFrame();
       return;
     }
-    if (state.previewZoom <= 1) return;
+    if (activePointers.size === 2) {
+      const [p1, p2] = [...activePointers.values()];
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      gesture = { kind: "pinch", dist, midX, midY };
+      return;
+    }
     gesture = { kind: "pan", x: e.clientX, y: e.clientY };
   };
 
   const onPointerMove = (e: PointerEvent) => {
     if (!stageRef) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (!gesture) return;
     if (gesture.kind === "pan") {
       const dx = e.clientX - gesture.x;
@@ -404,6 +415,22 @@ const Canvas: Component = () => {
       panPreview(dx, dy);
       drawFrame();
       gesture = { kind: "pan", x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (gesture.kind === "pinch") {
+      if (activePointers.size >= 2) {
+        const [p1, p2] = [...activePointers.values()];
+        const newDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const newMidX = (p1.x + p2.x) / 2;
+        const newMidY = (p1.y + p2.y) / 2;
+        const rect = stageRef.getBoundingClientRect();
+        // Derive delta so that zoomFactor == newDist/prevDist with pinch sensitivity 0.0005
+        const delta = -Math.log(newDist / gesture.dist) / 0.0005;
+        zoomPreviewDelta(delta, true, newMidX - rect.left, newMidY - rect.top);
+        panPreview(newMidX - gesture.midX, newMidY - gesture.midY);
+        gesture = { kind: "pinch", dist: newDist, midX: newMidX, midY: newMidY };
+        drawFrame();
+      }
       return;
     }
     const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
@@ -502,6 +529,9 @@ const Canvas: Component = () => {
   };
 
   const onPointerUp = (e?: PointerEvent) => {
+    if (e) {
+      activePointers.delete(e.pointerId);
+    }
     if (
       gesture?.kind === "crop" &&
       stageRef &&
@@ -523,6 +553,17 @@ const Canvas: Component = () => {
           crop_rotation: crop.rotation,
         });
       }
+      gesture = null;
+      return;
+    }
+    if (gesture?.kind === "pinch") {
+      if (activePointers.size === 1) {
+        const [p] = [...activePointers.values()];
+        gesture = { kind: "pan", x: p.x, y: p.y };
+      } else {
+        gesture = null;
+      }
+      return;
     }
     gesture = null;
   };
@@ -531,6 +572,7 @@ const Canvas: Component = () => {
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
+        style={{ "touch-action": "none" }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -539,6 +581,7 @@ const Canvas: Component = () => {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
 
