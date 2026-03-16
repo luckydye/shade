@@ -1,10 +1,14 @@
 struct CropParams {
-  x: f32,
-  y: f32,
-  width: f32,
-  height: f32,
-  target_width: f32,
-  target_height: f32,
+  out_x: f32,
+  out_y: f32,
+  out_width: f32,
+  out_height: f32,
+  pivot_x: f32,
+  pivot_y: f32,
+  in_x: f32,
+  in_y: f32,
+  in_width: f32,
+  in_height: f32,
   cos_r: f32,
   sin_r: f32,
 }
@@ -21,16 +25,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   let in_size = textureDimensions(input_tex);
-  let center_x = params.x + params.width * 0.5;
-  let center_y = params.y + params.height * 0.5;
-  let u = (f32(gid.x) + 0.5) / params.target_width;
-  let v = (f32(gid.y) + 0.5) / params.target_height;
-  let lu = (u - 0.5) * params.width;
-  let lv = (v - 0.5) * params.height;
-  let rx = lu * params.cos_r + lv * params.sin_r;
-  let ry = -lu * params.sin_r + lv * params.cos_r;
-  let src_x = clamp(center_x + rx - 0.5, 0.0, f32(in_size.x) - 1.0);
-  let src_y = clamp(center_y + ry - 0.5, 0.0, f32(in_size.y) - 1.0);
+
+  // Output pixel → normalised UV → canvas position.
+  let u = (f32(gid.x) + 0.5) / f32(out_size.x);
+  let v = (f32(gid.y) + 0.5) / f32(out_size.y);
+  let canvas_x = params.out_x + u * params.out_width;
+  let canvas_y = params.out_y + v * params.out_height;
+
+  // Rotate around crop pivot in canvas space.
+  let dx = canvas_x - params.pivot_x;
+  let dy = canvas_y - params.pivot_y;
+  let rot_x = params.pivot_x + dx * params.cos_r + dy * params.sin_r;
+  let rot_y = params.pivot_y - dx * params.sin_r + dy * params.cos_r;
+
+  // Canvas position → input texture pixel coordinate.
+  let src_x = clamp(
+    (rot_x - params.in_x) / params.in_width * f32(in_size.x) - 0.5,
+    0.0, f32(in_size.x) - 1.0,
+  );
+  let src_y = clamp(
+    (rot_y - params.in_y) / params.in_height * f32(in_size.y) - 0.5,
+    0.0, f32(in_size.y) - 1.0,
+  );
+
+  // Bilinear interpolation.
   let x0 = u32(floor(src_x));
   let y0 = u32(floor(src_y));
   let x1 = min(x0 + 1u, u32(in_size.x) - 1u);

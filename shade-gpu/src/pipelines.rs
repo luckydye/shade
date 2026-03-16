@@ -33,12 +33,19 @@ struct CurvesUniform {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct CropUniform {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub target_width: f32,
-    pub target_height: f32,
+    /// Canvas-space region the output texture represents.
+    pub out_x: f32,
+    pub out_y: f32,
+    pub out_width: f32,
+    pub out_height: f32,
+    /// Rotation pivot in canvas space.
+    pub pivot_x: f32,
+    pub pivot_y: f32,
+    /// Canvas-space region the input texture represents.
+    pub in_x: f32,
+    pub in_y: f32,
+    pub in_width: f32,
+    pub in_height: f32,
     pub cos_r: f32,
     pub sin_r: f32,
 }

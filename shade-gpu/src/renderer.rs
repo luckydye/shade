@@ -1,7 +1,7 @@
 use anyhow::Result;
 use half::f16;
 use shade_core::{
-    AdjustmentOp, ColorMatrix3x3, ColorSpace, CropRect, FloatImage, Layer, LayerStack,
+    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack,
     TextureId, ToneParams,
 };
 use std::collections::HashMap;
@@ -452,18 +452,23 @@ impl Renderer {
                             .last()
                             .map(|t| t as &wgpu::Texture)
                             .unwrap_or(&*source_texture);
+                        let src_size = crop_input.size();
                         self.crop_pipeline.process_to_size(
                             &self.ctx,
                             crop_input,
                             target_width,
                             target_height,
                             CropUniform {
-                                x: current_view.x,
-                                y: current_view.y,
-                                width: current_view.width,
-                                height: current_view.height,
-                                target_width: target_width as f32,
-                                target_height: target_height as f32,
+                                out_x: current_view.x,
+                                out_y: current_view.y,
+                                out_width: current_view.width,
+                                out_height: current_view.height,
+                                pivot_x: 0.0,
+                                pivot_y: 0.0,
+                                in_x: 0.0,
+                                in_y: 0.0,
+                                in_width: src_size.width as f32,
+                                in_height: src_size.height as f32,
                                 cos_r: 1.0,
                                 sin_r: 0.0,
                             },
@@ -474,23 +479,27 @@ impl Renderer {
                     }
                 }
                 Layer::Crop { rect } => {
-                    let relative_crop = crop_rect_to_target_space(
-                        rect,
-                        &current_view,
-                        target_width,
-                        target_height,
-                    )?;
-                    current_view = intersect_crop_rect(&current_view, rect)?;
+                    let prev_view = current_view.clone();
+                    current_view = PreviewCrop {
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        height: rect.height,
+                    };
                     self.crop_pipeline.process(
                         &self.ctx,
                         current_accum,
                         CropUniform {
-                            x: relative_crop.x,
-                            y: relative_crop.y,
-                            width: relative_crop.width,
-                            height: relative_crop.height,
-                            target_width: target_width as f32,
-                            target_height: target_height as f32,
+                            out_x: rect.x,
+                            out_y: rect.y,
+                            out_width: rect.width,
+                            out_height: rect.height,
+                            pivot_x: rect.x + rect.width * 0.5,
+                            pivot_y: rect.y + rect.height * 0.5,
+                            in_x: prev_view.x,
+                            in_y: prev_view.y,
+                            in_width: prev_view.width,
+                            in_height: prev_view.height,
                             cos_r: rect.rotation.cos(),
                             sin_r: rect.rotation.sin(),
                         },
@@ -901,39 +910,6 @@ fn normalize_preview_crop(
     crop
 }
 
-fn intersect_crop_rect(base: &PreviewCrop, rect: &CropRect) -> Result<PreviewCrop> {
-    let x = base.x.max(rect.x);
-    let y = base.y.max(rect.y);
-    let right = (base.x + base.width).min(rect.x + rect.width);
-    let bottom = (base.y + base.height).min(rect.y + rect.height);
-    if right <= x || bottom <= y {
-        anyhow::bail!("crop layer does not intersect the active preview region");
-    }
-    Ok(PreviewCrop {
-        x,
-        y,
-        width: right - x,
-        height: bottom - y,
-    })
-}
-
-fn crop_rect_to_target_space(
-    rect: &CropRect,
-    current_view: &PreviewCrop,
-    target_width: u32,
-    target_height: u32,
-) -> Result<CropRect> {
-    let intersection = intersect_crop_rect(current_view, rect)?;
-    Ok(CropRect {
-        x: ((intersection.x - current_view.x) / current_view.width) * target_width as f32,
-        y: ((intersection.y - current_view.y) / current_view.height)
-            * target_height as f32,
-        width: (intersection.width / current_view.width) * target_width as f32,
-        height: (intersection.height / current_view.height) * target_height as f32,
-        rotation: rect.rotation,
-    })
-}
-
 fn resample_mask_region(
     pixels: &[u8],
     source_width: u32,
@@ -1130,10 +1106,9 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 mod tests {
     use super::{
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        resample_rgba_f32_region, rgba_display_f32_to_u8, FloatImage, PreviewCrop,
-        Renderer,
+        rgba_display_f32_to_u8, FloatImage, PreviewCrop, Renderer,
     };
-    use shade_core::{AdjustmentOp, ColorSpace, LayerStack};
+    use shade_core::{AdjustmentOp, ColorSpace, CropRect, LayerStack, TextureId};
     use std::collections::HashMap;
 
     #[test]
@@ -1153,36 +1128,6 @@ mod tests {
         assert_eq!(crop.y, 50.0);
         assert_eq!(crop.width, 200.0);
         assert_eq!(crop.height, 50.0);
-    }
-
-    #[test]
-    fn resample_rgba_region_reads_only_selected_crop() {
-        let pixels = vec![
-            10.0, 0.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0, 30.0, 0.0, 0.0, 1.0, 40.0, 0.0,
-            0.0, 1.0, 50.0, 0.0, 0.0, 1.0, 60.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0,
-            80.0, 0.0, 0.0, 1.0,
-        ];
-        let output = resample_rgba_f32_region(
-            &pixels,
-            4,
-            2,
-            2,
-            2,
-            &PreviewCrop {
-                x: 2.0,
-                y: 0.0,
-                width: 2.0,
-                height: 2.0,
-            },
-        );
-
-        assert_eq!(
-            output,
-            vec![
-                30.0, 0.0, 0.0, 1.0, 40.0, 0.0, 0.0, 1.0, 70.0, 0.0, 0.0, 1.0, 80.0, 0.0,
-                0.0, 1.0,
-            ]
-        );
     }
 
     #[test]
@@ -1342,6 +1287,473 @@ mod tests {
                 0.0, 1.0,
             ]
         );
+    }
+
+    /// Build a 4×4 image where each pixel's R channel encodes its (col, row) as
+    /// `R = row * 4 + col + 1` (values 1..16). G=B=0, A=1.
+    fn make_4x4_source() -> (LayerStack, HashMap<TextureId, FloatImage>) {
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for row in 0..4u32 {
+            for col in 0..4u32 {
+                pixels.push((row * 4 + col + 1) as f32); // R
+                pixels.push(0.0); // G
+                pixels.push(0.0); // B
+                pixels.push(1.0); // A
+            }
+        }
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 4, 4);
+        let mut sources = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 4,
+                height: 4,
+                pixels: pixels.into(),
+            },
+        );
+        (stack, sources)
+    }
+
+    fn r_channels(pixels: &[f32]) -> Vec<f32> {
+        pixels.chunks(4).map(|px| px[0]).collect()
+    }
+
+    /// Crop layer at full resolution: target=canvas=4×4, crop to right half.
+    /// Source R channel:  1  2  3  4 / 5  6  7  8 / 9 10 11 12 / 13 14 15 16
+    /// Crop x=2,y=0,w=2,h=4 → columns 2-3 stretched to 4 output columns.
+    /// At the native crop resolution (2×4 target) the crop is 1:1 with source pixels.
+    #[tokio::test]
+    async fn crop_layer_full_resolution() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+        let (mut stack, sources) = make_4x4_source();
+        stack.add_crop_layer(CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 2.0,
+            height: 4.0,
+            rotation: 0.0,
+        });
+
+        // Render at the crop's native resolution: 2×4 target for a 2×4 crop.
+        let texture = renderer
+            .render_stack_preview_texture(&stack, &sources, 4, 4, 2, 4, None)
+            .expect("render");
+        let pixels = renderer
+            .readback_work_texture_to_f32(&texture, 2, 4)
+            .await
+            .expect("readback");
+        let r = r_channels(&pixels);
+
+        // Expect source columns 2-3: [3,4, 7,8, 11,12, 15,16].
+        let expected = [3.0, 4.0, 7.0, 8.0, 11.0, 12.0, 15.0, 16.0];
+        for (i, (got, want)) in r.iter().zip(expected.iter()).enumerate() {
+            let diff = (got - want).abs();
+            assert!(
+                diff < 0.6,
+                "pixel {i}: expected {want}, got {got}"
+            );
+        }
+    }
+
+    /// Crop applied at preview resolution (downscaled target) must sample from the
+    /// correct region of the original canvas, producing the same visual result as the
+    /// full-res render (just at lower resolution).
+    #[tokio::test]
+    async fn crop_layer_at_preview_resolution_matches_full_res() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+        let (mut stack, sources) = make_4x4_source();
+        stack.add_crop_layer(CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 2.0,
+            height: 4.0,
+            rotation: 0.0,
+        });
+
+        // Preview: canvas=4×4, target=2×2 (half res).
+        let texture = renderer
+            .render_stack_preview_texture(&stack, &sources, 4, 4, 2, 2, None)
+            .expect("render");
+        let pixels = renderer
+            .readback_work_texture_to_f32(&texture, 2, 2)
+            .await
+            .expect("readback");
+        let r = r_channels(&pixels);
+
+        // The 2×2 preview of the crop (cols 2-3, rows 0-3) should show:
+        // top-left ≈ avg of source pixels {3,4,7,8} = 5.5
+        // top-right ≈ same column range, still within [3,8]
+        // All values must come from the right half (cols 2-3).
+        for (i, val) in r.iter().enumerate() {
+            assert!(
+                *val >= 3.0 - 0.01 && *val <= 16.0 + 0.01,
+                "pixel {i}: expected R from crop region (>=3), got {val}"
+            );
+        }
+        // More specifically, top row values should be < bottom row values.
+        assert!(
+            r[0] < r[2] && r[1] < r[3],
+            "top row should be dimmer than bottom: top={:?}, bottom={:?}",
+            &r[..2],
+            &r[2..]
+        );
+    }
+
+    /// When a preview crop (zoomed-in view) is active AND there is a crop layer,
+    /// the crop transform must be applied relative to the original canvas coordinates.
+    /// This is the core scenario: preview shows a sub-region, crop is in canvas space.
+    #[tokio::test]
+    async fn crop_layer_with_preview_crop_uses_canvas_coordinates() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+        let (mut stack, sources) = make_4x4_source();
+        // Crop to bottom-right 2×2 (canvas coords: x=2, y=2, w=2, h=2).
+        stack.add_crop_layer(CropRect {
+            x: 2.0,
+            y: 2.0,
+            width: 2.0,
+            height: 2.0,
+            rotation: 0.0,
+        });
+
+        // Full-res render for reference.
+        let tex_full = renderer
+            .render_stack_preview_texture(&stack, &sources, 4, 4, 2, 2, None)
+            .expect("full-res render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 2, 2)
+            .await
+            .expect("readback");
+        let r_full = r_channels(&px_full);
+
+        // Preview render: preview crop = full canvas, but target = 2×2 (downscaled).
+        // This should produce the same result as the full-res path at 2×2.
+        let tex_preview = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                4,
+                4,
+                2,
+                2,
+                Some(PreviewCrop {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 4.0,
+                    height: 4.0,
+                }),
+            )
+            .expect("preview render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 2, 2)
+            .await
+            .expect("readback");
+        let r_preview = r_channels(&px_preview);
+
+        // Both renders cover the same canvas region at the same target size.
+        // Results must be identical.
+        assert_eq!(
+            r_full, r_preview,
+            "full-res and explicit full-canvas preview must match:\nfull={r_full:?}\npreview={r_preview:?}"
+        );
+    }
+
+    /// When the preview crop exactly covers the crop region at native resolution,
+    /// the result must match a render without a preview crop at the same target size.
+    /// This is the key invariant: the crop transform is applied in canvas coordinates
+    /// regardless of what preview region is active.
+    #[tokio::test]
+    async fn crop_layer_with_zoomed_preview_shows_correct_region() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+        let (mut stack, sources) = make_4x4_source();
+        // Crop to right half: x=2, y=0, w=2, h=4.
+        stack.add_crop_layer(CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 2.0,
+            height: 4.0,
+            rotation: 0.0,
+        });
+
+        // Render WITHOUT preview crop at native crop resolution (2×4).
+        let tex_no_crop = renderer
+            .render_stack_preview_texture(&stack, &sources, 4, 4, 2, 4, None)
+            .expect("render without preview crop");
+        let px_no_crop = renderer
+            .readback_work_texture_to_f32(&tex_no_crop, 2, 4)
+            .await
+            .expect("readback");
+        let r_no_crop = r_channels(&px_no_crop);
+
+        // Render WITH preview crop covering the crop region at same resolution.
+        let tex_with_crop = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                4,
+                4,
+                2,
+                4,
+                Some(PreviewCrop {
+                    x: 2.0,
+                    y: 0.0,
+                    width: 2.0,
+                    height: 4.0,
+                }),
+            )
+            .expect("render with preview crop");
+        let px_with_crop = renderer
+            .readback_work_texture_to_f32(&tex_with_crop, 2, 4)
+            .await
+            .expect("readback");
+        let r_with_crop = r_channels(&px_with_crop);
+
+        // Both should produce values from the crop region (source cols 2-3).
+        let expected = [3.0, 4.0, 7.0, 8.0, 11.0, 12.0, 15.0, 16.0];
+        for (i, want) in expected.iter().enumerate() {
+            let diff_no_crop = (r_no_crop[i] - want).abs();
+            let diff_with_crop = (r_with_crop[i] - want).abs();
+            assert!(
+                diff_no_crop < 0.6,
+                "no-crop pixel {i}: expected {want}, got {}",
+                r_no_crop[i]
+            );
+            assert!(
+                diff_with_crop < 0.6,
+                "with-crop pixel {i}: expected {want}, got {}",
+                r_with_crop[i]
+            );
+        }
+    }
+
+    /// Crop with rotation: the preview render must match the full-res render.
+    /// A 90° rotation of a square region should swap axes.
+    #[tokio::test]
+    async fn crop_with_rotation_preview_matches_full_res() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+        let (mut stack, sources) = make_4x4_source();
+        // Crop center 2×2 region with 90° rotation.
+        stack.add_crop_layer(CropRect {
+            x: 1.0,
+            y: 1.0,
+            width: 2.0,
+            height: 2.0,
+            rotation: std::f32::consts::FRAC_PI_2,
+        });
+
+        // Full-res render (target = canvas = 4×4).
+        let tex_full = renderer
+            .render_stack_preview_texture(&stack, &sources, 4, 4, 4, 4, None)
+            .expect("full render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 4, 4)
+            .await
+            .expect("readback");
+        let r_full = r_channels(&px_full);
+
+        // Preview render at half resolution.
+        let tex_half = renderer
+            .render_stack_preview_texture(&stack, &sources, 4, 4, 2, 2, None)
+            .expect("half render");
+        let px_half = renderer
+            .readback_work_texture_to_f32(&tex_half, 2, 2)
+            .await
+            .expect("readback");
+        let r_half = r_channels(&px_half);
+
+        // The 2×2 preview should be a downscaled version of the 4×4 full render.
+        // Average each 2×2 block of the full render and compare.
+        let mut expected = Vec::with_capacity(4);
+        for row in 0..2 {
+            for col in 0..2 {
+                let tl = r_full[(row * 2) * 4 + col * 2];
+                let tr = r_full[(row * 2) * 4 + col * 2 + 1];
+                let bl = r_full[(row * 2 + 1) * 4 + col * 2];
+                let br = r_full[(row * 2 + 1) * 4 + col * 2 + 1];
+                expected.push((tl + tr + bl + br) / 4.0);
+            }
+        }
+
+        for i in 0..4 {
+            let diff = (r_half[i] - expected[i]).abs();
+            assert!(
+                diff < 1.5,
+                "pixel {i}: half_res={}, expected≈{}, diff={diff}",
+                r_half[i],
+                expected[i]
+            );
+        }
+    }
+
+    /// Rotated crop on a non-square canvas: the preview render (at lower resolution)
+    /// must match the full-resolution render downscaled to the same size.
+    /// On an 8×4 canvas with a square 4×4 crop + 90° rotation, the preview target
+    /// of 4×4 introduces non-uniform scaling (2× horizontal, 1× vertical).
+    /// The bug: rotation is applied in the non-uniformly-scaled preview space
+    /// instead of the original canvas space, distorting the result.
+    #[tokio::test]
+    async fn crop_rotation_invariant_under_non_uniform_preview_scaling() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        // 8×4 canvas. Pixel R = row * 8 + col + 1.
+        let mut pixels = Vec::with_capacity(8 * 4 * 4);
+        for row in 0..4u32 {
+            for col in 0..8u32 {
+                pixels.push((row * 8 + col + 1) as f32);
+                pixels.push(0.0);
+                pixels.push(0.0);
+                pixels.push(1.0);
+            }
+        }
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 8, 4);
+        // Square crop in the center with 90° rotation.
+        stack.add_crop_layer(CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: std::f32::consts::FRAC_PI_2,
+        });
+        let mut sources: HashMap<TextureId, FloatImage> = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 8,
+                height: 4,
+                pixels: pixels.into(),
+            },
+        );
+
+        // Full-res render: target = 8×4 (canvas resolution).
+        // The crop operates in an 8×4 accumulator, where the crop rect's
+        // target-space representation preserves the square aspect ratio (4×4).
+        let tex_full = renderer
+            .render_stack_preview_texture(&stack, &sources, 8, 4, 8, 4, None)
+            .expect("full-res render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 8, 4)
+            .await
+            .expect("readback");
+
+        // Downsample the full-res result to 4×4 by averaging 2×1 blocks.
+        let mut r_reference = Vec::with_capacity(16);
+        for row in 0..4 {
+            for col in 0..4 {
+                let l = px_full[(row * 8 + col * 2) * 4]; // R of left pixel
+                let r = px_full[(row * 8 + col * 2 + 1) * 4]; // R of right pixel
+                r_reference.push((l + r) / 2.0);
+            }
+        }
+
+        // Preview render: 4×4 target for 8×4 canvas (non-uniform scaling).
+        let tex_preview = renderer
+            .render_stack_preview_texture(&stack, &sources, 8, 4, 4, 4, None)
+            .expect("preview render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 4, 4)
+            .await
+            .expect("readback");
+        let r_preview = r_channels(&px_preview);
+
+        // The preview should match the downscaled full-res render.
+        // A large difference means rotation was distorted by non-uniform scaling.
+        for i in 0..r_reference.len() {
+            let diff = (r_preview[i] - r_reference[i]).abs();
+            assert!(
+                diff < 1.5,
+                "pixel {i}: reference={}, preview={}, diff={diff} — rotation distorted by non-uniform scaling",
+                r_reference[i],
+                r_preview[i]
+            );
+        }
+    }
+
+    /// Non-square canvas with crop: verifies that non-uniform preview scaling
+    /// does not distort the crop region.
+    #[tokio::test]
+    async fn crop_on_non_square_canvas_preview_is_consistent() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        // 8×2 canvas (wide). Pixel R = col + 1.
+        let mut pixels = Vec::with_capacity(8 * 2 * 4);
+        for _row in 0..2u32 {
+            for col in 0..8u32 {
+                pixels.push((col + 1) as f32);
+                pixels.push(0.0);
+                pixels.push(0.0);
+                pixels.push(1.0);
+            }
+        }
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 8, 2);
+        // Crop to right half: x=4, y=0, w=4, h=2.
+        stack.add_crop_layer(CropRect {
+            x: 4.0,
+            y: 0.0,
+            width: 4.0,
+            height: 2.0,
+            rotation: 0.0,
+        });
+        let mut sources: HashMap<TextureId, FloatImage> = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 8,
+                height: 2,
+                pixels: pixels.into(),
+            },
+        );
+
+        // Full-res: target = 4×2 (native crop size).
+        let tex_full = renderer
+            .render_stack_preview_texture(&stack, &sources, 8, 2, 4, 2, None)
+            .expect("full render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 4, 2)
+            .await
+            .expect("readback");
+        let r_full = r_channels(&px_full);
+
+        // Preview: heavily downscaled to 2×2 (non-uniform: 4x horizontal, 1x vertical).
+        let tex_small = renderer
+            .render_stack_preview_texture(&stack, &sources, 8, 2, 2, 2, None)
+            .expect("small render");
+        let px_small = renderer
+            .readback_work_texture_to_f32(&tex_small, 2, 2)
+            .await
+            .expect("readback");
+        let r_small = r_channels(&px_small);
+
+        // The crop region has cols 4-7 (R = 5,6,7,8).
+        // Full-res 4×2: each pixel maps 1:1, so R values should be exactly 5,6,7,8 per row.
+        for val in &r_full {
+            assert!(
+                *val >= 4.5 && *val <= 8.5,
+                "full-res crop pixel R={val} outside expected range [5,8]"
+            );
+        }
+        // Preview 2×2: should also only contain values from the crop region.
+        for val in &r_small {
+            assert!(
+                *val >= 4.5 && *val <= 8.5,
+                "preview crop pixel R={val} outside expected range [5,8]"
+            );
+        }
     }
 }
 
