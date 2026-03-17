@@ -26,7 +26,15 @@ async function getTauriInvoke() {
 
 // ── WASM worker path ─────────────────────────────────────────────────────────
 let worker: Worker | null = null;
-let pendingResolvers: Map<string, (value: unknown) => void> = new Map();
+let nextWorkerRequestId = 1;
+let pendingRequests = new Map<
+  number,
+  {
+    responseType: string;
+    resolve: (value: unknown) => void;
+    reject: (reason: unknown) => void;
+  }
+>();
 let workerReady = false;
 let workerReadyResolve: (() => void) | null = null;
 const workerReadyPromise = new Promise<void>((res) => {
@@ -43,12 +51,31 @@ function getWorker(): Worker {
       if (msg.type === "ready") {
         workerReady = true;
         workerReadyResolve?.();
+        return;
       }
-      const resolver = pendingResolvers.get(msg.type);
-      if (resolver) {
-        pendingResolvers.delete(msg.type);
-        resolver(msg);
+      const requestId =
+        typeof msg.requestId === "number" ? (msg.requestId as number) : null;
+      if (requestId === null) {
+        return;
       }
+      const pending = pendingRequests.get(requestId);
+      if (!pending) {
+        return;
+      }
+      pendingRequests.delete(requestId);
+      if (msg.type === "error") {
+        pending.reject(new Error(String(msg.message ?? "worker request failed")));
+        return;
+      }
+      if (msg.type !== pending.responseType) {
+        pending.reject(
+          new Error(
+            `unexpected worker response: expected ${pending.responseType}, got ${msg.type}`,
+          ),
+        );
+        return;
+      }
+      pending.resolve(msg);
     };
     worker.postMessage({ type: "init" });
   }
@@ -59,9 +86,15 @@ function workerCall<T>(
   message: Record<string, unknown>,
   responseType: string,
 ): Promise<T> {
-  return new Promise((resolve) => {
-    pendingResolvers.set(responseType, resolve as (v: unknown) => void);
-    getWorker().postMessage(message);
+  return new Promise((resolve, reject) => {
+    const requestId = nextWorkerRequestId;
+    nextWorkerRequestId += 1;
+    pendingRequests.set(requestId, {
+      responseType,
+      resolve: resolve as (v: unknown) => void,
+      reject,
+    });
+    getWorker().postMessage({ ...message, requestId });
   });
 }
 
