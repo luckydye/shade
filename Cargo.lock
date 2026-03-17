@@ -7285,6 +7285,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "half",
+ "image",
  "log",
  "shade-core",
  "shade-io",
