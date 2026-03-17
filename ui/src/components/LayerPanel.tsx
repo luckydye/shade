@@ -91,8 +91,8 @@ const LayerPanel: Component = () => {
   };
 
   return (
-    <div class="w-48 bg-panel border-r border-gray-700 flex flex-col">
-      <div class="p-2 border-b border-gray-700 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+    <div class="w-48 bg-[var(--panel-bg)] border-r border-[var(--border-medium)] flex flex-col">
+      <div class="p-2 border-b border-[var(--border-medium)] text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
         Layers
       </div>
       <div class="flex-1 overflow-y-auto">
@@ -109,11 +109,11 @@ const LayerPanel: Component = () => {
                 </Show>
                 <div
                   draggable
-                  class={`flex items-center gap-2 px-2 py-1.5 cursor-pointer border-b border-gray-800 text-xs
+                  class={`flex items-center gap-2 px-2 py-1.5 cursor-pointer border-b border-[var(--border)] text-xs
                     ${
                       state.selectedLayerIdx === realIdx
-                        ? "bg-blue-900/40"
-                        : "hover:bg-gray-800"
+                        ? "bg-[var(--surface-active)]"
+                        : "hover:bg-[var(--surface)]"
                     }`}
                   style={{ "-webkit-user-drag": "element", "user-drag": "element" }}
                   onClick={() => selectLayer(realIdx)}
@@ -136,8 +136,8 @@ const LayerPanel: Component = () => {
                     class={`w-4 h-4 flex-shrink-0 rounded-sm border text-center leading-none
                       ${
                         layer.visible
-                          ? "bg-accent border-accent text-white"
-                          : "border-gray-600"
+                          ? "bg-blue-500 border-blue-500 text-white"
+                          : "border-[var(--border-medium)]"
                       }`}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -168,7 +168,7 @@ const LayerPanel: Component = () => {
                   </Show>
                   <Show when={!layer.has_mask && layer.kind !== "crop"}>
                     <button
-                      class="text-gray-500 text-[10px] hover:text-white transition-colors"
+                      class="text-[var(--text-faint)] text-[10px] hover:text-[var(--text)] transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         setMaskTarget(maskTarget() === realIdx ? null : realIdx);
@@ -180,7 +180,7 @@ const LayerPanel: Component = () => {
                   </Show>
                   {layer.kind !== "image" && (
                     <button
-                      class="text-gray-500 transition-colors hover:text-white"
+                      class="text-[var(--text-faint)] transition-colors hover:text-[var(--text)]"
                       onClick={(e) => {
                         e.stopPropagation();
                         void deleteLayer(realIdx);
@@ -192,15 +192,15 @@ const LayerPanel: Component = () => {
                   )}
                 </div>
                 <Show when={maskTarget() === realIdx}>
-                  <div class="flex gap-1 px-2 py-1 bg-gray-900 border-b border-gray-800">
+                  <div class="flex gap-1 px-2 py-1 bg-[var(--surface-faint)] border-b border-[var(--border)]">
                     <button
-                      class="flex-1 text-[10px] py-0.5 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+                      class="flex-1 text-[10px] py-0.5 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
                       onClick={() => void applyLinearMask(realIdx)}
                     >
                       Linear
                     </button>
                     <button
-                      class="flex-1 text-[10px] py-0.5 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+                      class="flex-1 text-[10px] py-0.5 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
                       onClick={() => void applyRadialMask(realIdx)}
                     >
                       Radial
@@ -217,22 +217,22 @@ const LayerPanel: Component = () => {
           }}
         </For>
       </div>
-      <div class="p-2 border-t border-gray-700">
+      <div class="p-2 border-t border-[var(--border-medium)]">
         <button
           onClick={addAdjustmentLayer}
-          class="w-full text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+          class="w-full text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Adjustment
         </button>
         <button
           onClick={addCurvesLayer}
-          class="w-full mt-2 text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+          class="w-full mt-2 text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Curves
         </button>
         <button
           onClick={() => void addLayer("crop")}
-          class="w-full mt-2 text-xs py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+          class="w-full mt-2 text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Crop
         </button>

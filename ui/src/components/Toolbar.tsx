@@ -24,10 +24,10 @@ const ActionButton: Component<ActionButtonProps> = (props) => (
     type="button"
     onClick={props.onClick}
     disabled={props.disabled}
-    class={`inline-flex min-h-10 items-center gap-2 rounded-2xl border px-3.5 text-white transition-colors ${
+    class={`inline-flex min-h-10 items-center gap-2 rounded-2xl border px-3.5 transition-colors ${
       props.primary
-        ? "border-stone-100 bg-stone-100 text-stone-950 enabled:hover:bg-white"
-        : "border-white/10 bg-white/[0.04] text-white/80 enabled:hover:border-white/15 enabled:hover:bg-white/[0.08] enabled:hover:text-white"
+        ? "border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)] enabled:hover:bg-[var(--btn-primary-hover)]"
+        : "border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-dashed)] enabled:hover:bg-[var(--surface-hover)] enabled:hover:text-[var(--text)]"
     } ${props.disabled ? "opacity-45" : ""}`}
   >
     <span class="inline-flex items-center justify-center">{props.icon}</span>
@@ -140,7 +140,7 @@ export const Toolbar: Component = () => {
   };
 
   return (
-    <header data-tauri-drag-region class="absolute select-none lg:static top-0 w-full z-50 grid grid-cols-[40px_auto_40px] md:grid-cols-[auto_auto_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-3 pt-[calc(env(safe-area-inset-top))] lg:pt-2">
+    <header data-tauri-drag-region class="absolute select-none lg:static top-0 w-full z-50 grid grid-cols-[40px_auto_40px] md:grid-cols-[auto_auto_auto] items-center gap-6 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 py-3 backdrop-blur-[18px] lg:px-3 pt-[calc(env(safe-area-inset-top))] lg:pt-2">
       <div>
         <Show when={hasImage() && state.currentView === "editor"}>
           <ActionButton
@@ -191,9 +191,9 @@ export const Toolbar: Component = () => {
           }}
           disabled={!canResumeEditor()}
         >
-          <span class="block text-[11px] text-white/40">
+          <span class="block text-[11px] text-[var(--text-faint)]">
             {(state.isLoading && (
-              <span class="hidden rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[11px] font-medium text-white/70 sm:inline-flex">
+              <span class="hidden rounded-full border border-[var(--border-medium)] bg-[var(--surface-hover)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] sm:inline-flex">
                 Processing
               </span>
             )) ||

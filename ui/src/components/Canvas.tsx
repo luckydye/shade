@@ -794,7 +794,7 @@ const Canvas: Component = () => {
     <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
       <div
         ref={stageRef}
-        class="relative flex-1 overflow-hidden bg-[#0b0b0b]"
+        class="relative flex-1 overflow-hidden bg-[var(--canvas-bg)]"
         style={{ "touch-action": "none" }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -806,7 +806,7 @@ const Canvas: Component = () => {
         onPointerLeave={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_transparent_45%)]" />
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_45%)]" />
 
         <div
           ref={viewportRef}
@@ -842,7 +842,7 @@ const Canvas: Component = () => {
                 class="absolute inset-0 h-full w-full object-contain"
                 style={{ "view-transition-name": "active-media" }}
               />
-              <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.04),_transparent_40%)]" />
+              <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_40%)]" />
               <div class="absolute inset-x-0 bottom-6 flex items-center justify-center">
                 <span class="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur">
                   <span class="h-2 w-2 animate-pulse rounded-full bg-white" />
