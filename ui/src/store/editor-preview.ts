@@ -14,7 +14,6 @@ import {
 type PreviewQuality = "interactive" | "final";
 
 const INTERACTIVE_PREVIEW_SCALE = 0.33;
-const INTERACTIVE_PREVIEW_DEBOUNCE_MS = 0;
 const PREVIEW_REQUEST_THROTTLE_MS = 16;
 const MIN_PREVIEW_ZOOM = 0.1;
 const MAX_PREVIEW_IMAGE_SCALE = 8;
@@ -22,7 +21,6 @@ const MAX_PREVIEW_IMAGE_SCALE = 8;
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
 let previewRefreshPromise: Promise<void> | null = null;
-let previewRefreshInteractiveTimer: ReturnType<typeof setTimeout> | null = null;
 let previewLastRequestStartedAt = 0;
 let previewRefreshInteractiveWaiters: Array<{
   resolve: () => void;
@@ -259,7 +257,7 @@ export function resetPreviewViewport() {
     previewCenterX: crop.x + crop.width * 0.5,
     previewCenterY: crop.y + crop.height * 0.5,
   });
-  void refreshPreview("viewport");
+  void refreshPreview();
 }
 
 export function setPreviewViewportSize(width: number, height: number) {
@@ -275,7 +273,7 @@ export function setPreviewViewportSize(width: number, height: number) {
     previewViewportWidth: nextWidth,
     previewViewportHeight: nextHeight,
   });
-  void refreshPreview("viewport");
+  void refreshPreview();
 }
 
 export function zoomPreviewDelta(
@@ -322,7 +320,7 @@ export function zoomPreviewDelta(
     previewCenterX: center.x,
     previewCenterY: center.y,
   });
-  void refreshPreview("viewport");
+  void refreshPreview();
 }
 
 export function panPreview(deltaX: number, deltaY: number) {
@@ -347,7 +345,7 @@ export function panPreview(deltaX: number, deltaY: number) {
     previewCenterX: center.x,
     previewCenterY: center.y,
   });
-  void refreshPreview("viewport");
+  void refreshPreview();
 }
 
 async function performPreviewRefresh() {
@@ -410,95 +408,44 @@ async function performPreviewRefresh() {
   });
 }
 
-function resolveInteractiveWaiters(work: Promise<void>) {
-  const waiters = previewRefreshInteractiveWaiters;
-  previewRefreshInteractiveWaiters = [];
-  void work.then(
-    () => {
-      for (const waiter of waiters) {
-        waiter.resolve();
-      }
-    },
-    (error) => {
-      for (const waiter of waiters) {
-        waiter.reject(error);
-      }
-    },
-  );
-  return work;
-}
-
-function rejectInteractiveWaiters(error: unknown) {
-  const waiters = previewRefreshInteractiveWaiters;
-  previewRefreshInteractiveWaiters = [];
-  for (const waiter of waiters) {
-    waiter.reject(error);
-  }
-}
-
-
-function queuePreviewRefresh(version: number, quality: PreviewQuality) {
-  if (
-    previewRefreshQueued &&
-    previewRefreshQueued.version === version &&
-    previewRefreshQueued.quality === "final"
-  ) {
-    return;
-  }
-  
-  previewRefreshQueued = { version, quality };
-  if (previewRefreshPromise) return previewRefreshPromise;
-  
-  previewRefreshPromise = (async () => {
-    while (previewRefreshQueued) {
-      await performPreviewRefresh();
-    }
-    previewRefreshPromise = null;
-  })();
-  return previewRefreshPromise;
-}
-
-export function refreshPreview(
-  mode: "viewport" | "final" = "viewport",
-) {
+export function refreshPreview() {
   previewRefreshVersion += 1;
-  
-  const version = previewRefreshVersion;
-  
-  const runFinal = () => {
-    previewRefreshInteractiveTimer = setTimeout(() => {
-      previewRefreshInteractiveTimer = null;
-      const work = queuePreviewRefresh(version, "final") ?? Promise.resolve();
-      resolveInteractiveWaiters(work);
-    }, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
-  };
-  
-  if (mode === "final") {
-    runFinal();
-    return Promise.resolve();
-  }
-  
-  //
-  
-  if (previewRefreshInteractiveTimer !== null) {
-    clearTimeout(previewRefreshInteractiveTimer);
-    previewRefreshInteractiveTimer = null;
-  }
   const completion = new Promise<void>((resolve, reject) => {
     previewRefreshInteractiveWaiters.push({ resolve, reject });
   });
-  
-  const interactive = queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
-  
-  void interactive.then(
-    () => {
-      if (version !== previewRefreshVersion) return;
-      runFinal();
-    },
-    (error) => {
-      rejectInteractiveWaiters(error);
-    },
-  );
-  
+  if (previewRefreshPromise) {
+    return completion;
+  }
+  previewRefreshPromise = (async () => {
+    try {
+      while (true) {
+        const version = previewRefreshVersion;
+        previewRefreshQueued = { version, quality: "interactive" };
+        await performPreviewRefresh();
+        if (version !== previewRefreshVersion) {
+          continue;
+        }
+        previewRefreshQueued = { version, quality: "final" };
+        await performPreviewRefresh();
+        if (version !== previewRefreshVersion) {
+          continue;
+        }
+        const waiters = previewRefreshInteractiveWaiters;
+        previewRefreshInteractiveWaiters = [];
+        for (const waiter of waiters) {
+          waiter.resolve();
+        }
+        return;
+      }
+    } catch (error) {
+      const waiters = previewRefreshInteractiveWaiters;
+      previewRefreshInteractiveWaiters = [];
+      for (const waiter of waiters) {
+        waiter.reject(error);
+      }
+    } finally {
+      previewRefreshPromise = null;
+    }
+  })();
   return completion;
 }
