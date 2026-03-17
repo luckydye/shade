@@ -869,10 +869,14 @@ const Canvas: Component = () => {
             </div>
           )}
           {shouldShowZoomIndicator() && previewZoomPercent() !== null && (
-            <div class="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
+            <button
+              type="button"
+              class="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition hover:border-white/20 hover:bg-black/60"
+              onClick={() => resetPreviewViewport()}
+            >
               <span>Zoom</span>
               <span class="text-white/35">{previewZoomPercent()}%</span>
-            </div>
+            </button>
           )}
           {state.layers.length === 0 && !state.isLoading && (
             <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">

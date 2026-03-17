@@ -140,7 +140,7 @@ export const Toolbar: Component = () => {
   };
 
   return (
-    <header data-tauri-drag-region class="absolute select-none lg:static top-0 w-full z-50 grid grid-cols-[40px_1fr_40px] md:grid-cols-[auto_1fr_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-3 pt-[calc(env(safe-area-inset-top))] lg:pt-2">
+    <header data-tauri-drag-region class="absolute select-none lg:static top-0 w-full z-50 grid grid-cols-[40px_auto_40px] md:grid-cols-[auto_auto_auto] items-center gap-6 border-b border-white/6 bg-[rgba(4,4,4,0.94)] px-4 py-3 backdrop-blur-[18px] lg:px-3 pt-[calc(env(safe-area-inset-top))] lg:pt-2">
       <div>
         <Show when={hasImage() && state.currentView === "editor"}>
           <ActionButton
@@ -172,7 +172,7 @@ export const Toolbar: Component = () => {
       <div class="flex justify-center text-center pointer-events-none">
         <button
           type="button"
-          class={`flex flex-col ${
+          class={`flex flex-col pointer-events-auto ${
             canResumeEditor() ? "cursor-pointer" : "cursor-default"
           }`}
           style={{

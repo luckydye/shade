@@ -19,7 +19,6 @@ const ZOOM_PREVIEW_DEBOUNCE_MS = 120;
 const PREVIEW_REQUEST_THROTTLE_MS = 250;
 const MIN_PREVIEW_ZOOM = 0.1;
 const MAX_PREVIEW_IMAGE_SCALE = 8;
-const PREVIEW_ZOOM_SNAP_LOG_EPSILON = 0.12;
 
 let previewRefreshVersion = 0;
 let previewRefreshQueued: { version: number; quality: PreviewQuality } | null = null;
@@ -254,41 +253,6 @@ export function getMaxPreviewZoom() {
   return Math.max(1, MAX_PREVIEW_IMAGE_SCALE / previewScale.fitScale);
 }
 
-function getPreviewSnapPoints(fitScale: number) {
-  const snapPoints = [1, 1 / fitScale];
-  return snapPoints.filter(
-    (snapPoint, index) =>
-      snapPoint >= MIN_PREVIEW_ZOOM &&
-      snapPoint <= getMaxPreviewZoom() &&
-      snapPoints.findIndex(
-        (candidate) => Math.abs(candidate - snapPoint) <= Number.EPSILON,
-      ) === index,
-  );
-}
-
-function snapPreviewZoom(previousZoom: number, targetZoom: number, fitScale: number) {
-  const nearestSnapPoint = getPreviewSnapPoints(fitScale).reduce<number | null>(
-    (nearest, snapPoint) => {
-      const crossedSnapPoint =
-        (previousZoom < snapPoint && targetZoom > snapPoint) ||
-        (previousZoom > snapPoint && targetZoom < snapPoint);
-      const nearSnapPoint =
-        Math.abs(Math.log(targetZoom / snapPoint)) <= PREVIEW_ZOOM_SNAP_LOG_EPSILON;
-      if (!crossedSnapPoint && !nearSnapPoint) {
-        return nearest;
-      }
-      if (nearest === null) {
-        return snapPoint;
-      }
-      const currentDistance = Math.abs(Math.log(targetZoom / snapPoint));
-      const nearestDistance = Math.abs(Math.log(targetZoom / nearest));
-      return currentDistance < nearestDistance ? snapPoint : nearest;
-    },
-    null,
-  );
-  return nearestSnapPoint ?? targetZoom;
-}
-
 export function resetPreviewViewport() {
   const crop = getPreviewBounds();
   setState({
@@ -336,10 +300,10 @@ export function zoomPreviewDelta(
   const sensitivity = pinch ? 0.0005 : 0.001;
   const multiplier = Math.exp(-delta * sensitivity);
   const oldImageScale = previewScale.fitScale * state.previewZoom;
-  const zoom = snapPreviewZoom(
-    state.previewZoom,
-    clamp(state.previewZoom * multiplier, MIN_PREVIEW_ZOOM, getMaxPreviewZoom()),
-    previewScale.fitScale,
+  const zoom = clamp(
+    state.previewZoom * multiplier,
+    MIN_PREVIEW_ZOOM,
+    getMaxPreviewZoom(),
   );
   const newImageScale = previewScale.fitScale * zoom;
   const viewportCenterX = state.previewViewportWidth * 0.5;
