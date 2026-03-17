@@ -51,3 +51,13 @@ export interface FitReference {
   width: number;
   height: number;
 }
+
+// A clip rect in artboard-local coordinates. Drawing is clipped to this region.
+// rotation is in radians.
+export interface ArtboardClip {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+}

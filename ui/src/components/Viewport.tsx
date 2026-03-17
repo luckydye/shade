@@ -364,8 +364,12 @@ export const Viewport: Component = () => {
         height: state.canvasHeight,
       };
       // In crop-edit mode we show the backdrop only (full canvas, no crop applied).
-      // Outside crop-edit mode we show backdrop + high-res preview tile.
-      const showPreview = !selectedCropLayer();
+      // Outside crop-edit mode we show backdrop + high-res preview tile, clipped to the
+      // committed crop rect so the backdrop doesn't bleed beyond the crop boundary.
+      const cropLayer = selectedCropLayer();
+      const showPreview = !cropLayer;
+      const committedCrop = getCommittedCropRect();
+      const clip = cropLayer ? undefined : committedCrop;
       const t = getViewTransform(cssWidth, cssHeight);
       backdropScratch ??= document.createElement("canvas");
       previewScratch ??= document.createElement("canvas");
@@ -377,6 +381,7 @@ export const Viewport: Component = () => {
         t,
         backdropScratch,
         previewScratch,
+        clip,
       );
     }
 
