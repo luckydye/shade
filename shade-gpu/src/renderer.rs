@@ -583,17 +583,20 @@ impl Renderer {
                             )?
                         }
                     } else {
-                        // No rotation: out_* = prev_view so the output texture keeps
-                        // its correct viewport mapping. At zoom=1 this is an identity;
-                        // at zoom>1 it prevents the crop from "undoing" the zoom.
+                        current_view = PreviewCrop {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height,
+                        };
                         self.crop_pipeline.process(
                             &self.ctx,
                             current_accum,
                             CropUniform {
-                                out_x: prev_view.x,
-                                out_y: prev_view.y,
-                                out_width: prev_view.width,
-                                out_height: prev_view.height,
+                                out_x: rect.x,
+                                out_y: rect.y,
+                                out_width: rect.width,
+                                out_height: rect.height,
                                 pivot_x: rect.x + rect.width * 0.5,
                                 pivot_y: rect.y + rect.height * 0.5,
                                 in_x: prev_view.x,
