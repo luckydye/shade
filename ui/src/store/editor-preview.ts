@@ -14,9 +14,8 @@ import {
 type PreviewQuality = "interactive" | "final";
 
 const INTERACTIVE_PREVIEW_SCALE = 0.33;
-const INTERACTIVE_PREVIEW_DEBOUNCE_MS = 16;
-const ZOOM_PREVIEW_DEBOUNCE_MS = 120;
-const PREVIEW_REQUEST_THROTTLE_MS = 250;
+const INTERACTIVE_PREVIEW_DEBOUNCE_MS = 0;
+const PREVIEW_REQUEST_THROTTLE_MS = 16;
 const MIN_PREVIEW_ZOOM = 0.1;
 const MAX_PREVIEW_IMAGE_SCALE = 8;
 
@@ -293,6 +292,7 @@ export function zoomPreviewDelta(
   ) {
     return;
   }
+  
   const previewScale = getPreviewFitScale();
   if (!previewScale) {
     return;
@@ -322,7 +322,7 @@ export function zoomPreviewDelta(
     previewCenterX: center.x,
     previewCenterY: center.y,
   });
-  void refreshPreview("zoom");
+  void refreshPreview("viewport");
 }
 
 export function panPreview(deltaX: number, deltaY: number) {
@@ -350,7 +350,7 @@ export function panPreview(deltaX: number, deltaY: number) {
   void refreshPreview("viewport");
 }
 
-function performPreviewRefresh() {
+async function performPreviewRefresh() {
   const queued = previewRefreshQueued;
   if (!queued) return Promise.resolve();
   previewRefreshQueued = null;
@@ -410,25 +410,6 @@ function performPreviewRefresh() {
   });
 }
 
-function queuePreviewRefresh(version: number, quality: PreviewQuality) {
-  if (
-    previewRefreshQueued &&
-    previewRefreshQueued.version === version &&
-    previewRefreshQueued.quality === "final"
-  ) {
-    return;
-  }
-  previewRefreshQueued = { version, quality };
-  if (previewRefreshPromise) return previewRefreshPromise;
-  previewRefreshPromise = (async () => {
-    while (previewRefreshQueued) {
-      await performPreviewRefresh();
-    }
-    previewRefreshPromise = null;
-  })();
-  return previewRefreshPromise;
-}
-
 function resolveInteractiveWaiters(work: Promise<void>) {
   const waiters = previewRefreshInteractiveWaiters;
   previewRefreshInteractiveWaiters = [];
@@ -455,18 +436,35 @@ function rejectInteractiveWaiters(error: unknown) {
   }
 }
 
-function scheduleRefresh(
-  version: number,
-  immediateInteractive: boolean,
-  interactiveDelayMs: number,
-) {
-  if (previewRefreshInteractiveTimer !== null) {
-    clearTimeout(previewRefreshInteractiveTimer);
-    previewRefreshInteractiveTimer = null;
+
+function queuePreviewRefresh(version: number, quality: PreviewQuality) {
+  if (
+    previewRefreshQueued &&
+    previewRefreshQueued.version === version &&
+    previewRefreshQueued.quality === "final"
+  ) {
+    return;
   }
-  const completion = new Promise<void>((resolve, reject) => {
-    previewRefreshInteractiveWaiters.push({ resolve, reject });
-  });
+  
+  previewRefreshQueued = { version, quality };
+  if (previewRefreshPromise) return previewRefreshPromise;
+  
+  previewRefreshPromise = (async () => {
+    while (previewRefreshQueued) {
+      await performPreviewRefresh();
+    }
+    previewRefreshPromise = null;
+  })();
+  return previewRefreshPromise;
+}
+
+export function refreshPreview(
+  mode: "viewport" | "final" = "viewport",
+) {
+  previewRefreshVersion += 1;
+  
+  const version = previewRefreshVersion;
+  
   const runFinal = () => {
     previewRefreshInteractiveTimer = setTimeout(() => {
       previewRefreshInteractiveTimer = null;
@@ -474,20 +472,24 @@ function scheduleRefresh(
       resolveInteractiveWaiters(work);
     }, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
   };
-  if (!immediateInteractive) {
-    previewRefreshInteractiveTimer = setTimeout(() => {
-      previewRefreshInteractiveTimer = null;
-      const interactive =
-        queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
-      const work = interactive.finally(() => {
-        if (version !== previewRefreshVersion) return;
-        return queuePreviewRefresh(version, "final") ?? Promise.resolve();
-      });
-      resolveInteractiveWaiters(work);
-    }, interactiveDelayMs);
-    return completion;
+  
+  if (mode === "final") {
+    runFinal();
+    return Promise.resolve();
   }
+  
+  //
+  
+  if (previewRefreshInteractiveTimer !== null) {
+    clearTimeout(previewRefreshInteractiveTimer);
+    previewRefreshInteractiveTimer = null;
+  }
+  const completion = new Promise<void>((resolve, reject) => {
+    previewRefreshInteractiveWaiters.push({ resolve, reject });
+  });
+  
   const interactive = queuePreviewRefresh(version, "interactive") ?? Promise.resolve();
+  
   void interactive.then(
     () => {
       if (version !== previewRefreshVersion) return;
@@ -497,27 +499,6 @@ function scheduleRefresh(
       rejectInteractiveWaiters(error);
     },
   );
+  
   return completion;
-}
-
-export function refreshPreview(
-  mode: "progressive" | "viewport" | "zoom" | "final" = "progressive",
-) {
-  previewRefreshVersion += 1;
-  const version = previewRefreshVersion;
-  if (mode === "final") {
-    if (previewRefreshInteractiveTimer !== null) {
-      clearTimeout(previewRefreshInteractiveTimer);
-      previewRefreshInteractiveTimer = null;
-    }
-    const work = queuePreviewRefresh(version, "final") ?? Promise.resolve();
-    return resolveInteractiveWaiters(work);
-  }
-  if (mode === "viewport") {
-    return scheduleRefresh(version, true, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
-  }
-  if (mode === "zoom") {
-    return scheduleRefresh(version, false, ZOOM_PREVIEW_DEBOUNCE_MS);
-  }
-  return scheduleRefresh(version, false, INTERACTIVE_PREVIEW_DEBOUNCE_MS);
 }

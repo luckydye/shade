@@ -498,11 +498,12 @@ const Canvas: Component = () => {
   };
 
   const onWheel = (e: WheelEvent) => {
-    if (selectedCropLayer()) return;
     e.preventDefault();
+    
     if (!stageRef) {
       throw new Error("preview stage is required for wheel zoom");
     }
+    
     const deltaModeScale =
       e.deltaMode === WheelEvent.DOM_DELTA_LINE
         ? 16
@@ -511,8 +512,8 @@ const Canvas: Component = () => {
           : 1;
     const delta = e.deltaY * deltaModeScale;
     const rect = stageRef.getBoundingClientRect();
+    
     zoomPreviewDelta(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
-    drawFrame();
   };
 
   const onPointerDown = (e: PointerEvent) => {
