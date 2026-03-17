@@ -117,3 +117,7 @@ export async function openPeerImage(
 export async function exportImage(path: string) {
   await bridge.exportImage(path);
 }
+
+export async function pickExportTarget() {
+  return bridge.pickExportTarget();
+}

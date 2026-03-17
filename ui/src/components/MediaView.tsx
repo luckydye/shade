@@ -1,4 +1,3 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import {
   Component,
   createEffect,
@@ -12,6 +11,7 @@ import {
 } from "solid-js";
 import {
   addMediaLibrary,
+  pickDirectory,
   type LibraryImage,
   listMediaLibraries,
   removeMediaLibrary,
@@ -666,15 +666,9 @@ export const MediaView: Component = () => {
     setIsSubmitting(true);
     setError(null);
     try {
-      const selectedPath = await open({
-        directory: true,
-        multiple: false,
-      });
+      const selectedPath = await pickDirectory();
       if (selectedPath === null) {
         return;
-      }
-      if (Array.isArray(selectedPath)) {
-        throw new Error("expected a single directory path");
       }
       const library = await addMediaLibrary(selectedPath);
       await refetchLibraries();

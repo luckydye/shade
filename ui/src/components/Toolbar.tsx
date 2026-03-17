@@ -1,7 +1,7 @@
 import { Component, JSX, Show } from "solid-js";
-import { save } from "@tauri-apps/plugin-dialog";
 import {
   exportImage,
+  pickExportTarget,
   openImageFile,
   showEditorView,
   showMediaView,
@@ -126,13 +126,7 @@ export const Toolbar: Component = () => {
   };
 
   const handleExport = async () => {
-    const path = await save({
-      title: "Export Render",
-      filters: [
-        { name: "PNG Image", extensions: ["png"] },
-        { name: "JPEG Image", extensions: ["jpg", "jpeg"] },
-      ],
-    });
+    const path = await pickExportTarget();
     if (!path) {
       return;
     }

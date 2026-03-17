@@ -9,7 +9,7 @@ type IsTauriFn = () => boolean;
 let _invoke: InvokeFn | null = null;
 let _isTauri: IsTauriFn | null = null;
 
-async function isTauriRuntime() {
+export async function isTauriRuntime() {
   if (_isTauri) return _isTauri();
   const { isTauri } = await import("@tauri-apps/api/core");
   _isTauri = isTauri as IsTauriFn;
@@ -68,6 +68,51 @@ function workerCall<T>(
 async function ensureWorkerReady() {
   getWorker();
   await workerReadyPromise;
+}
+
+function previewFrameToImageData(frame: PreviewFrame) {
+  if (frame.kind === "rgba-float16") {
+    return new ImageData(frame.pixels as any, frame.width, frame.height, {
+      pixelFormat: "rgba-float16",
+      colorSpace: frame.colorSpace,
+    } as any);
+  }
+  return new ImageData(
+    new Uint8ClampedArray(
+      frame.pixels.buffer,
+      frame.pixels.byteOffset,
+      frame.pixels.byteLength,
+    ),
+    frame.width,
+    frame.height,
+  );
+}
+
+async function imageDataToBlob(image: ImageData) {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("2d canvas context is unavailable");
+  }
+  context.putImageData(image, 0, 0);
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/png");
+  });
+  if (!blob) {
+    throw new Error("failed to encode preview as png");
+  }
+  return blob;
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -358,7 +403,57 @@ export async function exportImage(path: string): Promise<void> {
     await inv("export_image", { path });
     return;
   }
-  throw new Error("exportImage is only implemented for Tauri");
+  const stack = await getLayerStack();
+  const cropLayer = stack.layers.find(
+    (layer) => layer.kind === "crop" && layer.visible && layer.crop,
+  );
+  const crop = cropLayer?.crop;
+  const frame = await renderPreview({
+    target_width: crop?.width ?? stack.canvas_width,
+    target_height: crop?.height ?? stack.canvas_height,
+    crop: crop
+      ? {
+          x: crop.x,
+          y: crop.y,
+          width: crop.width,
+          height: crop.height,
+        }
+      : undefined,
+  });
+  const blob = await imageDataToBlob(previewFrameToImageData(frame));
+  downloadBlob(blob, path || "shade-export.png");
+}
+
+export async function pickDirectory(): Promise<string | null> {
+  if (!(await isTauriRuntime())) {
+    return null;
+  }
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selectedPath = await open({
+    directory: true,
+    multiple: false,
+  });
+  if (selectedPath === null) {
+    return null;
+  }
+  if (Array.isArray(selectedPath)) {
+    throw new Error("expected a single directory path");
+  }
+  return selectedPath;
+}
+
+export async function pickExportTarget(): Promise<string | null> {
+  if (!(await isTauriRuntime())) {
+    return "shade-export.png";
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  return save({
+    title: "Export Render",
+    filters: [
+      { name: "PNG Image", extensions: ["png"] },
+      { name: "JPEG Image", extensions: ["jpg", "jpeg"] },
+    ],
+  });
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
@@ -611,7 +706,7 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
     const inv = await getTauriInvoke();
     return inv("list_media_libraries") as Promise<MediaLibrary[]>;
   }
-  throw new Error("listMediaLibraries is only implemented for Tauri");
+  return [];
 }
 
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
@@ -621,7 +716,7 @@ export async function listLibraryImages(libraryId: string): Promise<LibraryImage
       libraryId,
     }) as Promise<LibraryImageListing>;
   }
-  throw new Error("listLibraryImages is only implemented for Tauri");
+  return { items: [], is_complete: true };
 }
 
 export async function addMediaLibrary(path: string): Promise<MediaLibrary> {

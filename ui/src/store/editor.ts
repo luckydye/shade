@@ -19,6 +19,7 @@ export {
   openImage,
   openImageFile,
   openPeerImage,
+  pickExportTarget,
   showEditorView,
   showMediaView,
 } from "./editor-image";
