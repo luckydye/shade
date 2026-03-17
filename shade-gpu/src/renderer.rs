@@ -144,7 +144,7 @@ impl Renderer {
             "input texture",
         );
         let final_tex =
-            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false)?;
+            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false, None)?;
         self.readback_work_texture_to_u8(&final_tex, width, height)
             .await
     }
@@ -159,8 +159,34 @@ impl Renderer {
         let input_tex =
             self.upload_float_texture(input_data, width, height, "input texture");
         let final_tex =
-            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false)?;
+            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false, None)?;
         self.readback_work_texture_to_f32(&final_tex, width, height)
+            .await
+    }
+
+    /// Process a single video frame through the adjustment pipeline.
+    ///
+    /// `frame_index` is used to seed per-frame grain variation so that film grain
+    /// is temporally animated rather than frozen across all frames.
+    /// Returns RGBA8 (u8) pixels ready for a video encoder.
+    pub async fn render_frame(
+        &self,
+        input_data: &[f32],
+        width: u32,
+        height: u32,
+        ops: &[AdjustmentOp],
+        frame_index: u64,
+    ) -> Result<Vec<u8>> {
+        let input_tex = self.upload_float_texture(input_data, width, height, "frame input");
+        let final_tex = self.render_texture_with_ops(
+            &input_tex,
+            ops,
+            (0.0, 0.0),
+            (1.0, 1.0),
+            false,
+            Some(frame_index),
+        )?;
+        self.readback_work_texture_to_u8(&final_tex, width, height)
             .await
     }
 
@@ -173,6 +199,8 @@ impl Renderer {
         vignette_uv_scale: (f32, f32),
         // When true, Denoise and Sharpen are skipped (already applied at full-res).
         skip_res_ops: bool,
+        // Video frame index for temporal grain variation. None for single-image rendering.
+        frame_index: Option<u64>,
     ) -> Result<wgpu::Texture> {
         let mut current_tex: &wgpu::Texture = input_tex;
         let mut owned_textures: Vec<wgpu::Texture> = Vec::new();
@@ -237,8 +265,13 @@ impl Renderer {
                         .process(&self.ctx, current_tex, *params)
                 }
                 AdjustmentOp::Grain(params) => {
-                    self.grain_pipeline
-                        .process(&self.ctx, current_tex, *params)?
+                    let mut grain = *params;
+                    // Modulate seed per-frame so grain varies temporally in video.
+                    // Without this every frame would share identical noise (frozen grain).
+                    if let Some(fi) = frame_index {
+                        grain.seed += fi as f32 * 0.12345678;
+                    }
+                    self.grain_pipeline.process(&self.ctx, current_tex, grain)?
                 }
                 AdjustmentOp::Hsl(params) => {
                     self.hsl_pipeline.process(&self.ctx, current_tex, *params)?
@@ -591,6 +624,7 @@ impl Renderer {
                         vignette_uv_offset,
                         vignette_uv_scale,
                         skip_res_ops,
+                        None,
                     )?
                 }
             };

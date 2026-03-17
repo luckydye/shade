@@ -1,4 +1,5 @@
-use anyhow::Result;
+#[cfg_attr(not(feature = "video"), allow(unused_imports))]
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use shade_core::{
     AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect, FloatImage, GrainParams,
@@ -9,6 +10,8 @@ use shade_io::{
     from_linear_srgb_f32, load_image, load_image_f32_with_colorspace, quantize_rgba_f32,
     save_image, to_linear_srgb_f32,
 };
+#[cfg(feature = "video")]
+use shade_video::{VideoCodec, VideoDecoder, VideoEncoder};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -194,6 +197,88 @@ enum Commands {
         /// Radial mask radius (default: min(width,height)/2)
         #[arg(long)]
         mask_radius: Option<f32>,
+    },
+
+    /// Apply tone and color adjustments to every frame of a video and encode the result.
+    ///
+    /// Requires system FFmpeg. Rebuild with `--features video` to enable.
+    #[cfg(feature = "video")]
+    Video {
+        /// Input video path (MP4, MOV, MKV, …)
+        input: PathBuf,
+
+        /// Output video path (extension determines container: .mp4, .mov, .mkv)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Output codec: h264 (default), h265, prores422, prores4444
+        #[arg(long, default_value = "h264")]
+        codec: String,
+
+        /// Only process frames starting from this zero-based index (inclusive).
+        #[arg(long)]
+        start_frame: Option<u64>,
+
+        /// Stop after this zero-based frame index (exclusive). Omit to process all frames.
+        #[arg(long)]
+        end_frame: Option<u64>,
+
+        // ── Tone ─────────────────────────────────────────────────────────────
+        #[arg(long, default_value_t = 0.0)]
+        exposure: f32,
+
+        #[arg(long, default_value_t = 0.0)]
+        contrast: f32,
+
+        #[arg(long, default_value_t = 0.0)]
+        blacks: f32,
+
+        #[arg(long, default_value_t = 0.0)]
+        whites: f32,
+
+        #[arg(long, default_value_t = 0.0)]
+        highlights: f32,
+
+        #[arg(long, default_value_t = 0.0)]
+        shadows: f32,
+
+        // ── Color ────────────────────────────────────────────────────────────
+        #[arg(long)]
+        saturation: Option<f32>,
+
+        #[arg(long)]
+        vibrancy: Option<f32>,
+
+        #[arg(long)]
+        temperature: Option<f32>,
+
+        #[arg(long)]
+        tint: Option<f32>,
+
+        // ── Vignette ─────────────────────────────────────────────────────────
+        #[arg(long)]
+        vignette: Option<f32>,
+
+        #[arg(long)]
+        vignette_midpoint: Option<f32>,
+
+        #[arg(long)]
+        vignette_feather: Option<f32>,
+
+        // ── Sharpen ──────────────────────────────────────────────────────────
+        #[arg(long)]
+        sharpen: Option<f32>,
+
+        #[arg(long)]
+        sharpen_threshold: Option<f32>,
+
+        // ── Grain ────────────────────────────────────────────────────────────
+        /// Film grain intensity. Seed is varied per-frame for natural temporal animation.
+        #[arg(long)]
+        grain: Option<f32>,
+
+        #[arg(long)]
+        grain_size: Option<f32>,
     },
 }
 
@@ -551,6 +636,142 @@ async fn main() -> Result<()> {
             log::info!("Saving output: {}", output.display());
             save_image(&output, &result, target_width, target_height)?;
             log::info!("Done.");
+        }
+
+        #[cfg(feature = "video")]
+        Commands::Video {
+            input,
+            output,
+            codec,
+            start_frame,
+            end_frame,
+            exposure,
+            contrast,
+            blacks,
+            whites,
+            highlights,
+            shadows,
+            saturation,
+            vibrancy,
+            temperature,
+            tint,
+            vignette,
+            vignette_midpoint,
+            vignette_feather,
+            sharpen,
+            sharpen_threshold,
+            grain,
+            grain_size,
+        } => {
+            // Parse codec string.
+            let video_codec: VideoCodec = codec.parse()?;
+
+            // Initialise FFmpeg once.
+            shade_video::init();
+
+            // Open the input video and read its properties.
+            let mut decoder = VideoDecoder::open(&input)
+                .with_context(|| format!("failed to open input video: {}", input.display()))?;
+            let (width, height) = decoder.dimensions();
+            let fps = decoder.fps();
+            let total = decoder.frame_count();
+            log::info!(
+                "Input video: {}×{} @ {:.3} fps, ~{} frames",
+                width, height, fps,
+                total.map(|n| n.to_string()).unwrap_or_else(|| "unknown".to_string())
+            );
+
+            // Build the adjustment ops vector (same logic as Edit command).
+            let mut ops: Vec<AdjustmentOp> = Vec::new();
+            ops.push(AdjustmentOp::Tone {
+                exposure,
+                contrast,
+                blacks,
+                whites,
+                highlights,
+                shadows,
+                gamma: 1.0,
+            });
+            if saturation.is_some() || vibrancy.is_some() || temperature.is_some() || tint.is_some() {
+                ops.push(AdjustmentOp::Color(ColorParams {
+                    saturation: saturation.unwrap_or(1.0),
+                    vibrancy: vibrancy.unwrap_or(0.0),
+                    temperature: temperature.unwrap_or(0.0),
+                    tint: tint.unwrap_or(0.0),
+                }));
+            }
+            if vignette.is_some() {
+                let mut vp = VignetteParams::default();
+                if let Some(v) = vignette { vp.amount = v; }
+                if let Some(v) = vignette_midpoint { vp.midpoint = v; }
+                if let Some(v) = vignette_feather { vp.feather = v; }
+                ops.push(AdjustmentOp::Vignette(vp));
+            }
+            if sharpen.is_some() {
+                ops.push(AdjustmentOp::Sharpen(SharpenParams {
+                    amount: sharpen.unwrap_or(0.0),
+                    threshold: sharpen_threshold.unwrap_or(0.0),
+                }));
+            }
+            if grain.is_some() {
+                ops.push(AdjustmentOp::Grain(GrainParams {
+                    amount: grain.unwrap_or(0.0),
+                    size: grain_size.unwrap_or(1.0),
+                    ..GrainParams::default()
+                }));
+            }
+
+            log::info!("Initialising GPU renderer…");
+            let renderer = Renderer::new().await?;
+
+            log::info!("Opening output video: {}", output.display());
+            let mut encoder = VideoEncoder::open(&output, width, height, fps, video_codec)
+                .with_context(|| format!("failed to open output video: {}", output.display()))?;
+
+            let start = start_frame.unwrap_or(0);
+            let mut frames_written: u64 = 0;
+
+            for frame_result in &mut decoder {
+                let frame = frame_result?;
+
+                // Skip frames before start_frame.
+                if frame.index < start {
+                    continue;
+                }
+                // Stop at end_frame.
+                if let Some(end) = end_frame {
+                    if frame.index >= end {
+                        break;
+                    }
+                }
+
+                // Convert sRGB (video colour space) → linear sRGB for GPU pipeline.
+                let mut pixels = frame.data.clone();
+                to_linear_srgb_f32(&mut pixels, &ColorSpace::Srgb);
+
+                // Render through the adjustment pipeline. frame.index seeds temporal grain.
+                let rgba8 = renderer
+                    .render_frame(&pixels, width, height, &ops, frame.index)
+                    .await?;
+
+                // Convert linear sRGB → sRGB for video output.
+                let mut out_f32: Vec<f32> = rgba8
+                    .iter()
+                    .map(|&b| b as f32 / 255.0)
+                    .collect();
+                from_linear_srgb_f32(&mut out_f32, &ColorSpace::Srgb);
+                let out_rgba8 = quantize_rgba_f32(&out_f32);
+
+                encoder.push_frame(&out_rgba8, frame.index)?;
+                frames_written += 1;
+
+                if frames_written % 25 == 0 {
+                    log::info!("Encoded {} frames…", frames_written);
+                }
+            }
+
+            encoder.finish()?;
+            log::info!("Done. Encoded {} frames → {}", frames_written, output.display());
         }
     }
 
