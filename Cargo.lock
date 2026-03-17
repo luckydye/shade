@@ -7463,6 +7463,7 @@ dependencies = [
  "serde_json",
  "shade-core",
  "shade-io",
+ "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
