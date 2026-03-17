@@ -380,6 +380,16 @@ impl Renderer {
         // source image (so they can be skipped when that adjustment layer is processed).
         let mut pre_applied_adj_idx: Option<usize> = None;
 
+        // Full-resolution source texture for the most recent image layer.
+        // Used by rotated crop layers so they can sample the complete canvas
+        // instead of the viewport-cropped accumulator.
+        // Stores: (source_size, raw_source_arc, optional_preprocessed_textures)
+        let mut full_res_source: Option<(
+            wgpu::Extent3d,
+            std::sync::Arc<wgpu::Texture>,
+            Vec<wgpu::Texture>,
+        )> = None;
+
         // 2. For each visible layer, composite it onto the accumulator.
         for (idx, entry) in stack.layers.iter().enumerate() {
             if !entry.visible {
@@ -453,7 +463,7 @@ impl Renderer {
                             .map(|t| t as &wgpu::Texture)
                             .unwrap_or(&*source_texture);
                         let src_size = crop_input.size();
-                        self.crop_pipeline.process_to_size(
+                        let image_result = self.crop_pipeline.process_to_size(
                             &self.ctx,
                             crop_input,
                             target_width,
@@ -472,7 +482,13 @@ impl Renderer {
                                 cos_r: 1.0,
                                 sin_r: 0.0,
                             },
-                        )?
+                        )?;
+                        full_res_source = Some((
+                            src_size,
+                            source_texture.clone(),
+                            preprocess_owned,
+                        ));
+                        image_result
                     } else {
                         // No source image: skip this layer.
                         continue;
@@ -486,24 +502,77 @@ impl Renderer {
                         width: rect.width,
                         height: rect.height,
                     };
-                    self.crop_pipeline.process(
-                        &self.ctx,
-                        current_accum,
-                        CropUniform {
-                            out_x: rect.x,
-                            out_y: rect.y,
-                            out_width: rect.width,
-                            out_height: rect.height,
-                            pivot_x: rect.x + rect.width * 0.5,
-                            pivot_y: rect.y + rect.height * 0.5,
-                            in_x: prev_view.x,
-                            in_y: prev_view.y,
-                            in_width: prev_view.width,
-                            in_height: prev_view.height,
-                            cos_r: rect.rotation.cos(),
-                            sin_r: rect.rotation.sin(),
-                        },
-                    )?
+                    if rect.rotation != 0.0 {
+                        // Sample directly from the full-resolution source so
+                        // the rotation can access pixels outside the viewport.
+                        if let Some((src_size, ref raw_source, ref preprocess)) =
+                            full_res_source
+                        {
+                            let src_tex = preprocess
+                                .last()
+                                .map(|t| t as &wgpu::Texture)
+                                .unwrap_or(&**raw_source);
+                            self.crop_pipeline.process_to_size(
+                                &self.ctx,
+                                src_tex,
+                                target_width,
+                                target_height,
+                                CropUniform {
+                                    out_x: rect.x,
+                                    out_y: rect.y,
+                                    out_width: rect.width,
+                                    out_height: rect.height,
+                                    pivot_x: rect.x + rect.width * 0.5,
+                                    pivot_y: rect.y + rect.height * 0.5,
+                                    in_x: 0.0,
+                                    in_y: 0.0,
+                                    in_width: src_size.width as f32,
+                                    in_height: src_size.height as f32,
+                                    cos_r: rect.rotation.cos(),
+                                    sin_r: rect.rotation.sin(),
+                                },
+                            )?
+                        } else {
+                            // No source image — fall back to accumulator.
+                            self.crop_pipeline.process(
+                                &self.ctx,
+                                current_accum,
+                                CropUniform {
+                                    out_x: rect.x,
+                                    out_y: rect.y,
+                                    out_width: rect.width,
+                                    out_height: rect.height,
+                                    pivot_x: rect.x + rect.width * 0.5,
+                                    pivot_y: rect.y + rect.height * 0.5,
+                                    in_x: prev_view.x,
+                                    in_y: prev_view.y,
+                                    in_width: prev_view.width,
+                                    in_height: prev_view.height,
+                                    cos_r: rect.rotation.cos(),
+                                    sin_r: rect.rotation.sin(),
+                                },
+                            )?
+                        }
+                    } else {
+                        self.crop_pipeline.process(
+                            &self.ctx,
+                            current_accum,
+                            CropUniform {
+                                out_x: rect.x,
+                                out_y: rect.y,
+                                out_width: rect.width,
+                                out_height: rect.height,
+                                pivot_x: rect.x + rect.width * 0.5,
+                                pivot_y: rect.y + rect.height * 0.5,
+                                in_x: prev_view.x,
+                                in_y: prev_view.y,
+                                in_width: prev_view.width,
+                                in_height: prev_view.height,
+                                cos_r: 1.0,
+                                sin_r: 0.0,
+                            },
+                        )?
+                    }
                 }
                 Layer::Adjustment { ops } => {
                     // Vignette UV maps preview pixels back to full-image UV space.
@@ -1677,6 +1746,503 @@ mod tests {
                 "pixel {i}: reference={}, preview={}, diff={diff} — rotation distorted by non-uniform scaling",
                 r_reference[i],
                 r_preview[i]
+            );
+        }
+    }
+
+    // ── CPU-side viewport transform pipeline ──────────────────────────────
+    //
+    // Replicates the crop.wgsl shader math in pure Rust so the coordinate
+    // transform pipeline can be tested without a GPU.
+
+    use crate::pipelines::CropUniform;
+
+    /// CPU replica of crop.wgsl: for output pixel (gid_x, gid_y) in an
+    /// output texture of (out_w, out_h), compute the source (x, y) in the
+    /// input texture of (in_w, in_h).
+    fn cpu_crop_sample(
+        gid_x: u32,
+        gid_y: u32,
+        out_w: u32,
+        out_h: u32,
+        in_w: u32,
+        in_h: u32,
+        p: &CropUniform,
+    ) -> (f32, f32) {
+        let u = (gid_x as f32 + 0.5) / out_w as f32;
+        let v = (gid_y as f32 + 0.5) / out_h as f32;
+        let canvas_x = p.out_x + u * p.out_width;
+        let canvas_y = p.out_y + v * p.out_height;
+
+        let dx = canvas_x - p.pivot_x;
+        let dy = canvas_y - p.pivot_y;
+        let rot_x = p.pivot_x + dx * p.cos_r + dy * p.sin_r;
+        let rot_y = p.pivot_y - dx * p.sin_r + dy * p.cos_r;
+
+        let src_x = ((rot_x - p.in_x) / p.in_width * in_w as f32 - 0.5)
+            .clamp(0.0, (in_w - 1) as f32);
+        let src_y = ((rot_y - p.in_y) / p.in_height * in_h as f32 - 0.5)
+            .clamp(0.0, (in_h - 1) as f32);
+        (src_x, src_y)
+    }
+
+    /// CPU bilinear sample from an RGBA f32 image stored row-major.
+    fn cpu_bilinear(pixels: &[f32], w: u32, h: u32, sx: f32, sy: f32) -> [f32; 4] {
+        let x0 = (sx.floor() as u32).min(w - 1);
+        let y0 = (sy.floor() as u32).min(h - 1);
+        let x1 = (x0 + 1).min(w - 1);
+        let y1 = (y0 + 1).min(h - 1);
+        let wx = sx - x0 as f32;
+        let wy = sy - y0 as f32;
+        let idx = |x: u32, y: u32| (y * w + x) as usize * 4;
+        let mut out = [0.0f32; 4];
+        for c in 0..4 {
+            let tl = pixels[idx(x0, y0) + c];
+            let tr = pixels[idx(x1, y0) + c];
+            let bl = pixels[idx(x0, y1) + c];
+            let br = pixels[idx(x1, y1) + c];
+            let top = tl * (1.0 - wx) + tr * wx;
+            let bot = bl * (1.0 - wx) + br * wx;
+            out[c] = top * (1.0 - wy) + bot * wy;
+        }
+        out
+    }
+
+    /// Run the full CPU pipeline: Image layer (viewport crop) → Crop layer.
+    /// Returns the final RGBA f32 buffer at (target_w × target_h).
+    fn cpu_render_image_then_crop(
+        source: &[f32],
+        src_w: u32,
+        src_h: u32,
+        target_w: u32,
+        target_h: u32,
+        viewport: &PreviewCrop,
+        crop: &CropRect,
+    ) -> Vec<f32> {
+        // Step 1: Image layer — sample source into (target_w × target_h)
+        //         using the viewport crop (no rotation).
+        let image_uniform = CropUniform {
+            out_x: viewport.x,
+            out_y: viewport.y,
+            out_width: viewport.width,
+            out_height: viewport.height,
+            pivot_x: 0.0,
+            pivot_y: 0.0,
+            in_x: 0.0,
+            in_y: 0.0,
+            in_width: src_w as f32,
+            in_height: src_h as f32,
+            cos_r: 1.0,
+            sin_r: 0.0,
+        };
+        let mut accum = vec![0.0f32; (target_w * target_h * 4) as usize];
+        for gy in 0..target_h {
+            for gx in 0..target_w {
+                let (sx, sy) =
+                    cpu_crop_sample(gx, gy, target_w, target_h, src_w, src_h, &image_uniform);
+                let px = cpu_bilinear(source, src_w, src_h, sx, sy);
+                let off = (gy * target_w + gx) as usize * 4;
+                accum[off..off + 4].copy_from_slice(&px);
+            }
+        }
+
+        // Step 2: Crop layer.
+        // When rotation is non-zero, sample from the FULL source (not the
+        // viewport-cropped accumulator) so rotated positions outside the
+        // viewport still resolve to valid source pixels.
+        let (crop_src, crop_src_w, crop_src_h, crop_in) = if crop.rotation != 0.0 {
+            (
+                source,
+                src_w,
+                src_h,
+                CropUniform {
+                    out_x: crop.x,
+                    out_y: crop.y,
+                    out_width: crop.width,
+                    out_height: crop.height,
+                    pivot_x: crop.x + crop.width * 0.5,
+                    pivot_y: crop.y + crop.height * 0.5,
+                    in_x: 0.0,
+                    in_y: 0.0,
+                    in_width: src_w as f32,
+                    in_height: src_h as f32,
+                    cos_r: crop.rotation.cos(),
+                    sin_r: crop.rotation.sin(),
+                },
+            )
+        } else {
+            let prev_view = viewport;
+            (
+                accum.as_slice(),
+                target_w,
+                target_h,
+                CropUniform {
+                    out_x: crop.x,
+                    out_y: crop.y,
+                    out_width: crop.width,
+                    out_height: crop.height,
+                    pivot_x: crop.x + crop.width * 0.5,
+                    pivot_y: crop.y + crop.height * 0.5,
+                    in_x: prev_view.x,
+                    in_y: prev_view.y,
+                    in_width: prev_view.width,
+                    in_height: prev_view.height,
+                    cos_r: 1.0,
+                    sin_r: 0.0,
+                },
+            )
+        };
+        let mut output = vec![0.0f32; (target_w * target_h * 4) as usize];
+        for gy in 0..target_h {
+            for gx in 0..target_w {
+                let (sx, sy) = cpu_crop_sample(
+                    gx, gy, target_w, target_h, crop_src_w, crop_src_h, &crop_in,
+                );
+                let px = cpu_bilinear(crop_src, crop_src_w, crop_src_h, sx, sy);
+                let off = (gy * target_w + gx) as usize * 4;
+                output[off..off + 4].copy_from_slice(&px);
+            }
+        }
+        output
+    }
+
+    fn make_grid(w: u32, h: u32) -> Vec<f32> {
+        let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+        for row in 0..h {
+            for col in 0..w {
+                pixels.push((row * w + col + 1) as f32);
+                pixels.push(0.0);
+                pixels.push(0.0);
+                pixels.push(1.0);
+            }
+        }
+        pixels
+    }
+
+    fn r_from(pixels: &[f32]) -> Vec<f32> {
+        pixels.chunks(4).map(|px| px[0]).collect()
+    }
+
+    #[test]
+    fn cpu_crop_no_rotation_identity() {
+        // 4×4 source, full-canvas viewport, crop right half, no rotation.
+        let source = make_grid(4, 4);
+        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 4.0, height: 4.0 };
+        let crop = CropRect { x: 2.0, y: 0.0, width: 2.0, height: 4.0, rotation: 0.0 };
+        let out = cpu_render_image_then_crop(&source, 4, 4, 4, 4, &viewport, &crop);
+        let r = r_from(&out);
+        // Output covers crop rect (2,0)-(4,4) at 4×4 target.
+        // Each column covers 0.5 canvas units. Center of col 0 → canvas_x = 2.25 → src col ≈ 2.
+        for (i, val) in r.iter().enumerate() {
+            assert!(
+                *val >= 2.5 && *val <= 16.5,
+                "pixel {i}: R={val} outside crop region"
+            );
+        }
+    }
+
+    #[test]
+    fn cpu_crop_90deg_rotation_square_canvas() {
+        // 4×4 source, 90° rotation of center 2×2 crop.
+        let source = make_grid(4, 4);
+        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 4.0, height: 4.0 };
+        let crop = CropRect {
+            x: 1.0,
+            y: 1.0,
+            width: 2.0,
+            height: 2.0,
+            rotation: std::f32::consts::FRAC_PI_2,
+        };
+
+        // Full-res: target = canvas = 4×4.
+        let full = cpu_render_image_then_crop(&source, 4, 4, 4, 4, &viewport, &crop);
+        let r_full = r_from(&full);
+
+        // Half-res: target = 2×2 for same 4×4 canvas.
+        let half = cpu_render_image_then_crop(&source, 4, 4, 2, 2, &viewport, &crop);
+        let r_half = r_from(&half);
+
+        // The 2×2 result should approximate the 4×4 result downsampled by
+        // averaging 2×2 blocks.
+        let mut expected = Vec::with_capacity(4);
+        for row in 0..2 {
+            for col in 0..2 {
+                let tl = r_full[(row * 2) * 4 + col * 2];
+                let tr = r_full[(row * 2) * 4 + col * 2 + 1];
+                let bl = r_full[(row * 2 + 1) * 4 + col * 2];
+                let br = r_full[(row * 2 + 1) * 4 + col * 2 + 1];
+                expected.push((tl + tr + bl + br) / 4.0);
+            }
+        }
+        for i in 0..4 {
+            let diff = (r_half[i] - expected[i]).abs();
+            assert!(
+                diff < 1.5,
+                "pixel {i}: half={}, expected≈{}, diff={diff}",
+                r_half[i], expected[i],
+            );
+        }
+    }
+
+    /// The key bug scenario: non-square canvas with a rotated crop.
+    /// On an 8×4 canvas, a square 4×4 crop with 90° rotation.
+    /// When the target is 4×4 (non-uniform scaling: 2× horizontal, 1× vertical),
+    /// the rotation must still happen in canvas space, not in the scaled
+    /// preview-pixel space.
+    #[test]
+    fn cpu_crop_rotation_non_uniform_scaling() {
+        let source = make_grid(8, 4);
+        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 4.0 };
+        let crop = CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: std::f32::consts::FRAC_PI_2,
+        };
+
+        // Full-res reference: target = 8×4 (uniform 1:1 mapping for image layer).
+        let full = cpu_render_image_then_crop(&source, 8, 4, 8, 4, &viewport, &crop);
+        // Downsample 8×4 → 4×4 by averaging 2×1 horizontal pairs.
+        let mut r_ref = Vec::with_capacity(16);
+        for row in 0..4 {
+            for col in 0..4 {
+                let l = full[(row * 8 + col * 2) * 4];
+                let r = full[(row * 8 + col * 2 + 1) * 4];
+                r_ref.push((l + r) / 2.0);
+            }
+        }
+
+        // Preview: target = 4×4 for 8×4 canvas (non-uniform scaling).
+        let preview = cpu_render_image_then_crop(&source, 8, 4, 4, 4, &viewport, &crop);
+        let r_preview = r_from(&preview);
+
+        for i in 0..r_ref.len() {
+            let diff = (r_preview[i] - r_ref[i]).abs();
+            assert!(
+                diff < 1.5,
+                "pixel {i}: reference={}, preview={}, diff={diff} — \
+                 rotation distorted by non-uniform scaling",
+                r_ref[i], r_preview[i],
+            );
+        }
+    }
+
+    /// Verify that a 45° rotation on a non-square canvas samples from the
+    /// correct canvas-space coordinates regardless of preview resolution.
+    #[test]
+    fn cpu_crop_45deg_non_square_canvas() {
+        let source = make_grid(8, 4);
+        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 4.0 };
+        let crop = CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: std::f32::consts::FRAC_PI_4,
+        };
+
+        let full = cpu_render_image_then_crop(&source, 8, 4, 8, 4, &viewport, &crop);
+        let mut r_ref = Vec::with_capacity(16);
+        for row in 0..4 {
+            for col in 0..4 {
+                let l = full[(row * 8 + col * 2) * 4];
+                let r = full[(row * 8 + col * 2 + 1) * 4];
+                r_ref.push((l + r) / 2.0);
+            }
+        }
+
+        let preview = cpu_render_image_then_crop(&source, 8, 4, 4, 4, &viewport, &crop);
+        let r_preview = r_from(&preview);
+
+        for i in 0..r_ref.len() {
+            let diff = (r_preview[i] - r_ref[i]).abs();
+            assert!(
+                diff < 1.5,
+                "pixel {i}: reference={}, preview={}, diff={diff}",
+                r_ref[i], r_preview[i],
+            );
+        }
+    }
+
+    /// Test that the crop shader samples pixels from the expected canvas-space
+    /// position after rotation.
+    #[test]
+    fn cpu_crop_sample_positions_after_rotation() {
+        // 8×4 canvas. Crop (2,0,4,4) with 90° rotation, pivot at (4,2).
+        // Full-canvas input: in = (0,0,8,4), texture = 8×4.
+        let p = CropUniform {
+            out_x: 2.0,
+            out_y: 0.0,
+            out_width: 4.0,
+            out_height: 4.0,
+            pivot_x: 4.0,
+            pivot_y: 2.0,
+            in_x: 0.0,
+            in_y: 0.0,
+            in_width: 8.0,
+            in_height: 4.0,
+            cos_r: 0.0,
+            sin_r: 1.0,
+        };
+
+        // gid (2,2) in 4×4 output: u=0.625, v=0.625.
+        // canvas = (2+2.5, 0+2.5) = (4.5, 2.5).
+        // dx=0.5, dy=0.5. rot = (4+0.5, 2-0.5) = (4.5, 1.5).
+        // src = (4.5-0)/8*8 - 0.5 = 4.0, (1.5-0)/4*4 - 0.5 = 1.0.
+        let (sx, sy) = cpu_crop_sample(2, 2, 4, 4, 8, 4, &p);
+        assert!(
+            (sx - 4.0).abs() < 0.01,
+            "gid(2,2) src_x={sx}, expected 4.0"
+        );
+        assert!(
+            (sy - 1.0).abs() < 0.01,
+            "gid(2,2) src_y={sy}, expected 1.0"
+        );
+
+        // gid (0,0): u=0.125, v=0.125. canvas=(2.5, 0.5).
+        // dx=-1.5, dy=-1.5. rot = (4-1.5, 2+1.5) = (2.5, 3.5).
+        // src = (2.5/8*8-0.5, 3.5/4*4-0.5) = (2.0, 3.0).
+        let (sx, sy) = cpu_crop_sample(0, 0, 4, 4, 8, 4, &p);
+        assert!(
+            (sx - 2.0).abs() < 0.01,
+            "gid(0,0) src_x={sx}, expected 2.0"
+        );
+        assert!(
+            (sy - 3.0).abs() < 0.01,
+            "gid(0,0) src_y={sy}, expected 3.0"
+        );
+    }
+
+    /// Edge case: small rotation (5°) on a wide canvas.
+    /// Ensures the transform doesn't degenerate for small angles.
+    #[test]
+    fn cpu_crop_small_rotation_wide_canvas() {
+        let source = make_grid(16, 4);
+        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 16.0, height: 4.0 };
+        let crop = CropRect {
+            x: 6.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: 5.0f32.to_radians(),
+        };
+
+        // Full-res reference: target = 16×4.
+        let full = cpu_render_image_then_crop(&source, 16, 4, 16, 4, &viewport, &crop);
+        // Downsample 16×4 → 4×4 by averaging 4×1 blocks.
+        let mut r_ref = Vec::with_capacity(16);
+        for row in 0..4 {
+            for col in 0..4 {
+                let mut sum = 0.0;
+                for dx in 0..4 {
+                    sum += full[(row * 16 + col * 4 + dx) * 4];
+                }
+                r_ref.push(sum / 4.0);
+            }
+        }
+
+        let preview = cpu_render_image_then_crop(&source, 16, 4, 4, 4, &viewport, &crop);
+        let r_preview = r_from(&preview);
+
+        for i in 0..r_ref.len() {
+            let diff = (r_preview[i] - r_ref[i]).abs();
+            assert!(
+                diff < 2.0,
+                "pixel {i}: reference={}, preview={}, diff={diff}",
+                r_ref[i], r_preview[i],
+            );
+        }
+    }
+
+    /// Diagnostic: when viewport=crop rect and there's rotation, the crop
+    /// layer must produce the same result as when viewport=full canvas.
+    #[test]
+    fn cpu_crop_rotation_viewport_must_match_full_canvas() {
+        let source = make_grid(8, 8);
+        let crop = CropRect {
+            x: 2.0,
+            y: 2.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: std::f32::consts::FRAC_PI_4,
+        };
+
+        let full = cpu_render_image_then_crop(
+            &source, 8, 8, 4, 4,
+            &PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 8.0 },
+            &crop,
+        );
+        let r_full = r_from(&full);
+
+        let preview = cpu_render_image_then_crop(
+            &source, 8, 8, 4, 4,
+            &PreviewCrop { x: 2.0, y: 2.0, width: 4.0, height: 4.0 },
+            &crop,
+        );
+        let r_preview = r_from(&preview);
+
+        eprintln!("--- viewport = crop rect ---");
+        for row in 0..4 {
+            let v: Vec<String> = (0..4).map(|c| format!("{:6.1}", r_preview[row*4+c])).collect();
+            eprintln!("  row {row}: {}", v.join(" "));
+        }
+        eprintln!("--- viewport = full canvas (reference) ---");
+        for row in 0..4 {
+            let v: Vec<String> = (0..4).map(|c| format!("{:6.1}", r_full[row*4+c])).collect();
+            eprintln!("  row {row}: {}", v.join(" "));
+        }
+
+        let mut max_diff = 0.0f32;
+        for i in 0..r_full.len() {
+            max_diff = max_diff.max((r_preview[i] - r_full[i]).abs());
+        }
+        assert!(
+            max_diff < 2.0,
+            "max diff={max_diff} — rotation is not canvas-space invariant"
+        );
+    }
+
+    /// Counterpart: when the viewport covers the full canvas, the rotated
+    /// crop at different target resolutions must still agree.
+    #[test]
+    fn cpu_crop_rotation_full_viewport_different_resolutions() {
+        let source = make_grid(8, 8);
+        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 8.0 };
+        let crop = CropRect {
+            x: 2.0,
+            y: 2.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: std::f32::consts::FRAC_PI_2,
+        };
+
+        // 8×8 target (high-res).
+        let hi = cpu_render_image_then_crop(&source, 8, 8, 8, 8, &viewport, &crop);
+        let r_hi = r_from(&hi);
+
+        // Downsample to 4×4 by averaging 2×2 blocks.
+        let mut r_ref = Vec::with_capacity(16);
+        for row in 0..4 {
+            for col in 0..4 {
+                let tl = r_hi[(row * 2) * 8 + col * 2];
+                let tr = r_hi[(row * 2) * 8 + col * 2 + 1];
+                let bl = r_hi[(row * 2 + 1) * 8 + col * 2];
+                let br = r_hi[(row * 2 + 1) * 8 + col * 2 + 1];
+                r_ref.push((tl + tr + bl + br) / 4.0);
+            }
+        }
+
+        // 4×4 target directly.
+        let lo = cpu_render_image_then_crop(&source, 8, 8, 4, 4, &viewport, &crop);
+        let r_lo = r_from(&lo);
+
+        for i in 0..r_ref.len() {
+            let diff = (r_lo[i] - r_ref[i]).abs();
+            assert!(
+                diff < 2.0,
+                "pixel {i}: reference={}, lo_res={}, diff={diff}",
+                r_ref[i], r_lo[i],
             );
         }
     }
