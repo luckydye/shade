@@ -2,20 +2,6 @@ import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as bridge from "../bridge/index";
 
-export interface PreviewImage {
-  image: ImageData;
-  crop: bridge.PreviewCrop;
-  viewportX: number;
-  viewportY: number;
-  viewportWidth: number;
-  viewportHeight: number;
-}
-
-export interface PreviewContextImage {
-  image: ImageData;
-  crop: bridge.PreviewCrop;
-}
-
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop";
   visible: boolean;
@@ -47,20 +33,16 @@ export interface EditorState {
   selectedLayerIdx: number;
   isLoading: boolean;
   webgpuAvailable: boolean;
-  previewZoom: number;
-  previewCenterX: number;
-  previewCenterY: number;
-  previewViewportWidth: number;
-  previewViewportHeight: number;
+  viewportZoom: number;
+  viewportCenterX: number;
+  viewportCenterY: number;
+  viewportScreenWidth: number;
+  viewportScreenHeight: number;
   crop: CropRect;
   cropDraft: CropRect | null;
   isCropMode: boolean;
   loadingMediaSrc: string | null;
 }
-
-export const [previewFrame, setPreviewFrame] = createSignal<PreviewImage | null>(null);
-export const [previewContextFrame, setPreviewContextFrame] =
-  createSignal<PreviewContextImage | null>(null);
 
 export const [state, setState] = createStore<EditorState>({
   currentView: "media",
@@ -74,11 +56,11 @@ export const [state, setState] = createStore<EditorState>({
   selectedLayerIdx: -1,
   isLoading: false,
   webgpuAvailable: true,
-  previewZoom: 1,
-  previewCenterX: 0,
-  previewCenterY: 0,
-  previewViewportWidth: 0,
-  previewViewportHeight: 0,
+  viewportZoom: 1,
+  viewportCenterX: 0,
+  viewportCenterY: 0,
+  viewportScreenWidth: 0,
+  viewportScreenHeight: 0,
   crop: { x: 0, y: 0, width: 0, height: 0, rotation: 0 },
   cropDraft: null,
   isCropMode: false,
@@ -128,7 +110,13 @@ export function normalizeCropRect(
 }
 
 export function cropRectsMatch(a: CropRect, b: CropRect) {
-  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height && a.rotation === b.rotation;
+  return (
+    a.x === b.x &&
+    a.y === b.y &&
+    a.width === b.width &&
+    a.height === b.height &&
+    a.rotation === b.rotation
+  );
 }
 
 export function selectedLayerIsCrop() {

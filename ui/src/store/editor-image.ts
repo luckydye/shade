@@ -1,22 +1,16 @@
 import * as bridge from "../bridge/index";
-import {
-  fullCanvasCrop,
-  setPreviewContextFrame,
-  setPreviewFrame,
-  setState,
-  state,
-} from "./editor-store";
-import { refreshPreview } from "./editor-preview";
+import { fullCanvasCrop, setState, state } from "./editor-store";
+import { clearPreviewTiles, refreshPreview } from "../viewport/preview";
 import { refreshLayerStack } from "./editor-layers";
 
-function resetPreviewState(canvasWidth: number, canvasHeight: number) {
+function resetViewportState(canvasWidth: number, canvasHeight: number) {
   const crop = fullCanvasCrop(canvasWidth, canvasHeight);
   setState({
     canvasWidth,
     canvasHeight,
-    previewZoom: 1,
-    previewCenterX: crop.width * 0.5,
-    previewCenterY: crop.height * 0.5,
+    viewportZoom: 1,
+    viewportCenterX: crop.width * 0.5,
+    viewportCenterY: crop.height * 0.5,
     crop,
     cropDraft: null,
     isCropMode: false,
@@ -24,16 +18,15 @@ function resetPreviewState(canvasWidth: number, canvasHeight: number) {
 }
 
 function clearLoadedImageState() {
-  setPreviewFrame(null);
-  setPreviewContextFrame(null);
+  clearPreviewTiles();
   setState({
     layers: [],
     canvasWidth: 0,
     canvasHeight: 0,
     selectedLayerIdx: -1,
-    previewZoom: 1,
-    previewCenterX: 0,
-    previewCenterY: 0,
+    viewportZoom: 1,
+    viewportCenterX: 0,
+    viewportCenterY: 0,
     previewRenderWidth: 0,
     previewRenderHeight: 0,
     previewDisplayColorSpace: "Unknown",
@@ -60,7 +53,7 @@ async function openImageFrom(
   });
   try {
     const info = await load();
-    resetPreviewState(info.canvas_width, info.canvas_height);
+    resetViewportState(info.canvas_width, info.canvas_height);
     setState("sourceBitDepth", info.source_bit_depth);
     await refreshLayerStack();
     await refreshPreview();

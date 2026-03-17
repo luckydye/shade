@@ -1,14 +1,7 @@
-export type {
-  CropRect,
-  EditorState,
-  LayerInfo,
-  PreviewImage,
-} from "./editor-store";
+export type { CropRect, EditorState, LayerInfo } from "./editor-store";
 
 export {
   isDrawerOpen,
-  previewContextFrame,
-  previewFrame,
   setIsDrawerOpen,
   state,
 } from "./editor-store";
@@ -49,17 +42,19 @@ export {
 } from "./editor-layers";
 
 export {
+  backdropTile,
   fitPreviewSize,
-  getMaxPreviewZoom,
-  getPreviewBounds,
-  getPreviewDisplaySize,
-  getPreviewZoomPercent,
-  panPreview,
+  getMaxViewportZoom,
+  getViewportDisplaySize,
+  getViewportFitRef,
+  getViewportZoomPercent,
+  panViewport,
+  previewTile,
   refreshPreview,
-  resetPreviewViewport,
-  setPreviewViewportSize,
-  zoomPreviewDelta,
-} from "./editor-preview";
+  resetViewport,
+  setViewportScreenSize,
+  zoomViewport,
+} from "../viewport/preview";
 
 export {
   findCropLayerIdx,

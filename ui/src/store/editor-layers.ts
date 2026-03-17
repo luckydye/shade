@@ -3,13 +3,11 @@ import {
   fullCanvasCrop,
   LayerInfo,
   normalizeCropRect,
-  setPreviewContextFrame,
-  setPreviewFrame,
   resolveSelectedLayerIdx,
   setState,
   state,
 } from "./editor-store";
-import { refreshPreview, resetPreviewViewport } from "./editor-preview";
+import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 
 function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
   return {
@@ -54,8 +52,7 @@ export async function deleteLayer(idx: number) {
   await bridge.deleteLayer(idx);
   await refreshLayerStack();
   if (state.layers.length === 0) {
-    setPreviewFrame(null);
-    setPreviewContextFrame(null);
+    clearPreviewTiles();
   }
   await refreshPreview();
 }
@@ -82,7 +79,10 @@ function applyCropLayerEdit(layerIdx: number, params: Record<string, unknown>) {
     y: params.crop_y as number,
     width: params.crop_width as number,
     height: params.crop_height as number,
-    rotation: (params.crop_rotation as number | undefined) ?? state.layers[layerIdx]?.crop?.rotation ?? 0,
+    rotation:
+      (params.crop_rotation as number | undefined) ??
+      state.layers[layerIdx]?.crop?.rotation ??
+      0,
   });
 }
 
@@ -246,7 +246,7 @@ export function resetCrop() {
     crop,
     cropDraft: state.isCropMode ? crop : null,
   });
-  resetPreviewViewport();
+  resetViewport();
 }
 
 export function applyCrop() {
@@ -258,9 +258,9 @@ export function applyCrop() {
     crop,
     cropDraft: null,
     isCropMode: false,
-    previewZoom: 1,
-    previewCenterX: crop.x + crop.width * 0.5,
-    previewCenterY: crop.y + crop.height * 0.5,
+    viewportZoom: 1,
+    viewportCenterX: crop.x + crop.width * 0.5,
+    viewportCenterY: crop.y + crop.height * 0.5,
   });
   void refreshPreview();
 }

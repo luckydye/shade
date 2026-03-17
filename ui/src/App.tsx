@@ -1,7 +1,7 @@
 import { Component, Show } from "solid-js";
 import { Toolbar } from "./components/Toolbar";
 import Inspector from "./components/Inspector";
-import Canvas from "./components/Canvas";
+import { Viewport } from "./components/Viewport";
 import { MediaView } from "./components/MediaView";
 import { state } from "./store/editor";
 
@@ -14,7 +14,7 @@ const App: Component = () => {
       <Toolbar />
       <Show when={showEditor()} fallback={<MediaView />}>
         <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
-          <Canvas />
+          <Viewport />
           <Inspector />
         </div>
       </Show>
