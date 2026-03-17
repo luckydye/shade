@@ -45,6 +45,7 @@ export function screenToWorld(sx: number, sy: number, t: WorldTransform) {
 }
 
 // Clamp camera center so panning doesn't scroll outside the fit reference bounds.
+// When the image is smaller than the viewport in a dimension, center it.
 export function clampCamera(
   zoom: number,
   centerX: number,
@@ -56,7 +57,13 @@ export function clampCamera(
   const imageScale = fitScale * zoom;
   const visW = screen.width / imageScale;
   const visH = screen.height / imageScale;
-  const cx = Math.max(fit.x + visW * 0.5, Math.min(centerX, fit.x + fit.width - visW * 0.5));
-  const cy = Math.max(fit.y + visH * 0.5, Math.min(centerY, fit.y + fit.height - visH * 0.5));
+  const cx =
+    visW >= fit.width
+      ? fit.x + fit.width * 0.5
+      : Math.max(fit.x + visW * 0.5, Math.min(centerX, fit.x + fit.width - visW * 0.5));
+  const cy =
+    visH >= fit.height
+      ? fit.y + fit.height * 0.5
+      : Math.max(fit.y + visH * 0.5, Math.min(centerY, fit.y + fit.height - visH * 0.5));
   return { centerX: cx, centerY: cy, zoom };
 }
