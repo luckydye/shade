@@ -334,14 +334,14 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
     <button
       type="button"
       ref={containerRef}
-      class={`group flex flex-col gap-1.5 p-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 ${
-        loadError() ? "ring-1 ring-red-500/50" : "hover:bg-white/[0.06] active:bg-white/[0.14]"
+      class={`group flex flex-col gap-1.5 p-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+        loadError() ? "ring-1 ring-red-500/50" : "hover:bg-[var(--surface-hover)] active:bg-[var(--surface-active)]"
       }`}
       onClick={handleClick}
     >
-      <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-white/[0.04]">
+      <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
         {!src() && !loadError() && (
-          <div class="h-full w-full animate-pulse bg-white/[0.06]" />
+          <div class="h-full w-full animate-pulse bg-[var(--surface-hover)]" />
         )}
         {src() && (
           <img
@@ -361,7 +361,7 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
           <div class="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-400/90 shadow-sm" />
         )}
       </div>
-      <span class="truncate px-0.5 text-[11px] text-white/40">{props.item.name}</span>
+      <span class="truncate px-0.5 text-[11px] text-[var(--text-faint)]">{props.item.name}</span>
     </button>
   );
 };
@@ -739,10 +739,10 @@ export const MediaView: Component = () => {
 
   return (
     <div class="mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0">
-      <div class="border-b border-white/6 px-6 py-4">
+      <div class="border-b border-[var(--border)] px-6 py-4">
         <div class="flex flex-col gap-4">
           <div class="flex items-center gap-8">
-            <h1 class="hidden text-sm font-medium text-white/80 md:block">Libraries</h1>
+            <h1 class="hidden text-sm font-medium text-[var(--text-secondary)] md:block">Libraries</h1>
             <div class="flex flex-1 gap-2 overflow-x-auto">
               <For each={libraryEntries()}>
                 {(library) =>
@@ -759,11 +759,11 @@ export const MediaView: Component = () => {
                         class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
                           selectedLibraryId() === library.id
                             ? offline
-                              ? "border-dashed border-amber-400/45 bg-white/12 text-white"
-                              : "border-white/18 bg-white/12 text-white"
+                              ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
+                              : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
                             : offline
-                              ? "border-dashed border-amber-500/25 bg-white/[0.03] text-white/65 hover:border-amber-400/40 hover:text-white"
-                              : "border-white/8 bg-white/[0.03] text-white/55 hover:border-white/12 hover:text-white"
+                              ? "border-dashed border-amber-500/25 bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
+                              : "border-[var(--border-soft)] bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
                         }`}
                       >
                         <span class="flex items-center gap-2">
@@ -785,7 +785,7 @@ export const MediaView: Component = () => {
                 {(peer) => (
                   <button
                     type="button"
-                    class="shrink-0 rounded-full border border-dashed border-white/14 bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-white/60 transition-colors hover:border-white/24 hover:text-white"
+                    class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)]"
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
@@ -795,7 +795,7 @@ export const MediaView: Component = () => {
               </For>
               <button
                 type="button"
-                class="shrink-0 rounded-full border border-dashed border-white/14 bg-white/[0.03] px-3 py-2 text-[14px] font-semibold leading-none text-white/60 transition-colors hover:border-white/24 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-3 py-2 text-[14px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={isSubmitting()}
                 onClick={() => void handleAddLibrary()}
                 aria-label="Add library"
@@ -806,7 +806,7 @@ export const MediaView: Component = () => {
             <div class="flex items-center gap-3">
               <button
                 type="button"
-                class="rounded-full border border-red-500/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-full border border-[var(--danger-border)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={!selectedLibrary()?.removable || isSubmitting()}
                 onClick={() => void handleRemoveLibrary()}
               >
@@ -814,9 +814,9 @@ export const MediaView: Component = () => {
               </button>
             </div>
           </div>
-          {error() && <p class="text-sm text-red-300">{error()}</p>}
+          {error() && <p class="text-sm text-[var(--danger-text)]">{error()}</p>}
           <Show when={selectedLibraryDetail()}>
-            <p class="truncate text-xs text-white/28">
+            <p class="truncate text-xs text-[var(--text-dim)]">
               {selectedLibraryDetail()}
               {!isLibraryScanComplete() &&
                 ` • indexing ${displayedItems().length} images`}
@@ -832,7 +832,7 @@ export const MediaView: Component = () => {
         <Show
           when={displayedItems().length > 0}
           fallback={
-            <p class="text-sm text-white/30">
+            <p class="text-sm text-[var(--text-subtle)]">
               {items.loading || !isLibraryScanComplete()
                 ? "Loading…"
                 : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
@@ -850,7 +850,7 @@ export const MediaView: Component = () => {
               <For each={visibleRows()}>
                 {(row) =>
                   row.kind === "date" ? (
-                    <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-white/38 first:pt-0">
+                    <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)] first:pt-0">
                       {formatModificationMonth(row.modifiedAt)}
                     </h2>
                   ) : (
