@@ -395,7 +395,10 @@ async function performPreviewRefresh() {
       request.crop.width === state.canvasWidth &&
       request.crop.height === state.canvasHeight
     ) {
-      setPreviewContextFrame(toImageData(frame));
+      setPreviewContextFrame({
+        image: toImageData(frame),
+        crop: request.crop,
+      });
       return;
     }
     if (queued.quality === "interactive" && previewContextFrame()) {
@@ -404,7 +407,16 @@ async function performPreviewRefresh() {
     const contextFrame = await renderPreviewThrottled(contextRequest);
     if (queued.version !== previewRefreshVersion) return;
     if (contextFrame.width === 0 || contextFrame.height === 0) return;
-    setPreviewContextFrame(toImageData(contextFrame));
+    const contextCrop = contextRequest.crop ?? fullCanvasCrop();
+    setPreviewContextFrame({
+      image: toImageData(contextFrame),
+      crop: {
+        x: contextCrop.x,
+        y: contextCrop.y,
+        width: contextCrop.width,
+        height: contextCrop.height,
+      },
+    });
   });
 }
 

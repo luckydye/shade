@@ -399,32 +399,34 @@ const Canvas: Component = () => {
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
     const cropLayer = selectedCropLayer();
-    const committedCrop = getCommittedCropRect();
     const cropEditBounds = getCropInteractionBounds(cssWidth, cssHeight);
     const previewBounds = cropLayer
       ? { x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight }
-      : committedCrop;
+      : getCommittedCropRect();
     const imageBounds = cropLayer
       ? cropEditBounds
       : getDisplayBounds(cssWidth, cssHeight, previewBounds);
-    const contextBounds = cropLayer
-      ? cropEditBounds
-      : getDisplayBounds(cssWidth, cssHeight, committedCrop);
     const contextFrame = previewContextFrame();
     if (contextFrame) {
       contextCanvas ??= document.createElement("canvas");
       if (
-        contextCanvas.width !== contextFrame.width ||
-        contextCanvas.height !== contextFrame.height
+        contextCanvas.width !== contextFrame.image.width ||
+        contextCanvas.height !== contextFrame.image.height
       ) {
-        contextCanvas.width = contextFrame.width;
-        contextCanvas.height = contextFrame.height;
+        contextCanvas.width = contextFrame.image.width;
+        contextCanvas.height = contextFrame.image.height;
       }
       const contextScratch = contextCanvas.getContext("2d");
       if (!contextScratch) {
         throw new Error("context canvas 2d context is required");
       }
-      contextScratch.putImageData(contextFrame, 0, 0);
+      contextScratch.putImageData(contextFrame.image, 0, 0);
+      const contextBounds = getDisplayBounds(cssWidth, cssHeight, {
+        x: contextFrame.crop.x,
+        y: contextFrame.crop.y,
+        width: contextFrame.crop.width,
+        height: contextFrame.crop.height,
+      });
       ctx.drawImage(
         contextCanvas,
         contextBounds.x,

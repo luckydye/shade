@@ -779,7 +779,7 @@ const Inspector: Component = () => {
     const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
     const luminanceHistogram = createMemo(() => {
       const frame = previewContextFrame();
-      return frame ? buildLuminanceHistogram(frame) : [];
+      return frame ? buildLuminanceHistogram(frame.image) : [];
     });
     let svgRef!: SVGSVGElement;
     let nextId = 0;

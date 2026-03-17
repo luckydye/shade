@@ -11,6 +11,11 @@ export interface PreviewImage {
   viewportHeight: number;
 }
 
+export interface PreviewContextImage {
+  image: ImageData;
+  crop: bridge.PreviewCrop;
+}
+
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop";
   visible: boolean;
@@ -55,7 +60,7 @@ export interface EditorState {
 
 export const [previewFrame, setPreviewFrame] = createSignal<PreviewImage | null>(null);
 export const [previewContextFrame, setPreviewContextFrame] =
-  createSignal<ImageData | null>(null);
+  createSignal<PreviewContextImage | null>(null);
 
 export const [state, setState] = createStore<EditorState>({
   currentView: "media",
