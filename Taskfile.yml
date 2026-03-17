@@ -11,6 +11,21 @@ tasks:
     dir: ui
     cmd: bun run build
 
+  web:dev:
+    desc: Start the web-only wasm UI
+    dir: shade-web
+    cmd: bun run dev
+
+  web:build:
+    desc: Build the web-only wasm UI
+    dir: shade-web
+    cmd: bun run build
+
+  web:wasm:
+    desc: Build the wasm bundle consumed by the web UI
+    dir: shade-web
+    cmd: bun run build:wasm
+
   dev:
     desc: Start the Tauri dev environment
     dir: crates/shade-tauri

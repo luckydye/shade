@@ -1,0 +1,25 @@
+{
+  "name": "shade-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "../scripts/build-wasm.sh",
+    "build:wasm:dev": "../scripts/build-wasm-dev.sh",
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "shade-ui": "../ui",
+    "solid-js": "^1.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tailwindcss": "^4",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-solid": "^2.8.0"
+  }
+}

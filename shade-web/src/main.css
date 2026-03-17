@@ -1,0 +1,192 @@
+@import "tailwindcss";
+@source "./";
+@source "../node_modules/shade-ui/src";
+
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+
+:root {
+  /* App backgrounds */
+  --app-bg: linear-gradient(180deg, #050505 0%, #0c0c0c 100%);
+  --app-bg-highlight: rgba(255, 255, 255, 0.06);
+  --toolbar-bg: rgba(4, 4, 4, 0.94);
+  --panel-bg: rgba(17, 17, 17, 0.92);
+  --input-bg: rgba(0, 0, 0, 0.30);
+
+  /* Surfaces */
+  --surface-subtle: rgba(255, 255, 255, 0.02);
+  --surface-faint: rgba(255, 255, 255, 0.03);
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-selected: rgba(255, 255, 255, 0.10);
+  --surface-active: rgba(255, 255, 255, 0.12);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.10);
+  --border-dashed: rgba(255, 255, 255, 0.14);
+  --border-active: rgba(255, 255, 255, 0.18);
+
+  /* Text */
+  --text: #f5f5f4;
+  --text-strong: rgba(255, 255, 255, 0.82);
+  --text-secondary: rgba(255, 255, 255, 0.80);
+  --text-muted: rgba(255, 255, 255, 0.62);
+  --text-value: rgba(255, 255, 255, 0.62);
+  --text-icon: rgba(255, 255, 255, 0.42);
+  --text-faint: rgba(255, 255, 255, 0.40);
+  --text-subtle: rgba(255, 255, 255, 0.30);
+  --text-dim: rgba(255, 255, 255, 0.24);
+  --text-placeholder: rgba(255, 255, 255, 0.20);
+
+  /* Primary button */
+  --btn-primary-bg: #f5f5f4;
+  --btn-primary-text: #0c0a09;
+  --btn-primary-hover: #ffffff;
+
+  /* Curves SVG */
+  --curve-bg: #080808;
+  --curve-mid-line: #525252;
+  --curve-guide: #737373;
+  --curve-guide-mid: #f5f5f4;
+  --curve-stroke: #f5f5f4;
+  --curve-histogram: #f5f5f4;
+  --curve-point-stroke: #111111;
+  --curve-label: #a3a3a3;
+
+  /* Slider */
+  --slider-track: rgba(255, 255, 255, 0.08);
+  --slider-notch: rgba(255, 255, 255, 0.20);
+  --slider-thumb-border: #111111;
+  --slider-thumb-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 1px 3px rgb(0 0 0 / 0.4);
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.28);
+  --scrollbar-track: rgba(255, 255, 255, 0.05);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.40);
+
+  /* Canvas */
+  --canvas-bg: #0b0b0b;
+  --canvas-highlight: rgba(255, 255, 255, 0.05);
+
+  /* Semantic danger */
+  --danger-text: #f87171;
+  --danger-border: rgba(239, 68, 68, 0.30);
+  --danger-hover-text: #fca5a5;
+  --danger-hover-border: rgba(239, 68, 68, 0.50);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --app-bg: linear-gradient(180deg, #f0f0f0 0%, #e8e8e8 100%);
+    --app-bg-highlight: rgba(0, 0, 0, 0.03);
+    --toolbar-bg: rgba(240, 240, 238, 0.94);
+    --panel-bg: rgba(228, 228, 226, 0.92);
+    --input-bg: rgba(255, 255, 255, 0.65);
+
+    --surface-subtle: rgba(0, 0, 0, 0.02);
+    --surface-faint: rgba(0, 0, 0, 0.03);
+    --surface: rgba(0, 0, 0, 0.04);
+    --surface-hover: rgba(0, 0, 0, 0.06);
+    --surface-selected: rgba(0, 0, 0, 0.09);
+    --surface-active: rgba(0, 0, 0, 0.11);
+
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border: rgba(0, 0, 0, 0.07);
+    --border-soft: rgba(0, 0, 0, 0.09);
+    --border-medium: rgba(0, 0, 0, 0.12);
+    --border-dashed: rgba(0, 0, 0, 0.15);
+    --border-active: rgba(0, 0, 0, 0.22);
+
+    --text: #1c1917;
+    --text-strong: rgba(0, 0, 0, 0.82);
+    --text-secondary: rgba(0, 0, 0, 0.78);
+    --text-muted: rgba(0, 0, 0, 0.60);
+    --text-value: rgba(0, 0, 0, 0.60);
+    --text-icon: rgba(0, 0, 0, 0.45);
+    --text-faint: rgba(0, 0, 0, 0.45);
+    --text-subtle: rgba(0, 0, 0, 0.35);
+    --text-dim: rgba(0, 0, 0, 0.30);
+    --text-placeholder: rgba(0, 0, 0, 0.25);
+
+    --btn-primary-bg: #1c1917;
+    --btn-primary-text: #fafaf9;
+    --btn-primary-hover: #0c0a09;
+
+    --curve-bg: #e8e8e6;
+    --curve-mid-line: #a3a3a3;
+    --curve-guide: #a3a3a3;
+    --curve-guide-mid: #292524;
+    --curve-stroke: #292524;
+    --curve-histogram: #292524;
+    --curve-point-stroke: #e8e8e6;
+    --curve-label: #737373;
+
+    --slider-track: rgba(0, 0, 0, 0.08);
+    --slider-notch: rgba(0, 0, 0, 0.20);
+    --slider-thumb-border: #e0e0de;
+    --slider-thumb-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.2);
+
+    --canvas-bg: #ebebeb;
+    --canvas-highlight: rgba(0, 0, 0, 0.03);
+
+    --scrollbar-thumb: rgba(0, 0, 0, 0.22);
+    --scrollbar-track: rgba(0, 0, 0, 0.06);
+    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
+
+    --danger-text: #dc2626;
+    --danger-border: rgba(220, 38, 38, 0.35);
+    --danger-hover-text: #b91c1c;
+    --danger-hover-border: rgba(220, 38, 38, 0.55);
+  }
+}
+
+/* ─── App shell ──────────────────────────────────────────────────────────── */
+
+.app-gradient {
+  background-image:
+    radial-gradient(circle at top, var(--app-bg-highlight), transparent 24%),
+    var(--app-bg);
+}
+
+/* ─── View transitions ───────────────────────────────────────────────────── */
+
+::view-transition-old(active-media),
+::view-transition-new(active-media) {
+  animation-duration: 340ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────────────────────── */
+
+.media-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.media-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+
+.media-scroll::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+.media-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.media-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
