@@ -29,10 +29,12 @@ function drawTile(
 
 // Composite one artboard: draw the low-res backdrop first, then the high-res
 // preview tile on top. Either tile may be null if not yet available.
-// The backdrop fills the artboard area providing visible content while panning;
-// the preview tile provides full-resolution detail for the currently visible region.
-// An optional clip rect (artboard-local, rotation in radians) constrains drawing to the
-// committed crop region so the backdrop doesn't bleed outside the cropped bounds.
+//
+// When a clip is provided it defines the committed crop region (artboard-local coords,
+// rotation in radians). For rotated crops the clip is a "projection": the canvas is
+// counter-rotated around the clip center so the rotated region appears axis-aligned
+// on screen (like a standard de-rotated crop result). The clip boundary is set first
+// (before the rotation) so it is always axis-aligned in screen space.
 export function compositeArtboard(
   ctx: CanvasRenderingContext2D,
   artboard: Artboard,
@@ -49,23 +51,28 @@ export function compositeArtboard(
     const sy = (artboard.worldY + clip.y) * t.scale + t.dy;
     const sw = clip.width * t.scale;
     const sh = clip.height * t.scale;
-    const clipPath = new Path2D();
-    if (clip.rotation === 0) {
-      clipPath.rect(sx, sy, sw, sh);
-    } else {
-      // Rotated clip rect: build path around the center, then apply rotation via DOMMatrix.
-      // Path2D.addPath applies the transform before the canvas CTM, so coordinates here
-      // are in the same CSS-pixel space as the drawImage calls in drawTile.
-      const inner = new Path2D();
-      inner.rect(-sw / 2, -sh / 2, sw, sh);
-      clipPath.addPath(
-        inner,
-        new DOMMatrix()
-          .translateSelf(sx + sw / 2, sy + sh / 2)
-          .rotateSelf(clip.rotation * (180 / Math.PI)),
-      );
+    if (sw <= 0 || sh <= 0) {
+      ctx.restore();
+      return;
     }
+    // Clip is set BEFORE the canvas rotation so it is axis-aligned in screen space.
+    // ctx.clip() transforms the path via the current CTM (only DPR scale here),
+    // locking the clip in screen coordinates regardless of subsequent CTM changes.
+    const clipPath = new Path2D();
+    clipPath.rect(sx, sy, sw, sh);
     ctx.clip(clipPath);
+
+    if (clip.rotation !== 0) {
+      // Counter-rotate the canvas around the clip center so the rotated crop region
+      // is projected onto the axis-aligned screen rectangle defined by the clip above.
+      // Tiles are drawn in their original artboard orientation; the canvas transform
+      // makes the rotated region appear straight to the viewer.
+      const scx = sx + sw / 2;
+      const scy = sy + sh / 2;
+      ctx.translate(scx, scy);
+      ctx.rotate(-clip.rotation);
+      ctx.translate(-scx, -scy);
+    }
   }
   if (backdrop) drawTile(ctx, backdrop, artboard, t, backdropScratch);
   if (preview) drawTile(ctx, preview, artboard, t, previewScratch);

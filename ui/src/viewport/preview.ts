@@ -79,6 +79,9 @@ export function getViewportDisplaySize() {
 }
 
 // Compute the visible artboard region at the given viewport state.
+// For rotated crops the "visible region" is the bounding box of the visible
+// sub-region rotated back into original image space, because the compositor
+// counter-rotates the canvas and we need the underlying unrotated pixels.
 function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
   const fit = getViewportFitRef();
   const { viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
@@ -87,10 +90,43 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
   const imageScale = fitScale * zoom;
   const visW = sw / imageScale;
   const visH = sh / imageScale;
-  // Clamped center
+  // Clamped center (in output/fit-ref space)
   const cx = Math.max(fit.x + visW * 0.5, Math.min(centerX, fit.x + fit.width - visW * 0.5));
   const cy = Math.max(fit.y + visH * 0.5, Math.min(centerY, fit.y + fit.height - visH * 0.5));
-  // Artboard image top-left in screen coords
+
+  const committedCrop = !selectedLayerIsCrop() ? getCommittedCropRect() : null;
+  if (committedCrop && Math.abs(committedCrop.rotation) > 0.001) {
+    // For rotated crops, the compositor counter-rotates the canvas so tiles must
+    // provide the original (unrotated) image content. Compute the bounding box of
+    // the currently visible output sub-region rotated back into image space.
+    const rot = committedCrop.rotation;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const absCos = Math.abs(cos);
+    const absSin = Math.abs(sin);
+    const cropCX = fit.x + fit.width * 0.5;
+    const cropCY = fit.y + fit.height * 0.5;
+    // Rotate the visible sub-region center from output space to image space
+    const localX = cx - cropCX;
+    const localY = cy - cropCY;
+    const imgCX = cropCX + localX * cos - localY * sin;
+    const imgCY = cropCY + localX * sin + localY * cos;
+    // Bounding box of the visible rectangle rotated by `rot`
+    const bbHalfW = (visW * absCos + visH * absSin) * 0.5;
+    const bbHalfH = (visW * absSin + visH * absCos) * 0.5;
+    const x = Math.max(0, imgCX - bbHalfW);
+    const y = Math.max(0, imgCY - bbHalfH);
+    const x2 = Math.min(state.canvasWidth, imgCX + bbHalfW);
+    const y2 = Math.min(state.canvasHeight, imgCY + bbHalfH);
+    if (x2 <= x || y2 <= y) return null;
+    return {
+      screenWidth: (x2 - x) * imageScale,
+      screenHeight: (y2 - y) * imageScale,
+      crop: { x, y, width: x2 - x, height: y2 - y },
+    };
+  }
+
+  // Axis-aligned case
   const imageX = sw * 0.5 - (cx - fit.x) * imageScale;
   const imageY = sh * 0.5 - (cy - fit.y) * imageScale;
   const screenLeft = Math.max(0, imageX);
@@ -151,26 +187,35 @@ function buildPreviewRequest(quality: "interactive" | "final"): bridge.PreviewRe
     state.viewportCenterY,
   );
   if (!visible) return null;
+  const inCropEdit = selectedLayerIsCrop();
+  // For rotated crops the compositor counter-rotates the canvas, so we need unrotated
+  // image content from the engine (ignore_crop_layers: true). For axis-aligned crops
+  // the engine applies the crop layer normally.
+  const hasRotation =
+    !inCropEdit && Math.abs(getCommittedCropRect().rotation) > 0.001;
   const dpr = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_SCALE : 1);
   return {
     target_width: Math.max(1, Math.round(visible.screenWidth * dpr)),
     target_height: Math.max(1, Math.round(visible.screenHeight * dpr)),
     crop: visible.crop,
-    ignore_crop_layers: selectedLayerIsCrop(),
+    ignore_crop_layers: inCropEdit || hasRotation,
   };
 }
 
 function buildBackdropRequest(quality: "interactive" | "final"): bridge.PreviewRequest | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
-  const crop = selectedLayerIsCrop() ? undefined : getCommittedCropRect();
+  const inCropEdit = selectedLayerIsCrop();
+  const committedCrop = inCropEdit ? null : getCommittedCropRect();
+  const hasRotation = committedCrop ? Math.abs(committedCrop.rotation) > 0.001 : false;
+  // For rotated crops the compositor counter-rotates the canvas, so the backdrop
+  // must cover the full artboard (the rotated crop bounding box could extend anywhere).
+  // For axis-aligned crops we only need the committed crop region.
+  const crop = inCropEdit || hasRotation ? undefined : committedCrop ?? undefined;
+  const baseW = crop?.width ?? state.canvasWidth;
+  const baseH = crop?.height ?? state.canvasHeight;
   const { viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
   const dpr = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_SCALE : 1);
-  const fitted = fitPreviewSize(
-    sw * dpr,
-    sh * dpr,
-    crop?.width ?? state.canvasWidth,
-    crop?.height ?? state.canvasHeight,
-  );
+  const fitted = fitPreviewSize(sw * dpr, sh * dpr, baseW, baseH);
   if (fitted.width <= 0 || fitted.height <= 0) return null;
   return {
     target_width: fitted.width,
