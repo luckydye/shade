@@ -529,15 +529,11 @@ impl Renderer {
                 }
                 Layer::Crop { rect } => {
                     let prev_view = current_view.clone();
-                    current_view = PreviewCrop {
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height,
-                    };
                     if rect.rotation != 0.0 {
-                        // Sample directly from the full-resolution source so
-                        // the rotation can access pixels outside the viewport.
+                        // For rotation: the output texture represents prev_view (the viewport).
+                        // out_* must be prev_view so each output pixel maps to its correct canvas
+                        // coordinate. current_view is not updated — the accumulator still covers
+                        // prev_view after this layer.
                         if let Some((src_size, ref raw_source, ref preprocess)) =
                             full_res_source
                         {
@@ -551,10 +547,10 @@ impl Renderer {
                                 target_width,
                                 target_height,
                                 CropUniform {
-                                    out_x: rect.x,
-                                    out_y: rect.y,
-                                    out_width: rect.width,
-                                    out_height: rect.height,
+                                    out_x: prev_view.x,
+                                    out_y: prev_view.y,
+                                    out_width: prev_view.width,
+                                    out_height: prev_view.height,
                                     pivot_x: rect.x + rect.width * 0.5,
                                     pivot_y: rect.y + rect.height * 0.5,
                                     in_x: 0.0,
@@ -571,10 +567,10 @@ impl Renderer {
                                 &self.ctx,
                                 current_accum,
                                 CropUniform {
-                                    out_x: rect.x,
-                                    out_y: rect.y,
-                                    out_width: rect.width,
-                                    out_height: rect.height,
+                                    out_x: prev_view.x,
+                                    out_y: prev_view.y,
+                                    out_width: prev_view.width,
+                                    out_height: prev_view.height,
                                     pivot_x: rect.x + rect.width * 0.5,
                                     pivot_y: rect.y + rect.height * 0.5,
                                     in_x: prev_view.x,
@@ -587,6 +583,12 @@ impl Renderer {
                             )?
                         }
                     } else {
+                        current_view = PreviewCrop {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height,
+                        };
                         self.crop_pipeline.process(
                             &self.ctx,
                             current_accum,
