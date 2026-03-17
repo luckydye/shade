@@ -606,6 +606,12 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
   await ensureWorkerReady();
   const { op, layer_idx, ...rest } = params;
   switch (op) {
+    case "crop":
+      await workerCall(
+        { type: "apply_crop", layerIdx: layer_idx, ...rest },
+        "crop_applied",
+      );
+      break;
     case "tone":
       await workerCall(
         { type: "apply_tone", layerIdx: layer_idx, ...rest },
@@ -659,7 +665,8 @@ export async function deleteLayer(idx: number): Promise<void> {
     await inv("delete_layer", { params: { layer_idx: idx } });
     return;
   }
-  throw new Error("deleteLayer is not implemented for WASM");
+  await ensureWorkerReady();
+  await workerCall({ type: "delete_layer", layerIdx: idx }, "layer_deleted");
 }
 
 export async function moveLayer(fromIdx: number, toIdx: number): Promise<number> {
@@ -824,8 +831,12 @@ export async function addLayer(kind: string): Promise<number> {
     const inv = await getTauriInvoke();
     return inv("add_layer", { kind }) as Promise<number>;
   }
-  // Web: not yet implemented for WASM (layer add would go via worker)
-  return 0;
+  await ensureWorkerReady();
+  const result = await workerCall<{ layerIdx: number }>(
+    { type: "add_layer", kind },
+    "layer_added",
+  );
+  return result.layerIdx;
 }
 
 export interface LinearGradientMask {

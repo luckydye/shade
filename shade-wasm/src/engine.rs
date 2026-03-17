@@ -1,5 +1,6 @@
 use shade_core::{
-    AdjustmentOp, ColorParams, HslParams, Layer, LayerStack, TextureId, ToneParams,
+    linear_lut, AdjustmentOp, ColorParams, CropRect, HslParams, Layer, LayerStack,
+    TextureId, ToneParams,
 };
 use std::collections::HashMap;
 
@@ -42,6 +43,46 @@ impl WasmEngine {
             gamma: 1.0,
         }]);
         id
+    }
+
+    pub fn add_layer(&mut self, kind: &str) -> usize {
+        match kind {
+            "adjustment" => self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+                exposure: 0.0,
+                contrast: 0.0,
+                blacks: 0.0,
+                whites: 0.0,
+                highlights: 0.0,
+                shadows: 0.0,
+                gamma: 1.0,
+            }]),
+            "curves" => self.stack.add_adjustment_layer(vec![AdjustmentOp::Curves {
+                lut_r: linear_lut(),
+                lut_g: linear_lut(),
+                lut_b: linear_lut(),
+                lut_master: linear_lut(),
+                per_channel: false,
+                control_points: None,
+            }]),
+            "crop" => self.stack.add_crop_layer(CropRect {
+                x: 0.0,
+                y: 0.0,
+                width: self.canvas_width as f32,
+                height: self.canvas_height as f32,
+                rotation: 0.0,
+            }),
+            _ => panic!("unknown layer kind: {kind}"),
+        }
+    }
+
+    pub fn delete_layer(&mut self, layer_idx: usize) {
+        assert!(layer_idx < self.stack.layers.len(), "layer index out of bounds");
+        if let Some(mask_id) = self.stack.layers[layer_idx].mask {
+            self.stack.masks.remove(&mask_id);
+            self.stack.mask_params.remove(&mask_id);
+        }
+        self.stack.layers.remove(layer_idx);
+        self.stack.generation += 1;
     }
 
     pub fn apply_tone(&mut self, layer_idx: usize, params: ToneParams) {
@@ -97,6 +138,44 @@ impl WasmEngine {
                 }
                 self.stack.generation += 1;
             }
+        }
+    }
+
+    pub fn apply_crop(&mut self, layer_idx: usize, rect: CropRect) {
+        let normalized = self.normalize_crop_rect(rect);
+        let Some(entry) = self.stack.layers.get_mut(layer_idx) else {
+            panic!("layer index out of bounds");
+        };
+        let Layer::Crop { rect: current } = &mut entry.layer else {
+            panic!("target layer is not a crop layer");
+        };
+        *current = normalized;
+        self.stack.generation += 1;
+    }
+
+    pub fn normalize_crop_rect(&self, rect: CropRect) -> CropRect {
+        assert!(
+            self.canvas_width > 0 && self.canvas_height > 0,
+            "cannot normalize crop without a loaded image"
+        );
+        let max_x = self.canvas_width.saturating_sub(1) as f32;
+        let max_y = self.canvas_height.saturating_sub(1) as f32;
+        let x = rect.x.round().clamp(0.0, max_x);
+        let y = rect.y.round().clamp(0.0, max_y);
+        let width = rect
+            .width
+            .round()
+            .clamp(1.0, self.canvas_width as f32 - x);
+        let height = rect
+            .height
+            .round()
+            .clamp(1.0, self.canvas_height as f32 - y);
+        CropRect {
+            x,
+            y,
+            width,
+            height,
+            rotation: rect.rotation,
         }
     }
 

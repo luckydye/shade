@@ -126,10 +126,38 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "add_layer": {
+        await ensureWasmReady();
+        const layerIdx = wasm.add_layer(msg.kind);
+        self.postMessage({ type: "layer_added", requestId, layerIdx });
+        break;
+      }
+
+      case "delete_layer": {
+        await ensureWasmReady();
+        wasm.delete_layer(msg.layerIdx);
+        self.postMessage({ type: "layer_deleted", requestId });
+        break;
+      }
+
       case "get_stack": {
         await ensureWasmReady();
         const json = wasm.get_stack_json();
         self.postMessage({ type: "stack", requestId, data: json });
+        break;
+      }
+
+      case "apply_crop": {
+        await ensureWasmReady();
+        wasm.apply_crop(
+          msg.layerIdx,
+          msg.crop_x,
+          msg.crop_y,
+          msg.crop_width,
+          msg.crop_height,
+          msg.crop_rotation ?? 0,
+        );
+        self.postMessage({ type: "crop_applied", requestId });
         break;
       }
 

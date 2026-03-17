@@ -1,6 +1,6 @@
 use crate::engine::WasmEngine;
 use serde::Serialize;
-use shade_core::{ColorParams, HslParams, ToneParams};
+use shade_core::{ColorParams, CropRect, HslParams, ToneParams};
 use shade_io::load_image_bytes_f32_with_info;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
@@ -196,6 +196,39 @@ pub fn move_layer(from_idx: usize, to_idx: usize) -> usize {
     })
 }
 
+#[wasm_bindgen]
+pub fn add_layer(kind: String) -> usize {
+    ENGINE.with(|e| e.borrow_mut().add_layer(&kind))
+}
+
+#[wasm_bindgen]
+pub fn delete_layer(layer_idx: usize) {
+    ENGINE.with(|e| e.borrow_mut().delete_layer(layer_idx));
+}
+
+#[wasm_bindgen]
+pub fn apply_crop(
+    layer_idx: usize,
+    crop_x: f32,
+    crop_y: f32,
+    crop_width: f32,
+    crop_height: f32,
+    crop_rotation: f32,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_crop(
+            layer_idx,
+            CropRect {
+                x: crop_x,
+                y: crop_y,
+                width: crop_width,
+                height: crop_height,
+                rotation: crop_rotation,
+            },
+        )
+    });
+}
+
 /// Returns a JSON string describing the current layer stack.
 #[wasm_bindgen]
 pub fn get_stack_json() -> String {
@@ -206,6 +239,87 @@ pub fn get_stack_json() -> String {
             .layers
             .iter()
             .map(|l| {
+                let adjustments = match &l.layer {
+                    shade_core::Layer::Adjustment { ops } => {
+                        let mut tone = None;
+                        let mut color = None;
+                        let mut hsl = None;
+                        let mut curves = None;
+                        for op in ops {
+                            match op {
+                                shade_core::AdjustmentOp::Tone {
+                                    exposure,
+                                    contrast,
+                                    blacks,
+                                    whites,
+                                    highlights,
+                                    shadows,
+                                    gamma,
+                                } => {
+                                    tone = Some(serde_json::json!({
+                                        "exposure": exposure,
+                                        "contrast": contrast,
+                                        "blacks": blacks,
+                                        "whites": whites,
+                                        "highlights": highlights,
+                                        "shadows": shadows,
+                                        "gamma": gamma,
+                                    }));
+                                }
+                                shade_core::AdjustmentOp::Color(params) => {
+                                    color = Some(serde_json::json!({
+                                        "saturation": params.saturation,
+                                        "vibrancy": params.vibrancy,
+                                        "temperature": params.temperature,
+                                        "tint": params.tint,
+                                    }));
+                                }
+                                shade_core::AdjustmentOp::Hsl(params) => {
+                                    hsl = Some(serde_json::json!({
+                                        "red_hue": params.red_hue,
+                                        "red_sat": params.red_sat,
+                                        "red_lum": params.red_lum,
+                                        "green_hue": params.green_hue,
+                                        "green_sat": params.green_sat,
+                                        "green_lum": params.green_lum,
+                                        "blue_hue": params.blue_hue,
+                                        "blue_sat": params.blue_sat,
+                                        "blue_lum": params.blue_lum,
+                                    }));
+                                }
+                                shade_core::AdjustmentOp::Curves {
+                                    lut_r,
+                                    lut_g,
+                                    lut_b,
+                                    lut_master,
+                                    per_channel,
+                                    control_points,
+                                } => {
+                                    curves = Some(serde_json::json!({
+                                        "lut_r": lut_r,
+                                        "lut_g": lut_g,
+                                        "lut_b": lut_b,
+                                        "lut_master": lut_master,
+                                        "per_channel": per_channel,
+                                        "control_points": control_points,
+                                    }));
+                                }
+                                _ => {}
+                            }
+                        }
+                        Some(serde_json::json!({
+                            "tone": tone,
+                            "curves": curves,
+                            "color": color,
+                            "vignette": serde_json::Value::Null,
+                            "sharpen": serde_json::Value::Null,
+                            "grain": serde_json::Value::Null,
+                            "hsl": hsl,
+                            "denoise": serde_json::Value::Null,
+                        }))
+                    }
+                    _ => None,
+                };
                 serde_json::json!({
                     "kind": match &l.layer {
                         shade_core::Layer::Image { .. } => "image",
@@ -214,6 +328,17 @@ pub fn get_stack_json() -> String {
                     },
                     "visible": l.visible,
                     "opacity": l.opacity,
+                    "crop": match &l.layer {
+                        shade_core::Layer::Crop { rect } => Some(serde_json::json!({
+                            "x": rect.x,
+                            "y": rect.y,
+                            "width": rect.width,
+                            "height": rect.height,
+                            "rotation": rect.rotation,
+                        })),
+                        _ => None,
+                    },
+                    "adjustments": adjustments,
                 })
             })
             .collect();
