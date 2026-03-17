@@ -34,5 +34,8 @@ image = { workspace = true }
 base64 = "0.22"
 shade-io = { path = "../shade-io" }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1", features = ["js"] }
+
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-Oz", "--enable-mutable-globals"]
+wasm-opt = false
