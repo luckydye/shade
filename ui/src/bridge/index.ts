@@ -366,6 +366,80 @@ function toByteView(value: ArrayBuffer | Uint8Array): ByteView {
       };
 }
 
+function transformBrowserPreview(
+  frame: { pixels: Uint8Array; width: number; height: number },
+  request?: PreviewRequest,
+): PreviewFrame {
+  if (
+    !request ||
+    (!request.crop &&
+      request.target_width === frame.width &&
+      request.target_height === frame.height)
+  ) {
+    return {
+      kind: "rgba",
+      pixels: frame.pixels,
+      width: frame.width,
+      height: frame.height,
+    };
+  }
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = frame.width;
+  sourceCanvas.height = frame.height;
+  const sourceContext = sourceCanvas.getContext("2d");
+  if (!sourceContext) {
+    throw new Error("2d canvas context is unavailable");
+  }
+  sourceContext.putImageData(
+    new ImageData(
+      new Uint8ClampedArray(
+        frame.pixels.buffer,
+        frame.pixels.byteOffset,
+        frame.pixels.byteLength,
+      ),
+      frame.width,
+      frame.height,
+    ),
+    0,
+    0,
+  );
+
+  const crop = request.crop ?? {
+    x: 0,
+    y: 0,
+    width: frame.width,
+    height: frame.height,
+  };
+  const targetWidth = Math.max(1, Math.round(request.target_width));
+  const targetHeight = Math.max(1, Math.round(request.target_height));
+  const targetCanvas = document.createElement("canvas");
+  targetCanvas.width = targetWidth;
+  targetCanvas.height = targetHeight;
+  const targetContext = targetCanvas.getContext("2d");
+  if (!targetContext) {
+    throw new Error("2d canvas context is unavailable");
+  }
+  targetContext.imageSmoothingEnabled = true;
+  targetContext.drawImage(
+    sourceCanvas,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    targetWidth,
+    targetHeight,
+  );
+  const image = targetContext.getImageData(0, 0, targetWidth, targetHeight);
+  return {
+    kind: "rgba",
+    pixels: new Uint8Array(image.data.buffer.slice(0)),
+    width: targetWidth,
+    height: targetHeight,
+  };
+}
+
 export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
@@ -409,7 +483,7 @@ export async function renderPreview(request?: PreviewRequest): Promise<PreviewFr
     width: number;
     height: number;
   }>({ type: "render_preview", request }, "preview_rendered");
-  return {
+  const frame = {
     kind: "rgba",
     pixels:
       result.pixels instanceof Uint8Array
@@ -418,6 +492,7 @@ export async function renderPreview(request?: PreviewRequest): Promise<PreviewFr
     width: result.width,
     height: result.height,
   };
+  return transformBrowserPreview(frame, request);
 }
 
 export async function openImage(path: string): Promise<OpenImageInfo> {

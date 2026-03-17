@@ -86,6 +86,15 @@ function getFullImageBounds(stageWidth: number, stageHeight: number): ImageBound
   };
 }
 
+function getCropInteractionBounds(stageWidth: number, stageHeight: number): ImageBounds {
+  return getDisplayBounds(stageWidth, stageHeight, {
+    x: 0,
+    y: 0,
+    width: state.canvasWidth,
+    height: state.canvasHeight,
+  });
+}
+
 const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
@@ -263,7 +272,7 @@ const Canvas: Component = () => {
 
   function cropHandleAtPoint(x: number, y: number) {
     if (!stageRef || !selectedCropLayer()) return null;
-    const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
+    const bounds = getCropInteractionBounds(stageRef.clientWidth, stageRef.clientHeight);
     if (bounds.scale <= 0) return null;
     const draft = activeCrop();
     if (!draft) return null;
@@ -311,7 +320,7 @@ const Canvas: Component = () => {
     cssHeight: number,
   ) {
     if (!stageRef || !selectedCropLayer()) return;
-    const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
+    const bounds = getCropInteractionBounds(stageRef.clientWidth, stageRef.clientHeight);
     if (bounds.scale <= 0) return;
     const draft = activeCrop();
     if (!draft) return;
@@ -390,12 +399,17 @@ const Canvas: Component = () => {
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
     const cropLayer = selectedCropLayer();
+    const committedCrop = getCommittedCropRect();
+    const cropEditBounds = getCropInteractionBounds(cssWidth, cssHeight);
     const previewBounds = cropLayer
       ? { x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight }
-      : getCommittedCropRect();
+      : committedCrop;
     const imageBounds = cropLayer
-      ? getFullImageBounds(cssWidth, cssHeight)
+      ? cropEditBounds
       : getDisplayBounds(cssWidth, cssHeight, previewBounds);
+    const contextBounds = cropLayer
+      ? cropEditBounds
+      : getDisplayBounds(cssWidth, cssHeight, committedCrop);
     const contextFrame = previewContextFrame();
     if (contextFrame) {
       contextCanvas ??= document.createElement("canvas");
@@ -413,10 +427,10 @@ const Canvas: Component = () => {
       contextScratch.putImageData(contextFrame, 0, 0);
       ctx.drawImage(
         contextCanvas,
-        imageBounds.x,
-        imageBounds.y,
-        imageBounds.width,
-        imageBounds.height,
+        contextBounds.x,
+        contextBounds.y,
+        contextBounds.width,
+        contextBounds.height,
       );
     }
     const frame = previewFrame();
@@ -630,7 +644,7 @@ const Canvas: Component = () => {
       drawFrame();
       return;
     }
-    const bounds = getFullImageBounds(stageRef.clientWidth, stageRef.clientHeight);
+    const bounds = getCropInteractionBounds(stageRef.clientWidth, stageRef.clientHeight);
     if (bounds.scale <= 0) {
       throw new Error("crop mode requires visible image bounds");
     }

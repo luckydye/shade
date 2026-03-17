@@ -24,6 +24,17 @@ export const ChromaSampling = Object.freeze({
 });
 
 /**
+ * @param {string} kind
+ * @returns {number}
+ */
+export function add_layer(kind) {
+    const ptr0 = passStringToWasm0(kind, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.add_layer(ptr0, len0);
+    return ret >>> 0;
+}
+
+/**
  * Apply color adjustments to a layer.
  * @param {number} layer_idx
  * @param {number} saturation
@@ -33,6 +44,18 @@ export const ChromaSampling = Object.freeze({
  */
 export function apply_color(layer_idx, saturation, vibrancy, temperature, tint) {
     wasm.apply_color(layer_idx, saturation, vibrancy, temperature, tint);
+}
+
+/**
+ * @param {number} layer_idx
+ * @param {number} crop_x
+ * @param {number} crop_y
+ * @param {number} crop_width
+ * @param {number} crop_height
+ * @param {number} crop_rotation
+ */
+export function apply_crop(layer_idx, crop_x, crop_y, crop_width, crop_height, crop_rotation) {
+    wasm.apply_crop(layer_idx, crop_x, crop_y, crop_width, crop_height, crop_rotation);
 }
 
 /**
@@ -65,6 +88,13 @@ export function apply_hsl(layer_idx, red_hue, red_sat, red_lum, green_hue, green
  */
 export function apply_tone(layer_idx, exposure, contrast, blacks, whites, highlights, shadows, gamma) {
     wasm.apply_tone(layer_idx, exposure, contrast, blacks, whites, highlights, shadows, gamma);
+}
+
+/**
+ * @param {number} layer_idx
+ */
+export function delete_layer(layer_idx) {
+    wasm.delete_layer(layer_idx);
 }
 
 /**
