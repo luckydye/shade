@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #050505;
+  --color-bg-raised: #0c0c0c;
+  --color-bg-surface: rgba(255, 255, 255, 0.04);
+  --color-bg-surface-hover: rgba(255, 255, 255, 0.07);
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-medium: rgba(255, 255, 255, 0.12);
+  --color-text: #f5f5f4;
+  --color-text-muted: rgba(255, 255, 255, 0.55);
+  --color-text-faint: rgba(255, 255, 255, 0.32);
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+html {
+  background-color: #050505;
+  color: #f5f5f4;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

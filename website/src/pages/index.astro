@@ -1,0 +1,287 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const features = [
+  {
+    icon: "📷",
+    title: "Universal RAW Support",
+    description:
+      "Canon, Nikon, Sony, Fujifilm, Leica, DNG, EXR — 60+ formats. If your camera shoots it, Shade opens it.",
+  },
+  {
+    icon: "⚡",
+    title: "WebGPU Accelerated",
+    description:
+      "Edits render in real time on your GPU. No waiting, no progress bars. Just instant feedback.",
+  },
+  {
+    icon: "🎚️",
+    title: "Full Tone Control",
+    description:
+      "Exposure, contrast, highlights, shadows, whites, blacks, and a proper curve editor. The whole toolkit.",
+  },
+  {
+    icon: "🗂️",
+    title: "Non-Destructive Layers",
+    description:
+      "Stack adjustments freely. Every change is reversible. Your original file is never touched.",
+  },
+  {
+    icon: "📤",
+    title: "One-Click Export",
+    description:
+      "Export to JPEG, PNG, WebP, or AVIF at any resolution. Full color-space control.",
+  },
+  {
+    icon: "🌐",
+    title: "No Install Required",
+    description:
+      "Opens in your browser. Nothing to download, nothing to update, nothing to maintain.",
+  },
+];
+---
+
+<Layout>
+  <!-- Corner labels -->
+  <span
+    class="fixed left-5 top-5 z-50 text-[11px] font-medium uppercase tracking-widest text-white/25"
+  >
+    An Open Source Project
+  </span>
+  <span
+    class="fixed right-5 top-1/2 z-50 -translate-y-1/2 rotate-90 text-[11px] font-medium uppercase tracking-widest text-white/20"
+  >
+    Made with love by luckydye
+  </span>
+
+  <main class="mx-auto max-w-3xl px-6">
+    <!-- Hero -->
+    <section class="flex min-h-screen flex-col items-center justify-center text-center">
+      <!-- Version pill -->
+      <div
+        class="mb-10 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5"
+      >
+        <span class="h-1.5 w-1.5 rounded-full bg-white/50"></span>
+        <span class="text-[12px] text-white/50">v1.0 — WebGPU RAW processing</span>
+      </div>
+
+      <!-- Headline -->
+      <h1
+        class="mb-7 text-[clamp(4.5rem,18vw,11rem)] font-black uppercase leading-[0.9] tracking-[-0.03em] text-white"
+      >
+        JUST THE<br />EDITOR.
+      </h1>
+
+      <!-- Subline -->
+      <p class="mb-10 max-w-md text-[clamp(0.95rem,2vw,1.1rem)] leading-relaxed text-white/45">
+        Professional RAW image processing in your browser. Open a file, dial
+        in the look, export. That's it.
+      </p>
+
+      <!-- CTAs -->
+      <div class="flex flex-wrap items-center justify-center gap-3">
+        <a
+          href="#"
+          class="inline-flex h-12 items-center gap-2 rounded-full bg-white px-7 text-[14px] font-semibold text-[#0a0a0a] transition-opacity hover:opacity-90"
+        >
+          Open Shade &nbsp;→
+        </a>
+        <a
+          href="https://github.com/luckydye/shade"
+          class="inline-flex h-12 items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-7 text-[14px] font-medium text-white/70 transition-colors hover:border-white/25 hover:text-white"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"
+            ></path>
+          </svg>
+          View on GitHub
+        </a>
+      </div>
+    </section>
+
+    <!-- App demo / video placeholder -->
+    <section class="pb-36">
+      <div
+        class="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0f0f0f] shadow-[0_64px_120px_-24px_rgba(0,0,0,0.9)]"
+      >
+        <!-- Fake titlebar -->
+        <div
+          class="flex items-center gap-3 border-b border-white/[0.06] bg-[#080808] px-4 py-3"
+        >
+          <div class="flex gap-1.5">
+            <div class="h-3 w-3 rounded-full bg-white/10"></div>
+            <div class="h-3 w-3 rounded-full bg-white/10"></div>
+            <div class="h-3 w-3 rounded-full bg-white/10"></div>
+          </div>
+          <div class="flex-1 text-center">
+            <span class="text-[11px] text-white/20">shade — DSC_4821.NEF</span>
+          </div>
+        </div>
+
+        <!-- Video / screenshot placeholder -->
+        <div class="relative aspect-[16/10] w-full bg-[#0b0b0b]">
+          <!-- Simulated editor layout -->
+          <div class="absolute inset-0 flex">
+            <!-- Canvas -->
+            <div class="relative flex flex-1 items-center justify-center bg-[#0b0b0b]">
+              <!-- Fake photo -->
+              <div
+                class="h-[62%] w-[62%] overflow-hidden rounded-lg shadow-[0_12px_48px_rgba(0,0,0,0.7)]"
+              >
+                <div
+                  class="h-full w-full bg-[conic-gradient(from_210deg_at_35%_45%,#1e1a15,#2e2418,#181510,#0d0d0d,#14110c,#1a1a1a)]"
+                >
+                </div>
+                <div
+                  class="absolute inset-0 bg-[radial-gradient(ellipse_55%_50%_at_62%_38%,rgba(200,165,115,0.10),transparent)]"
+                >
+                </div>
+              </div>
+
+              <!-- Play button -->
+              <div class="absolute inset-0 flex items-center justify-center">
+                <div
+                  class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-black/50 backdrop-blur-md transition-all hover:bg-black/70"
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="white"
+                    class="ml-1 opacity-70"
+                  >
+                    <polygon points="5,3 19,12 5,21"></polygon>
+                  </svg>
+                </div>
+              </div>
+
+              <span
+                class="absolute bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/[0.07] bg-black/50 px-3 py-1 text-[11px] text-white/30 backdrop-blur-sm"
+              >
+                Video coming soon
+              </span>
+            </div>
+
+            <!-- Side panel -->
+            <div
+              class="hidden w-[180px] shrink-0 border-l border-white/[0.06] bg-[#0d0d0d] lg:block"
+            >
+              <div class="space-y-4 p-4 pt-5">
+                {
+                  [
+                    ["Exposure", 52],
+                    ["Contrast", 44],
+                    ["Highlights", 38],
+                    ["Shadows", 62],
+                    ["Whites", 48],
+                    ["Blacks", 35],
+                  ].map(([label, pct]) => (
+                    <div>
+                      <div class="mb-1.5 flex justify-between">
+                        <span class="text-[10px] font-medium text-white/30">{label}</span>
+                        <span class="text-[10px] text-white/20">0</span>
+                      </div>
+                      <div class="h-[3px] overflow-hidden rounded-full bg-white/[0.08]">
+                        <div
+                          class="h-full rounded-full bg-white/30"
+                          style={`width: ${pct}%`}
+                        />
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why Shade -->
+    <section class="pb-36">
+      <h2
+        class="mb-16 text-center text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
+      >
+        Why Shade?
+      </h2>
+
+      <div class="grid gap-x-16 gap-y-12 sm:grid-cols-2">
+        {
+          features.map((f) => (
+            <div>
+              <div class="mb-3 text-2xl">{f.icon}</div>
+              <h3 class="mb-2 text-[15px] font-bold text-white">{f.title}</h3>
+              <p class="text-[14px] leading-relaxed text-white/40">{f.description}</p>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- Use cases -->
+    <section class="pb-36">
+      <h2
+        class="mb-4 text-center text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
+      >
+        Who's It For?
+      </h2>
+      <p class="mb-16 text-center text-[15px] text-white/35">
+        Built for photographers who want real tools without the overhead.
+      </p>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        {
+          [
+            {
+              tag: "Hobbyists",
+              text: "You shoot RAW but don't want to pay $200/year just to develop your photos.",
+            },
+            {
+              tag: "Travel photographers",
+              text: "Edit on any machine, anywhere. Hotel laptop, borrowed computer — Shade just works.",
+            },
+            {
+              tag: "Content creators",
+              text: "Drag in a file, make it look right, export and post. Fast turnaround, no bloat.",
+            },
+            {
+              tag: "Photography students",
+              text: "Learn real tone control and color science without a subscription or install.",
+            },
+          ].map((u) => (
+            <div class="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-7 transition-colors hover:bg-white/[0.04]">
+              <span class="mb-3 block text-[11px] font-semibold uppercase tracking-widest text-white/30">
+                {u.tag}
+              </span>
+              <p class="text-[15px] leading-relaxed text-white/60">{u.text}</p>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- Get Started -->
+    <section class="pb-40 text-center">
+      <h2
+        class="mb-5 text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
+      >
+        Get Started
+      </h2>
+      <p class="mb-10 text-[15px] text-white/40">
+        No account. No credit card. Open the app and drop in your first RAW file.
+      </p>
+      <a
+        href="#"
+        class="inline-flex h-12 items-center gap-2 rounded-full bg-white px-8 text-[14px] font-semibold text-[#0a0a0a] transition-opacity hover:opacity-90"
+      >
+        Open Shade &nbsp;→
+      </a>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/[0.06] py-7 text-center">
+    <p class="text-[12px] text-white/20">shade — Professional RAW editing in your browser.</p>
+  </footer>
+</Layout>
