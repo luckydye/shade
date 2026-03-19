@@ -1,6 +1,8 @@
 use crate::engine::WasmEngine;
 use serde::Serialize;
-use shade_core::{ColorParams, CropRect, HslParams, ToneParams};
+use shade_core::{
+    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams,
+};
 use shade_io::load_image_bytes_f32_with_info;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
@@ -139,6 +141,51 @@ pub fn apply_hsl(
     });
 }
 
+#[wasm_bindgen]
+pub fn apply_curves(layer_idx: usize, control_points: JsValue) -> Result<(), JsValue> {
+    let points: Vec<CurveControlPoint> = serde_wasm_bindgen::from_value(control_points)
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_curves(layer_idx, points);
+    });
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn apply_vignette(layer_idx: usize, amount: f32) {
+    ENGINE.with(|e| e.borrow_mut().apply_vignette(layer_idx, amount));
+}
+
+#[wasm_bindgen]
+pub fn apply_sharpen(layer_idx: usize, amount: f32) {
+    ENGINE.with(|e| e.borrow_mut().apply_sharpen(layer_idx, amount));
+}
+
+#[wasm_bindgen]
+pub fn apply_grain(layer_idx: usize, amount: f32, size: f32) {
+    ENGINE.with(|e| e.borrow_mut().apply_grain(layer_idx, amount, size));
+}
+
+#[wasm_bindgen]
+pub fn apply_denoise(
+    layer_idx: usize,
+    luma_strength: f32,
+    chroma_strength: f32,
+    mode: u32,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_denoise(
+            layer_idx,
+            DenoiseParams {
+                luma_strength,
+                chroma_strength,
+                mode,
+                _pad: 0.0,
+            },
+        )
+    });
+}
+
 /// Get layer count.
 #[wasm_bindgen]
 pub fn get_layer_count() -> usize {
@@ -245,6 +292,10 @@ pub fn get_stack_json() -> String {
                         let mut color = None;
                         let mut hsl = None;
                         let mut curves = None;
+                        let mut vignette = None;
+                        let mut sharpen = None;
+                        let mut grain = None;
+                        let mut denoise = None;
                         for op in ops {
                             match op {
                                 shade_core::AdjustmentOp::Tone {
@@ -304,18 +355,40 @@ pub fn get_stack_json() -> String {
                                         "control_points": control_points,
                                     }));
                                 }
-                                _ => {}
+                                shade_core::AdjustmentOp::Vignette(params) => {
+                                    vignette = Some(serde_json::json!({
+                                        "amount": params.amount,
+                                    }));
+                                }
+                                shade_core::AdjustmentOp::Sharpen(params) => {
+                                    sharpen = Some(serde_json::json!({
+                                        "amount": params.amount,
+                                    }));
+                                }
+                                shade_core::AdjustmentOp::Grain(params) => {
+                                    grain = Some(serde_json::json!({
+                                        "amount": params.amount,
+                                        "size": params.size,
+                                    }));
+                                }
+                                shade_core::AdjustmentOp::Denoise(params) => {
+                                    denoise = Some(serde_json::json!({
+                                        "luma_strength": params.luma_strength,
+                                        "chroma_strength": params.chroma_strength,
+                                        "mode": params.mode,
+                                    }));
+                                }
                             }
                         }
                         Some(serde_json::json!({
                             "tone": tone,
                             "curves": curves,
                             "color": color,
-                            "vignette": serde_json::Value::Null,
-                            "sharpen": serde_json::Value::Null,
-                            "grain": serde_json::Value::Null,
+                            "vignette": vignette,
+                            "sharpen": sharpen,
+                            "grain": grain,
                             "hsl": hsl,
-                            "denoise": serde_json::Value::Null,
+                            "denoise": denoise,
                         }))
                     }
                     _ => None,

@@ -105,6 +105,46 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "apply_curves": {
+        await ensureWasmReady();
+        await wasm.apply_curves(msg.layerIdx, msg.curve_points ?? []);
+        self.postMessage({ type: "curves_applied", requestId });
+        break;
+      }
+
+      case "apply_vignette": {
+        await ensureWasmReady();
+        wasm.apply_vignette(msg.layerIdx, msg.vignette_amount ?? 0);
+        self.postMessage({ type: "vignette_applied", requestId });
+        break;
+      }
+
+      case "apply_sharpen": {
+        await ensureWasmReady();
+        wasm.apply_sharpen(msg.layerIdx, msg.sharpen_amount ?? 0);
+        self.postMessage({ type: "sharpen_applied", requestId });
+        break;
+      }
+
+      case "apply_grain": {
+        await ensureWasmReady();
+        wasm.apply_grain(msg.layerIdx, msg.grain_amount ?? 0, msg.grain_size ?? 1);
+        self.postMessage({ type: "grain_applied", requestId });
+        break;
+      }
+
+      case "apply_denoise": {
+        await ensureWasmReady();
+        wasm.apply_denoise(
+          msg.layerIdx,
+          msg.denoise_luma_strength ?? 0,
+          msg.denoise_chroma_strength ?? 0,
+          msg.denoise_mode ?? 0,
+        );
+        self.postMessage({ type: "denoise_applied", requestId });
+        break;
+      }
+
       case "set_layer_visible": {
         await ensureWasmReady();
         wasm.set_layer_visible(msg.layerIdx, msg.visible);

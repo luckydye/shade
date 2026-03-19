@@ -721,6 +721,38 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
         "hsl_applied",
       );
       break;
+    case "curves":
+      await workerCall(
+        { type: "apply_curves", layerIdx: layer_idx, ...rest },
+        "curves_applied",
+      );
+      break;
+    case "vignette":
+      await workerCall(
+        { type: "apply_vignette", layerIdx: layer_idx, ...rest },
+        "vignette_applied",
+      );
+      break;
+    case "sharpen":
+      await workerCall(
+        { type: "apply_sharpen", layerIdx: layer_idx, ...rest },
+        "sharpen_applied",
+      );
+      break;
+    case "grain":
+      await workerCall(
+        { type: "apply_grain", layerIdx: layer_idx, ...rest },
+        "grain_applied",
+      );
+      break;
+    case "denoise":
+      await workerCall(
+        { type: "apply_denoise", layerIdx: layer_idx, ...rest },
+        "denoise_applied",
+      );
+      break;
+    default:
+      throw new Error(`unsupported web edit op: ${String(op)}`);
   }
 }
 
