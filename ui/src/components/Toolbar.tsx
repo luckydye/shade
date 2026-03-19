@@ -163,10 +163,10 @@ export const Toolbar: Component = () => {
         </Show>
       </div>
 
-      <div class="flex justify-center text-center pointer-events-none">
+      <div class="min-w-0 flex justify-center text-center pointer-events-none">
         <button
           type="button"
-          class={`flex flex-col pointer-events-auto ${
+          class={`min-w-0 flex flex-col pointer-events-auto ${
             canResumeEditor() ? "cursor-pointer" : "cursor-default"
           }`}
           style={{
@@ -185,7 +185,7 @@ export const Toolbar: Component = () => {
           }}
           disabled={!canResumeEditor()}
         >
-          <span class="block text-[11px] text-[var(--text-faint)]">
+          <span class="block max-w-full truncate text-[11px] text-[var(--text-faint)]">
             {(state.isLoading && (
               <span class="hidden rounded-full border border-[var(--border-medium)] bg-[var(--surface-hover)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] sm:inline-flex">
                 Processing
