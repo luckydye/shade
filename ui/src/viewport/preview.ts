@@ -23,10 +23,35 @@ let refreshQueued: { version: number; quality: "interactive" | "final" } | null 
 let refreshPromise: Promise<void> | null = null;
 let refreshLastStartAt = 0;
 let refreshWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
+let lastRenderedPreview:
+  | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
+  | null = null;
+let lastRenderedBackdrop:
+  | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
+  | null = null;
+
+type RefreshSnapshot = {
+  viewportZoom: number;
+  viewportCenterX: number;
+  viewportCenterY: number;
+  viewportScreenWidth: number;
+  viewportScreenHeight: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  selectedLayerIdx: number;
+  cropMode: boolean;
+  committedCropX: number;
+  committedCropY: number;
+  committedCropWidth: number;
+  committedCropHeight: number;
+  committedCropRotation: number;
+};
 
 export function clearPreviewTiles() {
   setPreviewTile(null);
   setBackdropTile(null);
+  lastRenderedPreview = null;
+  lastRenderedBackdrop = null;
 }
 
 export function getViewportFitRef(): FitReference {
@@ -225,13 +250,84 @@ function buildBackdropRequest(quality: "interactive" | "final"): bridge.PreviewR
   };
 }
 
-function cropMatches(a: bridge.PreviewCrop, b: bridge.PreviewCrop) {
-  const eps = 0.01;
+function captureRefreshSnapshot(): RefreshSnapshot {
+  const committedCrop = getCommittedCropRect();
+  return {
+    viewportZoom: state.viewportZoom,
+    viewportCenterX: state.viewportCenterX,
+    viewportCenterY: state.viewportCenterY,
+    viewportScreenWidth: state.viewportScreenWidth,
+    viewportScreenHeight: state.viewportScreenHeight,
+    canvasWidth: state.canvasWidth,
+    canvasHeight: state.canvasHeight,
+    selectedLayerIdx: state.selectedLayerIdx,
+    cropMode: selectedLayerIsCrop(),
+    committedCropX: committedCrop.x,
+    committedCropY: committedCrop.y,
+    committedCropWidth: committedCrop.width,
+    committedCropHeight: committedCrop.height,
+    committedCropRotation: committedCrop.rotation,
+  };
+}
+
+function refreshSnapshotMatches(snapshot: RefreshSnapshot) {
+  const current = captureRefreshSnapshot();
   return (
-    Math.abs(a.x - b.x) <= eps &&
-    Math.abs(a.y - b.y) <= eps &&
-    Math.abs(a.width - b.width) <= eps &&
-    Math.abs(a.height - b.height) <= eps
+    current.viewportZoom === snapshot.viewportZoom &&
+    current.viewportCenterX === snapshot.viewportCenterX &&
+    current.viewportCenterY === snapshot.viewportCenterY &&
+    current.viewportScreenWidth === snapshot.viewportScreenWidth &&
+    current.viewportScreenHeight === snapshot.viewportScreenHeight &&
+    current.canvasWidth === snapshot.canvasWidth &&
+    current.canvasHeight === snapshot.canvasHeight &&
+    current.selectedLayerIdx === snapshot.selectedLayerIdx &&
+    current.cropMode === snapshot.cropMode &&
+    current.committedCropX === snapshot.committedCropX &&
+    current.committedCropY === snapshot.committedCropY &&
+    current.committedCropWidth === snapshot.committedCropWidth &&
+    current.committedCropHeight === snapshot.committedCropHeight &&
+    current.committedCropRotation === snapshot.committedCropRotation
+  );
+}
+
+function previewRequestMatches(
+  a: bridge.PreviewRequest,
+  b: bridge.PreviewRequest,
+) {
+  const cropA = a.crop;
+  const cropB = b.crop;
+  const cropMatches =
+    cropA === undefined && cropB === undefined
+      ? true
+      : cropA !== undefined &&
+          cropB !== undefined &&
+          cropA.x === cropB.x &&
+          cropA.y === cropB.y &&
+          cropA.width === cropB.width &&
+          cropA.height === cropB.height;
+  return (
+    a.target_width === b.target_width &&
+    a.target_height === b.target_height &&
+    a.ignore_crop_layers === b.ignore_crop_layers &&
+    cropMatches
+  );
+}
+
+function canReuseRenderedPreview(
+  cached:
+    | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
+    | null,
+  quality: "interactive" | "final",
+  snapshot: RefreshSnapshot,
+  request: bridge.PreviewRequest,
+  hasTile: boolean,
+) {
+  return (
+    hasTile &&
+    cached?.quality === quality &&
+    refreshSnapshotMatches(cached.snapshot) &&
+    refreshSnapshotMatches(snapshot) &&
+    previewRequestMatches(cached.request, request)
   );
 }
 
@@ -239,35 +335,47 @@ async function performRefresh() {
   const queued = refreshQueued;
   if (!queued) return;
   refreshQueued = null;
+  const snapshot = captureRefreshSnapshot();
   const previewReq = buildPreviewRequest(queued.quality);
   const backdropReq = buildBackdropRequest(queued.quality);
   if (!previewReq || !backdropReq) return;
+  if (
+    canReuseRenderedPreview(
+      lastRenderedPreview,
+      queued.quality,
+      snapshot,
+      previewReq,
+      previewTile() !== null,
+    )
+  ) {
+    return;
+  }
   const frame = await throttledRender(previewReq);
   if (queued.version !== refreshVersion) return;
   if (frame.width === 0 || frame.height === 0) return;
   const crop = previewReq.crop;
   if (!crop) throw new Error("preview request must have a crop");
-  // Stale check: re-request if viewport moved while rendering
-  const currentVisible = getVisibleRegion(
-    state.viewportZoom,
-    state.viewportCenterX,
-    state.viewportCenterY,
-  );
-  if (!currentVisible || !cropMatches(crop, currentVisible.crop)) {
-    refreshPreview();
+  if (!refreshSnapshotMatches(snapshot)) {
     return;
   }
-  setState({
-    previewDisplayColorSpace:
-      frame.kind === "rgba-float16"
-        ? frame.colorSpace === "display-p3"
-          ? "Display P3"
-          : frame.colorSpace
-        : "sRGB",
-    previewRenderWidth: frame.width,
-    previewRenderHeight: frame.height,
-  });
+  if (queued.quality === "final") {
+    setState({
+      previewDisplayColorSpace:
+        frame.kind === "rgba-float16"
+          ? frame.colorSpace === "display-p3"
+            ? "Display P3"
+            : frame.colorSpace
+          : "sRGB",
+      previewRenderWidth: frame.width,
+      previewRenderHeight: frame.height,
+    });
+  }
   setPreviewTile(toRenderedTile(frame, crop));
+  lastRenderedPreview = {
+    quality: queued.quality,
+    snapshot,
+    request: previewReq,
+  };
   // If the preview already covers the full artboard, reuse it as the backdrop
   if (
     crop.x <= 0 &&
@@ -280,6 +388,17 @@ async function performRefresh() {
   }
   // Skip backdrop on interactive quality if we already have one
   if (queued.quality === "interactive" && backdropTile()) return;
+  if (
+    canReuseRenderedPreview(
+      lastRenderedBackdrop,
+      queued.quality,
+      snapshot,
+      backdropReq,
+      backdropTile() !== null,
+    )
+  ) {
+    return;
+  }
   const bdFrame = await throttledRender(backdropReq);
   if (queued.version !== refreshVersion) return;
   if (bdFrame.width === 0 || bdFrame.height === 0) return;
@@ -292,6 +411,11 @@ async function performRefresh() {
       height: bdCrop.height,
     }),
   );
+  lastRenderedBackdrop = {
+    quality: queued.quality,
+    snapshot,
+    request: backdropReq,
+  };
 }
 
 export function refreshPreview() {
