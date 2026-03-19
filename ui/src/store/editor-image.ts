@@ -44,10 +44,16 @@ async function openImageFrom(
     source_bit_depth: string;
   }>,
   loadingMediaSrc: string | null,
+  activeMediaSelection: {
+    libraryId: string;
+    itemId: string;
+  } | null,
 ) {
   clearLoadedImageState();
   setState({
     currentView: "editor",
+    activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
+    activeMediaItemId: activeMediaSelection?.itemId ?? null,
     isLoading: true,
     loadingMediaSrc,
   });
@@ -72,6 +78,8 @@ export function closeImage() {
   clearLoadedImageState();
   setState({
     currentView: "media",
+    activeMediaLibraryId: null,
+    activeMediaItemId: null,
     isLoading: false,
     loadingMediaSrc: null,
   });
@@ -88,8 +96,15 @@ export function showEditorView() {
   setState("currentView", "editor");
 }
 
-export async function openImage(path: string, loadingMediaSrc: string | null = null) {
-  await openImageFrom(() => bridge.openImage(path), loadingMediaSrc);
+export async function openImage(
+  path: string,
+  loadingMediaSrc: string | null = null,
+  activeMediaSelection: {
+    libraryId: string;
+    itemId: string;
+  } | null = null,
+) {
+  await openImageFrom(() => bridge.openImage(path), loadingMediaSrc, activeMediaSelection);
 }
 
 export async function openImageFile(file: File) {
@@ -100,10 +115,15 @@ export async function openPeerImage(
   peerEndpointId: string,
   picture: bridge.SharedPicture,
   loadingMediaSrc: string | null = null,
+  activeMediaSelection: {
+    libraryId: string;
+    itemId: string;
+  } | null = null,
 ) {
   await openImageFrom(
     () => bridge.openPeerImage(peerEndpointId, picture),
     loadingMediaSrc,
+    activeMediaSelection,
   );
 }
 

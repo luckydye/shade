@@ -235,20 +235,29 @@ async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string
   return resolveLocalThumbnailSrc(item.path, signal);
 }
 
-async function openMediaItem(item: MediaItem, src: string | null) {
+async function openMediaItem(item: MediaItem, libraryId: string, src: string | null) {
+  const activeMediaSelection = {
+    libraryId,
+    itemId: mediaItemKey(item),
+  };
   if (item.kind === "peer") {
     const picture: SharedPicture = {
       id: item.id,
       name: item.name,
       modified_at: item.modifiedAt,
     };
-    await openPeerImage(item.peerId, picture, src);
+    await openPeerImage(item.peerId, picture, src, activeMediaSelection);
     return;
   }
-  await openImage(item.path, src);
+  await openImage(item.path, src, activeMediaSelection);
 }
 
-const ImageTile: Component<{ item: MediaItem }> = (props) => {
+const MediaTile: Component<{
+  item: MediaItem;
+  libraryId: string;
+  compact?: boolean;
+  selected?: boolean;
+}> = (props) => {
   const [isIntersecting, setIsIntersecting] = createSignal(false);
   const [src, setSrc] = createSignal<string | undefined>(undefined);
   const [loadError, setLoadError] = createSignal(false);
@@ -323,21 +332,37 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
     const currentSrc = src() ?? null;
     if (document.startViewTransition) {
       document.startViewTransition(
-        () => void openMediaItem(props.item, currentSrc).catch(handleError),
+        () => void openMediaItem(props.item, props.libraryId, currentSrc).catch(handleError),
       );
       return;
     }
-    void openMediaItem(props.item, currentSrc).catch(handleError);
+    void openMediaItem(props.item, props.libraryId, currentSrc).catch(handleError);
   }
+
+  const buttonClass = () =>
+    props.compact
+      ? `group flex w-full flex-col gap-1.5 rounded-2xl border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+          props.selected
+            ? "border-[var(--border-active)] bg-[var(--surface-active)]"
+            : loadError()
+              ? "border-red-500/40"
+              : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] active:bg-[var(--surface-active)]"
+        }`
+      : `group flex flex-col gap-1.5 rounded-xl p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+          props.selected
+            ? "bg-[var(--surface-active)] ring-1 ring-[var(--border-active)]"
+            : loadError()
+              ? "ring-1 ring-red-500/50"
+              : "hover:bg-[var(--surface-hover)] active:bg-[var(--surface-active)]"
+        }`;
 
   return (
     <button
       type="button"
       ref={containerRef}
-      class={`group flex flex-col gap-1.5 p-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
-        loadError() ? "ring-1 ring-red-500/50" : "hover:bg-[var(--surface-hover)] active:bg-[var(--surface-active)]"
-      }`}
+      class={buttonClass()}
       onClick={handleClick}
+      aria-pressed={props.selected ? "true" : "false"}
     >
       <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
         {!src() && !loadError() && (
@@ -361,7 +386,11 @@ const ImageTile: Component<{ item: MediaItem }> = (props) => {
           <div class="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-400/90 shadow-sm" />
         )}
       </div>
-      <span class="truncate px-0.5 text-[11px] text-[var(--text-faint)]">{props.item.name}</span>
+      <span
+        class={`truncate px-0.5 text-[11px] ${props.selected ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
+      >
+        {props.item.name}
+      </span>
     </button>
   );
 };
@@ -435,6 +464,9 @@ export const MediaView: Component = () => {
 
   const selectedLibrary = createMemo(
     () => libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null,
+  );
+  const activeMediaItemId = createMemo(() =>
+    state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,
   );
   const displayedItems = createMemo(() => {
     const current = items();
@@ -731,9 +763,20 @@ export const MediaView: Component = () => {
     }
   }
 
+  const isEditorStrip = () => state.currentView === "editor";
+  const mediaVisibleClass = () => (isEditorStrip() ? "hidden lg:flex" : "flex");
+  const shellClass = () =>
+    isEditorStrip()
+      ? "hidden w-[100px] shrink-0 border-r border-[var(--border)] lg:flex lg:flex-col"
+      : "mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0";
+  const scrollClass = () =>
+    isEditorStrip()
+      ? "media-scroll flex-1 overflow-y-auto px-2 py-3"
+      : "media-scroll flex-1 overflow-y-auto p-6";
+
   return (
-    <div class="mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0">
-      <div class="border-b border-[var(--border)] px-6 py-4">
+    <div class={shellClass()}>
+      <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4`}>
         <div class="flex flex-col gap-4">
           <div class="flex items-center gap-8">
             <h1 class="hidden text-sm font-medium text-[var(--text-secondary)] md:block">Libraries</h1>
@@ -820,45 +863,71 @@ export const MediaView: Component = () => {
       </div>
       <div
         ref={scrollRef!}
-        class="media-scroll flex-1 overflow-y-auto p-6"
+        class={scrollClass()}
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         <Show
           when={displayedItems().length > 0}
           fallback={
-            <p class="text-sm text-[var(--text-subtle)]">
+            <p class={`text-[var(--text-subtle)] ${isEditorStrip() ? "px-1 text-xs" : "text-sm"}`}>
               {items.loading || !isLibraryScanComplete()
                 ? "Loading…"
                 : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
             </p>
           }
         >
-          <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
-            <div
-              class="grid gap-1"
-              style={{
-                "grid-template-columns": gridTemplateColumns(),
-                transform: `translateY(${offsetY()}px)`,
-              }}
-            >
-              <For each={visibleRows()}>
-                {(row) =>
-                  row.kind === "date" ? (
-                    <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)] first:pt-0">
-                      {formatModificationMonth(row.modifiedAt)}
-                    </h2>
-                  ) : (
-                    <For each={row.ids}>
-                      {(id) => {
-                        const item = itemsById().get(id);
-                        return item && <ImageTile item={item} />;
-                      }}
-                    </For>
-                  )
-                }
-              </For>
+          <Show
+            when={!isEditorStrip()}
+            fallback={
+              <div class="flex flex-col gap-2">
+                <For each={displayedItems()}>
+                  {(item) => (
+                    <MediaTile
+                      item={item}
+                      libraryId={selectedLibraryId()!}
+                      compact
+                      selected={activeMediaItemId() === mediaItemKey(item)}
+                    />
+                  )}
+                </For>
+              </div>
+            }
+          >
+            <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
+              <div
+                class="grid gap-1"
+                style={{
+                  "grid-template-columns": gridTemplateColumns(),
+                  transform: `translateY(${offsetY()}px)`,
+                }}
+              >
+                <For each={visibleRows()}>
+                  {(row) =>
+                    row.kind === "date" ? (
+                      <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)] first:pt-0">
+                        {formatModificationMonth(row.modifiedAt)}
+                      </h2>
+                    ) : (
+                      <For each={row.ids}>
+                        {(id) => {
+                          const item = itemsById().get(id);
+                          return (
+                            item && (
+                              <MediaTile
+                                item={item}
+                                libraryId={selectedLibraryId()!}
+                                selected={activeMediaItemId() === id}
+                              />
+                            )
+                          );
+                        }}
+                      </For>
+                    )
+                  }
+                </For>
+              </div>
             </div>
-          </div>
+          </Show>
         </Show>
       </div>
     </div>

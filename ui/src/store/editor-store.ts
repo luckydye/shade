@@ -23,6 +23,8 @@ export interface CropRect {
 
 export interface EditorState {
   currentView: "media" | "editor";
+  activeMediaLibraryId: string | null;
+  activeMediaItemId: string | null;
   layers: LayerInfo[];
   canvasWidth: number;
   canvasHeight: number;
@@ -46,6 +48,8 @@ export interface EditorState {
 
 export const [state, setState] = createStore<EditorState>({
   currentView: "media",
+  activeMediaLibraryId: null,
+  activeMediaItemId: null,
   layers: [],
   canvasWidth: 0,
   canvasHeight: 0,

@@ -1,4 +1,4 @@
-import { Component, Show } from "solid-js";
+import { Component } from "solid-js";
 import { Toolbar } from "./components/Toolbar";
 import Inspector from "./components/Inspector";
 import { Viewport } from "./components/Viewport";
@@ -12,12 +12,15 @@ const App: Component = () => {
   return (
     <div class="app-gradient flex h-screen w-screen select-none flex-col overflow-hidden text-[var(--text)]">
       <Toolbar />
-      <Show when={showEditor()} fallback={<MediaView />}>
-        <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div class="flex min-h-0 flex-1">
+        <MediaView />
+        <div
+          class={`min-h-0 flex-1 flex-col lg:flex-row ${showEditor() ? "flex" : "hidden"}`}
+        >
           <Viewport />
           <Inspector />
         </div>
-      </Show>
+      </div>
     </div>
   );
 };
