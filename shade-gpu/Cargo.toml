@@ -9,9 +9,10 @@ wgpu = { workspace = true }
 bytemuck = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-tokio = { workspace = true }
 half = { workspace = true }
+futures-channel = "0.3"
 
 [dev-dependencies]
 shade-io = { path = "../shade-io" }
 image = { workspace = true }
+tokio = { workspace = true }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures_channel::oneshot;
 use half::f16;
 use shade_core::{
     AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack,
@@ -837,7 +838,7 @@ impl Renderer {
         );
         queue.submit(std::iter::once(encoder.finish()));
         let buffer_slice = readback_buffer.slice(..);
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         buffer_slice.map_async(MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
@@ -908,7 +909,7 @@ impl Renderer {
         queue.submit(std::iter::once(encoder.finish()));
 
         let buffer_slice = readback_buffer.slice(..);
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         buffer_slice.map_async(MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
@@ -976,7 +977,7 @@ impl Renderer {
         );
         queue.submit(std::iter::once(encoder.finish()));
         let buffer_slice = readback_buffer.slice(..);
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         buffer_slice.map_async(MapMode::Read, move |result| {
             let _ = tx.send(result);
         });

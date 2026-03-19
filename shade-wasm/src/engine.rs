@@ -1,7 +1,7 @@
 use shade_core::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
-    CurveControlPoint, DenoiseParams, GrainParams, HslParams, Layer, LayerStack,
-    SharpenParams, TextureId, ToneParams, VignetteParams,
+    CurveControlPoint, DenoiseParams, FloatImage, GrainParams, HslParams, Layer,
+    LayerStack, SharpenParams, TextureId, ToneParams, VignetteParams,
 };
 use std::collections::HashMap;
 
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 /// This lives in the worker thread.
 pub struct WasmEngine {
     pub stack: LayerStack,
-    pub image_sources: HashMap<TextureId, (Vec<u8>, u32, u32)>,
+    pub image_sources: HashMap<TextureId, FloatImage>,
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
@@ -26,14 +26,14 @@ impl WasmEngine {
         }
     }
 
-    pub fn load_image_data(&mut self, pixels: Vec<u8>, width: u32, height: u32) -> u64 {
+    pub fn load_image_data(&mut self, image: FloatImage) -> u64 {
         let id = self.next_texture_id;
         self.next_texture_id += 1;
         self.stack = LayerStack::new();
-        self.image_sources.insert(id, (pixels, width, height));
-        self.canvas_width = width;
-        self.canvas_height = height;
-        self.stack.add_image_layer(id, width, height);
+        self.canvas_width = image.width;
+        self.canvas_height = image.height;
+        self.image_sources.insert(id, image.clone());
+        self.stack.add_image_layer(id, image.width, image.height);
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
             contrast: 0.0,
@@ -44,6 +44,31 @@ impl WasmEngine {
             gamma: 1.0,
         }]);
         id
+    }
+
+    pub fn load_rgba8_image_data(
+        &mut self,
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> u64 {
+        let image = FloatImage {
+            pixels: pixels
+                .chunks_exact(4)
+                .flat_map(|rgba| {
+                    [
+                        rgba[0] as f32 / 255.0,
+                        rgba[1] as f32 / 255.0,
+                        rgba[2] as f32 / 255.0,
+                        rgba[3] as f32 / 255.0,
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            width,
+            height,
+        };
+        self.load_image_data(image)
     }
 
     pub fn add_layer(&mut self, kind: &str) -> usize {
@@ -294,67 +319,15 @@ impl WasmEngine {
         self.stack.layers.len()
     }
 
-    pub fn render_preview_data_url(&self) -> String {
-        let pixels = self.render_preview_rgba();
-        if pixels.is_empty() {
-            return String::new();
-        }
-
-        let Some(image) =
-            image::RgbaImage::from_raw(self.canvas_width, self.canvas_height, pixels)
-        else {
-            return String::new();
-        };
-
-        let mut buf = Vec::new();
-        if image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
-            .is_err()
-        {
-            return String::new();
-        }
-
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        format!("data:image/png;base64,{}", STANDARD.encode(&buf))
-    }
-
-    pub fn render_preview_rgba(&self) -> Vec<u8> {
-        let Some(image_layer) = self.stack.layers.iter().find_map(|entry| match &entry.layer {
-            Layer::Image { texture_id, .. } if entry.visible => Some((*texture_id, entry.opacity)),
-            _ => None,
-        }) else {
-            return Vec::new();
-        };
-        let Some((source_pixels, _, _)) = self.image_sources.get(&image_layer.0) else {
-            return Vec::new();
-        };
-
-        let mut pixels: Vec<f32> = source_pixels
-            .iter()
-            .map(|channel| *channel as f32 / 255.0)
-            .collect();
-
-        for entry in &self.stack.layers {
-            if !entry.visible {
-                continue;
-            }
-            let Layer::Adjustment { ops } = &entry.layer else {
-                continue;
-            };
-            self.apply_adjustment_ops(&mut pixels, ops, entry.opacity);
-        }
-
-        pixels
-            .chunks_exact(4)
-            .flat_map(|rgba| {
-                [
-                    (rgba[0].clamp(0.0, 1.0) * 255.0).round() as u8,
-                    (rgba[1].clamp(0.0, 1.0) * 255.0).round() as u8,
-                    (rgba[2].clamp(0.0, 1.0) * 255.0).round() as u8,
-                    (rgba[3].clamp(0.0, 1.0) * 255.0).round() as u8,
-                ]
-            })
-            .collect()
+    pub fn snapshot_render_state(
+        &self,
+    ) -> (LayerStack, HashMap<TextureId, FloatImage>, u32, u32) {
+        (
+            self.stack.clone(),
+            self.image_sources.clone(),
+            self.canvas_width,
+            self.canvas_height,
+        )
     }
 
     pub fn apply_adjustment_ops(
@@ -422,25 +395,59 @@ impl WasmEngine {
     }
 
     pub fn apply_tone_op(&self, pixels: &mut [f32], params: ToneParams) {
+        fn luminance(rgb: [f32; 3]) -> f32 {
+            rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
+        }
+
+        fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+            if edge0 == edge1 {
+                return if x < edge0 { 0.0 } else { 1.0 };
+            }
+            let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        }
+
         let exposure_scale = 2.0_f32.powf(params.exposure);
+        let contrast_scale = 2.0_f32.powf(params.contrast);
+        let gamma = params.gamma.max(0.0001);
         for rgba in pixels.chunks_exact_mut(4) {
             let mut rgb = [rgba[0], rgba[1], rgba[2]];
-            for channel in &mut rgb {
-                let original = *channel;
-                let shadows_weight = (1.0 - original).powi(2);
-                let highlights_weight = original.powi(2);
-                *channel *= exposure_scale;
-                *channel += params.blacks * 0.25;
-                *channel += params.whites * 0.25 * highlights_weight;
-                *channel += params.shadows * 0.35 * shadows_weight;
-                *channel -= params.highlights * 0.35 * highlights_weight;
-                *channel = ((*channel - 0.5) * (1.0 + params.contrast) + 0.5).clamp(0.0, 1.0);
-                let gamma = params.gamma.max(0.01);
-                *channel = channel.clamp(0.0, 1.0).powf(1.0 / gamma);
-            }
-            rgba[0] = rgb[0];
-            rgba[1] = rgb[1];
-            rgba[2] = rgb[2];
+
+            rgb[0] *= exposure_scale;
+            rgb[1] *= exposure_scale;
+            rgb[2] *= exposure_scale;
+
+            let mid_luma = 0.18;
+            let luma = luminance(rgb);
+            let contrast_luma = mid_luma + (luma - mid_luma) * contrast_scale;
+            let contrast_delta = contrast_luma - luma;
+            rgb[0] += contrast_delta;
+            rgb[1] += contrast_delta;
+            rgb[2] += contrast_delta;
+
+            rgb[0] += params.blacks;
+            rgb[1] += params.blacks;
+            rgb[2] += params.blacks;
+
+            let whites_mask = smoothstep(0.5, 1.0, luminance(rgb));
+            rgb[0] += params.whites * whites_mask;
+            rgb[1] += params.whites * whites_mask;
+            rgb[2] += params.whites * whites_mask;
+
+            let shadow_mask = 1.0 - smoothstep(0.0, 0.5, luminance(rgb));
+            rgb[0] += params.shadows * shadow_mask * 0.5;
+            rgb[1] += params.shadows * shadow_mask * 0.5;
+            rgb[2] += params.shadows * shadow_mask * 0.5;
+
+            let highlight_mask = smoothstep(0.5, 1.0, luminance(rgb));
+            let highlight_scale = 1.0 - params.highlights * highlight_mask * 0.5;
+            rgb[0] *= highlight_scale;
+            rgb[1] *= highlight_scale;
+            rgb[2] *= highlight_scale;
+
+            rgba[0] = rgb[0].signum() * rgb[0].abs().powf(gamma);
+            rgba[1] = rgb[1].signum() * rgb[1].abs().powf(gamma);
+            rgba[2] = rgb[2].signum() * rgb[2].abs().powf(gamma);
         }
     }
 
@@ -503,21 +510,26 @@ impl WasmEngine {
     pub fn apply_vignette_op(&self, pixels: &mut [f32], params: VignetteParams) {
         let width = self.canvas_width.max(1) as usize;
         let height = self.canvas_height.max(1) as usize;
-        let half_w = width as f32 * 0.5;
-        let half_h = height as f32 * 0.5;
         for (idx, rgba) in pixels.chunks_exact_mut(4).enumerate() {
-            let x = (idx % width) as f32 - half_w;
-            let y = (idx / width) as f32 - half_h;
-            let nx = if half_w > 0.0 { x / half_w } else { 0.0 };
-            let ny = if half_h > 0.0 { y / half_h } else { 0.0 };
-            let distance = (nx * nx + ny * ny).sqrt().clamp(0.0, 1.5);
-            let start = params.midpoint.clamp(0.0, 1.0);
-            let feather = params.feather.max(0.001);
-            let edge = ((distance - start) / feather).clamp(0.0, 1.0);
-            let falloff = 1.0 - edge * params.amount.clamp(0.0, 1.0) * 0.85;
-            rgba[0] *= falloff;
-            rgba[1] *= falloff;
-            rgba[2] *= falloff;
+            let x = idx % width;
+            let y = idx / width;
+            let uv_x = x as f32 / width as f32;
+            let uv_y = y as f32 / height as f32;
+            let centered_x = (uv_x - 0.5) * params.roundness;
+            let centered_y = uv_y - 0.5;
+            let dist = (centered_x * centered_x + centered_y * centered_y).sqrt();
+            let edge0 = params.midpoint - params.feather;
+            let edge1 = params.midpoint + params.feather;
+            let t = if edge0 == edge1 {
+                if dist < edge0 { 0.0 } else { 1.0 }
+            } else {
+                ((dist - edge0) / (edge1 - edge0)).clamp(0.0, 1.0)
+            };
+            let smooth = t * t * (3.0 - 2.0 * t);
+            let multiplier = 1.0 - smooth * params.amount;
+            rgba[0] *= multiplier;
+            rgba[1] *= multiplier;
+            rgba[2] *= multiplier;
         }
     }
 

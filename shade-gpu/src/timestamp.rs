@@ -1,4 +1,5 @@
 use crate::profiler::PassTiming;
+use futures_channel::oneshot;
 use wgpu::{
     Buffer, BufferDescriptor, BufferUsages, Device, QuerySet, QueryType, Queue,
     QUERY_RESOLVE_BUFFER_ALIGNMENT, QUERY_SIZE,
@@ -75,7 +76,7 @@ impl TimestampQueries {
         let byte_len = (slots as u64) * (QUERY_SIZE as u64);
 
         let slice = self.readback_buf.slice(..byte_len);
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });

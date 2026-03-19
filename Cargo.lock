@@ -7375,6 +7375,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "futures-channel",
  "half",
  "image",
  "log",
@@ -7462,6 +7463,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "shade-core",
+ "shade-gpu",
  "shade-io",
  "uuid",
  "wasm-bindgen",

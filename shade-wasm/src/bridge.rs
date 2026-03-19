@@ -1,15 +1,16 @@
 use crate::engine::WasmEngine;
-use serde::Serialize;
-use shade_core::{
-    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams,
-};
+use serde::{Deserialize, Serialize};
+use shade_core::{ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams};
+use shade_gpu::{PreviewCrop as GpuPreviewCrop, Renderer};
 use shade_io::load_image_bytes_f32_with_info;
+use std::rc::Rc;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
 thread_local! {
     static ENGINE: RefCell<WasmEngine> = RefCell::new(WasmEngine::new());
+    static RENDERER: RefCell<Option<Rc<Renderer>>> = const { RefCell::new(None) };
 }
 
 #[derive(Serialize)]
@@ -20,13 +21,57 @@ pub struct LayerInfo {
     pub source_bit_depth: String,
 }
 
+#[derive(Clone, Deserialize)]
+pub struct PreviewCrop {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PreviewRenderRequest {
+    pub target_width: u32,
+    pub target_height: u32,
+    pub crop: Option<PreviewCrop>,
+    pub ignore_crop_layers: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub struct PreviewFrame {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn apply_preview_request(
+    mut stack: shade_core::LayerStack,
+    canvas_width: u32,
+    canvas_height: u32,
+    request: Option<PreviewRenderRequest>,
+) -> (shade_core::LayerStack, PreviewRenderRequest) {
+    let request = request.unwrap_or(PreviewRenderRequest {
+        target_width: canvas_width,
+        target_height: canvas_height,
+        crop: None,
+        ignore_crop_layers: None,
+    });
+    if request.ignore_crop_layers.unwrap_or(false) {
+        for entry in &mut stack.layers {
+            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
+                entry.visible = false;
+            }
+        }
+    }
+    (stack, request)
+}
+
 /// Load raw RGBA8 image data into the engine.
 /// Returns the texture ID assigned.
 #[wasm_bindgen]
 pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
     ENGINE.with(|e| {
-        e.borrow_mut()
-            .load_image_data(pixels.to_vec(), width, height)
+        e.borrow_mut().load_rgba8_image_data(pixels.to_vec(), width, height)
     })
 }
 
@@ -39,15 +84,7 @@ pub fn load_image_encoded(
         let mut engine = e.borrow_mut();
         let (image, info) = load_image_bytes_f32_with_info(bytes, file_name.as_deref())
             .map_err(|err| JsValue::from_str(&err.to_string()))?;
-        engine.load_image_data(
-            image
-                .pixels
-                .iter()
-                .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)
-                .collect(),
-            image.width,
-            image.height,
-        );
+        engine.load_image_data(image);
         serde_wasm_bindgen::to_value(&LayerInfo {
             layer_count: engine.layer_count(),
             canvas_width: engine.canvas_width,
@@ -199,6 +236,24 @@ pub fn get_canvas_size() -> Vec<u32> {
         let eng = e.borrow();
         vec![eng.canvas_width, eng.canvas_height]
     })
+}
+
+#[wasm_bindgen]
+pub async fn init_renderer() -> Result<(), JsValue> {
+    if RENDERER.with(|renderer| renderer.borrow().is_some()) {
+        return Ok(());
+    }
+    let renderer = Rc::new(
+        Renderer::new()
+            .await
+            .map_err(|err| JsValue::from_str(&err.to_string()))?,
+    );
+    RENDERER.with(|slot| {
+        if slot.borrow().is_none() {
+            slot.replace(Some(renderer));
+        }
+    });
+    Ok(())
 }
 
 /// Set layer visibility.
@@ -426,11 +481,46 @@ pub fn get_stack_json() -> String {
 }
 
 #[wasm_bindgen]
-pub fn render_preview() -> String {
-    ENGINE.with(|e| e.borrow().render_preview_data_url())
-}
-
-#[wasm_bindgen]
-pub fn render_preview_rgba() -> Vec<u8> {
-    ENGINE.with(|e| e.borrow().render_preview_rgba())
+pub async fn render_preview_rgba(request: JsValue) -> Result<JsValue, JsValue> {
+    let request: Option<PreviewRenderRequest> = if request.is_undefined() || request.is_null() {
+        None
+    } else {
+        Some(
+            serde_wasm_bindgen::from_value(request)
+                .map_err(|err| JsValue::from_str(&err.to_string()))?,
+        )
+    };
+    let renderer = RENDERER.with(|slot| slot.borrow().clone()).ok_or_else(|| {
+        JsValue::from_str("renderer is not initialized")
+    })?;
+    let (stack, sources, canvas_width, canvas_height) =
+        ENGINE.with(|engine| engine.borrow().snapshot_render_state());
+    if canvas_width == 0 || canvas_height == 0 {
+        return Err(JsValue::from_str("no image loaded"));
+    }
+    let (stack, request) =
+        apply_preview_request(stack, canvas_width, canvas_height, request);
+    let pixels = renderer
+        .render_stack_preview(
+            &stack,
+            &sources,
+            canvas_width,
+            canvas_height,
+            request.target_width,
+            request.target_height,
+            request.crop.map(|crop| GpuPreviewCrop {
+                x: crop.x,
+                y: crop.y,
+                width: crop.width,
+                height: crop.height,
+            }),
+        )
+        .await
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    serde_wasm_bindgen::to_value(&PreviewFrame {
+        pixels,
+        width: request.target_width,
+        height: request.target_height,
+    })
+    .map_err(|err| JsValue::from_str(&err.to_string()))
 }
