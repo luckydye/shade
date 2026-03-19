@@ -3,18 +3,22 @@ import {
   applyEdit,
   applyGradientMask,
   getCommittedCropRect,
-  getPreviewZoomPercent,
+  getViewportZoomPercent,
   state,
   isDrawerOpen,
   openImageFile,
-  panPreview,
-  previewContextFrame,
-  previewFrame,
-  resetPreviewViewport,
-  setPreviewViewportSize,
-  zoomPreviewDelta,
+  panViewport,
+  backdropTile,
+  previewTile,
+  resetViewport,
+  setViewportScreenSize,
+  zoomViewport,
 } from "../store/editor";
 import type { MaskParamsInfo } from "../bridge/index";
+import { compositeArtboard } from "../viewport/compositor";
+import { buildTransform, worldToScreen } from "../viewport/transform";
+import { getViewportFitRef } from "../viewport/preview";
+import type { WorldTransform } from "../viewport/transform";
 
 type CropHandle =
   | "move"
@@ -30,77 +34,14 @@ type CropHandle =
 
 type MaskHandle = "start" | "end" | "center" | "edge";
 
-interface ImageBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scale: number;
-}
-
 const HANDLE_SIZE = 10;
 
-function getDisplayBounds(
-  stageWidth: number,
-  stageHeight: number,
-  crop = {
-    x: 0,
-    y: 0,
-    width: state.canvasWidth,
-    height: state.canvasHeight,
-  },
-): ImageBounds {
-  if (stageWidth <= 0 || stageHeight <= 0 || crop.width <= 0 || crop.height <= 0) {
-    return { x: 0, y: 0, width: 0, height: 0, scale: 0 };
-  }
-  const scale =
-    Math.min(stageWidth / crop.width, stageHeight / crop.height) * state.previewZoom;
-  return {
-    x: stageWidth * 0.5 - (state.previewCenterX - crop.x) * scale,
-    y: stageHeight * 0.5 - (state.previewCenterY - crop.y) * scale,
-    width: crop.width * scale,
-    height: crop.height * scale,
-    scale,
-  };
-}
-
-function getFullImageBounds(stageWidth: number, stageHeight: number): ImageBounds {
-  if (
-    stageWidth <= 0 ||
-    stageHeight <= 0 ||
-    state.canvasWidth <= 0 ||
-    state.canvasHeight <= 0
-  ) {
-    return { x: 0, y: 0, width: 0, height: 0, scale: 0 };
-  }
-  const scale = Math.min(
-    stageWidth / state.canvasWidth,
-    stageHeight / state.canvasHeight,
-  );
-  return {
-    x: (stageWidth - state.canvasWidth * scale) * 0.5,
-    y: (stageHeight - state.canvasHeight * scale) * 0.5,
-    width: state.canvasWidth * scale,
-    height: state.canvasHeight * scale,
-    scale,
-  };
-}
-
-function getCropInteractionBounds(stageWidth: number, stageHeight: number): ImageBounds {
-  return getDisplayBounds(stageWidth, stageHeight, {
-    x: 0,
-    y: 0,
-    width: state.canvasWidth,
-    height: state.canvasHeight,
-  });
-}
-
-const Canvas: Component = () => {
+export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
-  let viewportRef: HTMLDivElement | undefined;
-  let scratchCanvas: HTMLCanvasElement | undefined;
-  let contextCanvas: HTMLCanvasElement | undefined;
+  let containerRef: HTMLDivElement | undefined;
+  let backdropScratch: HTMLCanvasElement | undefined;
+  let previewScratch: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
   const [draftCrop, setDraftCrop] = createSignal<{
     x: number;
@@ -145,24 +86,43 @@ const Canvas: Component = () => {
     return layer.mask_params;
   };
 
-  const shouldShowZoomIndicator = () => state.previewZoom > 1.001 || state.previewZoom < 0.999;
-  const previewZoomPercent = () => getPreviewZoomPercent();
+  const shouldShowZoomIndicator = () =>
+    state.viewportZoom > 1.001 || state.viewportZoom < 0.999;
+  const viewportZoomPercent = () => getViewportZoomPercent();
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
+
+  // Build the camera for the current viewport state
+  function getCamera() {
+    return {
+      centerX: state.viewportCenterX,
+      centerY: state.viewportCenterY,
+      zoom: state.viewportZoom,
+    };
+  }
+
+  // Transform for normal viewing and mask overlays (fits to crop rect or full canvas in crop mode)
+  function getViewTransform(cssWidth: number, cssHeight: number): WorldTransform {
+    return buildTransform(getCamera(), { width: cssWidth, height: cssHeight }, getViewportFitRef());
+  }
+
+  // Transform for crop-edit overlays (always fits to full canvas)
+  function getCropEditTransform(cssWidth: number, cssHeight: number): WorldTransform {
+    return buildTransform(
+      getCamera(),
+      { width: cssWidth, height: cssHeight },
+      { x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight },
+    );
+  }
 
   function maskHandleAtPoint(sx: number, sy: number): MaskHandle | null {
     if (!stageRef) return null;
     const mp = activeMask();
     if (!mp) return null;
-    const crop = getCommittedCropRect();
-    const bounds = getDisplayBounds(stageRef.clientWidth, stageRef.clientHeight, crop);
-    if (bounds.scale <= 0) return null;
+    const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+    if (t.scale <= 0) return null;
 
-    const toScreen = (canvasX: number, canvasY: number) => ({
-      x: bounds.x + (canvasX - crop.x) * bounds.scale,
-      y: bounds.y + (canvasY - crop.y) * bounds.scale,
-    });
-
+    const toScreen = (ax: number, ay: number) => worldToScreen(ax, ay, t);
     const GRAB_R = 14;
 
     if (mp.kind === "linear") {
@@ -183,31 +143,24 @@ const Canvas: Component = () => {
 
   function drawMaskOverlay(
     ctx: CanvasRenderingContext2D,
-    _cssWidth: number,
-    _cssHeight: number,
+    cssWidth: number,
+    cssHeight: number,
   ) {
-    if (!stageRef) return;
     const mp = activeMask();
     if (!mp) return;
-    const crop = getCommittedCropRect();
-    const bounds = getDisplayBounds(stageRef.clientWidth, stageRef.clientHeight, crop);
-    if (bounds.scale <= 0) return;
+    const t = getViewTransform(cssWidth, cssHeight);
+    if (t.scale <= 0) return;
 
-    const toScreen = (canvasX: number, canvasY: number) => ({
-      x: bounds.x + (canvasX - crop.x) * bounds.scale,
-      y: bounds.y + (canvasY - crop.y) * bounds.scale,
-    });
+    const toScreen = (ax: number, ay: number) => worldToScreen(ax, ay, t);
 
     ctx.save();
 
     const drawHandle = (x: number, y: number, filled: boolean) => {
-      // Black border for visibility on light images
       ctx.beginPath();
       ctx.arc(x, y, 8.5, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
       ctx.lineWidth = 3;
       ctx.stroke();
-      // White handle
       ctx.beginPath();
       ctx.arc(x, y, 7, 0, Math.PI * 2);
       if (filled) {
@@ -224,7 +177,6 @@ const Canvas: Component = () => {
       const s = toScreen(mp.x1 ?? 0, mp.y1 ?? 0);
       const e = toScreen(mp.x2 ?? 0, mp.y2 ?? 0);
 
-      // Line between handles — black shadow then white
       ctx.setLineDash([6, 4]);
       ctx.lineWidth = 3;
       ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
@@ -244,9 +196,8 @@ const Canvas: Component = () => {
       drawHandle(e.x, e.y, true);
     } else {
       const c = toScreen(mp.cx ?? 0, mp.cy ?? 0);
-      const r = (mp.radius ?? 0) * bounds.scale;
+      const r = (mp.radius ?? 0) * t.scale;
 
-      // Circle outline — black shadow then white
       ctx.setLineDash([6, 4]);
       ctx.lineWidth = 3;
       ctx.strokeStyle = "rgba(0, 0, 0, 0.3)";
@@ -272,31 +223,36 @@ const Canvas: Component = () => {
 
   function cropHandleAtPoint(x: number, y: number) {
     if (!stageRef || !selectedCropLayer()) return null;
-    const bounds = getCropInteractionBounds(stageRef.clientWidth, stageRef.clientHeight);
-    if (bounds.scale <= 0) return null;
+    const t = getCropEditTransform(stageRef.clientWidth, stageRef.clientHeight);
+    if (t.scale <= 0) return null;
     const draft = activeCrop();
     if (!draft) return null;
-    const cx = bounds.x + (draft.x + draft.width * 0.5) * bounds.scale;
-    const cy = bounds.y + (draft.y + draft.height * 0.5) * bounds.scale;
+    const center = worldToScreen(
+      draft.x + draft.width * 0.5,
+      draft.y + draft.height * 0.5,
+      t,
+    );
+    const cx = center.x;
+    const cy = center.y;
     const cos = Math.cos(-draft.rotation);
     const sin = Math.sin(-draft.rotation);
     const dx = x - cx;
     const dy = y - cy;
     const lx = dx * cos - dy * sin + cx;
     const ly = dx * sin + dy * cos + cy;
-    // Rotate handle: 30px above top-center
-    const rotHandleX = cx;
-    const rotHandleY = cy - (draft.height * 0.5) * bounds.scale - 30;
-    // Check rotate handle in unrotated space (rotate the handle position back)
-    const rhDx = rotHandleX - cx;
-    const rhDy = rotHandleY - cy;
+    // Rotation handle: 30px above top-center in screen space
+    const rotHandleScreenY = cy - (draft.height * 0.5) * t.scale - 30;
+    const rhDx = 0;
+    const rhDy = rotHandleScreenY - cy;
     const rhScreenX = cx + rhDx * Math.cos(draft.rotation) - rhDy * Math.sin(draft.rotation);
     const rhScreenY = cy + rhDx * Math.sin(draft.rotation) + rhDy * Math.cos(draft.rotation);
     if (Math.hypot(x - rhScreenX, y - rhScreenY) <= HANDLE_SIZE + 4) return "rotate" as CropHandle;
-    const left = bounds.x + draft.x * bounds.scale;
-    const top = bounds.y + draft.y * bounds.scale;
-    const right = left + draft.width * bounds.scale;
-    const bottom = top + draft.height * bounds.scale;
+    const { x: left, y: top } = worldToScreen(draft.x, draft.y, t);
+    const { x: right, y: bottom } = worldToScreen(
+      draft.x + draft.width,
+      draft.y + draft.height,
+      t,
+    );
     const nearLeft = Math.abs(lx - left) <= HANDLE_SIZE;
     const nearRight = Math.abs(lx - right) <= HANDLE_SIZE;
     const nearTop = Math.abs(ly - top) <= HANDLE_SIZE;
@@ -319,15 +275,16 @@ const Canvas: Component = () => {
     cssWidth: number,
     cssHeight: number,
   ) {
-    if (!stageRef || !selectedCropLayer()) return;
-    const bounds = getCropInteractionBounds(stageRef.clientWidth, stageRef.clientHeight);
-    if (bounds.scale <= 0) return;
+    if (!selectedCropLayer()) return;
+    const t = getCropEditTransform(cssWidth, cssHeight);
+    if (t.scale <= 0) return;
     const draft = activeCrop();
     if (!draft) return;
-    const width = draft.width * bounds.scale;
-    const height = draft.height * bounds.scale;
-    const cx = bounds.x + (draft.x + draft.width * 0.5) * bounds.scale;
-    const cy = bounds.y + (draft.y + draft.height * 0.5) * bounds.scale;
+    const width = draft.width * t.scale;
+    const height = draft.height * t.scale;
+    const center = worldToScreen(draft.x + draft.width * 0.5, draft.y + draft.height * 0.5, t);
+    const cx = center.x;
+    const cy = center.y;
     ctx.save();
     // Dimmed overlay with rotated cutout
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
@@ -384,11 +341,11 @@ const Canvas: Component = () => {
   }
 
   function drawFrame() {
-    if (!canvasRef || !viewportRef) return;
+    if (!canvasRef || !containerRef) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
-    const cssWidth = Math.max(1, Math.floor(viewportRef.clientWidth));
-    const cssHeight = Math.max(1, Math.floor(viewportRef.clientHeight));
+    const cssWidth = Math.max(1, Math.floor(containerRef.clientWidth));
+    const cssHeight = Math.max(1, Math.floor(containerRef.clientHeight));
     const devicePixelRatio = window.devicePixelRatio || 1;
     const pixelWidth = Math.max(1, Math.floor(cssWidth * devicePixelRatio));
     const pixelHeight = Math.max(1, Math.floor(cssHeight * devicePixelRatio));
@@ -398,82 +355,50 @@ const Canvas: Component = () => {
     }
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    const cropLayer = selectedCropLayer();
-    const cropEditBounds = getCropInteractionBounds(cssWidth, cssHeight);
-    const previewBounds = cropLayer
-      ? { x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight }
-      : getCommittedCropRect();
-    const imageBounds = cropLayer
-      ? cropEditBounds
-      : getDisplayBounds(cssWidth, cssHeight, previewBounds);
-    const contextFrame = previewContextFrame();
-    if (contextFrame) {
-      contextCanvas ??= document.createElement("canvas");
-      if (
-        contextCanvas.width !== contextFrame.image.width ||
-        contextCanvas.height !== contextFrame.image.height
-      ) {
-        contextCanvas.width = contextFrame.image.width;
-        contextCanvas.height = contextFrame.image.height;
-      }
-      const contextScratch = contextCanvas.getContext("2d");
-      if (!contextScratch) {
-        throw new Error("context canvas 2d context is required");
-      }
-      contextScratch.putImageData(contextFrame.image, 0, 0);
-      const contextBounds = getDisplayBounds(cssWidth, cssHeight, {
-        x: contextFrame.crop.x,
-        y: contextFrame.crop.y,
-        width: contextFrame.crop.width,
-        height: contextFrame.crop.height,
-      });
-      ctx.drawImage(
-        contextCanvas,
-        contextBounds.x,
-        contextBounds.y,
-        contextBounds.width,
-        contextBounds.height,
+
+    if (state.canvasWidth > 0 && state.canvasHeight > 0) {
+      const artboard = {
+        worldX: 0,
+        worldY: 0,
+        width: state.canvasWidth,
+        height: state.canvasHeight,
+      };
+      // In crop-edit mode we show the backdrop only (full canvas, no crop applied).
+      // Outside crop-edit mode we show backdrop + high-res preview tile, clipped to the
+      // committed crop rect so the backdrop doesn't bleed beyond the crop boundary.
+      const cropLayer = selectedCropLayer();
+      const showPreview = !cropLayer;
+      const committedCrop = getCommittedCropRect();
+      const clip = cropLayer ? undefined : committedCrop;
+      const t = getViewTransform(cssWidth, cssHeight);
+      backdropScratch ??= document.createElement("canvas");
+      previewScratch ??= document.createElement("canvas");
+      compositeArtboard(
+        ctx,
+        artboard,
+        backdropTile(),
+        showPreview ? previewTile() : null,
+        t,
+        backdropScratch,
+        previewScratch,
+        clip,
       );
     }
-    const frame = previewFrame();
-    if (frame && !cropLayer) {
-      scratchCanvas ??= document.createElement("canvas");
-      if (
-        scratchCanvas.width !== frame.image.width ||
-        scratchCanvas.height !== frame.image.height
-      ) {
-        scratchCanvas.width = frame.image.width;
-        scratchCanvas.height = frame.image.height;
-      }
-      const scratchContext = scratchCanvas.getContext("2d");
-      if (!scratchContext) {
-        throw new Error("scratch canvas 2d context is required");
-      }
-      scratchContext.putImageData(frame.image, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(
-        scratchCanvas,
-        imageBounds.x + (frame.crop.x - previewBounds.x) * imageBounds.scale,
-        imageBounds.y + (frame.crop.y - previewBounds.y) * imageBounds.scale,
-        frame.crop.width * imageBounds.scale,
-        frame.crop.height * imageBounds.scale,
-      );
-    }
+
     drawCropOverlay(ctx, cssWidth, cssHeight);
     drawMaskOverlay(ctx, cssWidth, cssHeight);
   }
 
   createEffect(() => {
-    state.previewViewportWidth;
-    state.previewViewportHeight;
-    state.previewZoom;
-    state.previewCenterX;
-    state.previewCenterY;
+    state.viewportScreenWidth;
+    state.viewportScreenHeight;
+    state.viewportZoom;
+    state.viewportCenterX;
+    state.viewportCenterY;
     state.selectedLayerIdx;
     state.layers;
-    previewContextFrame();
-    previewFrame();
+    backdropTile();
+    previewTile();
     drawFrame();
   });
 
@@ -483,12 +408,12 @@ const Canvas: Component = () => {
   });
 
   onMount(() => {
-    const viewport = viewportRef;
-    if (!viewport) return;
+    const container = containerRef;
+    if (!container) return;
     const observer = new ResizeObserver(([entry]) => {
-      setPreviewViewportSize(entry.contentRect.width, entry.contentRect.height);
+      setViewportScreenSize(entry.contentRect.width, entry.contentRect.height);
     });
-    observer.observe(viewport);
+    observer.observe(container);
     onCleanup(() => observer.disconnect());
   });
 
@@ -515,11 +440,9 @@ const Canvas: Component = () => {
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    
     if (!stageRef) {
-      throw new Error("preview stage is required for wheel zoom");
+      throw new Error("viewport stage is required for wheel zoom");
     }
-    
     const deltaModeScale =
       e.deltaMode === WheelEvent.DOM_DELTA_LINE
         ? 16
@@ -528,13 +451,12 @@ const Canvas: Component = () => {
           : 1;
     const delta = e.deltaY * deltaModeScale;
     const rect = stageRef.getBoundingClientRect();
-    
-    zoomPreviewDelta(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
+    zoomViewport(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
   };
 
   const onPointerDown = (e: PointerEvent) => {
     if (!stageRef) {
-      throw new Error("preview stage is required for pointer interaction");
+      throw new Error("viewport stage is required for pointer interaction");
     }
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (selectedCropLayer()) {
@@ -557,7 +479,6 @@ const Canvas: Component = () => {
       drawFrame();
       return;
     }
-    // Mask handle interaction
     if (activeMask()) {
       const rect = stageRef.getBoundingClientRect();
       const handle = maskHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
@@ -594,7 +515,7 @@ const Canvas: Component = () => {
     if (gesture.kind === "pan") {
       const dx = e.clientX - gesture.x;
       const dy = e.clientY - gesture.y;
-      panPreview(dx, dy);
+      panViewport(dx, dy);
       drawFrame();
       gesture = { kind: "pan", x: e.clientX, y: e.clientY };
       return;
@@ -606,36 +527,38 @@ const Canvas: Component = () => {
         const newMidX = (p1.x + p2.x) / 2;
         const newMidY = (p1.y + p2.y) / 2;
         const rect = stageRef.getBoundingClientRect();
-        // Derive delta so that zoomFactor == newDist/prevDist with pinch sensitivity 0.0005
         const delta = -Math.log(newDist / gesture.dist) / 0.0005;
-        zoomPreviewDelta(delta, true, newMidX - rect.left, newMidY - rect.top);
-        panPreview(newMidX - gesture.midX, newMidY - gesture.midY);
+        zoomViewport(delta, true, newMidX - rect.left, newMidY - rect.top);
+        panViewport(newMidX - gesture.midX, newMidY - gesture.midY);
         gesture = { kind: "pinch", dist: newDist, midX: newMidX, midY: newMidY };
         drawFrame();
       }
       return;
     }
     if (gesture.kind === "mask") {
-      const crop = getCommittedCropRect();
-      const bounds = getDisplayBounds(stageRef.clientWidth, stageRef.clientHeight, crop);
-      if (bounds.scale <= 0) return;
-      const dx = (e.clientX - gesture.startX) / bounds.scale;
-      const dy = (e.clientY - gesture.startY) / bounds.scale;
+      const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+      if (t.scale <= 0) return;
+      const dx = (e.clientX - gesture.startX) / t.scale;
+      const dy = (e.clientY - gesture.startY) / t.scale;
       const p = gesture.params;
       let next: MaskParamsInfo;
       if (p.kind === "linear") {
-        const sx = p.x1 ?? 0, sy = p.y1 ?? 0, ex = p.x2 ?? 0, ey = p.y2 ?? 0;
+        const sx = p.x1 ?? 0,
+          sy = p.y1 ?? 0,
+          ex = p.x2 ?? 0,
+          ey = p.y2 ?? 0;
         if (gesture.handle === "start") {
           next = { ...p, x1: sx + dx, y1: sy + dy };
         } else {
           next = { ...p, x2: ex + dx, y2: ey + dy };
         }
       } else {
-        const cx = p.cx ?? 0, cy = p.cy ?? 0, r = p.radius ?? 0;
+        const cx = p.cx ?? 0,
+          cy = p.cy ?? 0,
+          r = p.radius ?? 0;
         if (gesture.handle === "center") {
           next = { ...p, cx: cx + dx, cy: cy + dy };
         } else {
-          // Edge handle: adjust radius based on distance from center
           const newEdgeX = cx + r + dx;
           const newEdgeY = cy + dy;
           const newR = Math.max(1, Math.hypot(newEdgeX - cx, newEdgeY - cy));
@@ -646,25 +569,28 @@ const Canvas: Component = () => {
       drawFrame();
       return;
     }
-    const bounds = getCropInteractionBounds(stageRef.clientWidth, stageRef.clientHeight);
-    if (bounds.scale <= 0) {
+    // Crop handle drag
+    const t = getCropEditTransform(stageRef.clientWidth, stageRef.clientHeight);
+    if (t.scale <= 0) {
       throw new Error("crop mode requires visible image bounds");
     }
     const start = gesture.crop;
     if (gesture.handle === "rotate") {
-      const cx = bounds.x + (start.x + start.width * 0.5) * bounds.scale;
-      const cy = bounds.y + (start.y + start.height * 0.5) * bounds.scale;
+      const center = worldToScreen(
+        start.x + start.width * 0.5,
+        start.y + start.height * 0.5,
+        t,
+      );
       const rect = stageRef.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const angle = Math.atan2(mx - cx, -(my - cy));
+      const angle = Math.atan2(mx - center.x, -(my - center.y));
       setDraftCrop({ ...start, rotation: angle });
       drawFrame();
       return;
     }
-    // Project screen delta into crop-local axes
-    const rawDx = (e.clientX - gesture.startX) / bounds.scale;
-    const rawDy = (e.clientY - gesture.startY) / bounds.scale;
+    const rawDx = (e.clientX - gesture.startX) / t.scale;
+    const rawDy = (e.clientY - gesture.startY) / t.scale;
     const cos = Math.cos(-start.rotation);
     const sin = Math.sin(-start.rotation);
     const deltaX = Math.round(rawDx * cos - rawDy * sin);
@@ -807,6 +733,7 @@ const Canvas: Component = () => {
     }
     gesture = null;
   };
+
   return (
     <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
       <div
@@ -826,7 +753,7 @@ const Canvas: Component = () => {
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_45%)]" />
 
         <div
-          ref={viewportRef}
+          ref={containerRef}
           class="relative flex h-full w-full items-center justify-center lg:h-full"
           style={{
             height: isDrawerOpen() ? "calc(100% - 30vh)" : undefined,
@@ -836,7 +763,7 @@ const Canvas: Component = () => {
             ref={canvasRef}
             width="800"
             height="600"
-            onDblClick={() => resetPreviewViewport()}
+            onDblClick={() => resetViewport()}
             style={{
               width: "100%",
               height: "100%",
@@ -847,11 +774,9 @@ const Canvas: Component = () => {
                   ? "active-editor-media"
                   : "none",
             }}
-            class={`${
-              state.layers.length === 0 ? "opacity-0" : "opacity-100"
-            }`}
+            class={`${state.layers.length === 0 ? "opacity-0" : "opacity-100"}`}
           />
-          {state.isLoading && state.loadingMediaSrc && !previewFrame() && (
+          {state.isLoading && state.loadingMediaSrc && !previewTile() && (
             <div class="pointer-events-none absolute inset-0">
               <img
                 src={state.loadingMediaSrc}
@@ -873,7 +798,8 @@ const Canvas: Component = () => {
               <span>Crop</span>
               <span class="text-white/35">
                 {activeCrop()!.width} × {activeCrop()!.height}
-                {Math.abs(activeCrop()!.rotation) > 0.001 && ` ${Math.round(activeCrop()!.rotation * 180 / Math.PI)}°`}
+                {Math.abs(activeCrop()!.rotation) > 0.001 &&
+                  ` ${Math.round((activeCrop()!.rotation * 180) / Math.PI)}°`}
               </span>
             </div>
           )}
@@ -885,14 +811,14 @@ const Canvas: Component = () => {
               </span>
             </div>
           )}
-          {shouldShowZoomIndicator() && previewZoomPercent() !== null && (
+          {shouldShowZoomIndicator() && viewportZoomPercent() !== null && (
             <button
               type="button"
               class="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition hover:border-white/20 hover:bg-black/60"
-              onClick={() => resetPreviewViewport()}
+              onClick={() => resetViewport()}
             >
               <span>Zoom</span>
-              <span class="text-white/35">{previewZoomPercent()}%</span>
+              <span class="text-white/35">{viewportZoomPercent()}%</span>
             </button>
           )}
           {state.layers.length === 0 && !state.isLoading && (
@@ -935,5 +861,3 @@ const Canvas: Component = () => {
     </section>
   );
 };
-
-export default Canvas;

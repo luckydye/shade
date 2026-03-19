@@ -20,7 +20,7 @@ import {
   listSnapshots,
   loadPreset,
   loadSnapshot,
-  previewContextFrame,
+  backdropTile,
   moveLayer,
   removeMask,
   savePreset,
@@ -778,7 +778,7 @@ const Inspector: Component = () => {
     const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
     const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
     const luminanceHistogram = createMemo(() => {
-      const frame = previewContextFrame();
+      const frame = backdropTile();
       return frame ? buildLuminanceHistogram(frame.image) : [];
     });
     let svgRef!: SVGSVGElement;
