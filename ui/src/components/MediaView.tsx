@@ -776,10 +776,9 @@ export const MediaView: Component = () => {
 
   return (
     <div class={shellClass()}>
-      <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4`}>
-        <div class="flex flex-col gap-4">
-          <div class="flex items-center gap-8">
-            <h1 class="hidden text-sm font-medium text-[var(--text-secondary)] md:block">Libraries</h1>
+      <Show when={!isEditorStrip()}>
+        <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4`}>
+          <div class="flex items-center gap-8 w-full">
             <div class="flex flex-1 gap-2 overflow-x-auto">
               <For each={libraryEntries()}>
                 {(library) =>
@@ -851,16 +850,8 @@ export const MediaView: Component = () => {
               </button>
             </div>
           </div>
-          {error() && <p class="text-sm text-[var(--danger-text)]">{error()}</p>}
-          <Show when={selectedLibraryDetail()}>
-            <p class="truncate text-xs text-[var(--text-dim)]">
-              {selectedLibraryDetail()}
-              {!isLibraryScanComplete() &&
-                ` • indexing ${displayedItems().length} images`}
-            </p>
-          </Show>
         </div>
-      </div>
+      </Show>
       <div
         ref={scrollRef!}
         class={scrollClass()}
@@ -928,6 +919,17 @@ export const MediaView: Component = () => {
               </div>
             </div>
           </Show>
+        </Show>
+      </div>
+      
+      <div class="flex flex-col gap-4 py-2 px-6">
+        {error() && <p class="text-sm text-[var(--danger-text)]">{error()}</p>}
+        <Show when={selectedLibraryDetail()}>
+          <p class="truncate text-xs text-[var(--text-dim)]">
+            {selectedLibraryDetail()}
+            {!isLibraryScanComplete() &&
+              ` • indexing ${displayedItems().length} images`}
+          </p>
         </Show>
       </div>
     </div>

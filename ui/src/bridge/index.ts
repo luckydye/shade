@@ -3,6 +3,19 @@
  * falls back to WASM worker when running in the browser.
  */
 
+import {
+  addBrowserMediaLibrary,
+  getBrowserMountedThumbnailBytes,
+  isBrowserMountedLibrary,
+  isBrowserMountedPath,
+  listBrowserLibraryImages,
+  listBrowserMediaLibraries,
+  openBrowserMountedImage,
+  pickBrowserDirectory,
+  removeBrowserMediaLibrary,
+} from "../browser-media-library";
+import type { BrowserDirectoryHandle } from "../browser-media-library";
+
 // ── Tauri path ──────────────────────────────────────────────────────────────
 type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 type IsTauriFn = () => boolean;
@@ -500,6 +513,9 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
     const inv = await getTauriInvoke();
     return inv("open_image", { path }) as Promise<any>;
   }
+  if (await isBrowserMountedPath(path)) {
+    return _loadEncodedBytes(await openBrowserMountedImage(path), path);
+  }
   await ensureWorkerReady();
   const response = await fetch(path);
   return _loadEncodedBytes(new Uint8Array(await response.arrayBuffer()), path);
@@ -532,9 +548,9 @@ export async function exportImage(path: string): Promise<void> {
   downloadBlob(blob, path || "shade-export.png");
 }
 
-export async function pickDirectory(): Promise<string | null> {
+export async function pickDirectory(): Promise<string | BrowserDirectoryHandle | null> {
   if (!(await isTauriRuntime())) {
-    return null;
+    return pickBrowserDirectory();
   }
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selectedPath = await open({
@@ -775,7 +791,11 @@ export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
           : Uint8Array.from(result as number[]);
     return Uint8Array.from(bytes);
   }
-  return new Uint8Array();
+  if (await isBrowserMountedPath(path)) {
+    return getBrowserMountedThumbnailBytes(path);
+  }
+  const response = await fetch(path);
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
@@ -821,7 +841,7 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
     const inv = await getTauriInvoke();
     return inv("list_media_libraries") as Promise<MediaLibrary[]>;
   }
-  return [];
+  return listBrowserMediaLibraries();
 }
 
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
@@ -831,15 +851,26 @@ export async function listLibraryImages(libraryId: string): Promise<LibraryImage
       libraryId,
     }) as Promise<LibraryImageListing>;
   }
-  return { items: [], is_complete: true };
+  if (!(await isBrowserMountedLibrary(libraryId))) {
+    throw new Error(`browser media library not found: ${libraryId}`);
+  }
+  return listBrowserLibraryImages(libraryId);
 }
 
-export async function addMediaLibrary(path: string): Promise<MediaLibrary> {
+export async function addMediaLibrary(
+  path: string | BrowserDirectoryHandle,
+): Promise<MediaLibrary> {
   if (await isTauriRuntime()) {
+    if (typeof path !== "string") {
+      throw new Error("expected a filesystem path in the Tauri runtime");
+    }
     const inv = await getTauriInvoke();
     return inv("add_media_library", { path }) as Promise<MediaLibrary>;
   }
-  throw new Error("addMediaLibrary is only implemented for Tauri");
+  if (typeof path === "string") {
+    throw new Error("expected a directory handle in the browser runtime");
+  }
+  return addBrowserMediaLibrary(path);
 }
 
 export async function removeMediaLibrary(id: string): Promise<void> {
@@ -848,7 +879,7 @@ export async function removeMediaLibrary(id: string): Promise<void> {
     await inv("remove_media_library", { id });
     return;
   }
-  throw new Error("removeMediaLibrary is only implemented for Tauri");
+  await removeBrowserMediaLibrary(id);
 }
 
 export async function listPresets(): Promise<PresetInfo[]> {
