@@ -3,12 +3,12 @@ version: "3"
 tasks:
   ui:dev:
     desc: Start the UI dev server
-    dir: ui
+    dir: shade-ui
     cmd: bun run dev
 
   ui:build:
     desc: Build the UI for production
-    dir: ui
+    dir: shade-ui
     cmd: bun run build
 
   web:dev:
