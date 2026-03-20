@@ -6,6 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
   clearScreen: false,
+  base: "/app/",
   server: {
     port: 4173,
     strictPort: true,

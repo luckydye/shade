@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "bun run --cwd ../shade-web build && astro build && rm -rf dist/app && mkdir -p dist/app && cp -R ../shade-web/dist/. dist/app/",
     "preview": "astro preview"
   },
   "dependencies": {
