@@ -435,7 +435,6 @@ export function refreshPreview() {
   const completion = new Promise<void>((resolve, reject) => {
     refreshWaiters.push({ resolve, reject });
   });
-  
   if (refreshPromise) return completion;
   refreshPromise = (async () => {
     try {

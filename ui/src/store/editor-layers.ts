@@ -9,6 +9,69 @@ import {
 } from "./editor-store";
 import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 
+let pendingEdits = new Map<string, Record<string, unknown>>();
+let editFlushPromise: Promise<void> | null = null;
+let editFlushWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
+
+function getEditKey(params: Record<string, unknown>) {
+  const layerIdx = params.layer_idx;
+  const op = params.op;
+  if (typeof layerIdx !== "number") {
+    throw new Error("edit batching requires a numeric layer_idx");
+  }
+  if (typeof op !== "string" || op.length === 0) {
+    throw new Error("edit batching requires a string op");
+  }
+  return `${layerIdx}:${op}`;
+}
+
+function nextAnimationFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function flushPendingEdits() {
+  await nextAnimationFrame();
+  const batch = [...pendingEdits.values()];
+  pendingEdits = new Map();
+  if (batch.length === 0) {
+    return;
+  }
+  for (const params of batch) {
+    await bridge.applyEdit(params);
+  }
+  await refreshPreview();
+  if (pendingEdits.size > 0) {
+    await flushPendingEdits();
+  }
+}
+
+function queueEdit(params: Record<string, unknown>) {
+  const key = getEditKey(params);
+  const current = pendingEdits.get(key);
+  pendingEdits.set(key, current ? { ...current, ...params } : params);
+  const completion = new Promise<void>((resolve, reject) => {
+    editFlushWaiters.push({ resolve, reject });
+  });
+  if (editFlushPromise) {
+    return completion;
+  }
+  editFlushPromise = (async () => {
+    try {
+      await flushPendingEdits();
+      const waiters = editFlushWaiters;
+      editFlushWaiters = [];
+      for (const waiter of waiters) waiter.resolve();
+    } catch (error) {
+      const waiters = editFlushWaiters;
+      editFlushWaiters = [];
+      for (const waiter of waiters) waiter.reject(error);
+    } finally {
+      editFlushPromise = null;
+    }
+  })();
+  return completion;
+}
+
 function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
   return {
     tone: null,
@@ -187,16 +250,14 @@ export async function applyEdit(params: Record<string, unknown>) {
   }
   if (layer.kind === "crop") {
     applyCropLayerEdit(layerIdx, params);
-    await bridge.applyEdit(params);
-    await refreshPreview();
+    await queueEdit(params);
     return;
   }
   if (layer.kind !== "adjustment") {
     throw new Error("applyEdit target layer must be an adjustment or crop layer");
   }
   applyAdjustmentLayerEdit(layerIdx, params);
-  await bridge.applyEdit(params);
-  await refreshPreview();
+  await queueEdit(params);
 }
 
 export function selectLayer(idx: number) {
