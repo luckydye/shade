@@ -418,16 +418,16 @@ export async function renderPreview(request?: PreviewRequest): Promise<PreviewFr
   }
   await ensureWorkerReady();
   const result = await workerCall<{
-    pixels: Uint8Array | number[];
+    pixels: Uint8Array;
     width: number;
     height: number;
   }>({ type: "render_preview", request }, "preview_rendered");
+  if (!(result.pixels instanceof Uint8Array)) {
+    throw new Error("preview worker returned pixels in an unexpected format");
+  }
   return {
     kind: "rgba",
-    pixels:
-      result.pixels instanceof Uint8Array
-        ? result.pixels
-        : Uint8Array.from(result.pixels),
+    pixels: result.pixels,
     width: result.width,
     height: result.height,
   };

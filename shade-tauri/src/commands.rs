@@ -46,7 +46,7 @@ struct IosPhotoEntry {
 
 pub struct EditorState {
     pub stack: LayerStack,
-    pub image_sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+    pub image_sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
@@ -1256,7 +1256,7 @@ impl ThumbnailQueue {
 pub enum RenderJob {
     Preview {
         stack: LayerStack,
-        sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
@@ -1264,7 +1264,7 @@ pub enum RenderJob {
     },
     PreviewFloat16 {
         stack: LayerStack,
-        sources: std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
@@ -1376,7 +1376,7 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                             Ok(renderer) => runtime
                                 .block_on(renderer.render_stack_preview(
                                     &stack,
-                                    &sources,
+                                    sources.as_ref(),
                                     canvas_width,
                                     canvas_height,
                                     request.target_width,
@@ -1410,7 +1410,7 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                             Ok(renderer) => runtime
                                 .block_on(renderer.render_stack_preview_f16(
                                     &stack,
-                                    &sources,
+                                    sources.as_ref(),
                                     canvas_width,
                                     canvas_height,
                                     request.target_width,
@@ -1443,7 +1443,7 @@ impl Default for EditorState {
     fn default() -> Self {
         Self {
             stack: LayerStack::new(),
-            image_sources: std::collections::HashMap::new(),
+            image_sources: Arc::new(std::collections::HashMap::new()),
             canvas_width: 1920,
             canvas_height: 1080,
             next_texture_id: 1,
@@ -1469,14 +1469,14 @@ impl EditorState {
         let texture_id = self.next_texture_id;
         self.next_texture_id += 1;
         self.stack = LayerStack::new();
-        self.image_sources.insert(
+        self.image_sources = Arc::new(std::collections::HashMap::from([(
             texture_id,
             FloatImage {
                 pixels: pixels.into(),
                 width,
                 height,
             },
-        );
+        )]));
         self.canvas_width = width;
         self.canvas_height = height;
         self.source_bit_depth = source_bit_depth.clone();
@@ -1817,7 +1817,7 @@ fn snapshot_render_state(
 ) -> Result<
     (
         LayerStack,
-        std::collections::HashMap<shade_core::TextureId, FloatImage>,
+        Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
         u32,
         u32,
     ),

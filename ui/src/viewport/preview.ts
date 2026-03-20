@@ -172,9 +172,9 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
   };
 }
 
-function toRenderedTile(frame: bridge.PreviewFrame, crop: bridge.PreviewCrop): RenderedTile {
+function createRenderedTile(image: ImageData, crop: bridge.PreviewCrop): RenderedTile {
   return {
-    image: toImageData(frame),
+    image,
     x: crop.x,
     y: crop.y,
     width: crop.width,
@@ -371,8 +371,10 @@ async function performRefresh() {
       previewRenderHeight: frame.height,
     });
   }
-  setPreviewTile(toRenderedTile(frame, crop));
-  setSelectedArtboardPreviewTile(toRenderedTile(frame, crop));
+  const previewTileImage = toImageData(frame);
+  const renderedPreviewTile = createRenderedTile(previewTileImage, crop);
+  setPreviewTile(renderedPreviewTile);
+  setSelectedArtboardPreviewTile(renderedPreviewTile);
   lastRenderedPreview = {
     quality: queued.quality,
     snapshot,
@@ -385,8 +387,9 @@ async function performRefresh() {
     crop.width >= state.canvasWidth &&
     crop.height >= state.canvasHeight
   ) {
-    setBackdropTile(toRenderedTile(frame, crop));
-    setSelectedArtboardBackdropTile(toRenderedTile(frame, crop));
+    const renderedBackdropTile = createRenderedTile(previewTileImage, crop);
+    setBackdropTile(renderedBackdropTile);
+    setSelectedArtboardBackdropTile(renderedBackdropTile);
     return;
   }
   // Skip backdrop on interactive quality if we already have one
@@ -406,22 +409,16 @@ async function performRefresh() {
   if (queued.version !== refreshVersion) return;
   if (bdFrame.width === 0 || bdFrame.height === 0) return;
   const bdCrop = backdropReq.crop ?? fullCanvasCrop();
-  setBackdropTile(
-    toRenderedTile(bdFrame, {
-      x: bdCrop.x,
-      y: bdCrop.y,
-      width: bdCrop.width,
-      height: bdCrop.height,
-    }),
-  );
-  setSelectedArtboardBackdropTile(
-    toRenderedTile(bdFrame, {
-      x: bdCrop.x,
-      y: bdCrop.y,
-      width: bdCrop.width,
-      height: bdCrop.height,
-    }),
-  );
+  const renderedBackdropCrop = {
+    x: bdCrop.x,
+    y: bdCrop.y,
+    width: bdCrop.width,
+    height: bdCrop.height,
+  };
+  const backdropImage = toImageData(bdFrame);
+  const renderedBackdropTile = createRenderedTile(backdropImage, renderedBackdropCrop);
+  setBackdropTile(renderedBackdropTile);
+  setSelectedArtboardBackdropTile(renderedBackdropTile);
   lastRenderedBackdrop = {
     quality: queued.quality,
     snapshot,

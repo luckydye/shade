@@ -218,13 +218,20 @@ self.onmessage = async (e: MessageEvent) => {
       case "render_preview": {
         await ensureRendererReady();
         const frame = await wasm.render_preview_rgba(msg.request ?? null);
-        self.postMessage({
-          type: "preview_rendered",
-          requestId,
-          pixels: frame.pixels,
-          width: frame.width,
-          height: frame.height,
-        });
+        const pixels =
+          frame.pixels instanceof Uint8Array
+            ? frame.pixels
+            : Uint8Array.from(frame.pixels);
+        self.postMessage(
+          {
+            type: "preview_rendered",
+            requestId,
+            pixels,
+            width: frame.width,
+            height: frame.height,
+          },
+          [pixels.buffer],
+        );
         break;
       }
 
