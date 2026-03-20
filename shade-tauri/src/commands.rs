@@ -1857,6 +1857,52 @@ fn apply_preview_request(
     (stack, request)
 }
 
+fn export_dimension(value: f32, axis: &str) -> Result<u32, String> {
+    if !value.is_finite() {
+        return Err(format!("crop {axis} must be finite"));
+    }
+    let rounded = value.round();
+    if rounded < 1.0 || rounded > u32::MAX as f32 {
+        return Err(format!("crop {axis} is out of range"));
+    }
+    Ok(rounded as u32)
+}
+
+fn export_render_request(
+    stack: &LayerStack,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<PreviewRenderRequest, String> {
+    let crop = stack.layers.iter().find_map(|entry| {
+        if !entry.visible {
+            return None;
+        }
+        let shade_core::Layer::Crop { rect } = &entry.layer else {
+            return None;
+        };
+        Some(PreviewCrop {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        })
+    });
+    let target_width = match &crop {
+        Some(crop) => export_dimension(crop.width, "width")?,
+        None => canvas_width,
+    };
+    let target_height = match &crop {
+        Some(crop) => export_dimension(crop.height, "height")?,
+        None => canvas_height,
+    };
+    Ok(PreviewRenderRequest {
+        target_width,
+        target_height,
+        crop,
+        ignore_crop_layers: None,
+    })
+}
+
 /// Run the full GPU render pipeline and return raw RGBA8 pixels.
 #[tauri::command]
 pub async fn render_preview(
@@ -1938,6 +1984,7 @@ pub async fn export_image(
         return Err("export format must be png, jpg, or jpeg".into());
     }
     let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
+    let request = export_render_request(&stack, canvas_width, canvas_height)?;
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1948,12 +1995,30 @@ pub async fn export_image(
                 .await
                 .map_err(|e| e.to_string())?;
             renderer
-                .render_stack(&stack, &sources, canvas_width, canvas_height)
+                .render_stack_preview(
+                    &stack,
+                    &sources,
+                    canvas_width,
+                    canvas_height,
+                    request.target_width,
+                    request.target_height,
+                    request.crop.as_ref().map(|crop| shade_gpu::PreviewCrop {
+                        x: crop.x,
+                        y: crop.y,
+                        width: crop.width,
+                        height: crop.height,
+                    }),
+                )
                 .await
                 .map_err(|e| e.to_string())
         })?;
-        shade_io::save_image(&export_path, &pixels, canvas_width, canvas_height)
-            .map_err(|e| e.to_string())
+        shade_io::save_image(
+            &export_path,
+            &pixels,
+            request.target_width,
+            request.target_height,
+        )
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -3299,4 +3364,40 @@ fn normalize_crop_rect(
         height,
         rotation: rect.rotation,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_render_request;
+    use shade_core::{CropRect, LayerStack};
+
+    #[test]
+    fn export_render_request_uses_canvas_when_crop_is_absent() {
+        let mut stack = LayerStack::new();
+        stack.add_adjustment_layer(vec![]);
+        let request = export_render_request(&stack, 400, 300).expect("export request");
+        assert_eq!(request.target_width, 400);
+        assert_eq!(request.target_height, 300);
+        assert!(request.crop.is_none());
+    }
+
+    #[test]
+    fn export_render_request_uses_visible_crop_dimensions() {
+        let mut stack = LayerStack::new();
+        stack.add_crop_layer(CropRect {
+            x: 10.0,
+            y: 20.0,
+            width: 123.0,
+            height: 77.0,
+            rotation: 0.25,
+        });
+        let request = export_render_request(&stack, 400, 300).expect("export request");
+        let crop = request.crop.expect("crop request");
+        assert_eq!(request.target_width, 123);
+        assert_eq!(request.target_height, 77);
+        assert_eq!(crop.x, 10.0);
+        assert_eq!(crop.y, 20.0);
+        assert_eq!(crop.width, 123.0);
+        assert_eq!(crop.height, 77.0);
+    }
 }
