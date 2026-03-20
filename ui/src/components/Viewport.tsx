@@ -2,6 +2,7 @@ import { Component, createEffect, createSignal, onCleanup, onMount } from "solid
 import {
   applyEdit,
   applyGradientMask,
+  closeArtboard,
   getSelectedArtboard,
   getCommittedCropRect,
   getViewportZoomPercent,
@@ -43,6 +44,9 @@ const HANDLE_SIZE = 10;
 const ARTBOARD_TITLE_HEIGHT = 24;
 const ARTBOARD_TITLE_PADDING_X = 10;
 const ARTBOARD_TITLE_MAX_WIDTH = 220;
+const ARTBOARD_CLOSE_SIZE = 18;
+const ARTBOARD_CLOSE_MARGIN = 6;
+const ARTBOARD_CHROME_FADE = 0;
 
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
@@ -418,6 +422,15 @@ export const Viewport: Component = () => {
       const t = getViewTransform(cssWidth, cssHeight);
       backdropScratch ??= document.createElement("canvas");
       previewScratch ??= document.createElement("canvas");
+      const visibleArtboardIds = state.artboards
+        .filter((artboard) => {
+          const sx = artboard.worldX * t.scale + t.dx;
+          const sy = artboard.worldY * t.scale + t.dy;
+          const sw = artboard.width * t.scale;
+          const sh = artboard.height * t.scale;
+          return sx + sw > 0 && sy + sh > 0 && sx < cssWidth && sy < cssHeight;
+        })
+        .map((artboard) => artboard.id);
       for (const artboard of state.artboards) {
         const worldArtboard = {
           worldX: artboard.worldX,
@@ -426,6 +439,8 @@ export const Viewport: Component = () => {
           height: artboard.height,
         };
         const isSelected = artboard.id === selectedArtboard.id;
+        const shouldFadeChrome =
+          visibleArtboardIds.length === 1 && visibleArtboardIds[0] === artboard.id;
         const cropLayer = isSelected ? selectedCropLayer() : null;
         const committedCrop = isSelected ? getCommittedCropRect() : null;
         const clip = cropLayer || !committedCrop ? undefined : committedCrop;
@@ -444,7 +459,8 @@ export const Viewport: Component = () => {
         const sw = worldArtboard.width * t.scale;
         const sh = worldArtboard.height * t.scale;
         ctx.save();
-        ctx.strokeStyle = isSelected ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.22)";
+        ctx.globalAlpha = shouldFadeChrome ? ARTBOARD_CHROME_FADE : 1;
+        ctx.strokeStyle = "rgba(148, 148, 148, 0.7)";
         ctx.lineWidth = isSelected ? 2 : 1;
         ctx.strokeRect(sx, sy, sw, sh);
         ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -455,9 +471,9 @@ export const Viewport: Component = () => {
         );
         const labelX = sx;
         const labelY = sy - ARTBOARD_TITLE_HEIGHT - 6;
-        ctx.fillStyle = isSelected ? "rgba(255, 255, 255, 0.92)" : "rgba(255, 255, 255, 0.7)";
+        ctx.fillStyle = isSelected ? "rgba(255, 255, 255, 0.95)" : "rgba(148, 148, 148, 0.78)";
         ctx.fillRect(labelX, labelY, labelWidth, ARTBOARD_TITLE_HEIGHT);
-        ctx.fillStyle = isSelected ? "rgba(0, 0, 0, 0.88)" : "rgba(0, 0, 0, 0.76)";
+        ctx.fillStyle = "rgba(32, 32, 32, 0.95)";
         ctx.textBaseline = "middle";
         ctx.fillText(
           artboard.title,
@@ -465,6 +481,18 @@ export const Viewport: Component = () => {
           labelY + ARTBOARD_TITLE_HEIGHT * 0.5,
           labelWidth - ARTBOARD_TITLE_PADDING_X * 2,
         );
+        const closeX = sx + sw - ARTBOARD_CLOSE_SIZE;
+        const closeY = labelY;
+        ctx.fillStyle = "rgba(148, 148, 148, 0.82)";
+        ctx.fillRect(closeX, closeY, ARTBOARD_CLOSE_SIZE, ARTBOARD_CLOSE_SIZE);
+        ctx.strokeStyle = "rgba(32, 32, 32, 0.95)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(closeX + 5, closeY + 5);
+        ctx.lineTo(closeX + ARTBOARD_CLOSE_SIZE - 5, closeY + ARTBOARD_CLOSE_SIZE - 5);
+        ctx.moveTo(closeX + ARTBOARD_CLOSE_SIZE - 5, closeY + 5);
+        ctx.lineTo(closeX + 5, closeY + ARTBOARD_CLOSE_SIZE - 5);
+        ctx.stroke();
         ctx.restore();
       }
     }
@@ -567,6 +595,25 @@ export const Viewport: Component = () => {
     return null;
   }
 
+  function artboardCloseAtPoint(sx: number, sy: number): ArtboardState | null {
+    if (!stageRef) return null;
+    const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+    for (let idx = state.artboards.length - 1; idx >= 0; idx -= 1) {
+      const artboard = state.artboards[idx];
+      const x = artboard.worldX * t.scale + t.dx + artboard.width * t.scale - ARTBOARD_CLOSE_SIZE;
+      const y = artboard.worldY * t.scale + t.dy - ARTBOARD_TITLE_HEIGHT - 6;
+      if (
+        sx >= x &&
+        sx <= x + ARTBOARD_CLOSE_SIZE &&
+        sy >= y &&
+        sy <= y + ARTBOARD_CLOSE_SIZE
+      ) {
+        return artboard;
+      }
+    }
+    return null;
+  }
+
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
     if (!stageRef) {
@@ -588,6 +635,14 @@ export const Viewport: Component = () => {
       throw new Error("viewport stage is required for pointer interaction");
     }
     const rect = stageRef.getBoundingClientRect();
+    const clickedArtboardClose = artboardCloseAtPoint(
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+    );
+    if (clickedArtboardClose) {
+      void closeArtboard(clickedArtboardClose.id);
+      return;
+    }
     const clickedArtboardTitle = artboardTitleAtPoint(
       e.clientX - rect.left,
       e.clientY - rect.top,

@@ -7,6 +7,7 @@ export {
 } from "./editor-store";
 
 export {
+  closeArtboard,
   exportImage,
   closeImage,
   openImage,

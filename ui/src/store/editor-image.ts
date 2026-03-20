@@ -1,6 +1,6 @@
 import * as bridge from "../bridge/index";
 import { fullCanvasCrop, setState, state, type ArtboardSource } from "./editor-store";
-import { clearPreviewTiles, refreshPreview } from "../viewport/preview";
+import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 import { refreshLayerStack } from "./editor-layers";
 
 const ARTBOARD_GAP = 96;
@@ -31,6 +31,42 @@ function getArtboardTitle(source: ArtboardSource) {
     default:
       throw new Error("unknown artboard source");
   }
+}
+
+function artboardSourceMatches(a: ArtboardSource, b: ArtboardSource) {
+  if (a.kind !== b.kind) {
+    return false;
+  }
+  switch (a.kind) {
+    case "path":
+      return a.path === (b as ArtboardSource & { kind: "path" }).path;
+    case "file": {
+      const other = b as ArtboardSource & { kind: "file" };
+      return (
+        a.file.name === other.file.name &&
+        a.file.size === other.file.size &&
+        a.file.lastModified === other.file.lastModified
+      );
+    }
+    case "peer": {
+      const other = b as ArtboardSource & { kind: "peer" };
+      return (
+        a.peerEndpointId === other.peerEndpointId &&
+        a.picture.id === other.picture.id
+      );
+    }
+    default:
+      throw new Error("unknown artboard source");
+  }
+}
+
+async function focusExistingArtboard(artboardId: string) {
+  if (artboardId !== state.selectedArtboardId) {
+    await selectArtboard(artboardId);
+    return;
+  }
+  setState("currentView", "editor");
+  resetViewport();
 }
 
 function resetViewportState(canvasWidth: number, canvasHeight: number) {
@@ -82,6 +118,16 @@ async function openImageFrom(
     itemId: string;
   } | null,
 ) {
+  const existingArtboard = state.artboards.find((artboard) =>
+    artboardSourceMatches(artboard.source, source),
+  );
+  if (existingArtboard) {
+    if (loadingMediaSrc?.startsWith("blob:")) {
+      URL.revokeObjectURL(loadingMediaSrc);
+    }
+    await focusExistingArtboard(existingArtboard.id);
+    return;
+  }
   setState({
     currentView: "editor",
     activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
@@ -137,6 +183,32 @@ export function closeImage() {
     isLoading: false,
     loadingMediaSrc: null,
   });
+}
+
+export async function closeArtboard(artboardId: string) {
+  const artboardIndex = state.artboards.findIndex((candidate) => candidate.id === artboardId);
+  if (artboardIndex < 0) {
+    throw new Error("artboard not found");
+  }
+  const remainingArtboards = state.artboards.filter((candidate) => candidate.id !== artboardId);
+  if (remainingArtboards.length === 0) {
+    closeImage();
+    return;
+  }
+  if (state.selectedArtboardId !== artboardId) {
+    setState("artboards", remainingArtboards);
+    return;
+  }
+  const nextArtboard =
+    remainingArtboards[Math.min(artboardIndex, remainingArtboards.length - 1)];
+  clearPreviewTiles();
+  setState({
+    artboards: remainingArtboards,
+    selectedArtboardId: null,
+    isLoading: false,
+    loadingMediaSrc: null,
+  });
+  await selectArtboard(nextArtboard.id);
 }
 
 export function showMediaView() {
