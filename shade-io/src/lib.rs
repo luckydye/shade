@@ -13,6 +13,16 @@ use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
+pub mod library_index;
+
+pub use library_index::{
+    delete_persisted_library_index, indexed_library_image_for_path,
+    is_supported_library_image, library_index_db_path, has_persisted_library_index,
+    load_persisted_library_index, picture_display_name, replace_persisted_library_index,
+    scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
+    PersistedLibraryIndex,
+};
+
 // ── Public image loading ───────────────────────────────────────────────────────
 
 const EXR_MAGIC: [u8; 4] = [0x76, 0x2f, 0x31, 0x01];

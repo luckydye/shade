@@ -4,9 +4,12 @@ use shade_core::{
     CurveControlPoint, DenoiseParams, FloatImage, GrainParams, HslParams, LayerStack,
     MaskData, MaskParams, SharpenParams, VignetteParams,
 };
-use shade_io::SourceImageInfo;
 use shade_io::{
+    delete_persisted_library_index, indexed_library_image_for_path, is_supported_library_image,
+    has_persisted_library_index, library_index_db_path as shared_library_index_db_path,
     load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32,
+    load_persisted_library_index, picture_display_name, replace_persisted_library_index,
+    scan_directory_images, sort_indexed_library_items, SourceImageInfo,
 };
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -93,11 +96,6 @@ struct AppConfig {
     paired_peers: Vec<String>,
     p2p_secret_key: Option<[u8; 32]>,
 }
-
-const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif", "exr", "dng", "cr2", "cr3",
-    "arw", "nef", "orf", "raf", "rw2", "3fr",
-];
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -198,6 +196,10 @@ fn preset_file_path(name: &str) -> Result<PathBuf, String> {
 
 fn edits_db_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("edits.db"))
+}
+
+fn library_index_db_path() -> Result<PathBuf, String> {
+    Ok(shared_library_index_db_path(&app_config_dir()?))
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
@@ -858,6 +860,45 @@ fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
     Err(format!("unknown media library: {library_id}"))
 }
 
+fn desktop_local_library_roots() -> Result<Vec<(String, PathBuf)>, String> {
+    let mut roots = vec![("pictures".to_string(), default_pictures_dir()?)];
+    for directory in load_app_config()?.directories {
+        let path = PathBuf::from(directory);
+        roots.push((custom_library_id(&path), path));
+    }
+    Ok(roots)
+}
+
+pub fn prime_missing_library_indexes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), String> {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let db_path = library_index_db_path()?;
+        for (library_id, root) in desktop_local_library_roots()? {
+            if tauri::async_runtime::block_on(has_persisted_library_index(
+                &db_path,
+                &library_id,
+                &root,
+            ))? {
+                continue;
+            }
+            tauri::async_runtime::block_on(
+                app.state::<crate::LibraryScanService>()
+                    .0
+                    .refresh_library(&db_path, &library_id, root),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 fn resolve_ccapi_library_host(library_id: &str) -> Result<String, String> {
     let host = library_id
         .strip_prefix("ccapi:")
@@ -868,58 +909,15 @@ fn resolve_ccapi_library_host(library_id: &str) -> Result<String, String> {
     Ok(host.to_string())
 }
 
-fn modified_at_millis(mtime: std::time::SystemTime) -> Result<u64, String> {
-    let duration = mtime
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| e.to_string())?;
-    u64::try_from(duration.as_millis()).map_err(|e| e.to_string())
-}
-
 fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> {
-    let mut entries_with_mtime: Vec<(std::time::SystemTime, LibraryImage)> = Vec::new();
-    let mut dirs = vec![dir.to_path_buf()];
-    while let Some(current_dir) = dirs.pop() {
-        let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
-        for entry in entries {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            if path.is_dir() {
-                dirs.push(path);
-                continue;
-            }
-            if !path.is_file() {
-                continue;
-            }
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-                continue;
-            };
-            if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                continue;
-            }
-            let path_string = path
-                .to_str()
-                .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
-                .to_string();
-            let mtime = path
-                .metadata()
-                .map_err(|e| e.to_string())?
-                .modified()
-                .map_err(|e| e.to_string())?;
-            entries_with_mtime.push((
-                mtime,
-                LibraryImage {
-                    name: picture_display_name(&path_string),
-                    path: path_string,
-                    modified_at: Some(modified_at_millis(mtime)?),
-                    metadata: Default::default(),
-                },
-            ));
-        }
-    }
-    entries_with_mtime.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(entries_with_mtime
+    Ok(scan_directory_images(dir)?
         .into_iter()
-        .map(|(_, entry)| entry)
+        .map(|item| LibraryImage {
+            name: item.name,
+            path: item.path,
+            modified_at: item.modified_at,
+            metadata: Default::default(),
+        })
         .collect())
 }
 
@@ -976,6 +974,7 @@ pub struct LibraryScanEntry {
 
 pub struct LibraryScanSnapshot {
     pub items: Vec<LibraryScanEntry>,
+    pub is_scanning: bool,
     pub is_complete: bool,
     pub error: Option<String>,
     pub completed_at: Option<u64>,
@@ -1000,38 +999,62 @@ impl LibraryScanService {
         })
     }
 
-    pub fn snapshot_for_library(
+    async fn ensure_snapshot_for_library(
         &self,
+        db_path: &Path,
         library_id: &str,
         root: PathBuf,
-    ) -> Result<LibraryImageListing, String> {
+    ) -> Result<(Arc<Mutex<LibraryScanSnapshot>>, bool), String> {
+        if let Some(snapshot) = self
+            .scans
+            .lock()
+            .map_err(|_| "library scan lock poisoned".to_string())?
+            .get(library_id)
+            .cloned()
+        {
+            return Ok((snapshot, false));
+        }
+        let persisted = load_persisted_library_index(db_path, library_id, &root).await?;
+        let should_scan = persisted.is_none();
+        let snapshot = Arc::new(Mutex::new(LibraryScanSnapshot {
+            items: persisted
+                .as_ref()
+                .map(|listing| listing.items.iter().cloned().map(library_scan_entry).collect())
+                .unwrap_or_default(),
+            is_scanning: false,
+            is_complete: persisted.is_some(),
+            error: None,
+            completed_at: persisted.map(|listing| listing.indexed_at),
+        }));
         let snapshot = {
             let mut scans = self
                 .scans
                 .lock()
                 .map_err(|_| "library scan lock poisoned".to_string())?;
-            let should_restart = scans
-                .get(library_id)
-                .map(|snapshot| library_scan_should_restart(snapshot))
-                .transpose()?
-                .unwrap_or(true);
-            if should_restart {
-                let snapshot = Arc::new(Mutex::new(LibraryScanSnapshot {
-                    items: Vec::new(),
-                    is_complete: false,
-                    error: None,
-                    completed_at: None,
-                }));
-                scans.insert(library_id.to_string(), snapshot.clone());
-                spawn_library_scan(snapshot.clone(), root);
-                snapshot
-            } else {
-                scans
-                    .get(library_id)
-                    .expect("library scan snapshot must exist")
-                    .clone()
-            }
+            scans
+                .entry(library_id.to_string())
+                .or_insert_with(|| snapshot.clone())
+                .clone()
         };
+        Ok((snapshot, should_scan))
+    }
+
+    pub async fn snapshot_for_library(
+        &self,
+        db_path: &Path,
+        library_id: &str,
+        root: PathBuf,
+    ) -> Result<LibraryImageListing, String> {
+        let (snapshot, should_scan) = self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
+        if should_scan {
+            start_library_scan(
+                snapshot.clone(),
+                db_path.to_path_buf(),
+                library_id.to_string(),
+                root,
+                true,
+            )?;
+        }
         let snapshot = snapshot
             .lock()
             .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
@@ -1046,6 +1069,30 @@ impl LibraryScanService {
                 .collect(),
             is_complete: snapshot.is_complete,
         })
+    }
+
+    pub async fn refresh_library(
+        &self,
+        db_path: &Path,
+        library_id: &str,
+        root: PathBuf,
+    ) -> Result<(), String> {
+        let (snapshot, _) = self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
+        start_library_scan(
+            snapshot,
+            db_path.to_path_buf(),
+            library_id.to_string(),
+            root,
+            false,
+        )
+    }
+
+    pub fn remove_library(&self, library_id: &str) -> Result<(), String> {
+        self.scans
+            .lock()
+            .map_err(|_| "library scan lock poisoned".to_string())?
+            .remove(library_id);
+        Ok(())
     }
 }
 
@@ -1090,48 +1137,83 @@ impl CameraThumbnailService {
     }
 }
 
-pub fn library_scan_should_restart(
-    snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
-) -> Result<bool, String> {
-    let snapshot = snapshot
-        .lock()
-        .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
-    if !snapshot.is_complete {
-        return Ok(false);
+fn library_scan_entry(item: shade_io::IndexedLibraryImage) -> LibraryScanEntry {
+    LibraryScanEntry {
+        modified_at: item.modified_at.unwrap_or(0),
+        image: LibraryImage {
+            name: item.name,
+            path: item.path,
+            modified_at: item.modified_at,
+            metadata: Default::default(),
+        },
     }
-    let Some(completed_at) = snapshot.completed_at else {
-        return Ok(true);
-    };
-    let now = modified_at_millis(std::time::SystemTime::now())?;
-    Ok(now.saturating_sub(completed_at) > 5_000)
 }
 
-pub fn spawn_library_scan(snapshot: Arc<Mutex<LibraryScanSnapshot>>, root: PathBuf) {
+pub fn start_library_scan(
+    snapshot: Arc<Mutex<LibraryScanSnapshot>>,
+    db_path: PathBuf,
+    library_id: String,
+    root: PathBuf,
+    publish_progress: bool,
+) -> Result<(), String> {
+    {
+        let mut guard = snapshot
+            .lock()
+            .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+        if guard.is_scanning {
+            return Err(format!("library index refresh already running: {library_id}"));
+        }
+        guard.is_scanning = true;
+        guard.is_complete = false;
+        guard.error = None;
+        if publish_progress {
+            guard.items.clear();
+            guard.completed_at = None;
+        }
+    }
     std::thread::Builder::new()
         .name("shade-library-scan".into())
         .spawn(move || {
-            let result = scan_library_into_snapshot(&root, &snapshot);
+            let result = scan_library_into_snapshot(&root, &snapshot, publish_progress).and_then(
+                |items| {
+                    tauri::async_runtime::block_on(replace_persisted_library_index(
+                        &db_path,
+                        &library_id,
+                        &root,
+                        &items,
+                    ))
+                    .map(|indexed_at| (items, indexed_at))
+                },
+            );
             let mut guard = snapshot
                 .lock()
                 .expect("library scan snapshot lock poisoned");
-            if let Err(error) = result {
-                guard.error = Some(error);
+            match result {
+                Ok((items, indexed_at)) => {
+                    if !publish_progress {
+                        guard.items = items.into_iter().map(library_scan_entry).collect();
+                    }
+                    guard.completed_at = Some(indexed_at);
+                }
+                Err(error) => {
+                    guard.error = Some(error);
+                }
             }
-            guard.completed_at = Some(
-                modified_at_millis(std::time::SystemTime::now())
-                    .expect("current time must be valid"),
-            );
+            guard.is_scanning = false;
             guard.is_complete = true;
         })
         .expect("failed to spawn library scan thread");
+    Ok(())
 }
 
 pub fn scan_library_into_snapshot(
     dir: &Path,
     snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
-) -> Result<(), String> {
+    publish_progress: bool,
+) -> Result<Vec<shade_io::IndexedLibraryImage>, String> {
     let mut dirs = vec![dir.to_path_buf()];
     let mut batch = Vec::new();
+    let mut items = Vec::new();
     while let Some(current_dir) = dirs.pop() {
         let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
         for entry in entries {
@@ -1141,41 +1223,24 @@ pub fn scan_library_into_snapshot(
                 dirs.push(path);
                 continue;
             }
-            if !path.is_file() {
+            if !path.is_file() || !is_supported_library_image(&path) {
                 continue;
             }
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-                continue;
-            };
-            if !IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                continue;
+            let item = indexed_library_image_for_path(&path)?;
+            items.push(item.clone());
+            if publish_progress {
+                batch.push(library_scan_entry(item));
             }
-            let path_string = path
-                .to_str()
-                .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
-                .to_string();
-            let modified_at = modified_at_millis(
-                path.metadata()
-                    .map_err(|e| e.to_string())?
-                    .modified()
-                    .map_err(|e| e.to_string())?,
-            )?;
-            batch.push(LibraryScanEntry {
-                modified_at,
-                image: LibraryImage {
-                    name: picture_display_name(&path_string),
-                    path: path_string,
-                    modified_at: Some(modified_at),
-                    metadata: Default::default(),
-                },
-            });
-            if batch.len() >= 64 {
+            if publish_progress && batch.len() >= 64 {
                 flush_library_scan_batch(snapshot, &mut batch)?;
             }
         }
     }
-    flush_library_scan_batch(snapshot, &mut batch)?;
-    Ok(())
+    if publish_progress {
+        flush_library_scan_batch(snapshot, &mut batch)?;
+    }
+    sort_indexed_library_items(&mut items);
+    Ok(items)
 }
 
 pub fn flush_library_scan_batch(
@@ -2865,15 +2930,45 @@ async fn build_library_listing<R: tauri::Runtime>(
             return list_ccapi_library_images(&resolve_ccapi_library_host(&library_id)?)
                 .await;
         }
+        let db_path = library_index_db_path()?;
         let library_path = resolve_desktop_library_path(&library_id)?;
         _app.state::<crate::LibraryScanService>()
             .0
-            .snapshot_for_library(&library_id, library_path)
+            .snapshot_for_library(&db_path, &library_id, library_path)
+            .await
     }
 }
 
 #[tauri::command]
-pub async fn add_media_library(path: String) -> Result<MediaLibrary, String> {
+pub async fn refresh_library_index<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    library_id: String,
+) -> Result<(), String> {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = _app;
+        return Err(format!("library indexing is not supported on this platform: {library_id}"));
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        if library_id.starts_with("ccapi:") {
+            return Err(format!("library indexing is not supported for camera libraries: {library_id}"));
+        }
+        let db_path = library_index_db_path()?;
+        let library_path = resolve_desktop_library_path(&library_id)?;
+        _app.state::<crate::LibraryScanService>()
+            .0
+            .refresh_library(&db_path, &library_id, library_path)
+            .await
+    }
+}
+
+#[tauri::command]
+pub async fn add_media_library<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<MediaLibrary, String> {
     let canonical = std::fs::canonicalize(Path::new(&path)).map_err(|e| e.to_string())?;
     if !canonical.is_dir() {
         return Err(format!("not a directory: {}", canonical.display()));
@@ -2891,11 +2986,23 @@ pub async fn add_media_library(path: String) -> Result<MediaLibrary, String> {
         config.directories.push(canonical_string);
         save_app_config(&config)?;
     }
-    Ok(library_for_directory(canonical))
+    let library = library_for_directory(canonical.clone());
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let db_path = library_index_db_path()?;
+        _app.state::<crate::LibraryScanService>()
+            .0
+            .refresh_library(&db_path, &library.id, canonical)
+            .await?;
+    }
+    Ok(library)
 }
 
 #[tauri::command]
-pub async fn remove_media_library(id: String) -> Result<(), String> {
+pub async fn remove_media_library<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<(), String> {
     if id == "pictures" || id == "photos" {
         return Err(format!("media library is not removable: {id}"));
     }
@@ -2907,7 +3014,13 @@ pub async fn remove_media_library(id: String) -> Result<(), String> {
     if config.directories.len() == before {
         return Err(format!("unknown media library: {id}"));
     }
-    save_app_config(&config)
+    save_app_config(&config)?;
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        delete_persisted_library_index(&library_index_db_path()?, &id).await?;
+        _app.state::<crate::LibraryScanService>().0.remove_library(&id)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -3056,25 +3169,6 @@ pub async fn load_snapshot(
         st.current_edit_version = Some(params.version);
     }
     Ok(())
-}
-
-fn picture_display_name(picture_id: &str) -> String {
-    if let Some(name) = Path::new(picture_id)
-        .file_name()
-        .and_then(|name| name.to_str())
-    {
-        return name.to_owned();
-    }
-    let short = if picture_id.len() <= 20 {
-        picture_id.to_owned()
-    } else {
-        format!(
-            "{}...{}",
-            &picture_id[..8],
-            &picture_id[picture_id.len() - 8..]
-        )
-    };
-    format!("Photo {short}")
 }
 
 pub struct AppMediaProvider<R: tauri::Runtime = tauri::Wry> {

@@ -14,8 +14,8 @@ use wgpu::{
 use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 // The tone.wgsl shader is embedded at compile time.
-// Path is relative to crates/shade-gpu/src/: go up 3 levels to shade/, then shaders/tone.wgsl.
-const TONE_WGSL: &str = include_str!("../../shaders/tone.wgsl");
+// Path is relative to shade-gpu/src/: go up 3 levels to shade/, then shaders/tone.wgsl.
+const TONE_WGSL: &str = include_str!("../shaders/tone.wgsl");
 
 /// GPU-side representation of ToneParams — must be Pod + have repr(C).
 /// 8 × f32 = 32 bytes (no padding needed).

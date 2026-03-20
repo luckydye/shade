@@ -10,3 +10,5 @@ exr = { workspace = true }
 anyhow = { workspace = true }
 rawler = { workspace = true }
 kamadak-exif = "0.6"
+libsql = "0.6"
+serde = { workspace = true }

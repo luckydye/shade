@@ -1,5 +1,6 @@
 import {
   getThumbnailBytes,
+  isTauriRuntime,
   listLibraryImages,
   type LibraryImage,
   type LibraryImageListing,
@@ -27,6 +28,7 @@ type CachedLocalItem = {
 };
 
 const failedThumbnailLoads: CachedFailures = new Map();
+const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
 
 function normalizeModifiedAt(modifiedAt: unknown) {
   return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
@@ -72,6 +74,13 @@ function toBlobBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.length);
   copy.set(bytes);
   return copy.buffer;
+}
+
+function normalizeLibraryImageListing(listing: LibraryImageListing): LibraryImageListing {
+  return {
+    items: listing.items.map(normalizeLibraryImage),
+    is_complete: listing.is_complete,
+  };
 }
 
 function abortError() {
@@ -232,20 +241,26 @@ async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
 export async function getCachedLocalLibraryItems(
   libraryId: string,
 ): Promise<LibraryImage[]> {
+  if (await isTauriRuntime()) {
+    return tauriLocalLibraryListings.get(libraryId)?.items ?? [];
+  }
   return (await loadLocalLibraryListing(libraryId)).items;
 }
 
 export async function loadLocalLibraryItemsCachedOrRemote(
   libraryId: string,
 ): Promise<LibraryImageListing> {
+  if (await isTauriRuntime()) {
+    const listing = normalizeLibraryImageListing(await listLibraryImages(libraryId));
+    tauriLocalLibraryListings.set(libraryId, listing);
+    void warmLocalLibraryThumbnails(listing.items);
+    return listing;
+  }
   try {
-    const listing = await listLibraryImages(libraryId);
+    const listing = normalizeLibraryImageListing(await listLibraryImages(libraryId));
     await saveLocalLibraryListing(libraryId, listing);
     void warmLocalLibraryThumbnails(listing.items);
-    return {
-      items: listing.items.map(normalizeLibraryImage),
-      is_complete: listing.is_complete,
-    };
+    return listing;
   } catch (error) {
     const cachedListing = await loadLocalLibraryListing(libraryId);
     if (cachedListing.items.length > 0) {

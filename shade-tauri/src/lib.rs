@@ -44,6 +44,7 @@ pub fn run() {
                 *app.state::<P2pState>().0.write().await = Some(p2p);
             });
             commands::spawn_camera_discovery(app.handle().clone());
+            commands::prime_missing_library_indexes(&app.handle().clone())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -63,6 +64,7 @@ pub fn run() {
             commands::list_pictures,
             commands::list_media_libraries,
             commands::list_library_images,
+            commands::refresh_library_index,
             commands::add_media_library,
             commands::remove_media_library,
             commands::list_presets,

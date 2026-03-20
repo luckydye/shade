@@ -12,6 +12,7 @@ import {
 import {
   addMediaLibrary,
   pickDirectory,
+  refreshLibraryIndex,
   type LibraryImage,
   listMediaLibraries,
   removeMediaLibrary,
@@ -502,6 +503,10 @@ export const MediaView: Component = () => {
     }
     return isPeerLibrary(library) ? library.peerId : (library.path ?? "");
   });
+  const canRefreshSelectedLibrary = createMemo(() => {
+    const library = selectedLibrary();
+    return !!library && !isPeerLibrary(library) && !isCameraLibrary(library);
+  });
   const columns = createMemo(() =>
     Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))),
   );
@@ -763,6 +768,23 @@ export const MediaView: Component = () => {
     }
   }
 
+  async function handleRefreshLibrary() {
+    const library = selectedLibrary();
+    if (!library || isPeerLibrary(library) || isCameraLibrary(library)) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await refreshLibraryIndex(library.id);
+      await refetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   const isEditorStrip = () => state.currentView === "editor";
   const mediaVisibleClass = () => (isEditorStrip() ? "hidden lg:flex" : "flex");
   const shellClass = () =>
@@ -840,6 +862,14 @@ export const MediaView: Component = () => {
               </button>
             </div>
             <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="rounded-full border border-[var(--border-soft)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+                onClick={() => void handleRefreshLibrary()}
+              >
+                Refresh
+              </button>
               <button
                 type="button"
                 class="rounded-full border border-[var(--danger-border)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] disabled:cursor-not-allowed disabled:opacity-40"

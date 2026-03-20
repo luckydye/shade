@@ -4,8 +4,8 @@ use bytemuck::{Pod, Zeroable};
 use shade_core::SharpenParams;
 use wgpu::*;
 
-const SHADER_H: &str = include_str!("../../shaders/sharpen_h.wgsl");
-const SHADER_V: &str = include_str!("../../shaders/sharpen_v.wgsl");
+const SHADER_H: &str = include_str!("../shaders/sharpen_h.wgsl");
+const SHADER_V: &str = include_str!("../shaders/sharpen_v.wgsl");
 
 pub struct SharpenTwoPassPipeline {
     h_pipeline: ComputePipeline,

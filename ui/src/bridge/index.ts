@@ -839,6 +839,14 @@ export async function removeMediaLibrary(id: string): Promise<void> {
   await removeBrowserMediaLibrary(id);
 }
 
+export async function refreshLibraryIndex(libraryId: string): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("refreshLibraryIndex is only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  await inv("refresh_library_index", { libraryId });
+}
+
 export async function listPresets(): Promise<PresetInfo[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();

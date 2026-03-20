@@ -12,13 +12,13 @@ use wgpu::{
 
 use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 
-const CURVES_WGSL: &str = include_str!("../../shaders/curves.wgsl");
-const COLOR_WGSL: &str = include_str!("../../shaders/color.wgsl");
-const VIGNETTE_WGSL: &str = include_str!("../../shaders/vignette.wgsl");
-const SHARPEN_WGSL: &str = include_str!("../../shaders/sharpen.wgsl");
-const GRAIN_WGSL: &str = include_str!("../../shaders/grain.wgsl");
-const HSL_WGSL: &str = include_str!("../../shaders/hsl_adjust.wgsl");
-const CROP_WGSL: &str = include_str!("../../shaders/crop.wgsl");
+const CURVES_WGSL: &str = include_str!("../shaders/curves.wgsl");
+const COLOR_WGSL: &str = include_str!("../shaders/color.wgsl");
+const VIGNETTE_WGSL: &str = include_str!("../shaders/vignette.wgsl");
+const SHARPEN_WGSL: &str = include_str!("../shaders/sharpen.wgsl");
+const GRAIN_WGSL: &str = include_str!("../shaders/grain.wgsl");
+const HSL_WGSL: &str = include_str!("../shaders/hsl_adjust.wgsl");
+const CROP_WGSL: &str = include_str!("../shaders/crop.wgsl");
 
 // ─── Uniform structs ──────────────────────────────────────────────────────────
 

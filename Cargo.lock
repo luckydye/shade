@@ -7393,7 +7393,9 @@ dependencies = [
  "exr",
  "image",
  "kamadak-exif",
+ "libsql",
  "rawler",
+ "serde",
  "shade-core",
 ]
 

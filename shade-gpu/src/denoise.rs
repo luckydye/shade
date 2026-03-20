@@ -11,11 +11,11 @@ use wgpu::*;
 
 use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 
-const GUIDE_H_WGSL: &str = include_str!("../../shaders/denoise_guide_h.wgsl");
-const GUIDE_V_WGSL: &str = include_str!("../../shaders/denoise_guide_v.wgsl");
-const BILATERAL_H_WGSL: &str = include_str!("../../shaders/denoise_bilateral_h.wgsl");
-const BILATERAL_V_WGSL: &str = include_str!("../../shaders/denoise_bilateral_v.wgsl");
-const NLM_WGSL: &str = include_str!("../../shaders/denoise_nlm.wgsl");
+const GUIDE_H_WGSL: &str = include_str!("../shaders/denoise_guide_h.wgsl");
+const GUIDE_V_WGSL: &str = include_str!("../shaders/denoise_guide_v.wgsl");
+const BILATERAL_H_WGSL: &str = include_str!("../shaders/denoise_bilateral_h.wgsl");
+const BILATERAL_V_WGSL: &str = include_str!("../shaders/denoise_bilateral_v.wgsl");
+const NLM_WGSL: &str = include_str!("../shaders/denoise_nlm.wgsl");
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
