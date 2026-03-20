@@ -507,7 +507,7 @@ export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anc
   refreshPreview();
 }
 
-export function panViewport(deltaX: number, deltaY: number) {
+export function panViewport(deltaX: number, deltaY: number, shouldRefresh = true) {
   const { viewportZoom, viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
   if (sw <= 0 || sh <= 0) return;
   const fit = getViewportFitRef();
@@ -517,7 +517,9 @@ export function panViewport(deltaX: number, deltaY: number) {
     viewportCenterX: state.viewportCenterX - deltaX / imageScale,
     viewportCenterY: state.viewportCenterY - deltaY / imageScale,
   });
-  refreshPreview();
+  if (shouldRefresh) {
+    refreshPreview();
+  }
 }
 
 export function offsetViewportCenter(deltaX: number, deltaY: number) {

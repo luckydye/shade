@@ -13,6 +13,7 @@ import {
   panViewport,
   backdropTile,
   previewTile,
+  refreshPreview,
   resetViewport,
   selectArtboard,
   setViewportScreenSize,
@@ -723,7 +724,7 @@ export const Viewport: Component = () => {
     if (gesture.kind === "pan") {
       const dx = e.clientX - gesture.x;
       const dy = e.clientY - gesture.y;
-      panViewport(dx, dy);
+      panViewport(dx, dy, false);
       drawFrame();
       gesture = { kind: "pan", x: e.clientX, y: e.clientY };
       return;
@@ -756,7 +757,7 @@ export const Viewport: Component = () => {
         const rect = stageRef.getBoundingClientRect();
         const delta = -Math.log(newDist / gesture.dist) / 0.0005;
         zoomViewport(delta, true, newMidX - rect.left, newMidY - rect.top);
-        panViewport(newMidX - gesture.midX, newMidY - gesture.midY);
+        panViewport(newMidX - gesture.midX, newMidY - gesture.midY, false);
         gesture = { kind: "pinch", dist: newDist, midX: newMidX, midY: newMidY };
         drawFrame();
       }
@@ -952,12 +953,18 @@ export const Viewport: Component = () => {
       return;
     }
     if (gesture?.kind === "pinch") {
+      void refreshPreview();
       if (activePointers.size === 1) {
         const [p] = [...activePointers.values()];
         gesture = { kind: "pan", x: p.x, y: p.y };
       } else {
         gesture = null;
       }
+      return;
+    }
+    if (gesture?.kind === "pan") {
+      void refreshPreview();
+      gesture = null;
       return;
     }
     gesture = null;
