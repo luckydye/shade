@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @source "./";
-@source "../../ui/src/**";
+@source "../../shade-ui/src/**";
 
 /* ─── Design tokens ──────────────────────────────────────────────────────── */
 

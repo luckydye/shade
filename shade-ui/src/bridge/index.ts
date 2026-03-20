@@ -777,6 +777,7 @@ export interface MediaLibrary {
   path?: string | null;
   removable: boolean;
   is_online?: boolean | null;
+  is_refreshing?: boolean | null;
 }
 
 export interface PresetInfo {

@@ -7390,6 +7390,7 @@ name = "shade-io"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "exr",
  "image",
  "kamadak-exif",
@@ -7397,6 +7398,7 @@ dependencies = [
  "rawler",
  "serde",
  "shade-core",
+ "tokio",
 ]
 
 [[package]]

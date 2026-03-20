@@ -4,6 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 wasm-pack build shade-wasm \
   --target web \
-  --out-dir ../ui/wasm \
+  --out-dir ../shade-ui/wasm \
   --dev
 echo "WASM dev build complete → ui/wasm/"

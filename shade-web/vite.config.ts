@@ -11,7 +11,7 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
     fs: {
-      allow: [resolve(__dirname, "."), resolve(__dirname, "../ui")],
+      allow: [resolve(__dirname, "."), resolve(__dirname, "../shade-ui")],
     },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",

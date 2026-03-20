@@ -96,6 +96,10 @@ function isPeerLibrary(library: LibraryEntry | null): library is PeerLibrary {
   return library?.kind === "peer";
 }
 
+function isLocalLibraryRefreshing(library: LibraryEntry | null) {
+  return !!library && !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_refreshing;
+}
+
 function isCameraLibrary(
   library: LibraryEntry | null,
 ): library is MediaLibrary & { kind: "camera" } {
@@ -503,6 +507,9 @@ export const MediaView: Component = () => {
     }
     return isPeerLibrary(library) ? library.peerId : (library.path ?? "");
   });
+  const selectedLibraryIsRefreshing = createMemo(() =>
+    isLocalLibraryRefreshing(selectedLibrary()),
+  );
   const canRefreshSelectedLibrary = createMemo(() => {
     const library = selectedLibrary();
     return !!library && !isPeerLibrary(library) && !isCameraLibrary(library);
@@ -681,7 +688,7 @@ export const MediaView: Component = () => {
       items.loading ||
       !current ||
       current.libraryId !== libraryId ||
-      current.isComplete
+      (current.isComplete && !selectedLibraryIsRefreshing())
     ) {
       return;
     }
@@ -810,6 +817,7 @@ export const MediaView: Component = () => {
                       : isCameraLibrary(library)
                         ? library.is_online === false
                         : false;
+                    const refreshing = isLocalLibraryRefreshing(library);
                     return (
                       <button
                         type="button"
@@ -825,10 +833,14 @@ export const MediaView: Component = () => {
                         }`}
                       >
                         <span class="flex items-center gap-2">
-                          {(isPeerLibrary(library) || isCameraLibrary(library)) && (
+                          {(isPeerLibrary(library) || isCameraLibrary(library) || refreshing) && (
                             <span
                               class={`h-1.5 w-1.5 rounded-full ${
-                                offline ? "bg-amber-400" : "bg-emerald-400"
+                                refreshing
+                                  ? "animate-pulse bg-sky-400"
+                                  : offline
+                                    ? "bg-amber-400"
+                                    : "bg-emerald-400"
                               }`}
                             />
                           )}
@@ -957,7 +969,9 @@ export const MediaView: Component = () => {
         <Show when={selectedLibraryDetail()}>
           <p class="truncate text-xs text-[var(--text-dim)]">
             {selectedLibraryDetail()}
-            {!isLibraryScanComplete() &&
+            {selectedLibraryIsRefreshing() && " • refreshing library index"}
+            {!selectedLibraryIsRefreshing() &&
+              !isLibraryScanComplete() &&
               ` • indexing ${displayedItems().length} images`}
           </p>
         </Show>
