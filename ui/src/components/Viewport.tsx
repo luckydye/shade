@@ -2,16 +2,20 @@ import { Component, createEffect, createSignal, onCleanup, onMount } from "solid
 import {
   applyEdit,
   applyGradientMask,
+  getSelectedArtboard,
   getCommittedCropRect,
   getViewportZoomPercent,
-  state,
   isDrawerOpen,
+  moveArtboardBy,
   openImageFile,
+  offsetViewportCenter,
   panViewport,
   backdropTile,
   previewTile,
   resetViewport,
+  selectArtboard,
   setViewportScreenSize,
+  state,
   zoomViewport,
 } from "../store/editor";
 import type { MaskParamsInfo } from "../bridge/index";
@@ -19,6 +23,7 @@ import { compositeArtboard } from "../viewport/compositor";
 import { buildTransform, worldToScreen } from "../viewport/transform";
 import { getViewportFitRef } from "../viewport/preview";
 import type { WorldTransform } from "../viewport/transform";
+import type { ArtboardState } from "../store/editor-store";
 
 type CropHandle =
   | "move"
@@ -35,6 +40,9 @@ type CropHandle =
 type MaskHandle = "start" | "end" | "center" | "edge";
 
 const HANDLE_SIZE = 10;
+const ARTBOARD_TITLE_HEIGHT = 24;
+const ARTBOARD_TITLE_PADDING_X = 10;
+const ARTBOARD_TITLE_MAX_WIDTH = 220;
 
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
@@ -71,6 +79,13 @@ export const Viewport: Component = () => {
         startY: number;
         params: MaskParamsInfo;
       }
+    | {
+        kind: "artboard";
+        pointerId: number;
+        artboardId: string;
+        x: number;
+        y: number;
+      }
     | null = null;
 
   const selectedCropLayer = () => {
@@ -101,17 +116,55 @@ export const Viewport: Component = () => {
     };
   }
 
+  function getViewWorldOffset() {
+    const artboard = getSelectedArtboard();
+    return artboard ? { x: artboard.worldX, y: artboard.worldY } : { x: 0, y: 0 };
+  }
+
+  function toWorldX(localX: number) {
+    return localX + getViewWorldOffset().x;
+  }
+
+  function toWorldY(localY: number) {
+    return localY + getViewWorldOffset().y;
+  }
+
   // Transform for normal viewing and mask overlays (fits to crop rect or full canvas in crop mode)
   function getViewTransform(cssWidth: number, cssHeight: number): WorldTransform {
-    return buildTransform(getCamera(), { width: cssWidth, height: cssHeight }, getViewportFitRef());
+    const offset = getViewWorldOffset();
+    const fit = getViewportFitRef();
+    return buildTransform(
+      {
+        centerX: state.viewportCenterX + offset.x,
+        centerY: state.viewportCenterY + offset.y,
+        zoom: state.viewportZoom,
+      },
+      { width: cssWidth, height: cssHeight },
+      {
+        x: fit.x + offset.x,
+        y: fit.y + offset.y,
+        width: fit.width,
+        height: fit.height,
+      },
+    );
   }
 
   // Transform for crop-edit overlays (always fits to full canvas)
   function getCropEditTransform(cssWidth: number, cssHeight: number): WorldTransform {
+    const offset = getViewWorldOffset();
     return buildTransform(
-      getCamera(),
+      {
+        centerX: state.viewportCenterX + offset.x,
+        centerY: state.viewportCenterY + offset.y,
+        zoom: state.viewportZoom,
+      },
       { width: cssWidth, height: cssHeight },
-      { x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight },
+      {
+        x: offset.x,
+        y: offset.y,
+        width: state.canvasWidth,
+        height: state.canvasHeight,
+      },
     );
   }
 
@@ -122,7 +175,7 @@ export const Viewport: Component = () => {
     const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
     if (t.scale <= 0) return null;
 
-    const toScreen = (ax: number, ay: number) => worldToScreen(ax, ay, t);
+    const toScreen = (ax: number, ay: number) => worldToScreen(toWorldX(ax), toWorldY(ay), t);
     const GRAB_R = 14;
 
     if (mp.kind === "linear") {
@@ -151,7 +204,7 @@ export const Viewport: Component = () => {
     const t = getViewTransform(cssWidth, cssHeight);
     if (t.scale <= 0) return;
 
-    const toScreen = (ax: number, ay: number) => worldToScreen(ax, ay, t);
+    const toScreen = (ax: number, ay: number) => worldToScreen(toWorldX(ax), toWorldY(ay), t);
 
     ctx.save();
 
@@ -228,8 +281,8 @@ export const Viewport: Component = () => {
     const draft = activeCrop();
     if (!draft) return null;
     const center = worldToScreen(
-      draft.x + draft.width * 0.5,
-      draft.y + draft.height * 0.5,
+      toWorldX(draft.x + draft.width * 0.5),
+      toWorldY(draft.y + draft.height * 0.5),
       t,
     );
     const cx = center.x;
@@ -247,10 +300,10 @@ export const Viewport: Component = () => {
     const rhScreenX = cx + rhDx * Math.cos(draft.rotation) - rhDy * Math.sin(draft.rotation);
     const rhScreenY = cy + rhDx * Math.sin(draft.rotation) + rhDy * Math.cos(draft.rotation);
     if (Math.hypot(x - rhScreenX, y - rhScreenY) <= HANDLE_SIZE + 4) return "rotate" as CropHandle;
-    const { x: left, y: top } = worldToScreen(draft.x, draft.y, t);
+    const { x: left, y: top } = worldToScreen(toWorldX(draft.x), toWorldY(draft.y), t);
     const { x: right, y: bottom } = worldToScreen(
-      draft.x + draft.width,
-      draft.y + draft.height,
+      toWorldX(draft.x + draft.width),
+      toWorldY(draft.y + draft.height),
       t,
     );
     const nearLeft = Math.abs(lx - left) <= HANDLE_SIZE;
@@ -282,7 +335,11 @@ export const Viewport: Component = () => {
     if (!draft) return;
     const width = draft.width * t.scale;
     const height = draft.height * t.scale;
-    const center = worldToScreen(draft.x + draft.width * 0.5, draft.y + draft.height * 0.5, t);
+    const center = worldToScreen(
+      toWorldX(draft.x + draft.width * 0.5),
+      toWorldY(draft.y + draft.height * 0.5),
+      t,
+    );
     const cx = center.x;
     const cy = center.y;
     ctx.save();
@@ -356,33 +413,60 @@ export const Viewport: Component = () => {
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    if (state.canvasWidth > 0 && state.canvasHeight > 0) {
-      const artboard = {
-        worldX: 0,
-        worldY: 0,
-        width: state.canvasWidth,
-        height: state.canvasHeight,
-      };
-      // In crop-edit mode we show the backdrop only (full canvas, no crop applied).
-      // Outside crop-edit mode we show backdrop + high-res preview tile, clipped to the
-      // committed crop rect so the backdrop doesn't bleed beyond the crop boundary.
-      const cropLayer = selectedCropLayer();
-      const showPreview = !cropLayer;
-      const committedCrop = getCommittedCropRect();
-      const clip = cropLayer ? undefined : committedCrop;
+    const selectedArtboard = getSelectedArtboard();
+    if (selectedArtboard) {
       const t = getViewTransform(cssWidth, cssHeight);
       backdropScratch ??= document.createElement("canvas");
       previewScratch ??= document.createElement("canvas");
-      compositeArtboard(
-        ctx,
-        artboard,
-        backdropTile(),
-        showPreview ? previewTile() : null,
-        t,
-        backdropScratch,
-        previewScratch,
-        clip,
-      );
+      for (const artboard of state.artboards) {
+        const worldArtboard = {
+          worldX: artboard.worldX,
+          worldY: artboard.worldY,
+          width: artboard.width,
+          height: artboard.height,
+        };
+        const isSelected = artboard.id === selectedArtboard.id;
+        const cropLayer = isSelected ? selectedCropLayer() : null;
+        const committedCrop = isSelected ? getCommittedCropRect() : null;
+        const clip = cropLayer || !committedCrop ? undefined : committedCrop;
+        compositeArtboard(
+          ctx,
+          worldArtboard,
+          isSelected ? backdropTile() ?? artboard.backdropTile : artboard.backdropTile,
+          isSelected && !cropLayer ? previewTile() ?? artboard.previewTile : null,
+          t,
+          backdropScratch,
+          previewScratch,
+          clip,
+        );
+        const sx = worldArtboard.worldX * t.scale + t.dx;
+        const sy = worldArtboard.worldY * t.scale + t.dy;
+        const sw = worldArtboard.width * t.scale;
+        const sh = worldArtboard.height * t.scale;
+        ctx.save();
+        ctx.strokeStyle = isSelected ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.22)";
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.strokeRect(sx, sy, sw, sh);
+        ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+        const measured = ctx.measureText(artboard.title);
+        const labelWidth = Math.min(
+          ARTBOARD_TITLE_MAX_WIDTH,
+          measured.width + ARTBOARD_TITLE_PADDING_X * 2,
+        );
+        const labelX = sx;
+        const labelY = sy - ARTBOARD_TITLE_HEIGHT - 6;
+        ctx.fillStyle = isSelected ? "rgba(255, 255, 255, 0.92)" : "rgba(255, 255, 255, 0.7)";
+        ctx.fillRect(labelX, labelY, labelWidth, ARTBOARD_TITLE_HEIGHT);
+        ctx.fillStyle = isSelected ? "rgba(0, 0, 0, 0.88)" : "rgba(0, 0, 0, 0.76)";
+        ctx.textBaseline = "middle";
+        ctx.fillText(
+          artboard.title,
+          labelX + ARTBOARD_TITLE_PADDING_X,
+          labelY + ARTBOARD_TITLE_HEIGHT * 0.5,
+          labelWidth - ARTBOARD_TITLE_PADDING_X * 2,
+        );
+        ctx.restore();
+      }
     }
 
     drawCropOverlay(ctx, cssWidth, cssHeight);
@@ -396,7 +480,9 @@ export const Viewport: Component = () => {
     state.viewportCenterX;
     state.viewportCenterY;
     state.selectedLayerIdx;
+    state.selectedArtboardId;
     state.layers;
+    state.artboards;
     backdropTile();
     previewTile();
     drawFrame();
@@ -432,11 +518,54 @@ export const Viewport: Component = () => {
   const onDrop = async (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const file = e.dataTransfer?.files?.[0];
-    if (file && file.type.startsWith("image/")) {
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    for (const file of files) {
       await openImageFile(file);
     }
   };
+
+  function artboardAtPoint(sx: number, sy: number): ArtboardState | null {
+    if (!stageRef) return null;
+    const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+    for (let idx = state.artboards.length - 1; idx >= 0; idx -= 1) {
+      const artboard = state.artboards[idx];
+      const x = artboard.worldX * t.scale + t.dx;
+      const y = artboard.worldY * t.scale + t.dy;
+      const width = artboard.width * t.scale;
+      const height = artboard.height * t.scale;
+      if (sx >= x && sx <= x + width && sy >= y && sy <= y + height) {
+        return artboard;
+      }
+    }
+    return null;
+  }
+
+  function artboardTitleAtPoint(sx: number, sy: number): ArtboardState | null {
+    if (!stageRef) return null;
+    const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+    const scratch = document.createElement("canvas");
+    const ctx = scratch.getContext("2d");
+    if (!ctx) {
+      throw new Error("2d canvas context required for artboard title hit testing");
+    }
+    ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+    for (let idx = state.artboards.length - 1; idx >= 0; idx -= 1) {
+      const artboard = state.artboards[idx];
+      const x = artboard.worldX * t.scale + t.dx;
+      const y = artboard.worldY * t.scale + t.dy;
+      const width = Math.min(
+        ARTBOARD_TITLE_MAX_WIDTH,
+        ctx.measureText(artboard.title).width + ARTBOARD_TITLE_PADDING_X * 2,
+      );
+      const titleY = y - ARTBOARD_TITLE_HEIGHT - 6;
+      if (sx >= x && sx <= x + width && sy >= titleY && sy <= titleY + ARTBOARD_TITLE_HEIGHT) {
+        return artboard;
+      }
+    }
+    return null;
+  }
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -458,9 +587,22 @@ export const Viewport: Component = () => {
     if (!stageRef) {
       throw new Error("viewport stage is required for pointer interaction");
     }
+    const rect = stageRef.getBoundingClientRect();
+    const clickedArtboardTitle = artboardTitleAtPoint(
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+    );
+    const clickedArtboard = artboardAtPoint(e.clientX - rect.left, e.clientY - rect.top);
+    if (clickedArtboardTitle && clickedArtboardTitle.id !== state.selectedArtboardId) {
+      void selectArtboard(clickedArtboardTitle.id);
+      return;
+    }
+    if (clickedArtboard && clickedArtboard.id !== state.selectedArtboardId) {
+      void selectArtboard(clickedArtboard.id);
+      return;
+    }
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (selectedCropLayer()) {
-      const rect = stageRef.getBoundingClientRect();
       const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
       if (!handle) return;
       const crop = activeCrop();
@@ -497,6 +639,17 @@ export const Viewport: Component = () => {
         return;
       }
     }
+    if (clickedArtboardTitle) {
+      gesture = {
+        kind: "artboard",
+        pointerId: e.pointerId,
+        artboardId: clickedArtboardTitle.id,
+        x: e.clientX,
+        y: e.clientY,
+      };
+      stageRef.setPointerCapture(e.pointerId);
+      return;
+    }
     if (activePointers.size === 2) {
       const [p1, p2] = [...activePointers.values()];
       const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -518,6 +671,25 @@ export const Viewport: Component = () => {
       panViewport(dx, dy);
       drawFrame();
       gesture = { kind: "pan", x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (gesture.kind === "artboard") {
+      const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+      if (t.scale <= 0) return;
+      const deltaX = (e.clientX - gesture.x) / t.scale;
+      const deltaY = (e.clientY - gesture.y) / t.scale;
+      moveArtboardBy(gesture.artboardId, deltaX, deltaY);
+      if (gesture.artboardId === state.selectedArtboardId) {
+        offsetViewportCenter(-deltaX, -deltaY);
+      }
+      drawFrame();
+      gesture = {
+        kind: "artboard",
+        pointerId: gesture.pointerId,
+        artboardId: gesture.artboardId,
+        x: e.clientX,
+        y: e.clientY,
+      };
       return;
     }
     if (gesture.kind === "pinch") {
@@ -577,8 +749,8 @@ export const Viewport: Component = () => {
     const start = gesture.crop;
     if (gesture.handle === "rotate") {
       const center = worldToScreen(
-        start.x + start.width * 0.5,
-        start.y + start.height * 0.5,
+        toWorldX(start.x + start.width * 0.5),
+        toWorldY(start.y + start.height * 0.5),
         t,
       );
       const rect = stageRef.getBoundingClientRect();
@@ -672,7 +844,9 @@ export const Viewport: Component = () => {
       activePointers.delete(e.pointerId);
     }
     if (
-      (gesture?.kind === "crop" || gesture?.kind === "mask") &&
+      (gesture?.kind === "crop" ||
+        gesture?.kind === "mask" ||
+        gesture?.kind === "artboard") &&
       stageRef &&
       e &&
       stageRef.hasPointerCapture(e.pointerId)

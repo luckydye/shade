@@ -3,12 +3,14 @@ import * as bridge from "../bridge/index";
 import {
   fullCanvasCrop,
   getCommittedCropRect,
+  setSelectedArtboardBackdropTile,
+  setSelectedArtboardPreviewTile,
   selectedLayerIsCrop,
   setState,
   state,
 } from "../store/editor-store";
 import type { FitReference, RenderedTile } from "./types";
-import { clampCamera, computeFitScale } from "./transform";
+import { computeFitScale } from "./transform";
 
 export const [previewTile, setPreviewTile] = createSignal<RenderedTile | null>(null);
 export const [backdropTile, setBackdropTile] = createSignal<RenderedTile | null>(null);
@@ -115,9 +117,8 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
   const imageScale = fitScale * zoom;
   const visW = sw / imageScale;
   const visH = sh / imageScale;
-  // Clamped center (in output/fit-ref space)
-  const cx = Math.max(fit.x + visW * 0.5, Math.min(centerX, fit.x + fit.width - visW * 0.5));
-  const cy = Math.max(fit.y + visH * 0.5, Math.min(centerY, fit.y + fit.height - visH * 0.5));
+  const cx = centerX;
+  const cy = centerY;
 
   const committedCrop = !selectedLayerIsCrop() ? getCommittedCropRect() : null;
   if (committedCrop && Math.abs(committedCrop.rotation) > 0.001) {
@@ -371,6 +372,7 @@ async function performRefresh() {
     });
   }
   setPreviewTile(toRenderedTile(frame, crop));
+  setSelectedArtboardPreviewTile(toRenderedTile(frame, crop));
   lastRenderedPreview = {
     quality: queued.quality,
     snapshot,
@@ -384,6 +386,7 @@ async function performRefresh() {
     crop.height >= state.canvasHeight
   ) {
     setBackdropTile(toRenderedTile(frame, crop));
+    setSelectedArtboardBackdropTile(toRenderedTile(frame, crop));
     return;
   }
   // Skip backdrop on interactive quality if we already have one
@@ -404,6 +407,14 @@ async function performRefresh() {
   if (bdFrame.width === 0 || bdFrame.height === 0) return;
   const bdCrop = backdropReq.crop ?? fullCanvasCrop();
   setBackdropTile(
+    toRenderedTile(bdFrame, {
+      x: bdCrop.x,
+      y: bdCrop.y,
+      width: bdCrop.width,
+      height: bdCrop.height,
+    }),
+  );
+  setSelectedArtboardBackdropTile(
     toRenderedTile(bdFrame, {
       x: bdCrop.x,
       y: bdCrop.y,
@@ -488,34 +499,31 @@ export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anc
   const vcy = sh * 0.5;
   const anchoredX = viewportCenterX + (anchorX - vcx) / oldScale;
   const anchoredY = viewportCenterY + (anchorY - vcy) / oldScale;
-  const camera = clampCamera(
-    zoom,
-    anchoredX - (anchorX - vcx) / newScale,
-    anchoredY - (anchorY - vcy) / newScale,
-    { width: sw, height: sh },
-    fit,
-  );
   setState({
-    viewportZoom: camera.zoom,
-    viewportCenterX: camera.centerX,
-    viewportCenterY: camera.centerY,
+    viewportZoom: zoom,
+    viewportCenterX: anchoredX - (anchorX - vcx) / newScale,
+    viewportCenterY: anchoredY - (anchorY - vcy) / newScale,
   });
   refreshPreview();
 }
 
 export function panViewport(deltaX: number, deltaY: number) {
   const { viewportZoom, viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
-  if (viewportZoom <= 1 || sw <= 0 || sh <= 0) return;
+  if (sw <= 0 || sh <= 0) return;
   const fit = getViewportFitRef();
   const fitScale = computeFitScale({ width: sw, height: sh }, fit);
   const imageScale = fitScale * viewportZoom;
-  const camera = clampCamera(
-    viewportZoom,
-    state.viewportCenterX - deltaX / imageScale,
-    state.viewportCenterY - deltaY / imageScale,
-    { width: sw, height: sh },
-    fit,
-  );
-  setState({ viewportCenterX: camera.centerX, viewportCenterY: camera.centerY });
+  setState({
+    viewportCenterX: state.viewportCenterX - deltaX / imageScale,
+    viewportCenterY: state.viewportCenterY - deltaY / imageScale,
+  });
+  refreshPreview();
+}
+
+export function offsetViewportCenter(deltaX: number, deltaY: number) {
+  setState({
+    viewportCenterX: state.viewportCenterX + deltaX,
+    viewportCenterY: state.viewportCenterY + deltaY,
+  });
   refreshPreview();
 }

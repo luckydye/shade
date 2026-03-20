@@ -101,7 +101,7 @@ const SaveIcon = () => (
 export const Toolbar: Component = () => {
   let fileInputRef: HTMLInputElement | undefined;
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
-  const canResumeEditor = () => hasImage() && state.currentView === "media";
+  const canResumeEditor = () => state.artboards.length > 0 && state.currentView === "media";
   const canExport = () => state.canvasWidth > 0 && state.canvasHeight > 0;
 
   const statusText = () => {
@@ -120,8 +120,12 @@ export const Toolbar: Component = () => {
 
   const handleFileChange = async (e: Event) => {
     const files = (e.currentTarget as HTMLInputElement).files;
-    const file = files?.[0];
-    if (file) await openImageFile(file);
+    if (!files || files.length === 0) {
+      return;
+    }
+    for (const file of Array.from(files)) {
+      await openImageFile(file);
+    }
     if (fileInputRef) fileInputRef.value = "";
   };
 
@@ -200,6 +204,7 @@ export const Toolbar: Component = () => {
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           class="hidden"
           onChange={handleFileChange}
         />

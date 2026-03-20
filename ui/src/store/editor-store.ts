@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as bridge from "../bridge/index";
+import type { RenderedTile } from "../viewport/types";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop";
@@ -21,10 +22,36 @@ export interface CropRect {
   rotation: number;
 }
 
+export type ArtboardSource =
+  | { kind: "path"; path: string }
+  | { kind: "file"; file: File }
+  | {
+      kind: "peer";
+      peerEndpointId: string;
+      picture: bridge.SharedPicture;
+    };
+
+export interface ArtboardState {
+  id: string;
+  title: string;
+  worldX: number;
+  worldY: number;
+  width: number;
+  height: number;
+  sourceBitDepth: string;
+  source: ArtboardSource;
+  activeMediaLibraryId: string | null;
+  activeMediaItemId: string | null;
+  previewTile: RenderedTile | null;
+  backdropTile: RenderedTile | null;
+}
+
 export interface EditorState {
   currentView: "media" | "editor";
   activeMediaLibraryId: string | null;
   activeMediaItemId: string | null;
+  artboards: ArtboardState[];
+  selectedArtboardId: string | null;
   layers: LayerInfo[];
   canvasWidth: number;
   canvasHeight: number;
@@ -50,6 +77,8 @@ export const [state, setState] = createStore<EditorState>({
   currentView: "media",
   activeMediaLibraryId: null,
   activeMediaItemId: null,
+  artboards: [],
+  selectedArtboardId: null,
   layers: [],
   canvasWidth: 0,
   canvasHeight: 0,
@@ -72,6 +101,51 @@ export const [state, setState] = createStore<EditorState>({
 });
 
 export const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);
+
+export function getSelectedArtboard() {
+  if (!state.selectedArtboardId) {
+    return null;
+  }
+  return state.artboards.find((artboard) => artboard.id === state.selectedArtboardId) ?? null;
+}
+
+export function setSelectedArtboardPreviewTile(tile: RenderedTile | null) {
+  const artboard = getSelectedArtboard();
+  if (!artboard) return;
+  setState(
+    "artboards",
+    (candidate) => candidate.id === artboard.id,
+    "previewTile",
+    tile,
+  );
+}
+
+export function setSelectedArtboardBackdropTile(tile: RenderedTile | null) {
+  const artboard = getSelectedArtboard();
+  if (!artboard) return;
+  setState(
+    "artboards",
+    (candidate) => candidate.id === artboard.id,
+    "backdropTile",
+    tile,
+  );
+}
+
+export function moveArtboardBy(id: string, deltaX: number, deltaY: number) {
+  const artboard = state.artboards.find((candidate) => candidate.id === id);
+  if (!artboard) {
+    throw new Error("artboard not found");
+  }
+  setState(
+    "artboards",
+    (candidate) => candidate.id === id,
+    {
+      ...artboard,
+      worldX: artboard.worldX + deltaX,
+      worldY: artboard.worldY + deltaY,
+    },
+  );
+}
 
 export function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number) {
   if (currentIdx >= 0 && currentIdx < layers.length) {

@@ -13,6 +13,7 @@ export {
   openImageFile,
   openPeerImage,
   pickExportTarget,
+  selectArtboard,
   showEditorView,
   showMediaView,
 } from "./editor-image";
@@ -49,6 +50,7 @@ export {
   getViewportFitRef,
   getViewportZoomPercent,
   panViewport,
+  offsetViewportCenter,
   previewTile,
   refreshPreview,
   resetViewport,
@@ -61,4 +63,6 @@ export {
   getCommittedCropRect,
   getDraftCropRect,
   hasActiveCrop,
+  getSelectedArtboard,
+  moveArtboardBy,
 } from "./editor-store";
