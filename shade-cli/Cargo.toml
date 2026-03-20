@@ -9,13 +9,12 @@ path = "src/main.rs"
 
 [features]
 # Enable the `shade video` subcommand. Requires system FFmpeg.
-video = ["dep:shade-video", "shade-video/ffmpeg"]
+video = ["shade-io/ffmpeg"]
 
 [dependencies]
 shade-core = { path = "../shade-core" }
 shade-gpu = { path = "../shade-gpu" }
 shade-io = { path = "../shade-io" }
-shade-video = { path = "../shade-video", optional = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }

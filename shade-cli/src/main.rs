@@ -11,7 +11,7 @@ use shade_io::{
     save_image, to_linear_srgb_f32,
 };
 #[cfg(feature = "video")]
-use shade_video::{VideoCodec, VideoDecoder, VideoEncoder};
+use shade_io::{VideoCodec, VideoDecoder, VideoEncoder};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -667,7 +667,7 @@ async fn main() -> Result<()> {
             let video_codec: VideoCodec = codec.parse()?;
 
             // Initialise FFmpeg once.
-            shade_video::init();
+            shade_io::init_video();
 
             // Open the input video and read its properties.
             let mut decoder = VideoDecoder::open(&input)

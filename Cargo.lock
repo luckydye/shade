@@ -7355,7 +7355,6 @@ dependencies = [
  "shade-core",
  "shade-gpu",
  "shade-io",
- "shade-video",
  "tempfile",
  "tokio",
 ]
@@ -7395,10 +7394,12 @@ dependencies = [
  "image",
  "kamadak-exif",
  "libsql",
+ "ndarray",
  "rawler",
  "serde",
  "shade-core",
  "tokio",
+ "video-rs",
 ]
 
 [[package]]
@@ -7442,15 +7443,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tokio",
-]
-
-[[package]]
-name = "shade-video"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "video-rs",
 ]
 
 [[package]]

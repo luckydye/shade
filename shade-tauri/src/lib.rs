@@ -7,10 +7,12 @@ pub struct P2pState(
     pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>,
 );
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
-pub struct ThumbnailService(pub std::sync::Arc<commands::ThumbnailQueue>);
-pub struct LibraryScanService(pub std::sync::Arc<commands::LibraryScanService>);
-pub struct CameraDiscoveryService(pub std::sync::Arc<commands::CameraDiscoveryService>);
-pub struct CameraThumbnailService(pub std::sync::Arc<commands::CameraThumbnailService>);
+pub struct ThumbnailService(
+    pub std::sync::Arc<shade_io::ThumbnailQueue<shade_io::ThumbnailResponseSender>>,
+);
+pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
+pub struct CameraDiscoveryService(pub std::sync::Arc<shade_io::CameraDiscoveryService>);
+pub struct CameraThumbnailService(pub std::sync::Arc<shade_io::CameraThumbnailService>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,14 +22,10 @@ pub fn run() {
         .manage(P2pState(tokio::sync::RwLock::new(None)))
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RenderService(commands::spawn_render_worker()))
-        .manage(ThumbnailService(commands::spawn_thumbnail_workers()))
-        .manage(LibraryScanService(commands::LibraryScanService::new()))
-        .manage(CameraDiscoveryService(
-            commands::CameraDiscoveryService::new(),
-        ))
-        .manage(CameraThumbnailService(
-            commands::CameraThumbnailService::new(),
-        ))
+        .manage(ThumbnailService(shade_io::spawn_thumbnail_workers()))
+        .manage(LibraryScanService(shade_io::LibraryScanService::new()))
+        .manage(CameraDiscoveryService(shade_io::CameraDiscoveryService::new()))
+        .manage(CameraThumbnailService(shade_io::CameraThumbnailService::new()))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
             let handle = app.handle().clone();

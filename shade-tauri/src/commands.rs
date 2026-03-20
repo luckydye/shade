@@ -5,20 +5,16 @@ use shade_core::{
     MaskData, MaskParams, SharpenParams, VignetteParams,
 };
 use shade_io::{
-    delete_persisted_library_index, indexed_library_image_for_path, is_supported_library_image,
-    has_persisted_library_index, library_index_db_path as shared_library_index_db_path,
-    load_image_bytes_f32_with_info, load_image_f32_with_info, to_linear_srgb_f32,
-    load_persisted_library_index, picture_display_name, replace_persisted_library_index,
-    scan_directory_images, sort_indexed_library_items, SourceImageInfo,
+    delete_persisted_library_index, has_persisted_library_index,
+    library_index_db_path as shared_library_index_db_path, load_image_bytes_f32_with_info,
+    picture_display_name, scan_directory_images, to_linear_srgb_f32, SourceImageInfo,
 };
-use std::collections::{HashMap, VecDeque};
-use std::fs::File;
-use std::io::Read;
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tokio::sync::Mutex as TokioMutex;
@@ -67,6 +63,7 @@ pub struct MediaLibrary {
     pub path: Option<String>,
     pub removable: bool,
     pub is_online: Option<bool>,
+    pub is_refreshing: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -129,16 +126,6 @@ fn decode_image_bytes_with_info(
         format!("image decode panicked: {}", panic_payload_message(payload))
     })?
     .map_err(|e| e.to_string())
-}
-
-fn decode_image_path_with_info(
-    path: &Path,
-) -> Result<(FloatImage, SourceImageInfo), String> {
-    catch_unwind(AssertUnwindSafe(|| load_image_f32_with_info(path)))
-        .map_err(|payload| {
-            format!("image decode panicked: {}", panic_payload_message(payload))
-        })?
-        .map_err(|e| e.to_string())
 }
 
 fn lock_editor_state<'a>(
@@ -204,20 +191,6 @@ fn library_index_db_path() -> Result<PathBuf, String> {
 
 fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
-}
-
-fn hash_file(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher.finalize().to_hex().to_string())
 }
 
 fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
@@ -671,20 +644,6 @@ fn ccapi_media_path(host: &str, file_path: &str) -> String {
     format!("ccapi://{host}{file_path}")
 }
 
-fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
-    let path = path
-        .strip_prefix("ccapi://")
-        .ok_or_else(|| format!("invalid ccapi media path: {path}"))?;
-    let slash_idx = path
-        .find('/')
-        .ok_or_else(|| format!("invalid ccapi media path: ccapi://{path}"))?;
-    let (host, file_path) = path.split_at(slash_idx);
-    if host.is_empty() || file_path.is_empty() {
-        return Err(format!("invalid ccapi media path: ccapi://{path}"));
-    }
-    Ok((host, file_path))
-}
-
 fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> MediaLibrary {
     MediaLibrary {
         id: ccapi_library_id(host),
@@ -693,10 +652,11 @@ fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> Media
         path: Some(host.to_string()),
         removable,
         is_online: Some(is_online),
+        is_refreshing: None,
     }
 }
 
-fn library_for_directory(path: PathBuf) -> MediaLibrary {
+fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
     let name = path
         .file_name()
         .and_then(|segment| segment.to_str())
@@ -709,6 +669,7 @@ fn library_for_directory(path: PathBuf) -> MediaLibrary {
         path: Some(path.display().to_string()),
         removable: true,
         is_online: None,
+        is_refreshing: Some(is_refreshing),
     }
 }
 
@@ -822,6 +783,7 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<Vec<MediaLibrary>, String> {
     let pictures_dir = default_pictures_dir()?;
+    let scan_service = &app.state::<crate::LibraryScanService>().0;
     let mut libraries = vec![MediaLibrary {
         id: "pictures".into(),
         name: "Pictures".into(),
@@ -829,11 +791,15 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         path: Some(pictures_dir.display().to_string()),
         removable: false,
         is_online: None,
+        is_refreshing: Some(scan_service.is_refreshing("pictures")?),
     }];
     let config = load_app_config()?;
     for directory in config.directories {
         let path = PathBuf::from(directory);
-        libraries.push(library_for_directory(path));
+        libraries.push(library_for_directory(
+            path.clone(),
+            scan_service.is_refreshing(&custom_library_id(&path))?,
+        ));
     }
     for host in app
         .state::<crate::CameraDiscoveryService>()
@@ -967,355 +933,121 @@ fn chrono_like_timestamp_millis(value: &str) -> Result<Option<u64>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub struct LibraryScanEntry {
-    pub modified_at: u64,
-    pub image: LibraryImage,
-}
-
-pub struct LibraryScanSnapshot {
-    pub items: Vec<LibraryScanEntry>,
-    pub is_scanning: bool,
-    pub is_complete: bool,
-    pub error: Option<String>,
-    pub completed_at: Option<u64>,
-}
-
-pub struct LibraryScanService {
-    pub scans: Mutex<HashMap<String, Arc<Mutex<LibraryScanSnapshot>>>>,
-}
-
-pub struct CameraDiscoveryService {
-    pub hosts: tokio::sync::RwLock<Vec<String>>,
-}
-
-pub struct CameraThumbnailService {
-    pub semaphores: tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>,
-}
-
-impl LibraryScanService {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            scans: Mutex::new(HashMap::new()),
-        })
-    }
-
-    async fn ensure_snapshot_for_library(
-        &self,
-        db_path: &Path,
-        library_id: &str,
-        root: PathBuf,
-    ) -> Result<(Arc<Mutex<LibraryScanSnapshot>>, bool), String> {
-        if let Some(snapshot) = self
-            .scans
-            .lock()
-            .map_err(|_| "library scan lock poisoned".to_string())?
-            .get(library_id)
-            .cloned()
-        {
-            return Ok((snapshot, false));
-        }
-        let persisted = load_persisted_library_index(db_path, library_id, &root).await?;
-        let should_scan = persisted.is_none();
-        let snapshot = Arc::new(Mutex::new(LibraryScanSnapshot {
-            items: persisted
-                .as_ref()
-                .map(|listing| listing.items.iter().cloned().map(library_scan_entry).collect())
-                .unwrap_or_default(),
-            is_scanning: false,
-            is_complete: persisted.is_some(),
-            error: None,
-            completed_at: persisted.map(|listing| listing.indexed_at),
-        }));
-        let snapshot = {
-            let mut scans = self
-                .scans
-                .lock()
-                .map_err(|_| "library scan lock poisoned".to_string())?;
-            scans
-                .entry(library_id.to_string())
-                .or_insert_with(|| snapshot.clone())
-                .clone()
-        };
-        Ok((snapshot, should_scan))
-    }
-
-    pub async fn snapshot_for_library(
-        &self,
-        db_path: &Path,
-        library_id: &str,
-        root: PathBuf,
-    ) -> Result<LibraryImageListing, String> {
-        let (snapshot, should_scan) = self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
-        if should_scan {
-            start_library_scan(
-                snapshot.clone(),
-                db_path.to_path_buf(),
-                library_id.to_string(),
-                root,
-                true,
-            )?;
-        }
-        let snapshot = snapshot
-            .lock()
-            .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
-        if let Some(error) = &snapshot.error {
-            return Err(error.clone());
-        }
-        Ok(LibraryImageListing {
-            items: snapshot
-                .items
-                .iter()
-                .map(|entry| entry.image.clone())
-                .collect(),
-            is_complete: snapshot.is_complete,
-        })
-    }
-
-    pub async fn refresh_library(
-        &self,
-        db_path: &Path,
-        library_id: &str,
-        root: PathBuf,
-    ) -> Result<(), String> {
-        let (snapshot, _) = self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
-        start_library_scan(
-            snapshot,
-            db_path.to_path_buf(),
-            library_id.to_string(),
-            root,
-            false,
-        )
-    }
-
-    pub fn remove_library(&self, library_id: &str) -> Result<(), String> {
-        self.scans
-            .lock()
-            .map_err(|_| "library scan lock poisoned".to_string())?
-            .remove(library_id);
-        Ok(())
+fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
+    LibraryImage {
+        name: item.name,
+        path: item.path,
+        modified_at: item.modified_at,
+        metadata: Default::default(),
     }
 }
 
-impl CameraDiscoveryService {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            hosts: tokio::sync::RwLock::new(Vec::new()),
-        })
-    }
-
-    pub async fn snapshot(&self) -> Vec<String> {
-        self.hosts.read().await.clone()
-    }
-
-    pub async fn replace_hosts(&self, hosts: Vec<String>) {
-        *self.hosts.write().await = hosts;
-    }
+async fn load_camera_thumbnail_from_tauri<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    host: &str,
+    file_path: &str,
+) -> Result<Vec<u8>, String> {
+    let _permit = _app
+        .state::<crate::CameraThumbnailService>()
+        .0
+        .acquire(host)
+        .await?;
+    ccapi::CCAPI::new(host)
+        .thumbnail(file_path)
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| error.to_string())
 }
 
-impl CameraThumbnailService {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            semaphores: tokio::sync::Mutex::new(HashMap::new()),
-        })
-    }
-
-    pub async fn acquire(
-        &self,
-        host: &str,
-    ) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
-        let semaphore = {
-            let mut semaphores = self.semaphores.lock().await;
-            semaphores
-                .entry(host.to_string())
-                .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
-                .clone()
-        };
-        semaphore
-            .acquire_owned()
+async fn load_photo_thumbnail_from_tauri<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    picture_id: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    #[cfg(target_os = "android")]
+    if picture_id.starts_with("content://") {
+        return _app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .get_thumbnail(picture_id)
             .await
-            .map_err(|_| format!("camera thumbnail throttler closed for {host}"))
+            .map(Some);
     }
-}
 
-fn library_scan_entry(item: shade_io::IndexedLibraryImage) -> LibraryScanEntry {
-    LibraryScanEntry {
-        modified_at: item.modified_at.unwrap_or(0),
-        image: LibraryImage {
-            name: item.name,
-            path: item.path,
-            modified_at: item.modified_at,
-            metadata: Default::default(),
-        },
-    }
-}
-
-pub fn start_library_scan(
-    snapshot: Arc<Mutex<LibraryScanSnapshot>>,
-    db_path: PathBuf,
-    library_id: String,
-    root: PathBuf,
-    publish_progress: bool,
-) -> Result<(), String> {
-    {
-        let mut guard = snapshot
-            .lock()
-            .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
-        if guard.is_scanning {
-            return Err(format!("library index refresh already running: {library_id}"));
-        }
-        guard.is_scanning = true;
-        guard.is_complete = false;
-        guard.error = None;
-        if publish_progress {
-            guard.items.clear();
-            guard.completed_at = None;
-        }
-    }
-    std::thread::Builder::new()
-        .name("shade-library-scan".into())
-        .spawn(move || {
-            let result = scan_library_into_snapshot(&root, &snapshot, publish_progress).and_then(
-                |items| {
-                    tauri::async_runtime::block_on(replace_persisted_library_index(
-                        &db_path,
-                        &library_id,
-                        &root,
-                        &items,
-                    ))
-                    .map(|indexed_at| (items, indexed_at))
-                },
-            );
-            let mut guard = snapshot
-                .lock()
-                .expect("library scan snapshot lock poisoned");
-            match result {
-                Ok((items, indexed_at)) => {
-                    if !publish_progress {
-                        guard.items = items.into_iter().map(library_scan_entry).collect();
-                    }
-                    guard.completed_at = Some(indexed_at);
-                }
-                Err(error) => {
-                    guard.error = Some(error);
-                }
+    #[cfg(target_os = "ios")]
+    if !picture_id.starts_with('/') {
+        let picture_id = picture_id.to_owned();
+        let bytes = tokio::task::spawn_blocking(move || {
+            let c_id =
+                std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
+            let mut out_size: i32 = 0;
+            let ptr = unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
+            if ptr.is_null() {
+                return Err("failed to get thumbnail from photo library".to_string());
             }
-            guard.is_scanning = false;
-            guard.is_complete = true;
+            let bytes = unsafe {
+                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
+                ios_free_buffer(ptr);
+                v
+            };
+            Ok(bytes)
         })
-        .expect("failed to spawn library scan thread");
-    Ok(())
-}
-
-pub fn scan_library_into_snapshot(
-    dir: &Path,
-    snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
-    publish_progress: bool,
-) -> Result<Vec<shade_io::IndexedLibraryImage>, String> {
-    let mut dirs = vec![dir.to_path_buf()];
-    let mut batch = Vec::new();
-    let mut items = Vec::new();
-    while let Some(current_dir) = dirs.pop() {
-        let entries = std::fs::read_dir(&current_dir).map_err(|e| e.to_string())?;
-        for entry in entries {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            if path.is_dir() {
-                dirs.push(path);
-                continue;
-            }
-            if !path.is_file() || !is_supported_library_image(&path) {
-                continue;
-            }
-            let item = indexed_library_image_for_path(&path)?;
-            items.push(item.clone());
-            if publish_progress {
-                batch.push(library_scan_entry(item));
-            }
-            if publish_progress && batch.len() >= 64 {
-                flush_library_scan_batch(snapshot, &mut batch)?;
-            }
-        }
-    }
-    if publish_progress {
-        flush_library_scan_batch(snapshot, &mut batch)?;
-    }
-    sort_indexed_library_items(&mut items);
-    Ok(items)
-}
-
-pub fn flush_library_scan_batch(
-    snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
-    batch: &mut Vec<LibraryScanEntry>,
-) -> Result<(), String> {
-    if batch.is_empty() {
-        return Ok(());
-    }
-    let mut guard = snapshot
-        .lock()
-        .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
-    guard.items.extend(batch.drain(..));
-    guard
-        .items
-        .sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
-    Ok(())
-}
-
-pub struct ThumbnailJob {
-    pub path: String,
-    pub response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
-}
-
-type ThumbnailResponse = tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>;
-type ThumbnailPending = HashMap<String, Vec<ThumbnailResponse>>;
-type ThumbnailState = (VecDeque<String>, ThumbnailPending);
-
-pub struct PendingThumbnailJob {
-    pub path: String,
-    pub responses: Vec<ThumbnailResponse>,
-}
-
-pub struct ThumbnailQueue {
-    jobs: Mutex<ThumbnailState>,
-    has_jobs: Condvar,
-}
-
-impl ThumbnailQueue {
-    pub fn new() -> Self {
-        Self {
-            jobs: Mutex::new((VecDeque::new(), HashMap::new())),
-            has_jobs: Condvar::new(),
-        }
+        .await
+        .map_err(|error| error.to_string())??;
+        return Ok(Some(bytes));
     }
 
-    pub fn push(&self, job: ThumbnailJob) {
-        let mut jobs = self.jobs.lock().unwrap();
-        let (order, pending) = &mut *jobs;
-        if let Some(responses) = pending.get_mut(&job.path) {
-            responses.push(job.response);
-            if let Some(existing_idx) = order.iter().position(|path| path == &job.path) {
-                order.remove(existing_idx);
-            }
-            order.push_back(job.path);
-        } else {
-            pending.insert(job.path.clone(), vec![job.response]);
-            order.push_back(job.path);
-        }
-        self.has_jobs.notify_one();
+    let _ = picture_id;
+    Ok(None)
+}
+
+async fn load_camera_image_from_tauri(
+    host: &str,
+    file_path: &str,
+) -> Result<Vec<u8>, String> {
+    ccapi::CCAPI::new(host)
+        .original(file_path)
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| error.to_string())
+}
+
+async fn load_photo_image_from_tauri<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    picture_id: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    #[cfg(target_os = "android")]
+    if picture_id.starts_with("content://") {
+        return _app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .get_image_data(picture_id)
+            .await
+            .map(Some);
     }
 
-    pub fn pop_latest(&self) -> PendingThumbnailJob {
-        let mut jobs = self.jobs.lock().unwrap();
-        loop {
-            let (order, pending) = &mut *jobs;
-            if let Some(path) = order.pop_back() {
-                let responses = pending
-                    .remove(&path)
-                    .expect("thumbnail queue pending entry must exist");
-                return PendingThumbnailJob { path, responses };
+    #[cfg(target_os = "ios")]
+    if !picture_id.starts_with('/') {
+        let picture_id = picture_id.to_owned();
+        let bytes = tokio::task::spawn_blocking(move || {
+            let c_id =
+                std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
+            let mut out_size: i32 = 0;
+            let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
+            if ptr.is_null() {
+                return Err("failed to fetch image from photo library".to_string());
             }
-            jobs = self.has_jobs.wait(jobs).unwrap();
-        }
+            let bytes = unsafe {
+                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
+                ios_free_buffer(ptr);
+                v
+            };
+            Ok(bytes)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        return Ok(Some(bytes));
     }
+
+    let _ = picture_id;
+    Ok(None)
 }
 
 pub enum RenderJob {
@@ -1363,52 +1095,6 @@ fn cancel_render_job(job: RenderJob) {
             let _ = response.send(cancelled_preview_float16_response());
         }
     }
-}
-
-fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
-    let source = std::path::Path::new(path);
-    let cache_key = hash_file(source)?;
-
-    let cache_dir = std::env::temp_dir().join("shade-thumbnails");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
-    let cache_path = cache_dir.join(format!("v2-{cache_key}.jpg"));
-
-    if cache_path.exists() {
-        return std::fs::read(&cache_path).map_err(|e| e.to_string());
-    }
-
-    let (pixels, width, height) =
-        shade_io::load_image(source).map_err(|e| e.to_string())?;
-    let img = image::RgbaImage::from_raw(width, height, pixels)
-        .ok_or("failed to wrap pixels in RgbaImage")?;
-    let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
-    let mut jpeg: Vec<u8> = Vec::new();
-    thumb
-        .write_to(
-            &mut std::io::Cursor::new(&mut jpeg),
-            image::ImageFormat::Jpeg,
-        )
-        .map_err(|e| e.to_string())?;
-    std::fs::write(&cache_path, &jpeg).map_err(|e| e.to_string())?;
-    Ok(jpeg)
-}
-
-pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue> {
-    let queue = Arc::new(ThumbnailQueue::new());
-    for worker_idx in 0..3 {
-        let worker_queue = queue.clone();
-        std::thread::Builder::new()
-            .name(format!("shade-thumbnail-{worker_idx}"))
-            .spawn(move || loop {
-                let job = worker_queue.pop_latest();
-                let result = generate_desktop_thumbnail(&job.path);
-                for response in job.responses {
-                    let _ = response.send(result.clone());
-                }
-            })
-            .expect("failed to spawn thumbnail worker thread");
-    }
-    queue
 }
 
 pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
@@ -1660,105 +1346,28 @@ pub async fn open_image<R: tauri::Runtime>(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
-    if path.starts_with("ccapi://") {
-        let bytes = load_picture_bytes(app, &path).await?;
-        let file_hash = hash_bytes(&bytes);
-        let persisted = load_latest_edit_version(&file_hash).await?;
-        let file_name = parse_ccapi_media_path(&path)
-            .ok()
-            .map(|(_, file_path)| picture_display_name(file_path));
-        let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
-        let response = {
-            let mut st = lock_editor_state(&state)?;
-            let response = st.replace_with_image(
-                image.pixels.to_vec(),
-                image.width,
-                image.height,
-                info.bit_depth,
-                info.color_space,
-            );
-            restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
-            response
-        };
-        return Ok(response);
-    }
-
-    #[cfg(target_os = "android")]
-    if path.starts_with("content://") {
-        let bytes = app
-            .state::<crate::photos::PhotosHandle<R>>()
-            .get_image_data(&path)
-            .await?;
-        let file_hash = hash_bytes(&bytes);
-        let persisted = load_latest_edit_version(&file_hash).await?;
-        let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
-        let response = {
-            let mut st = lock_editor_state(&state)?;
-            let response = st.replace_with_image(
-                image.pixels.to_vec(),
-                image.width,
-                image.height,
-                info.bit_depth,
-                info.color_space,
-            );
-            restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
-            response
-        };
-        return Ok(response);
-    }
-
-    #[cfg(target_os = "ios")]
-    if !path.starts_with('/') {
-        let photo_id = path.clone();
-        let bytes = tokio::task::spawn_blocking(move || {
-            let c_id =
-                std::ffi::CString::new(photo_id.as_str()).map_err(|e| e.to_string())?;
-            let mut out_size: i32 = 0;
-            let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
-            if ptr.is_null() {
-                return Err("failed to fetch image from photo library".to_string());
-            }
-            let bytes = unsafe {
-                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
-                ios_free_buffer(ptr);
-                v
-            };
-            Ok(bytes)
-        })
-        .await
-        .map_err(|e| e.to_string())??;
-
-        let file_hash = hash_bytes(&bytes);
-        let persisted = load_latest_edit_version(&file_hash).await?;
-        let (image, info) = decode_image_bytes_with_info(&bytes, None)?;
-        let response = {
-            let mut st = lock_editor_state(&state)?;
-            let response = st.replace_with_image(
-                image.pixels.to_vec(),
-                image.width,
-                image.height,
-                info.bit_depth,
-                info.color_space,
-            );
-            restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
-            response
-        };
-        return Ok(response);
-    }
-
-    let file_hash = hash_file(std::path::Path::new(&path))?;
+    let photo_app = app.clone();
+    let opened = shade_io::open_image(
+        &path,
+        |host, file_path| async move { load_camera_image_from_tauri(&host, &file_path).await },
+        move |picture_id| {
+            let app = photo_app.clone();
+            async move { load_photo_image_from_tauri(&app, &picture_id).await }
+        },
+    )
+    .await?;
+    let file_hash = opened.file_hash;
     let persisted = load_latest_edit_version(&file_hash).await?;
-    let (image, info) = decode_image_path_with_info(std::path::Path::new(&path))?;
     let response = {
         let mut st = lock_editor_state(&state)?;
         let response = st.replace_with_image(
-            image.pixels.to_vec(),
-            image.width,
-            image.height,
-            info.bit_depth,
-            info.color_space,
+            opened.image.pixels.to_vec(),
+            opened.image.width,
+            opened.image.height,
+            opened.info.bit_depth,
+            opened.info.color_space,
         );
-        restore_persisted_layers(&mut st, file_hash, Some(path), persisted)?;
+        restore_persisted_layers(&mut st, file_hash, opened.source_name, persisted)?;
         response
     };
     Ok(response)
@@ -2626,103 +2235,44 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
-    if picture_id.starts_with("ccapi://") {
-        let (host, file_path) = parse_ccapi_media_path(picture_id)?;
-        let _permit = app
-            .state::<crate::CameraThumbnailService>()
-            .0
-            .acquire(host)
-            .await?;
-        return ccapi::CCAPI::new(host)
-            .thumbnail(file_path)
-            .await
-            .map(|bytes| bytes.to_vec())
-            .map_err(|e| e.to_string());
-    }
-
-    #[cfg(target_os = "android")]
-    if picture_id.starts_with("content://") {
-        return app
-            .state::<crate::photos::PhotosHandle<R>>()
-            .get_thumbnail(picture_id)
-            .await;
-    }
-
-    #[cfg(target_os = "ios")]
-    if !picture_id.starts_with('/') {
-        let picture_id = picture_id.to_owned();
-        return tokio::task::spawn_blocking(move || {
-            let c_id =
-                std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
-            let mut out_size: i32 = 0;
-            let ptr =
-                unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
-            if ptr.is_null() {
-                return Err("failed to get thumbnail from photo library".to_string());
+    let thumbnail_queue = app.state::<crate::ThumbnailService>().0.clone();
+    shade_io::load_thumbnail_bytes(
+        picture_id,
+        thumbnail_queue.as_ref(),
+        {
+            let app = app.clone();
+            move |host, file_path| {
+                let app = app.clone();
+                async move { load_camera_thumbnail_from_tauri(&app, &host, &file_path).await }
             }
-            let bytes = unsafe {
-                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
-                ios_free_buffer(ptr);
-                v
-            };
-            Ok(bytes)
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-
-    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    app.state::<crate::ThumbnailService>().0.push(ThumbnailJob {
-        path: picture_id.to_owned(),
-        response: response_tx,
-    });
-    response_rx.await.map_err(|e| e.to_string())?
+        },
+        {
+            let app = app.clone();
+            move |picture_id| {
+                let app = app.clone();
+                async move { load_photo_thumbnail_from_tauri(&app, &picture_id).await }
+            }
+        },
+    )
+    .await
 }
 
 pub async fn load_picture_bytes<R: tauri::Runtime>(
-    _app: tauri::AppHandle<R>,
+    app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
-    if picture_id.starts_with("ccapi://") {
-        let (host, file_path) = parse_ccapi_media_path(picture_id)?;
-        return ccapi::CCAPI::new(host)
-            .original(file_path)
-            .await
-            .map(|bytes| bytes.to_vec())
-            .map_err(|e| e.to_string());
-    }
-
-    #[cfg(target_os = "android")]
-    if picture_id.starts_with("content://") {
-        return _app
-            .state::<crate::photos::PhotosHandle<R>>()
-            .get_image_data(picture_id)
-            .await;
-    }
-
-    #[cfg(target_os = "ios")]
-    if !picture_id.starts_with('/') {
-        let picture_id = picture_id.to_owned();
-        return tokio::task::spawn_blocking(move || {
-            let c_id =
-                std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
-            let mut out_size: i32 = 0;
-            let ptr = unsafe { ios_get_image_data(c_id.as_ptr(), &mut out_size) };
-            if ptr.is_null() {
-                return Err("failed to fetch image from photo library".to_string());
+    shade_io::load_picture_bytes(
+        picture_id,
+        |host, file_path| async move { load_camera_image_from_tauri(&host, &file_path).await },
+        {
+            let app = app.clone();
+            move |picture_id| {
+                let app = app.clone();
+                async move { load_photo_image_from_tauri(&app, &picture_id).await }
             }
-            let bytes = unsafe {
-                let v = std::slice::from_raw_parts(ptr, out_size as usize).to_vec();
-                ios_free_buffer(ptr);
-                v
-            };
-            Ok(bytes)
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-
-    std::fs::read(picture_id).map_err(|e| e.to_string())
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2807,6 +2357,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             path: None,
             removable: false,
             is_online: None,
+            is_refreshing: None,
         }]);
     }
 
@@ -2820,6 +2371,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             path: None,
             removable: false,
             is_online: None,
+            is_refreshing: None,
         }]);
     }
 
@@ -2932,10 +2484,15 @@ async fn build_library_listing<R: tauri::Runtime>(
         }
         let db_path = library_index_db_path()?;
         let library_path = resolve_desktop_library_path(&library_id)?;
-        _app.state::<crate::LibraryScanService>()
+        let snapshot = _app
+            .state::<crate::LibraryScanService>()
             .0
             .snapshot_for_library(&db_path, &library_id, library_path)
-            .await
+            .await?;
+        Ok(LibraryImageListing {
+            items: snapshot.items.into_iter().map(local_library_image).collect(),
+            is_complete: snapshot.is_complete,
+        })
     }
 }
 
@@ -2986,7 +2543,7 @@ pub async fn add_media_library<R: tauri::Runtime>(
         config.directories.push(canonical_string);
         save_app_config(&config)?;
     }
-    let library = library_for_directory(canonical.clone());
+    let library = library_for_directory(canonical.clone(), true);
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         let db_path = library_index_db_path()?;

@@ -14,6 +14,15 @@ use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
 pub mod library_index;
+pub mod library_scan_service;
+pub mod camera_services;
+pub mod thumbnail_queue;
+pub mod thumbnail_loader;
+pub mod image_loader;
+#[cfg(feature = "ffmpeg")]
+pub mod video_decoder;
+#[cfg(feature = "ffmpeg")]
+pub mod video_encoder;
 
 pub use library_index::{
     delete_persisted_library_index, indexed_library_image_for_path,
@@ -22,6 +31,31 @@ pub use library_index::{
     scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
     PersistedLibraryIndex,
 };
+pub use library_scan_service::{flush_library_scan_batch, scan_library_into_snapshot, start_library_scan, LibraryScanService, LibraryScanSnapshot};
+pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
+pub use thumbnail_queue::{PendingThumbnailJob, ThumbnailJob, ThumbnailQueue};
+pub use thumbnail_loader::{
+    generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
+    ThumbnailResponseSender,
+};
+pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
+#[cfg(feature = "ffmpeg")]
+pub use video_decoder::{FrameInfo, VideoDecoder};
+#[cfg(feature = "ffmpeg")]
+pub use video_encoder::{VideoCodec, VideoEncoder};
+
+#[cfg(feature = "ffmpeg")]
+pub fn init_video() {
+    video_rs::init().expect("failed to initialise FFmpeg via video-rs");
+}
+
+#[cfg(not(feature = "ffmpeg"))]
+pub fn init_video() {
+    panic!(
+        "shade-io was compiled without the `ffmpeg` feature. \
+         Install system FFmpeg and rebuild with the `ffmpeg` feature enabled."
+    );
+}
 
 // ── Public image loading ───────────────────────────────────────────────────────
 
