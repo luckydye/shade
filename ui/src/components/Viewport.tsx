@@ -53,8 +53,6 @@ export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
-  let backdropScratch: HTMLCanvasElement | undefined;
-  let previewScratch: HTMLCanvasElement | undefined;
   const [dragging, setDragging] = createSignal(false);
   const [draftCrop, setDraftCrop] = createSignal<{
     x: number;
@@ -421,8 +419,6 @@ export const Viewport: Component = () => {
     const selectedArtboard = getSelectedArtboard();
     if (selectedArtboard) {
       const t = getViewTransform(cssWidth, cssHeight);
-      backdropScratch ??= document.createElement("canvas");
-      previewScratch ??= document.createElement("canvas");
       const visibleArtboardIds = state.artboards
         .filter((artboard) => {
           const sx = artboard.worldX * t.scale + t.dx;
@@ -451,8 +447,6 @@ export const Viewport: Component = () => {
           isSelected ? backdropTile() ?? artboard.backdropTile : artboard.backdropTile,
           isSelected && !cropLayer ? previewTile() ?? artboard.previewTile : null,
           t,
-          backdropScratch,
-          previewScratch,
           clip,
         );
         const sx = worldArtboard.worldX * t.scale + t.dx;

@@ -1,30 +1,44 @@
 import type { ArtboardClip, Artboard, RenderedTile } from "./types";
 import type { WorldTransform } from "./transform";
 
+type TileSurface = HTMLCanvasElement | OffscreenCanvas;
+
+const tileSurfaceCache = new WeakMap<ImageData, TileSurface>();
+
+function createTileSurface(image: ImageData): TileSurface {
+  const cached = tileSurfaceCache.get(image);
+  if (cached) return cached;
+  const surface =
+    typeof OffscreenCanvas === "function"
+      ? new OffscreenCanvas(image.width, image.height)
+      : document.createElement("canvas");
+  if (surface instanceof HTMLCanvasElement) {
+    surface.width = image.width;
+    surface.height = image.height;
+  }
+  const surfaceCtx = surface.getContext("2d");
+  if (!surfaceCtx) throw new Error("tile surface 2d context required");
+  surfaceCtx.putImageData(image, 0, 0);
+  tileSurfaceCache.set(image, surface);
+  return surface;
+}
+
 // Draw one tile onto a canvas context at its correct screen position for the
-// given artboard transform. The scratch canvas is reused across calls.
+// given artboard transform.
 function drawTile(
   ctx: CanvasRenderingContext2D,
   tile: RenderedTile,
   artboard: Artboard,
   t: WorldTransform,
-  scratch: HTMLCanvasElement,
 ) {
   const sx = (artboard.worldX + tile.x) * t.scale + t.dx;
   const sy = (artboard.worldY + tile.y) * t.scale + t.dy;
   const sw = tile.width * t.scale;
   const sh = tile.height * t.scale;
   if (sw <= 0 || sh <= 0) return;
-  if (scratch.width !== tile.image.width || scratch.height !== tile.image.height) {
-    scratch.width = tile.image.width;
-    scratch.height = tile.image.height;
-  }
-  const scratchCtx = scratch.getContext("2d");
-  if (!scratchCtx) throw new Error("scratch canvas 2d context required");
-  scratchCtx.putImageData(tile.image, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(scratch, sx, sy, sw, sh);
+  ctx.drawImage(createTileSurface(tile.image), sx, sy, sw, sh);
 }
 
 // Composite one artboard: draw the low-res backdrop first, then the high-res
@@ -41,8 +55,6 @@ export function compositeArtboard(
   backdrop: RenderedTile | null,
   preview: RenderedTile | null,
   t: WorldTransform,
-  backdropScratch: HTMLCanvasElement,
-  previewScratch: HTMLCanvasElement,
   clip?: ArtboardClip,
 ): void {
   ctx.save();
@@ -74,7 +86,7 @@ export function compositeArtboard(
       ctx.translate(-scx, -scy);
     }
   }
-  if (backdrop) drawTile(ctx, backdrop, artboard, t, backdropScratch);
-  if (preview) drawTile(ctx, preview, artboard, t, previewScratch);
+  if (backdrop) drawTile(ctx, backdrop, artboard, t);
+  if (preview) drawTile(ctx, preview, artboard, t);
   ctx.restore();
 }

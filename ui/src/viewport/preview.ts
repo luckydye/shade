@@ -332,14 +332,14 @@ function canReuseRenderedPreview(
   );
 }
 
-async function performRefresh() {
+async function performRefresh() {  
   const queued = refreshQueued;
   if (!queued) return;
-  refreshQueued = null;
+  refreshQueued = null;  
   const snapshot = captureRefreshSnapshot();
   const previewReq = buildPreviewRequest(queued.quality);
   const backdropReq = buildBackdropRequest(queued.quality);
-  if (!previewReq || !backdropReq) return;
+  if (!previewReq || !backdropReq) return;  
   if (
     canReuseRenderedPreview(
       lastRenderedPreview,
@@ -352,13 +352,17 @@ async function performRefresh() {
     return;
   }
   const frame = await throttledRender(previewReq);
-  if (queued.version !== refreshVersion) return;
+  
+  // if (queued.version !== refreshVersion) return;
+  
   if (frame.width === 0 || frame.height === 0) return;
   const crop = previewReq.crop;
   if (!crop) throw new Error("preview request must have a crop");
+  
   if (!refreshSnapshotMatches(snapshot)) {
     return;
   }
+  
   if (queued.quality === "final") {
     setState({
       previewDisplayColorSpace:
@@ -431,6 +435,7 @@ export function refreshPreview() {
   const completion = new Promise<void>((resolve, reject) => {
     refreshWaiters.push({ resolve, reject });
   });
+  
   if (refreshPromise) return completion;
   refreshPromise = (async () => {
     try {
