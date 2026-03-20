@@ -2,9 +2,13 @@ use crate::{
     indexed_library_image_for_path, is_supported_library_image, load_persisted_library_index,
     replace_persisted_library_index, sort_indexed_library_items, IndexedLibraryImage,
 };
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+const LIBRARY_WATCH_DEBOUNCE: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Debug, Default)]
 pub struct LibraryScanSnapshot {
@@ -17,12 +21,18 @@ pub struct LibraryScanSnapshot {
 
 pub struct LibraryScanService {
     pub scans: Mutex<HashMap<String, Arc<Mutex<LibraryScanSnapshot>>>>,
+    pub watches: Mutex<HashMap<String, LibraryWatchHandle>>,
+}
+
+pub struct LibraryWatchHandle {
+    pub _watcher: RecommendedWatcher,
 }
 
 impl LibraryScanService {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             scans: Mutex::new(HashMap::new()),
+            watches: Mutex::new(HashMap::new()),
         })
     }
 
@@ -64,12 +74,71 @@ impl LibraryScanService {
         Ok((snapshot, should_scan))
     }
 
-    pub async fn snapshot_for_library(
+    pub fn watch_library(
+        self: &Arc<Self>,
+        db_path: &Path,
+        library_id: &str,
+        root: PathBuf,
+    ) -> Result<(), String> {
+        let mut watches = self
+            .watches
+            .lock()
+            .map_err(|_| "library watch lock poisoned".to_string())?;
+        if watches.contains_key(library_id) {
+            return Ok(());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = notify::recommended_watcher(move |result| {
+            let _ = tx.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+        watcher
+            .watch(&root, RecursiveMode::Recursive)
+            .map_err(|error| error.to_string())?;
+        spawn_library_watch_loop(
+            self.clone(),
+            db_path.to_path_buf(),
+            library_id.to_string(),
+            root,
+            rx,
+        )?;
+        watches.insert(library_id.to_string(), LibraryWatchHandle { _watcher: watcher });
+        Ok(())
+    }
+
+    pub async fn request_refresh(
         &self,
         db_path: &Path,
         library_id: &str,
         root: PathBuf,
+    ) -> Result<bool, String> {
+        let (snapshot, _) =
+            self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
+        {
+            let guard = snapshot
+                .lock()
+                .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
+            if guard.is_scanning {
+                return Ok(false);
+            }
+        }
+        start_library_scan(
+            snapshot,
+            db_path.to_path_buf(),
+            library_id.to_string(),
+            root,
+            false,
+        )?;
+        Ok(true)
+    }
+
+    pub async fn snapshot_for_library(
+        self: &Arc<Self>,
+        db_path: &Path,
+        library_id: &str,
+        root: PathBuf,
     ) -> Result<LibraryScanSnapshot, String> {
+        self.watch_library(db_path, library_id, root.clone())?;
         let (snapshot, should_scan) =
             self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
         if should_scan {
@@ -92,26 +161,26 @@ impl LibraryScanService {
     }
 
     pub async fn refresh_library(
-        &self,
+        self: &Arc<Self>,
         db_path: &Path,
         library_id: &str,
         root: PathBuf,
     ) -> Result<(), String> {
-        let (snapshot, _) =
-            self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
-        start_library_scan(
-            snapshot,
-            db_path.to_path_buf(),
-            library_id.to_string(),
-            root,
-            false,
-        )
+        self.watch_library(db_path, library_id, root.clone())?;
+        if self.request_refresh(db_path, library_id, root).await? {
+            return Ok(());
+        }
+        Err(format!("library index refresh already running: {library_id}"))
     }
 
     pub fn remove_library(&self, library_id: &str) -> Result<(), String> {
         self.scans
             .lock()
             .map_err(|_| "library scan lock poisoned".to_string())?
+            .remove(library_id);
+        self.watches
+            .lock()
+            .map_err(|_| "library watch lock poisoned".to_string())?
             .remove(library_id);
         Ok(())
     }
@@ -132,6 +201,62 @@ impl LibraryScanService {
             .is_scanning;
         Ok(is_refreshing)
     }
+}
+
+fn spawn_library_watch_loop(
+    service: Arc<LibraryScanService>,
+    db_path: PathBuf,
+    library_id: String,
+    root: PathBuf,
+    rx: std::sync::mpsc::Receiver<Result<notify::Event, notify::Error>>,
+) -> Result<(), String> {
+    std::thread::Builder::new()
+        .name("shade-library-watch".into())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to create library watch runtime");
+            loop {
+                let mut has_refreshable_event = match rx.recv() {
+                    Ok(Ok(event)) => library_watch_event_requires_refresh(&event),
+                    Ok(Err(_)) => true,
+                    Err(_) => return,
+                };
+                loop {
+                    match rx.recv_timeout(LIBRARY_WATCH_DEBOUNCE) {
+                        Ok(Ok(event)) => {
+                            has_refreshable_event |= library_watch_event_requires_refresh(&event);
+                        }
+                        Ok(Err(_)) => {
+                            has_refreshable_event = true;
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                if !has_refreshable_event {
+                    continue;
+                }
+                loop {
+                    match runtime.block_on(service.request_refresh(
+                        &db_path,
+                        &library_id,
+                        root.clone(),
+                    )) {
+                        Ok(true) => break,
+                        Ok(false) => std::thread::sleep(LIBRARY_WATCH_DEBOUNCE),
+                        Err(_) => break,
+                    }
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn library_watch_event_requires_refresh(event: &notify::Event) -> bool {
+    !matches!(event.kind, notify::EventKind::Access(_))
 }
 
 pub fn start_library_scan(

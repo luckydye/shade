@@ -847,7 +847,9 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         let db_path = library_index_db_path()?;
+        let library_scan_service = app.state::<crate::LibraryScanService>().0.clone();
         for (library_id, root) in desktop_local_library_roots()? {
+            library_scan_service.watch_library(&db_path, &library_id, root.clone())?;
             if tauri::async_runtime::block_on(has_persisted_library_index(
                 &db_path,
                 &library_id,
@@ -856,9 +858,7 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
                 continue;
             }
             tauri::async_runtime::block_on(
-                app.state::<crate::LibraryScanService>()
-                    .0
-                    .refresh_library(&db_path, &library_id, root),
+                library_scan_service.refresh_library(&db_path, &library_id, root),
             )?;
         }
         Ok(())
