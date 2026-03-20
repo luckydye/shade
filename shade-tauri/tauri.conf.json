@@ -7,7 +7,7 @@
     "beforeDevCommand": "task ui:dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "task ui:build",
-    "frontendDist": "../ui/dist"
+    "frontendDist": "../shade-ui/dist"
   },
   "app": {
     "windows": [
