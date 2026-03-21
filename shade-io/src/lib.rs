@@ -13,25 +13,37 @@ use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
+#[cfg(feature = "native")]
 pub mod app_config;
+#[cfg(feature = "native")]
 pub mod camera_services;
+#[cfg(feature = "native")]
 pub mod image_loader;
+#[cfg(feature = "native")]
 pub mod library_index;
+#[cfg(feature = "native")]
 pub mod library_scan_service;
+#[cfg(feature = "native")]
 pub mod library_source;
+#[cfg(feature = "native")]
 pub mod thumbnail_loader;
+#[cfg(feature = "native")]
 pub mod thumbnail_queue;
 #[cfg(feature = "ffmpeg")]
 pub mod video_decoder;
 #[cfg(feature = "ffmpeg")]
 pub mod video_encoder;
 
+#[cfg(feature = "native")]
 pub use app_config::{
     app_config_path, is_peer_paired, load_app_config, pair_peer, save_app_config,
     upsert_library_config, AppConfig,
 };
+#[cfg(feature = "native")]
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
+#[cfg(feature = "native")]
 pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
+#[cfg(feature = "native")]
 pub use library_index::{
     delete_persisted_library_index, has_persisted_library_index,
     indexed_library_image_for_path, is_supported_library_image, library_index_db_path,
@@ -39,10 +51,12 @@ pub use library_index::{
     scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
     PersistedLibraryIndex,
 };
+#[cfg(feature = "native")]
 pub use library_scan_service::{
     flush_library_scan_batch, scan_library_into_snapshot, start_library_scan,
     LibraryScanService, LibraryScanSnapshot,
 };
+#[cfg(feature = "native")]
 pub use library_source::{
     camera_library_id, display_s3_library_name, format_s3_library_detail,
     get_s3_object_bytes, library_config_id, list_s3_objects, local_library_id,
@@ -51,10 +65,12 @@ pub use library_source::{
     AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LocalLibraryConfig,
     PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry,
 };
+#[cfg(feature = "native")]
 pub use thumbnail_loader::{
     generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
     ThumbnailResponseSender,
 };
+#[cfg(feature = "native")]
 pub use thumbnail_queue::{PendingThumbnailJob, ThumbnailJob, ThumbnailQueue};
 #[cfg(feature = "ffmpeg")]
 pub use video_decoder::{FrameInfo, VideoDecoder};

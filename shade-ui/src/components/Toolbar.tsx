@@ -106,6 +106,10 @@ export const Toolbar: Component = () => {
   const canExport = () => state.canvasWidth > 0 && state.canvasHeight > 0;
 
   const statusText = () => {
+    if (state.loadError) return state.loadError;
+    if (!state.webgpuAvailable) {
+      return state.webgpuReason ?? "WebGPU unavailable";
+    }
     if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return "No image loaded";
     const previewResolution =
       state.previewRenderWidth > 0 && state.previewRenderHeight > 0
@@ -125,8 +129,12 @@ export const Toolbar: Component = () => {
       return;
     }
     const selectedFiles = Array.from(files);
-    for (const [index, file] of selectedFiles.entries()) {
-      await openImageFile(file, index === 0 ? "replace" : "append");
+    try {
+      for (const [index, file] of selectedFiles.entries()) {
+        await openImageFile(file, index === 0 ? "replace" : "append");
+      }
+    } catch {
+      return;
     }
     if (fileInputRef) fileInputRef.value = "";
   };
@@ -207,6 +215,7 @@ export const Toolbar: Component = () => {
           ref={fileInputRef}
           type="file"
           multiple
+          accept={ACCEPTED}
           class="hidden"
           onChange={handleFileChange}
         />
@@ -220,6 +229,7 @@ export const Toolbar: Component = () => {
           <ActionButton
             label="Open"
             icon={<UploadIcon />}
+            disabled={!state.webgpuAvailable}
             onClick={() => fileInputRef?.click()}
           />
         </div>

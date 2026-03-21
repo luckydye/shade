@@ -66,6 +66,17 @@ function isSupersededImageLoadError(error: unknown) {
   return error instanceof Error && error.message === SUPERSEDED_IMAGE_LOAD_ERROR;
 }
 
+function describeImageLoadError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isWebGpuAdapterError(message: string) {
+  return message.includes("No suitable wgpu adapter found");
+}
+
 function getPendingArtboardSize() {
   const selectedArtboard = state.artboards.find(
     (artboard) => artboard.id === state.selectedArtboardId,
@@ -208,6 +219,7 @@ function clearLoadedImageState() {
     crop: { x: 0, y: 0, width: 0, height: 0, rotation: 0 },
     cropDraft: null,
     isCropMode: false,
+    loadError: null,
   });
 }
 
@@ -236,6 +248,7 @@ function setPendingEditorState(
     previewDisplayColorSpace: "Unknown",
     isLoading: true,
     loadingMediaSrc,
+    loadError: null,
   });
 }
 
@@ -344,6 +357,16 @@ async function openImageFrom(
     if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
       return;
     }
+    const message = describeImageLoadError(error);
+    setState({
+      loadError: message,
+      ...(isWebGpuAdapterError(message)
+        ? {
+            webgpuAvailable: false,
+            webgpuReason: "No suitable WebGPU adapter found",
+          }
+        : {}),
+    });
     if (replacementArtboard) {
       await loadArtboardIntoEditor(replacementArtboard);
       throw error;

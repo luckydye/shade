@@ -4,7 +4,7 @@ use shade_core::{
     ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams,
 };
 use shade_gpu::{PreviewCrop as GpuPreviewCrop, Renderer};
-use shade_io::load_image_bytes_f32_with_info;
+use shade_io::{load_image_bytes_f32_with_info, to_linear_srgb_f32};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -87,7 +87,14 @@ pub fn load_image_encoded(
         let mut engine = e.borrow_mut();
         let (image, info) = load_image_bytes_f32_with_info(bytes, file_name.as_deref())
             .map_err(|err| JsValue::from_str(&err.to_string()))?;
-        engine.load_image_data(image);
+        let mut pixels = image.pixels.to_vec();
+        to_linear_srgb_f32(&mut pixels, &info.color_space);
+        let linear_image = shade_core::FloatImage {
+            pixels: pixels.into(),
+            width: image.width,
+            height: image.height,
+        };
+        engine.load_image_data(linear_image);
         serde_wasm_bindgen::to_value(&LayerInfo {
             layer_count: engine.layer_count(),
             canvas_width: engine.canvas_width,

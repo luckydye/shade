@@ -650,11 +650,18 @@ export const Viewport: Component = () => {
   const onDrop = async (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
+    if (!state.webgpuAvailable) {
+      return;
+    }
     const files = Array.from(e.dataTransfer?.files ?? []).filter((file) =>
       file.type.startsWith("image/"),
     );
-    for (const [index, file] of files.entries()) {
-      await openImageFile(file, index === 0 ? "replace" : "append");
+    try {
+      for (const [index, file] of files.entries()) {
+        await openImageFile(file, index === 0 ? "replace" : "append");
+      }
+    } catch {
+      return;
     }
   };
 
@@ -1286,10 +1293,16 @@ export const Viewport: Component = () => {
               </div>
               <div>
                 <div class="text-lg font-semibold tracking-[-0.02em] text-white">
-                  Drop an image to start
+                  {state.loadError
+                    ? "Cannot open images in this browser"
+                    : !state.webgpuAvailable
+                      ? "WebGPU is unavailable"
+                      : "Drop an image to start"}
                 </div>
                 <div class="mt-1 text-sm text-white/48">
-                  Drag a photo into the stage or use the Open action in the top bar.
+                  {state.loadError ??
+                    state.webgpuReason ??
+                    "Drag a photo into the stage or use the Open action in the top bar."}
                 </div>
               </div>
             </div>

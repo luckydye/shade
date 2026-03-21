@@ -3,6 +3,7 @@ use shade_core::{
     CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
     Layer, LayerStack, SharpenParams, TextureId, ToneParams, VignetteParams,
 };
+use shade_io::to_linear_srgb_f32;
 use std::collections::HashMap;
 
 /// Holds the in-memory editor state for the WASM context.
@@ -52,8 +53,7 @@ impl WasmEngine {
         width: u32,
         height: u32,
     ) -> u64 {
-        let image = FloatImage {
-            pixels: pixels
+        let mut linear_pixels = pixels
                 .chunks_exact(4)
                 .flat_map(|rgba| {
                     [
@@ -63,8 +63,10 @@ impl WasmEngine {
                         rgba[3] as f32 / 255.0,
                     ]
                 })
-                .collect::<Vec<_>>()
-                .into(),
+                .collect::<Vec<_>>();
+        to_linear_srgb_f32(&mut linear_pixels, &shade_core::ColorSpace::Srgb);
+        let image = FloatImage {
+            pixels: linear_pixels.into(),
             width,
             height,
         };

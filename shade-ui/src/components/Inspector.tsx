@@ -1989,9 +1989,6 @@ const Inspector: Component = () => {
   const DesktopEditPanel: Component = () => (
     <div>
       <div class="mb-4">
-        <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)]">
-          Layers
-        </div>
         <div
           ref={desktopLayerListRef}
           class="relative mt-3 flex flex-col gap-[2px]"
@@ -2149,7 +2146,7 @@ const Inspector: Component = () => {
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class="hidden h-full border border-[var(--border)] bg-[var(--panel-bg)] lg:flex lg:flex-col m-2 rounded-md">
-        <div class="flex-1 overflow-y-auto px-4 py-2">
+        <div class="flex-1 overflow-y-auto px-3">
           <DesktopEditPanel />
           {inspectorTab() === "presets" ? (
             <PresetsPanel />

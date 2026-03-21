@@ -63,6 +63,8 @@ export interface EditorState {
   selectedLayerIdx: number;
   isLoading: boolean;
   webgpuAvailable: boolean;
+  webgpuReason: string | null;
+  loadError: string | null;
   viewportZoom: number;
   viewportCenterX: number;
   viewportCenterY: number;
@@ -91,6 +93,8 @@ export const [state, setState] = createStore<EditorState>({
   selectedLayerIdx: -1,
   isLoading: false,
   webgpuAvailable: true,
+  webgpuReason: null,
+  loadError: null,
   viewportZoom: 1,
   viewportCenterX: 0,
   viewportCenterY: 0,

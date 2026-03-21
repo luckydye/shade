@@ -33,7 +33,7 @@ wgpu = { version = "23", features = ["wgsl", "webgpu"] }
 anyhow = "1"
 image = { workspace = true }
 base64 = "0.22"
-shade-io = { path = "../shade-io" }
+shade-io = { path = "../shade-io", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { version = "1", features = ["js"] }
