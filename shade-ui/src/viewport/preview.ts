@@ -25,6 +25,7 @@ let refreshQueued: { version: number; quality: "interactive" | "final" } | null 
 let refreshPromise: Promise<void> | null = null;
 let refreshLastStartAt = 0;
 let refreshWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
+let previewSuspended = false;
 let lastRenderedPreview:
   | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
   | null = null;
@@ -50,10 +51,21 @@ type RefreshSnapshot = {
 };
 
 export function clearPreviewTiles() {
+  refreshVersion += 1;
+  refreshQueued = null;
   setPreviewTile(null);
   setBackdropTile(null);
   lastRenderedPreview = null;
   lastRenderedBackdrop = null;
+}
+
+export function suspendPreview() {
+  previewSuspended = true;
+  clearPreviewTiles();
+}
+
+export function resumePreview() {
+  previewSuspended = false;
 }
 
 export function getViewportFitRef(): FitReference {
@@ -335,6 +347,7 @@ function canReuseRenderedPreview(
 async function performRefresh() {  
   const queued = refreshQueued;
   if (!queued) return;
+  if (previewSuspended) return;
   refreshQueued = null;  
   const snapshot = captureRefreshSnapshot();
   const previewReq = buildPreviewRequest(queued.quality);
@@ -431,6 +444,9 @@ async function performRefresh() {
 }
 
 export function refreshPreview() {
+  if (previewSuspended) {
+    return Promise.resolve();
+  }
   refreshVersion += 1;
   const completion = new Promise<void>((resolve, reject) => {
     refreshWaiters.push({ resolve, reject });

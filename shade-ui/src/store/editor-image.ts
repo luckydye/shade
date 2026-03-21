@@ -1,6 +1,12 @@
 import * as bridge from "../bridge/index";
 import { fullCanvasCrop, setState, state, type ArtboardSource } from "./editor-store";
-import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
+import {
+  clearPreviewTiles,
+  refreshPreview,
+  resetViewport,
+  resumePreview,
+  suspendPreview,
+} from "../viewport/preview";
 import { refreshLayerStack } from "./editor-layers";
 
 const ARTBOARD_GAP = 96;
@@ -118,6 +124,7 @@ function resetViewportState(canvasWidth: number, canvasHeight: number) {
 }
 
 function clearLoadedImageState() {
+  resumePreview();
   clearPreviewTiles();
   setState({
     artboards: [],
@@ -150,7 +157,7 @@ function setPendingEditorState(
   } | null,
   loadingMediaSrc: string | null,
 ) {
-  clearPreviewTiles();
+  suspendPreview();
   resetViewportState(canvasWidth, canvasHeight);
   setState({
     currentView: "editor",
@@ -237,6 +244,7 @@ async function openImageFrom(
       sourceBitDepth: info.source_bit_depth,
     });
     await refreshLayerStack();
+    resumePreview();
     await refreshPreview();
   } catch (error) {
     setState("artboards", (artboards) => artboards.filter((candidate) => candidate.id !== artboardId));
@@ -408,6 +416,7 @@ export async function selectArtboard(artboardId: string) {
       sourceBitDepth: info.source_bit_depth,
     });
     await refreshLayerStack();
+    resumePreview();
     await refreshPreview();
   } catch (error) {
     if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
