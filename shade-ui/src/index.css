@@ -148,6 +148,16 @@
     var(--app-bg);
 }
 
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button[data-pressed="true"] {
+  transform: translateY(1px);
+  box-shadow: inset 0 0 0 9999px var(--surface-active);
+}
+
 /* ─── View transitions ───────────────────────────────────────────────────── */
 
 ::view-transition-old(active-media),

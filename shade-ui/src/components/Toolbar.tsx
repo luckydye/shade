@@ -7,6 +7,7 @@ import {
   showMediaView,
   state,
 } from "../store/editor";
+import { Button } from "./Button";
 
 const ACCEPTED =
   "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
@@ -20,7 +21,7 @@ interface ActionButtonProps {
 }
 
 const ActionButton: Component<ActionButtonProps> = (props) => (
-  <button
+  <Button
     type="button"
     onClick={props.onClick}
     disabled={props.disabled}
@@ -32,7 +33,7 @@ const ActionButton: Component<ActionButtonProps> = (props) => (
   >
     <span class="inline-flex items-center justify-center">{props.icon}</span>
     <span class="hidden text-[13px] font-medium sm:inline">{props.label}</span>
-  </button>
+  </Button>
 );
 
 const BrandIcon = () => (
@@ -168,7 +169,7 @@ export const Toolbar: Component = () => {
       </div>
 
       <div class="min-w-0 flex justify-center text-center pointer-events-none">
-        <button
+        <Button
           type="button"
           class={`min-w-0 flex flex-col pointer-events-auto ${
             canResumeEditor() ? "cursor-pointer" : "cursor-default"
@@ -197,7 +198,7 @@ export const Toolbar: Component = () => {
             )) ||
               statusText()}
           </span>
-        </button>
+        </Button>
       </div>
 
       <div>

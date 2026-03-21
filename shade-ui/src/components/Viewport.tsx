@@ -26,6 +26,7 @@ import { buildTransform, worldToScreen } from "../viewport/transform";
 import { getViewportFitRef } from "../viewport/preview";
 import type { WorldTransform } from "../viewport/transform";
 import type { ArtboardState } from "../store/editor-store";
+import { Button } from "./Button";
 
 type CropHandle =
   | "move"
@@ -48,6 +49,7 @@ const ARTBOARD_TITLE_MAX_WIDTH = 220;
 const ARTBOARD_CLOSE_SIZE = 18;
 const ARTBOARD_CLOSE_MARGIN = 6;
 const ARTBOARD_CHROME_FADE = 0;
+const ARTBOARD_DRAG_THRESHOLD = 6;
 
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
@@ -86,6 +88,10 @@ export const Viewport: Component = () => {
         kind: "artboard";
         pointerId: number;
         artboardId: string;
+        draggable: boolean;
+        moved: boolean;
+        startX: number;
+        startY: number;
         x: number;
         y: number;
       }
@@ -643,14 +649,6 @@ export const Viewport: Component = () => {
       e.clientY - rect.top,
     );
     const clickedArtboard = artboardAtPoint(e.clientX - rect.left, e.clientY - rect.top);
-    if (clickedArtboardTitle && clickedArtboardTitle.id !== state.selectedArtboardId) {
-      void selectArtboard(clickedArtboardTitle.id);
-      return;
-    }
-    if (clickedArtboard && clickedArtboard.id !== state.selectedArtboardId) {
-      void selectArtboard(clickedArtboard.id);
-      return;
-    }
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (selectedCropLayer()) {
       const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
@@ -694,6 +692,25 @@ export const Viewport: Component = () => {
         kind: "artboard",
         pointerId: e.pointerId,
         artboardId: clickedArtboardTitle.id,
+        draggable: true,
+        moved: false,
+        startX: e.clientX,
+        startY: e.clientY,
+        x: e.clientX,
+        y: e.clientY,
+      };
+      stageRef.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (clickedArtboard) {
+      gesture = {
+        kind: "artboard",
+        pointerId: e.pointerId,
+        artboardId: clickedArtboard.id,
+        draggable: false,
+        moved: false,
+        startX: e.clientX,
+        startY: e.clientY,
         x: e.clientX,
         y: e.clientY,
       };
@@ -724,6 +741,16 @@ export const Viewport: Component = () => {
       return;
     }
     if (gesture.kind === "artboard") {
+      if (!gesture.draggable) {
+        return;
+      }
+      const movedX = e.clientX - gesture.startX;
+      const movedY = e.clientY - gesture.startY;
+      const didCrossThreshold =
+        Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
+      if (!gesture.moved && !didCrossThreshold) {
+        return;
+      }
       const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
       if (t.scale <= 0) return;
       const deltaX = (e.clientX - gesture.x) / t.scale;
@@ -737,6 +764,10 @@ export const Viewport: Component = () => {
         kind: "artboard",
         pointerId: gesture.pointerId,
         artboardId: gesture.artboardId,
+        draggable: gesture.draggable,
+        moved: true,
+        startX: gesture.startX,
+        startY: gesture.startY,
         x: e.clientX,
         y: e.clientY,
       };
@@ -893,10 +924,26 @@ export const Viewport: Component = () => {
     if (e) {
       activePointers.delete(e.pointerId);
     }
+    if (gesture?.kind === "artboard") {
+      const shouldSelect = !gesture.moved && gesture.artboardId !== state.selectedArtboardId;
+      const artboardId = gesture.artboardId;
+      const artboardPointerId = gesture.pointerId;
+      gesture = null;
+      if (shouldSelect) {
+        void selectArtboard(artboardId);
+      }
+      if (
+        stageRef &&
+        e &&
+        stageRef.hasPointerCapture(artboardPointerId)
+      ) {
+        stageRef.releasePointerCapture(artboardPointerId);
+      }
+      return;
+    }
     if (
       (gesture?.kind === "crop" ||
-        gesture?.kind === "mask" ||
-        gesture?.kind === "artboard") &&
+        gesture?.kind === "mask") &&
       stageRef &&
       e &&
       stageRef.hasPointerCapture(e.pointerId)
@@ -1042,14 +1089,14 @@ export const Viewport: Component = () => {
             </div>
           )}
           {shouldShowZoomIndicator() && viewportZoomPercent() !== null && (
-            <button
+            <Button
               type="button"
               class="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition hover:border-white/20 hover:bg-black/60"
               onClick={() => resetViewport()}
             >
               <span>Zoom</span>
               <span class="text-white/35">{viewportZoomPercent()}%</span>
-            </button>
+            </Button>
           )}
           {state.layers.length === 0 && !state.isLoading && (
             <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">

@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { Button } from "./Button";
 import {
   addMediaLibrary,
   pickDirectory,
@@ -351,20 +352,22 @@ const MediaTile: Component<{
             ? "border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/40"
-              : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] active:bg-[var(--surface-active)]"
+              : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`
       : `group flex flex-col gap-1.5 rounded-xl p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           props.selected
             ? "bg-[var(--surface-active)] ring-1 ring-[var(--border-active)]"
             : loadError()
               ? "ring-1 ring-red-500/50"
-              : "hover:bg-[var(--surface-hover)] active:bg-[var(--surface-active)]"
+              : "hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`;
 
   return (
-    <button
+    <Button
       type="button"
-      ref={containerRef}
+      ref={(element) => {
+        containerRef = element;
+      }}
       class={buttonClass()}
       onClick={handleClick}
       aria-pressed={props.selected ? "true" : "false"}
@@ -396,7 +399,7 @@ const MediaTile: Component<{
       >
         {props.item.name}
       </span>
-    </button>
+    </Button>
   );
 };
 
@@ -819,7 +822,7 @@ export const MediaView: Component = () => {
                         : false;
                     const refreshing = isLocalLibraryRefreshing(library);
                     return (
-                      <button
+                      <Button
                         type="button"
                         onClick={() => setSelectedLibraryId(library.id)}
                         class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
@@ -846,24 +849,24 @@ export const MediaView: Component = () => {
                           )}
                           <span>{library.name}</span>
                         </span>
-                      </button>
+                      </Button>
                     );
                   })()
                 }
               </For>
               <For each={suggestedPeers()}>
                 {(peer) => (
-                  <button
+                  <Button
                     type="button"
                     class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)]"
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
                     {`Peer ${peer.endpoint_id.slice(0, 8)}`}
-                  </button>
+                  </Button>
                 )}
               </For>
-              <button
+              <Button
                 type="button"
                 class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-3 py-2 text-[14px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={isSubmitting()}
@@ -871,25 +874,25 @@ export const MediaView: Component = () => {
                 aria-label="Add library"
               >
                 +
-              </button>
+              </Button>
             </div>
             <div class="flex items-center gap-3">
-              <button
+              <Button
                 type="button"
                 class="rounded-full border border-[var(--border-soft)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={!canRefreshSelectedLibrary() || isSubmitting()}
                 onClick={() => void handleRefreshLibrary()}
               >
                 Refresh
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 class="rounded-full border border-[var(--danger-border)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={!selectedLibrary()?.removable || isSubmitting()}
                 onClick={() => void handleRemoveLibrary()}
               >
                 Remove
-              </button>
+              </Button>
             </div>
           </div>
         </div>

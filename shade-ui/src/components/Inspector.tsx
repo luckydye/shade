@@ -31,6 +31,7 @@ import {
   state,
 } from "../store/editor";
 import type { LayerInfo } from "../store/editor";
+import { Button } from "./Button";
 
 type MobileLayerFocus =
   | "light"
@@ -63,6 +64,13 @@ interface SliderProps {
 const Slider: Component<SliderProps> = (props) => {
   let trackRef!: HTMLDivElement;
   const [dragging, setDragging] = createSignal(false);
+  let pendingPointer:
+    | {
+        pointerId: number;
+        startX: number;
+        startY: number;
+      }
+    | null = null;
 
   const fraction = () =>
     clamp((props.value - props.min) / (props.max - props.min), 0, 1);
@@ -95,19 +103,60 @@ const Slider: Component<SliderProps> = (props) => {
       <div
         ref={trackRef!}
         class="relative h-8 cursor-pointer select-none touch-none"
+        style={{ "touch-action": "pan-y" }}
         onPointerDown={(e) => {
-          e.preventDefault();
-          trackRef.setPointerCapture(e.pointerId);
-          setDragging(true);
-          props.onChange(resolve(e.clientX));
+          if (e.pointerType === "mouse") {
+            e.preventDefault();
+            trackRef.setPointerCapture(e.pointerId);
+            setDragging(true);
+            props.onChange(resolve(e.clientX));
+            return;
+          }
+          pendingPointer = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+          };
         }}
         onPointerMove={(e) => {
-          if (!dragging()) return;
+          if (!dragging()) {
+            if (!pendingPointer || pendingPointer.pointerId !== e.pointerId) {
+              return;
+            }
+            const deltaX = Math.abs(e.clientX - pendingPointer.startX);
+            const deltaY = Math.abs(e.clientY - pendingPointer.startY);
+            if (deltaX < 8 && deltaY < 8) {
+              return;
+            }
+            if (deltaY > deltaX) {
+              pendingPointer = null;
+              return;
+            }
+            e.preventDefault();
+            trackRef.setPointerCapture(e.pointerId);
+            pendingPointer = null;
+            setDragging(true);
+            props.onChange(resolve(e.clientX));
+            return;
+          }
+          e.preventDefault();
           props.onChange(resolve(e.clientX));
         }}
         onPointerUp={(e) => {
+          if (!dragging() && pendingPointer?.pointerId === e.pointerId) {
+            pendingPointer = null;
+            props.onChange(resolve(e.clientX));
+            return;
+          }
           if (trackRef.hasPointerCapture(e.pointerId))
             trackRef.releasePointerCapture(e.pointerId);
+          pendingPointer = null;
+          setDragging(false);
+        }}
+        onPointerCancel={(e) => {
+          if (trackRef.hasPointerCapture(e.pointerId))
+            trackRef.releasePointerCapture(e.pointerId);
+          pendingPointer = null;
           setDragging(false);
         }}
         onDblClick={() => props.onChange(props.defaultValue)}
@@ -1047,7 +1096,7 @@ const Inspector: Component = () => {
       <div class="space-y-3">
         <div class="flex gap-1">
           {(["red", "green", "blue"] as const).map((c) => (
-            <button
+            <Button
               type="button"
               onClick={() => setHslTab(c)}
               class={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors ${
@@ -1057,7 +1106,7 @@ const Inspector: Component = () => {
               }`}
             >
               {c}
-            </button>
+            </Button>
           ))}
         </div>
         <Slider
@@ -1588,7 +1637,7 @@ const Inspector: Component = () => {
           <Show
             when={selectedCropLayer()}
             fallback={
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   const cropLayerIdx = findCropLayerIdx();
@@ -1601,17 +1650,17 @@ const Inspector: Component = () => {
                 class="min-h-10 border border-[var(--border-soft)] bg-[var(--surface)] px-3 text-[12px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
               >
                 {hasCropLayer() ? "Select crop" : "Add crop layer"}
-              </button>
+              </Button>
             }
           >
-            <button
+            <Button
               type="button"
               onClick={() => setCropField("x", 0)}
               class="min-h-10 border border-[var(--border-soft)] bg-[var(--surface)] px-3 text-[12px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
             >
               Align left
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => {
                 void applyEdit({
@@ -1627,7 +1676,7 @@ const Inspector: Component = () => {
               class="min-h-10 border border-[var(--border-soft)] bg-[var(--surface)] px-3 text-[12px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
             >
               Reset
-            </button>
+            </Button>
           </Show>
         </div>
       </div>
@@ -1640,13 +1689,13 @@ const Inspector: Component = () => {
         <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)]">
           Presets
         </div>
-        <button
+        <Button
           type="button"
           onClick={() => void refreshPresetList()}
           class="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-faint)] transition-colors hover:text-[var(--text-muted)]"
         >
           Refresh
-        </button>
+        </Button>
       </div>
       <div class="flex gap-2">
         <input
@@ -1656,14 +1705,14 @@ const Inspector: Component = () => {
           placeholder="Preset name"
           class="min-h-10 flex-1 border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)]"
         />
-        <button
+        <Button
           type="button"
           disabled={isPresetBusy() || state.canvasWidth <= 0}
           onClick={() => void handleSavePreset()}
           class="min-h-10 rounded-xl border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
         >
           Save
-        </button>
+        </Button>
       </div>
       <Show when={presetStatus()}>
         {(status) => <div class="text-[11px] font-medium text-[var(--text-icon)]">{status()}</div>}
@@ -1682,14 +1731,14 @@ const Inspector: Component = () => {
               <div class="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--text-secondary)]">
                 {preset.name}
               </div>
-              <button
+              <Button
                 type="button"
                 disabled={isPresetBusy() || state.canvasWidth <= 0}
                 onClick={() => void handleLoadPreset(preset.name)}
                 class="rounded-lg border border-[var(--border-medium)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
               >
                 Load
-              </button>
+              </Button>
             </div>
           ))}
         </Show>
@@ -1721,25 +1770,25 @@ const Inspector: Component = () => {
                   Current
                 </div>
               </Show>
-              <button
+              <Button
                 type="button"
                 disabled={isPresetBusy() || state.canvasWidth <= 0 || snapshot.is_current}
                 onClick={() => void handleLoadSnapshot(snapshot.version)}
                 class="rounded-lg border border-[var(--border-medium)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
               >
                 Load
-              </button>
+              </Button>
             </div>
           ))}
         </Show>
-        <button
+        <Button
           type="button"
           disabled={isPresetBusy() || state.canvasWidth <= 0}
           onClick={() => void handleSaveSnapshot()}
           class="mt-1 rounded-xl border border-[var(--border-medium)] bg-[var(--surface)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
         >
           Save Snapshot
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1748,7 +1797,7 @@ const Inspector: Component = () => {
     <div class={props.class ?? ""}>
       <div class="flex gap-1 rounded-xl border border-[var(--border-soft)] bg-[var(--surface-faint)] p-1">
         {(["edit", "presets"] as const).map((tab) => (
-          <button
+          <Button
             type="button"
             onClick={() => setInspectorTab(tab)}
             class={`flex-1 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] transition-colors ${
@@ -1758,7 +1807,7 @@ const Inspector: Component = () => {
             }`}
           >
             {tab}
-          </button>
+          </Button>
         ))}
       </div>
     </div>
@@ -1796,7 +1845,7 @@ const Inspector: Component = () => {
                       : "border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:border-[var(--border-medium)] hover:bg-[var(--surface-hover)]"
                   } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
                 >
-                  <button
+                  <Button
                     type="button"
                     onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
                     class="inline-flex h-5 w-5 cursor-grab items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text-muted)] active:cursor-grabbing"
@@ -1810,7 +1859,7 @@ const Inspector: Component = () => {
                       <span class="h-0.5 w-0.5 rounded-full bg-current" />
                       <span class="h-0.5 w-0.5 rounded-full bg-current" />
                     </span>
-                  </button>
+                  </Button>
                   <span
                     class={`inline-flex w-4 items-center justify-center text-xs leading-none ${
                       layer.visible ? "text-[var(--text)]" : "text-[var(--text-subtle)]"
@@ -1823,17 +1872,17 @@ const Inspector: Component = () => {
                   >
                     {layer.visible ? "●" : "○"}
                   </span>
-                  <button
+                  <Button
                     type="button"
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={() => selectLayer(realIdx)}
                     class="min-w-0 flex-1 truncate text-left text-[13px] font-semibold tracking-[-0.01em] py-1.5"
                   >
                     {layerName}
-                  </button>
+                  </Button>
                   <Show when={layer.kind !== "crop"}>
                     {layer.has_mask ? (
-                      <button
+                      <Button
                         type="button"
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
@@ -1844,9 +1893,9 @@ const Inspector: Component = () => {
                         title="Remove mask"
                       >
                         M
-                      </button>
+                      </Button>
                     ) : (
-                      <button
+                      <Button
                         type="button"
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
@@ -1857,11 +1906,11 @@ const Inspector: Component = () => {
                         title="Add gradient mask"
                       >
                         +M
-                      </button>
+                      </Button>
                     )}
                   </Show>
                   <Show when={layer.kind !== "image"}>
-                    <button
+                    <Button
                       type="button"
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
@@ -1872,25 +1921,25 @@ const Inspector: Component = () => {
                       title="Delete layer"
                     >
                       <TrashIcon />
-                    </button>
+                    </Button>
                   </Show>
                 </div>
                 <Show when={maskPickerLayer() === realIdx}>
                   <div class="flex gap-1 border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2.5 py-1.5">
-                    <button
+                    <Button
                       type="button"
                       onClick={() => void handleApplyLinearMask(realIdx)}
                       class="flex-1 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] py-1 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
                     >
                       Linear
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       onClick={() => void handleApplyRadialMask(realIdx)}
                       class="flex-1 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] py-1 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
                     >
                       Radial
-                    </button>
+                    </Button>
                   </div>
                 </Show>
               </>
@@ -1898,7 +1947,7 @@ const Inspector: Component = () => {
           })}
         </div>
         <div class="mt-3 grid grid-cols-2 gap-2">
-          <button
+          <Button
             type="button"
             onClick={() => void addLayer("adjustment")}
             class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-[var(--border-medium)] bg-[var(--surface-faint)] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
@@ -1907,8 +1956,8 @@ const Inspector: Component = () => {
               <SparkIcon />
             </span>
             <span>Add Adjustments</span>
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => void addLayer("crop")}
             class="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-[var(--border-medium)] bg-[var(--surface-faint)] px-2 py-2 text-[9px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
@@ -1917,7 +1966,7 @@ const Inspector: Component = () => {
               <CropIcon />
             </span>
             <span>Add Crop</span>
-          </button>
+          </Button>
         </div>
       </div>
       <InspectorTabs class="mb-4" />
@@ -2008,7 +2057,7 @@ const Inspector: Component = () => {
                           inferFocus(state.layers[idx]);
                         const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
                         return (
-                          <button
+                          <Button
                             type="button"
                             onClick={() => {
                               selectLayer(idx);
@@ -2021,13 +2070,13 @@ const Inspector: Component = () => {
                           >
                             <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
                             <span>{focusLabels[focus()]}</span>
-                          </button>
+                          </Button>
                         );
                       })}
             
                       <div class="flex-1"></div>
             
-                      <button
+                      <Button
                         type="button"
                         onClick={() => setIsPickerOpen((v) => !v)}
                         class={`ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em] ${
@@ -2038,7 +2087,7 @@ const Inspector: Component = () => {
                           +
                         </span>
                         <span>Add</span>
-                      </button>
+                      </Button>
             
                       <Show
                         when={
@@ -2046,14 +2095,14 @@ const Inspector: Component = () => {
                           state.layers[state.selectedLayerIdx]?.kind !== "image"
                         }
                       >
-                        <button
+                        <Button
                           type="button"
                           onClick={() => void handleDeleteSelectedLayer()}
                           class="ml-1 flex min-w-[2.5rem] flex-col items-center gap-1 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.05em]"
                         >
                           <TrashIcon />
                           <span>Delete</span>
-                        </button>
+                        </Button>
                       </Show>
                     </div>
                   </Show>
@@ -2094,24 +2143,24 @@ const Inspector: Component = () => {
             <div class="grid grid-rows-6 gap-2">
               {(["light", "levels", "color", "wb", "curves", "grain", "vignette", "sharpen", "hsl", "denoise"] as const).map(
                 (focus) => (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => void handleAddLayer(focus)}
-                    class="flex items-center gap-1.5 rounded-xl border border-[var(--border-medium)] px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] active:bg-[var(--surface-selected)]"
+                    class="flex items-center gap-1.5 rounded-xl border border-[var(--border-medium)] px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] data-[pressed=true]:bg-[var(--surface-selected)]"
                   >
                     <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]()}</span>
                     <span>{focusLabels[focus]}</span>
-                  </button>
+                  </Button>
                 ),
               )}
 
-              <button
+              <Button
                 type="button"
                 onClick={() => void setIsPickerOpen(false)}
-                class="flex justify-end items-center gap-1.5 rounded-xl px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] active:bg-[var(--surface-selected)]"
+                class="flex justify-end items-center gap-1.5 rounded-xl px-3 py-3 text-[10px] font-bold uppercase tracking-[0.05em] text-[var(--text-muted)] data-[pressed=true]:bg-[var(--surface-selected)]"
               >
                 <span>Cancel</span>
-              </button>
+              </Button>
             </div>
           </div>
         </div>

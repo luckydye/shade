@@ -9,6 +9,7 @@ import {
   removeMask,
   moveLayer,
 } from "../store/editor";
+import { Button } from "./Button";
 
 type GradientKind = "linear" | "radial";
 type DropTarget = { layerIdx: number; position: "before" | "after" };
@@ -132,7 +133,7 @@ const LayerPanel: Component = () => {
                     void commitDrop();
                   }}
                 >
-                  <button
+                  <Button
                     class={`w-4 h-4 flex-shrink-0 rounded-sm border text-center leading-none
                       ${
                         layer.visible
@@ -146,7 +147,7 @@ const LayerPanel: Component = () => {
                     title="Toggle visibility"
                   >
                     {layer.visible ? "●" : "○"}
-                  </button>
+                  </Button>
                   <span class="flex-1 truncate">
                     {layer.kind === "image"
                       ? "Image"
@@ -155,7 +156,7 @@ const LayerPanel: Component = () => {
                         : "Adjustment"}
                   </span>
                   <Show when={layer.has_mask}>
-                    <button
+                    <Button
                       class="text-blue-400 text-[10px] hover:text-red-400 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -164,10 +165,10 @@ const LayerPanel: Component = () => {
                       title="Remove mask"
                     >
                       M
-                    </button>
+                    </Button>
                   </Show>
                   <Show when={!layer.has_mask && layer.kind !== "crop"}>
-                    <button
+                    <Button
                       class="text-[var(--text-faint)] text-[10px] hover:text-[var(--text)] transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -176,10 +177,10 @@ const LayerPanel: Component = () => {
                       title="Add mask"
                     >
                       +M
-                    </button>
+                    </Button>
                   </Show>
                   {layer.kind !== "image" && (
-                    <button
+                    <Button
                       class="text-[var(--text-faint)] transition-colors hover:text-[var(--text)]"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -188,23 +189,23 @@ const LayerPanel: Component = () => {
                       title="Delete layer"
                     >
                       ×
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <Show when={maskTarget() === realIdx}>
                   <div class="flex gap-1 px-2 py-1 bg-[var(--surface-faint)] border-b border-[var(--border)]">
-                    <button
+                    <Button
                       class="flex-1 text-[10px] py-0.5 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
                       onClick={() => void applyLinearMask(realIdx)}
                     >
                       Linear
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       class="flex-1 text-[10px] py-0.5 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
                       onClick={() => void applyRadialMask(realIdx)}
                     >
                       Radial
-                    </button>
+                    </Button>
                   </div>
                 </Show>
                 <Show when={rowDropTarget()?.layerIdx === realIdx && rowDropTarget()?.position === "after"}>
@@ -218,24 +219,24 @@ const LayerPanel: Component = () => {
         </For>
       </div>
       <div class="p-2 border-t border-[var(--border-medium)]">
-        <button
+        <Button
           onClick={addAdjustmentLayer}
           class="w-full text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Adjustment
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={addCurvesLayer}
           class="w-full mt-2 text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Curves
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => void addLayer("crop")}
           class="w-full mt-2 text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Crop
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { Component, createResource, For, Show } from "solid-js";
 import { getPeerThumbnail, type SharedPicture } from "../bridge/index";
 import { openPeerImage } from "../store/editor";
 import { p2pState, selectPeer } from "../store/p2p";
+import { Button } from "./Button";
 
 const RemoteImageTile: Component<{ peerId: string; picture: SharedPicture }> = (
   props,
@@ -12,7 +13,7 @@ const RemoteImageTile: Component<{ peerId: string; picture: SharedPicture }> = (
   );
 
   return (
-    <button
+    <Button
       type="button"
       class="flex flex-col gap-1.5 rounded-xl text-left"
       onClick={() => {
@@ -39,7 +40,7 @@ const RemoteImageTile: Component<{ peerId: string; picture: SharedPicture }> = (
         </Show>
       </div>
       <span class="truncate px-0.5 text-[11px] text-white/40">{props.picture.name}</span>
-    </button>
+    </Button>
   );
 };
 
@@ -62,7 +63,7 @@ export const PeerBrowser: Component = () => (
     <div class="mt-4 flex flex-wrap gap-2">
       <For each={p2pState.peers}>
         {(peer) => (
-          <button
+          <Button
             type="button"
             class={`rounded-full border px-3 py-1.5 text-[12px] transition-colors ${
               p2pState.selectedPeerId === peer.endpoint_id
@@ -74,7 +75,7 @@ export const PeerBrowser: Component = () => (
             }}
           >
             {peer.endpoint_id.slice(0, 8)}
-          </button>
+          </Button>
         )}
       </For>
     </div>
