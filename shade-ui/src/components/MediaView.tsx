@@ -47,6 +47,7 @@ import {
   openPeerImage,
   setTransitionMediaSrc,
   state,
+  transitionMediaSrc,
 } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 
@@ -315,7 +316,7 @@ const MediaTile: Component<{
 
   onCleanup(() => {
     const url = src();
-    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) {
+    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc && url !== transitionMediaSrc()) {
       URL.revokeObjectURL(url);
     }
   });

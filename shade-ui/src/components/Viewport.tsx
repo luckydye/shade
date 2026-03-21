@@ -128,7 +128,6 @@ export const Viewport: Component = () => {
   const shouldShowZoomIndicator = () =>
     state.viewportZoom > 1.001 || state.viewportZoom < 0.999;
   const viewportZoomPercent = () => getViewportZoomPercent();
-  const transitionOverlaySrc = () => transitionMediaSrc() ?? state.loadingMediaSrc;
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
 
@@ -422,6 +421,17 @@ export const Viewport: Component = () => {
     ctx.restore();
   }
 
+  function getArtboardPlaceholderFill(isLoading: boolean) {
+    if (!containerRef) {
+      return isLoading ? "rgba(128, 128, 128, 0.32)" : "rgba(128, 128, 128, 0.18)";
+    }
+    const styles = getComputedStyle(containerRef);
+    const fill = styles
+      .getPropertyValue(isLoading ? "--surface-active" : "--surface")
+      .trim();
+    return fill || (isLoading ? "rgba(128, 128, 128, 0.32)" : "rgba(128, 128, 128, 0.18)");
+  }
+
   function drawFrame() {
     if (!canvasRef || !containerRef) return;
     const ctx = canvasRef.getContext("2d");
@@ -463,18 +473,25 @@ export const Viewport: Component = () => {
         const cropLayer = isSelected ? selectedCropLayer() : null;
         const committedCrop = isSelected ? getCommittedCropRect() : null;
         const clip = cropLayer || !committedCrop ? undefined : committedCrop;
-        compositeArtboard(
-          ctx,
-          worldArtboard,
-          isSelected ? backdropTile() ?? artboard.backdropTile : artboard.backdropTile,
-          isSelected && !cropLayer ? previewTile() ?? artboard.previewTile : null,
-          t,
-          clip,
-        );
+        const visibleBackdrop = isSelected ? backdropTile() ?? artboard.backdropTile : artboard.backdropTile;
+        const visiblePreview =
+          isSelected && !cropLayer ? previewTile() ?? artboard.previewTile : null;
         const sx = worldArtboard.worldX * t.scale + t.dx;
         const sy = worldArtboard.worldY * t.scale + t.dy;
         const sw = worldArtboard.width * t.scale;
         const sh = worldArtboard.height * t.scale;
+        if (!visibleBackdrop && !visiblePreview) {
+          ctx.fillStyle = getArtboardPlaceholderFill(isSelected && state.isLoading);
+          ctx.fillRect(sx, sy, sw, sh);
+        }
+        compositeArtboard(
+          ctx,
+          worldArtboard,
+          visibleBackdrop,
+          visiblePreview,
+          t,
+          clip,
+        );
         ctx.save();
         ctx.globalAlpha = shouldFadeChrome ? ARTBOARD_CHROME_FADE : 1;
         ctx.strokeStyle = "rgba(148, 148, 148, 0.7)";
@@ -1147,29 +1164,21 @@ export const Viewport: Component = () => {
                   ? "active-editor-media"
                   : "none",
             }}
-            class={`${state.layers.length === 0 ? "opacity-0" : "opacity-100"}`}
+            class={`${
+              state.artboards.length === 0 && !state.isLoading ? "opacity-0" : "opacity-100"
+            }`}
           />
-          {transitionOverlaySrc() &&
-            (transitionMediaSrc() !== null || (state.isLoading && !previewTile())) && (
+          {transitionMediaSrc() && (
             <div class="pointer-events-none absolute inset-0">
               <img
-                src={transitionOverlaySrc()!}
+                src={transitionMediaSrc()!}
                 alt=""
                 class="absolute inset-0 h-full w-full object-contain"
                 style={{
-                  "view-transition-name":
-                    transitionMediaSrc() !== null ? "active-media" : "none",
+                  "view-transition-name": "active-media",
                 }}
               />
               <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_40%)]" />
-              {state.isLoading && (
-                <div class="absolute inset-x-0 bottom-6 flex items-center justify-center">
-                  <span class="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur">
-                    <span class="h-2 w-2 animate-pulse rounded-full bg-white" />
-                    Loading
-                  </span>
-                </div>
-              )}
             </div>
           )}
           {selectedCropLayer() && activeCrop() && (
