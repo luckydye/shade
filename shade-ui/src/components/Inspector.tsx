@@ -834,6 +834,7 @@ const Inspector: Component = () => {
     let nextId = 0;
     let lastTapTime = 0;
     let lastTapId = -1;
+    let activeTouchId: number | null = null;
 
     createEffect(
       on(
@@ -905,6 +906,64 @@ const Inspector: Component = () => {
       };
     };
 
+    const updateDraggingPoint = (clientX: number, clientY: number) => {
+      const id = draggingId();
+      if (id === null) {
+        return;
+      }
+      const { x, y } = normalizePoint(svgCoords({ clientX, clientY }));
+      const next = pts()
+        .map((p) => (p.id === id ? { ...p, x, y } : p))
+        .sort((a, b) => a.x - b.x);
+      setPts(next);
+      selectedAdjustmentLayerOrThrow();
+      void applyCurves(next);
+    };
+
+    const finishDraggingPoint = () => {
+      activeTouchId = null;
+      setDraggingId(null);
+    };
+
+    const startNewPointDrag = (clientX: number, clientY: number) => {
+      const { x, y } = normalizePoint(svgCoords({ clientX, clientY }));
+      const id = nextId++;
+      const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
+      setPts(next);
+      selectedAdjustmentLayerOrThrow();
+      void applyCurves(next);
+      setDraggingId(id);
+    };
+
+    const startExistingPointDrag = (id: number) => {
+      setHoveredId(id);
+      const now = Date.now();
+      if (now - lastTapTime < 300 && lastTapId === id) {
+        lastTapTime = 0;
+        const next = pts().filter((p) => p.id !== id);
+        setPts(next);
+        selectedAdjustmentLayerOrThrow();
+        void applyCurves(next);
+        finishDraggingPoint();
+        setHoveredId(null);
+        return false;
+      }
+      lastTapTime = now;
+      lastTapId = id;
+      setDraggingId(id);
+      return true;
+    };
+
+    const findTouch = (touches: TouchList, identifier: number) => {
+      for (let index = 0; index < touches.length; index += 1) {
+        const touch = touches.item(index);
+        if (touch?.identifier === identifier) {
+          return touch;
+        }
+      }
+      return null;
+    };
+
     return (
       <div class="py-1">
         <div class="mb-2 flex items-center justify-between">
@@ -923,36 +982,69 @@ const Inspector: Component = () => {
             ref={svgRef!}
             viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
             class="block h-40 w-full select-none"
-            style={{ cursor: draggingId() !== null ? "grabbing" : "crosshair" }}
+            style={{
+              cursor: draggingId() !== null ? "grabbing" : "crosshair",
+              "touch-action": "none",
+            }}
             onPointerDown={(e) => {
+              if (e.pointerType === "touch") return;
               if (e.target !== svgRef) return;
-              const { x, y } = normalizePoint(svgCoords(e));
-              const id = nextId++;
-              const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
-              setPts(next);
-              selectedAdjustmentLayerOrThrow();
-              void applyCurves(next);
+              startNewPointDrag(e.clientX, e.clientY);
               svgRef.setPointerCapture(e.pointerId);
-              setDraggingId(id);
             }}
             onPointerMove={(e) => {
-              const id = draggingId();
-              if (id === null) return;
-              const { x, y } = normalizePoint(svgCoords(e));
-              const next = pts()
-                .map((p) => (p.id === id ? { ...p, x, y } : p))
-                .sort((a, b) => a.x - b.x);
-              setPts(next);
-              selectedAdjustmentLayerOrThrow();
-              void applyCurves(next);
+              if (e.pointerType === "touch") return;
+              updateDraggingPoint(e.clientX, e.clientY);
             }}
             onPointerUp={(e) => {
+              if (e.pointerType === "touch") return;
               if (svgRef.hasPointerCapture(e.pointerId))
                 svgRef.releasePointerCapture(e.pointerId);
-              setDraggingId(null);
+              finishDraggingPoint();
             }}
             onPointerLeave={() => {
-              setDraggingId(null);
+              finishDraggingPoint();
+              setHoveredId(null);
+            }}
+            onTouchStart={(e) => {
+              if (e.touches.length !== 1) {
+                finishDraggingPoint();
+                return;
+              }
+              const touch = e.touches.item(0);
+              if (!touch) {
+                throw new Error("curve touch interaction requires an active touch point");
+              }
+              activeTouchId = touch.identifier;
+              if (e.target === svgRef) {
+                e.preventDefault();
+                startNewPointDrag(touch.clientX, touch.clientY);
+              }
+            }}
+            onTouchMove={(e) => {
+              if (activeTouchId === null) {
+                return;
+              }
+              const touch = findTouch(e.touches, activeTouchId);
+              if (!touch) {
+                return;
+              }
+              e.preventDefault();
+              updateDraggingPoint(touch.clientX, touch.clientY);
+            }}
+            onTouchEnd={(e) => {
+              if (activeTouchId === null) {
+                return;
+              }
+              const touch = findTouch(e.changedTouches, activeTouchId);
+              if (!touch) {
+                return;
+              }
+              e.preventDefault();
+              finishDraggingPoint();
+            }}
+            onTouchCancel={() => {
+              finishDraggingPoint();
               setHoveredId(null);
             }}
           >
@@ -1019,6 +1111,43 @@ const Inspector: Component = () => {
                 <circle
                   cx={chartX(pt.x)}
                   cy={chartY(pt.y)}
+                  r="14"
+                  fill="transparent"
+                  stroke="none"
+                  style={{
+                    cursor: draggingId() === pt.id ? "grabbing" : "grab",
+                  }}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    if (e.touches.length !== 1) {
+                      finishDraggingPoint();
+                      return;
+                    }
+                    const touch = e.touches.item(0);
+                    if (!touch) {
+                      throw new Error("curve point touch interaction requires an active touch point");
+                    }
+                    activeTouchId = touch.identifier;
+                    e.preventDefault();
+                    if (!startExistingPointDrag(pt.id)) {
+                      return;
+                    }
+                  }}
+                  onPointerDown={(e) => {
+                    if (e.pointerType === "touch") return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (!startExistingPointDrag(pt.id)) {
+                      if (svgRef.hasPointerCapture(e.pointerId))
+                        svgRef.releasePointerCapture(e.pointerId);
+                      return;
+                    }
+                    svgRef.setPointerCapture(e.pointerId);
+                  }}
+                />
+                <circle
+                  cx={chartX(pt.x)}
+                  cy={chartY(pt.y)}
                   r="4.5"
                   fill="var(--curve-stroke)"
                   stroke="var(--curve-point-stroke)"
@@ -1030,28 +1159,7 @@ const Inspector: Component = () => {
                   onPointerLeave={() =>
                     setHoveredId((current) => (current === pt.id ? null : current))
                   }
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    setHoveredId(pt.id);
-                    const now = Date.now();
-                    if (now - lastTapTime < 300 && lastTapId === pt.id) {
-                      lastTapTime = 0;
-                      const next = pts().filter((p) => p.id !== pt.id);
-                      setPts(next);
-                      selectedAdjustmentLayerOrThrow();
-                      void applyCurves(next);
-                      if (svgRef.hasPointerCapture(e.pointerId))
-                        svgRef.releasePointerCapture(e.pointerId);
-                      setDraggingId(null);
-                      setHoveredId(null);
-                      return;
-                    }
-                    lastTapTime = now;
-                    lastTapId = pt.id;
-                    e.preventDefault();
-                    svgRef.setPointerCapture(e.pointerId);
-                    setDraggingId(pt.id);
-                  }}
+                  pointer-events="none"
                 />
               </>
             ))}
