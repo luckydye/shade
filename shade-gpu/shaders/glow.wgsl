@@ -57,16 +57,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let resolution_scale = clamp(reference_longest_edge / 2000.0, 0.75, 2.0);
     let radius_ref_px = (1.5 + spread_t * 24.0) * resolution_scale;
     let sigma_ref_px = max(radius_ref_px * 0.55, 1.0);
-    let sample_step_ref_px = max(radius_ref_px / 4.0, 1.0);
+    let sample_step_ref_px = max(radius_ref_px / 6.0, 0.4);
+    let row_step_ref_px = sample_step_ref_px * 0.8660254;
     let output_step = max(params.glow.yz, vec2<f32>(0.0001, 0.0001));
     let p = vec2<f32>(gid.xy);
 
     var glow_energy = 0.0;
     var weight_sum = 0.0;
 
-    for (var oy: i32 = -4; oy <= 4; oy = oy + 1) {
-        for (var ox: i32 = -4; ox <= 4; ox = ox + 1) {
-            let offset_ref = vec2<f32>(f32(ox), f32(oy)) * sample_step_ref_px;
+    for (var oy: i32 = -6; oy <= 6; oy = oy + 1) {
+        let row_shift = select(0.0, 0.5, abs(oy) % 2 == 1);
+        for (var ox: i32 = -6; ox <= 6; ox = ox + 1) {
+            let offset_ref = vec2<f32>(
+                (f32(ox) + row_shift) * sample_step_ref_px,
+                f32(oy) * row_step_ref_px,
+            );
             let offset_output = offset_ref / output_step;
             let dist2 = dot(offset_ref, offset_ref);
             let weight = exp(-dist2 / (2.0 * sigma_ref_px * sigma_ref_px));
