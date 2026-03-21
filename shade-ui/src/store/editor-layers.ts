@@ -343,9 +343,20 @@ export async function removeMask(idx: number) {
   await runLayerMutation(() => bridge.removeMask(idx));
 }
 
-export async function addLayer(kind: string) {
-  const idx = await bridge.addLayer(kind);
+export async function addLayer(kind: string, position: number) {
+  let idx = await bridge.addLayer(kind);
   await refreshLayerStack();
+  if (position < 0 || position > state.layers.length) {
+    throw new Error("layer insertion position is out of bounds");
+  }
+  if (idx < 0 || idx >= state.layers.length) {
+    throw new Error("new layer could not be resolved after insertion");
+  }
+  if (idx !== position) {
+    await bridge.moveLayer(idx, position);
+    await refreshLayerStack();
+    idx = getMovedLayerIndex(idx, idx, position);
+  }
   setState("selectedLayerIdx", idx);
   await refreshPreview();
 }

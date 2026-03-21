@@ -19,12 +19,22 @@ const LayerPanel: Component = () => {
   const [dropTarget, setDropTarget] = createSignal<DropTarget | null>(null);
   let draggedLayerIdx: number | null = null;
 
+  const topLayerInsertPosition = () => state.layers.length;
+
+  const cropLayerInsertPosition = () => {
+    const imageLayerIdx = state.layers.findIndex((layer) => layer.kind === "image");
+    if (imageLayerIdx < 0) {
+      throw new Error("cannot add a crop layer without an image layer");
+    }
+    return imageLayerIdx + 1;
+  };
+
   const addAdjustmentLayer = async () => {
-    await addLayer("adjustment");
+    await addLayer("adjustment", topLayerInsertPosition());
   };
 
   const addCurvesLayer = async () => {
-    await addLayer("curves");
+    await addLayer("curves", topLayerInsertPosition());
   };
 
   const applyLinearMask = async (idx: number) => {
@@ -232,7 +242,7 @@ const LayerPanel: Component = () => {
           + Add Curves
         </Button>
         <Button
-          onClick={() => void addLayer("crop")}
+          onClick={() => void addLayer("crop", cropLayerInsertPosition())}
           class="w-full mt-2 text-xs py-1 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
         >
           + Add Crop

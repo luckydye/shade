@@ -31,6 +31,7 @@ import {
   state,
 } from "../store/editor";
 import type { LayerInfo } from "../store/editor";
+import { getSelectedArtboard, type ArtboardSource } from "../store/editor-store";
 import { Button } from "./Button";
 
 type MobileLayerFocus =
@@ -66,6 +67,8 @@ const EMPTY_STATE_CLASS =
   "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
 const LAYER_ROW_CLASS =
   "grid h-8 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
+const ADD_LAYER_ROW_CLASS =
+  "grid h-7 grid-cols-[0px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const ADD_LAYER_FOCI = [
@@ -644,6 +647,31 @@ const ControlSection: Component<{ title: string; children: JSX.Element }> = (pro
   </section>
 );
 
+function imageSourceDetail(source: ArtboardSource) {
+  switch (source.kind) {
+    case "path":
+      return {
+        filename: source.path.split(/[\\/]/).pop() ?? source.path,
+        location: source.path,
+        source: "Disk",
+      };
+    case "file":
+      return {
+        filename: source.file.name,
+        location: "Imported file",
+        source: "File",
+      };
+    case "peer":
+      return {
+        filename: source.picture.name,
+        location: source.peerEndpointId,
+        source: "Peer",
+      };
+    default:
+      throw new Error("unsupported artboard source");
+  }
+}
+
 export const Inspector: Component = () => {
   const [layerFocusOverrides, setLayerFocusOverrides] = createSignal(
     new Map<number, MobileLayerFocus>(),
@@ -667,6 +695,7 @@ export const Inspector: Component = () => {
   let desktopLayerListRef: HTMLDivElement | undefined;
 
   const selectedLayer = () => state.layers[state.selectedLayerIdx];
+  const selectedArtboard = () => getSelectedArtboard();
   const selectedCropLayer = () => {
     const layer = selectedLayer();
     return layer?.kind === "crop" ? layer : null;
@@ -1642,6 +1671,19 @@ export const Inspector: Component = () => {
       height: state.canvasHeight,
       rotation: 0,
     };
+  const imageDetails = () => {
+    const artboard = selectedArtboard();
+    if (!artboard) {
+      throw new Error("image details require a selected artboard");
+    }
+    const source = imageSourceDetail(artboard.source);
+    return {
+      ...source,
+      dimensions: `${artboard.width} × ${artboard.height}`,
+      bitDepth: artboard.sourceBitDepth,
+      colorSpace: state.previewDisplayColorSpace,
+    };
+  };
   const setCropField = (field: "x" | "y" | "width" | "height" | "rotation", value: number) => {
     if (!Number.isFinite(value)) {
       throw new Error(`crop ${field} must be a finite number`);
@@ -1664,9 +1706,9 @@ export const Inspector: Component = () => {
   const handleAddLayer = async (focus: MobileLayerFocus) => {
     setIsPickerOpen(false);
     if (focus === "curves") {
-      await addLayer("curves");
+      await addLayer("curves", state.layers.length);
     } else {
-      await addLayer("adjustment");
+      await addLayer("adjustment", state.layers.length);
     }
     const newIdx = state.selectedLayerIdx;
     setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
@@ -1705,6 +1747,16 @@ export const Inspector: Component = () => {
       throw new Error("cannot delete the image layer");
     }
     await deleteLayer(state.selectedLayerIdx);
+  };
+
+  const topLayerInsertPosition = () => state.layers.length;
+
+  const cropLayerInsertPosition = () => {
+    const imageLayerIdx = state.layers.findIndex((layer) => layer.kind === "image");
+    if (imageLayerIdx < 0) {
+      throw new Error("cannot add a crop layer without an image layer");
+    }
+    return imageLayerIdx + 1;
   };
 
   const refreshPresetList = async () => {
@@ -1863,7 +1915,7 @@ export const Inspector: Component = () => {
                     selectLayer(cropLayerIdx);
                     return;
                   }
-                  void addLayer("crop");
+                  void addLayer("crop", cropLayerInsertPosition());
                 }}
                 class={SECONDARY_BUTTON_CLASS}
               >
@@ -1901,26 +1953,57 @@ export const Inspector: Component = () => {
     );
   };
 
+  const ImageInfoPanel: Component = () => {
+    const details = () => imageDetails();
+    return (
+      <div class="flex flex-col gap-4 pt-1">
+        <SectionHeader title="Image" />
+        <div class="flex flex-col gap-2 rounded-lg bg-[var(--surface-subtle)] p-3 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+          {(
+            [
+              { label: "Filename", value: details().filename },
+              { label: "Location", value: details().location },
+              { label: "Source", value: details().source },
+              { label: "Dimensions", value: details().dimensions },
+              { label: "Bit Depth", value: details().bitDepth },
+              { label: "Color Space", value: details().colorSpace },
+            ] as const
+          ).map((item) => (
+            <div class="grid grid-cols-[72px_minmax(0,1fr)] gap-3 py-1">
+              <div class={SECTION_TITLE_CLASS}>{item.label}</div>
+              <div class="min-w-0 break-words text-[13px] font-medium text-[var(--text-strong)]">
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const PresetsPanel: Component = () => (
-    <div class="flex flex-col gap-4">
-      <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-5 pt-1">
+      <section class="flex flex-col gap-3">
         <div class="flex items-center justify-between gap-3">
-          <SectionHeader title="Presets" />
+          <SectionHeader
+            title="Presets"
+            detail={presets().length > 0 ? () => `${presets().length}` : undefined}
+          />
           <Button
             type="button"
             onClick={() => void refreshPresetList()}
-            class="text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
+            class="h-8 px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
           >
             Refresh
           </Button>
         </div>
-        <div class="flex gap-2">
+        <div class="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
           <input
             type="text"
             value={presetName()}
             onInput={(event) => setPresetName(event.currentTarget.value)}
             placeholder="Preset name"
-            class={`min-w-0 flex-1 ${INPUT_CLASS}`}
+            class={`min-w-0 ${INPUT_CLASS}`}
           />
           <Button
             type="button"
@@ -1933,18 +2016,23 @@ export const Inspector: Component = () => {
         </div>
         <Show when={presetStatus()}>
           {(status) => (
-            <div class="text-xs font-medium text-[var(--text-value)]">{status()}</div>
+            <div class="rounded-md bg-[var(--surface-subtle)] px-2 py-2 text-xs font-medium text-[var(--text-value)] shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+              {status()}
+            </div>
           )}
         </Show>
         <Show
           when={presets().length > 0}
           fallback={<EmptyState>No presets saved yet.</EmptyState>}
         >
-          <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-1">
             {presets().map((preset) => (
-              <div class="flex h-8 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2">
-                <div class="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--text-strong)]">
-                  {preset.name}
+              <div class="grid min-h-8 grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-md bg-[var(--surface-subtle)] px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+                <div class="min-w-0">
+                  <div class="truncate text-[13px] font-medium text-[var(--text-strong)]">
+                    {preset.name}
+                  </div>
+                  <div class="text-[11px] text-[var(--text-dim)]">Saved preset</div>
                 </div>
                 <Button
                   type="button"
@@ -1958,17 +2046,30 @@ export const Inspector: Component = () => {
             ))}
           </div>
         </Show>
-      </div>
-      <div class="flex flex-col gap-2">
-        <SectionHeader title="Image Snapshots" />
+      </section>
+      <section class="flex flex-col gap-3">
+        <div class="flex items-center justify-between gap-3">
+          <SectionHeader
+            title="Image Snapshots"
+            detail={snapshots().length > 0 ? () => `${snapshots().length}` : undefined}
+          />
+          <Button
+            type="button"
+            disabled={isPresetBusy() || state.canvasWidth <= 0}
+            onClick={() => void handleSaveSnapshot()}
+            class={SECONDARY_BUTTON_CLASS}
+          >
+            Save
+          </Button>
+        </div>
         <Show
           when={snapshots().length > 0}
           fallback={<EmptyState>No snapshots yet.</EmptyState>}
         >
-          <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-1">
             {snapshots().map((snapshot) => (
-              <div class="flex min-h-8 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2 py-1.5">
-                <div class="min-w-0 flex-1">
+              <div class="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_72px] items-center gap-2 rounded-md bg-[var(--surface-subtle)] px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+                <div class="min-w-0">
                   <div class="truncate text-[13px] font-medium text-[var(--text-strong)]">
                     {`Version ${snapshot.version}`}
                   </div>
@@ -1993,15 +2094,7 @@ export const Inspector: Component = () => {
             ))}
           </div>
         </Show>
-        <Button
-          type="button"
-          disabled={isPresetBusy() || state.canvasWidth <= 0}
-          onClick={() => void handleSaveSnapshot()}
-          class={SECONDARY_BUTTON_CLASS}
-        >
-          Save Snapshot
-        </Button>
-      </div>
+      </section>
     </div>
   );
 
@@ -2033,6 +2126,19 @@ export const Inspector: Component = () => {
             class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)] transition-opacity"
             style={getDesktopDropCursorStyle()}
           />
+          <Button
+            type="button"
+            onClick={() => void addLayer("adjustment", topLayerInsertPosition())}
+            class={ADD_LAYER_ROW_CLASS}
+          >
+            <span />
+            <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+              +
+            </span>
+            <span>Add Adjustment</span>
+            <span />
+            <span />
+          </Button>
           {[...state.layers].reverse().map((layer, reverseIdx) => {
             const realIdx = state.layers.length - 1 - reverseIdx;
             const layerName =
@@ -2043,6 +2149,21 @@ export const Inspector: Component = () => {
                   : "Adjustment";
             return (
               <>
+                <Show when={layer.kind === "image"}>
+                  <Button
+                    type="button"
+                    onClick={() => void addLayer("crop", cropLayerInsertPosition())}
+                    class={ADD_LAYER_ROW_CLASS}
+                  >
+                    <span />
+                    <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+                      +
+                    </span>
+                    <span>Add Crop</span>
+                    <span />
+                    <span />
+                  </Button>
+                </Show>
                 <div
                   data-layer-idx={realIdx}
                   class={`${LAYER_ROW_CLASS} ${
@@ -2153,28 +2274,6 @@ export const Inspector: Component = () => {
             );
           })}
         </div>
-        <div class="grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            onClick={() => void addLayer("adjustment")}
-            class="flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
-          >
-            <span class="[&>svg]:h-4 [&>svg]:w-4">
-              <SparkIcon />
-            </span>
-            <span>Add Adjustments</span>
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void addLayer("crop")}
-            class="flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
-          >
-            <span class="[&>svg]:h-4 [&>svg]:w-4">
-              <CropIcon />
-            </span>
-            <span>Add Crop</span>
-          </Button>
-        </div>
       </div>
       <InspectorTabs />
     </div>
@@ -2192,34 +2291,39 @@ export const Inspector: Component = () => {
               when={selectedCropLayer()}
               fallback={
                 <Show
-                  when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
+                  when={state.selectedLayerIdx >= 0}
                   fallback={
                     <EmptyState>Open an image and select a layer to edit.</EmptyState>
                   }
                 >
-                  <div class="flex flex-col gap-3 pt-2">
-                    <ControlSection title="Light">
-                      <LightSliders />
-                      <LevelSliders />
-                      <CurvesEditor />
-                    </ControlSection>
-                    <ControlSection title="Color">
-                      <SaturationSliders />
-                      <WhiteBalanceSliders />
-                    </ControlSection>
-                    <ControlSection title="HSL Color Balance">
-                      <HslSection />
-                    </ControlSection>
-                    <ControlSection title="Effects">
-                      <GlowSlider />
-                      <VignetteSlider />
-                      <SharpenSlider />
-                      <GrainSliders />
-                    </ControlSection>
-                    <ControlSection title="Denoise">
-                      <DenoiseSliders />
-                    </ControlSection>
-                  </div>
+                  <Show
+                    when={selectedAdjustmentLayer()}
+                    fallback={<ImageInfoPanel />}
+                  >
+                    <div class="flex flex-col gap-3 pt-2">
+                      <ControlSection title="Light">
+                        <LightSliders />
+                        <LevelSliders />
+                        <CurvesEditor />
+                      </ControlSection>
+                      <ControlSection title="Color">
+                        <SaturationSliders />
+                        <WhiteBalanceSliders />
+                      </ControlSection>
+                      <ControlSection title="HSL Color Balance">
+                        <HslSection />
+                      </ControlSection>
+                      <ControlSection title="Effects">
+                        <GlowSlider />
+                        <VignetteSlider />
+                        <SharpenSlider />
+                        <GrainSliders />
+                      </ControlSection>
+                      <ControlSection title="Denoise">
+                        <DenoiseSliders />
+                      </ControlSection>
+                    </div>
+                  </Show>
                 </Show>
               }
             >
