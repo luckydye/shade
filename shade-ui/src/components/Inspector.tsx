@@ -835,6 +835,7 @@ const Inspector: Component = () => {
     let lastTapTime = 0;
     let lastTapId = -1;
     let activeTouchId: number | null = null;
+    let clearCurveDragListeners: (() => void) | null = null;
 
     createEffect(
       on(
@@ -890,7 +891,10 @@ const Inspector: Component = () => {
       updateSize();
       const observer = new ResizeObserver(updateSize);
       observer.observe(svgRef);
-      onCleanup(() => observer.disconnect());
+      onCleanup(() => {
+        observer.disconnect();
+        clearCurveDragListeners?.();
+      });
     });
 
     const svgCoords = (event: { clientX: number; clientY: number }) => {
@@ -921,8 +925,77 @@ const Inspector: Component = () => {
     };
 
     const finishDraggingPoint = () => {
+      clearCurveDragListeners?.();
+      clearCurveDragListeners = null;
       activeTouchId = null;
       setDraggingId(null);
+    };
+
+    const trackPointerDrag = (pointerId: number) => {
+      clearCurveDragListeners?.();
+      const onPointerMove = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        updateDraggingPoint(event.clientX, event.clientY);
+      };
+      const onPointerUp = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        finishDraggingPoint();
+      };
+      const onPointerCancel = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        finishDraggingPoint();
+        setHoveredId(null);
+      };
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("pointercancel", onPointerCancel);
+      clearCurveDragListeners = () => {
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("pointercancel", onPointerCancel);
+      };
+    };
+
+    const trackTouchDrag = (identifier: number) => {
+      clearCurveDragListeners?.();
+      const onTouchMove = (event: TouchEvent) => {
+        const touch = findTouch(event.touches, identifier);
+        if (!touch) {
+          return;
+        }
+        event.preventDefault();
+        updateDraggingPoint(touch.clientX, touch.clientY);
+      };
+      const onTouchEnd = (event: TouchEvent) => {
+        const touch = findTouch(event.changedTouches, identifier);
+        if (!touch) {
+          return;
+        }
+        event.preventDefault();
+        finishDraggingPoint();
+      };
+      const onTouchCancel = (event: TouchEvent) => {
+        const touch = findTouch(event.changedTouches, identifier);
+        if (!touch) {
+          return;
+        }
+        finishDraggingPoint();
+        setHoveredId(null);
+      };
+      window.addEventListener("touchmove", onTouchMove, { passive: false });
+      window.addEventListener("touchend", onTouchEnd);
+      window.addEventListener("touchcancel", onTouchCancel);
+      clearCurveDragListeners = () => {
+        window.removeEventListener("touchmove", onTouchMove);
+        window.removeEventListener("touchend", onTouchEnd);
+        window.removeEventListener("touchcancel", onTouchCancel);
+      };
     };
 
     const startNewPointDrag = (clientX: number, clientY: number) => {
@@ -989,27 +1062,11 @@ const Inspector: Component = () => {
             onPointerDown={(e) => {
               if (e.pointerType === "touch") return;
               if (e.target !== svgRef) return;
+              e.preventDefault();
               startNewPointDrag(e.clientX, e.clientY);
-              svgRef.setPointerCapture(e.pointerId);
-            }}
-            onPointerMove={(e) => {
-              if (e.pointerType === "touch") return;
-              updateDraggingPoint(e.clientX, e.clientY);
-            }}
-            onPointerUp={(e) => {
-              if (e.pointerType === "touch") return;
-              if (svgRef.hasPointerCapture(e.pointerId))
-                svgRef.releasePointerCapture(e.pointerId);
-              finishDraggingPoint();
+              trackPointerDrag(e.pointerId);
             }}
             onPointerLeave={() => {
-              setHoveredId(null);
-            }}
-            onPointerCancel={(e) => {
-              if (e.pointerType === "touch") return;
-              if (svgRef.hasPointerCapture(e.pointerId))
-                svgRef.releasePointerCapture(e.pointerId);
-              finishDraggingPoint();
               setHoveredId(null);
             }}
             onTouchStart={(e) => {
@@ -1025,33 +1082,8 @@ const Inspector: Component = () => {
               if (e.target === svgRef) {
                 e.preventDefault();
                 startNewPointDrag(touch.clientX, touch.clientY);
+                trackTouchDrag(touch.identifier);
               }
-            }}
-            onTouchMove={(e) => {
-              if (activeTouchId === null) {
-                return;
-              }
-              const touch = findTouch(e.touches, activeTouchId);
-              if (!touch) {
-                return;
-              }
-              e.preventDefault();
-              updateDraggingPoint(touch.clientX, touch.clientY);
-            }}
-            onTouchEnd={(e) => {
-              if (activeTouchId === null) {
-                return;
-              }
-              const touch = findTouch(e.changedTouches, activeTouchId);
-              if (!touch) {
-                return;
-              }
-              e.preventDefault();
-              finishDraggingPoint();
-            }}
-            onTouchCancel={() => {
-              finishDraggingPoint();
-              setHoveredId(null);
             }}
           >
             <rect
@@ -1138,17 +1170,16 @@ const Inspector: Component = () => {
                     if (!startExistingPointDrag(pt.id)) {
                       return;
                     }
+                    trackTouchDrag(touch.identifier);
                   }}
                   onPointerDown={(e) => {
                     if (e.pointerType === "touch") return;
                     e.stopPropagation();
                     e.preventDefault();
                     if (!startExistingPointDrag(pt.id)) {
-                      if (svgRef.hasPointerCapture(e.pointerId))
-                        svgRef.releasePointerCapture(e.pointerId);
                       return;
                     }
-                    svgRef.setPointerCapture(e.pointerId);
+                    trackPointerDrag(e.pointerId);
                   }}
                 />
                 <circle
