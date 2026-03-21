@@ -11,13 +11,16 @@ import {
 } from "solid-js";
 import { Button } from "./Button";
 import {
+  addS3MediaLibrary,
   addMediaLibrary,
+  isTauriRuntime,
   pickDirectory,
   refreshLibraryIndex,
   type LibraryImage,
   listMediaLibraries,
   removeMediaLibrary,
   type MediaLibrary,
+  type S3MediaLibraryInput,
   type SharedPicture,
 } from "../bridge/index";
 import {
@@ -104,7 +107,12 @@ function isPeerLibrary(library: LibraryEntry | null): library is PeerLibrary {
 }
 
 function isLocalLibraryRefreshing(library: LibraryEntry | null) {
-  return !!library && !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_refreshing;
+  return (
+    !!library &&
+    !isPeerLibrary(library) &&
+    library.kind === "directory" &&
+    library.is_refreshing
+  );
 }
 
 function isLibraryOffline(
@@ -124,6 +132,12 @@ function isCameraLibrary(
   library: LibraryEntry | null,
 ): library is MediaLibrary & { kind: "camera" } {
   return library?.kind === "camera";
+}
+
+function isS3Library(
+  library: LibraryEntry | null,
+): library is MediaLibrary & { kind: "s3" } {
+  return library?.kind === "s3";
 }
 
 function cameraLibraryHost(libraryId: string) {
@@ -466,6 +480,17 @@ export const MediaView: Component = () => {
     },
   );
   const [isSubmitting, setIsSubmitting] = createSignal(false);
+  const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
+  const [showS3Form, setShowS3Form] = createSignal(false);
+  const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
+    name: "",
+    endpoint: "",
+    bucket: "",
+    region: "us-east-1",
+    access_key_id: "",
+    secret_access_key: "",
+    prefix: "",
+  });
   const [error, setError] = createSignal<string | null>(null);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
@@ -556,6 +581,7 @@ export const MediaView: Component = () => {
       !!library &&
       !isPeerLibrary(library) &&
       !isCameraLibrary(library) &&
+      !isS3Library(library) &&
       library.is_online !== false
     );
   });
@@ -697,6 +723,7 @@ export const MediaView: Component = () => {
   onMount(() => {
     startP2pPolling();
     void refetchPeerLibraries();
+    void isTauriRuntime().then(setSupportsS3Libraries);
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
     }, 3000);
@@ -770,6 +797,48 @@ export const MediaView: Component = () => {
     }
   }
 
+  function updateS3Draft<K extends keyof S3MediaLibraryInput>(
+    key: K,
+    value: S3MediaLibraryInput[K],
+  ) {
+    setS3Draft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function resetS3Draft() {
+    setS3Draft({
+      name: "",
+      endpoint: "",
+      bucket: "",
+      region: "us-east-1",
+      access_key_id: "",
+      secret_access_key: "",
+      prefix: "",
+    });
+  }
+
+  async function handleAddS3Library() {
+    if (isSubmitting()) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const library = await addS3MediaLibrary(s3Draft());
+      resetS3Draft();
+      setShowS3Form(false);
+      await refetchLibraries();
+      setSelectedLibraryId(library.id);
+      await refetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleAddPeerLibrary(peerId: string) {
     if (isSubmitting()) {
       return;
@@ -822,7 +891,7 @@ export const MediaView: Component = () => {
 
   async function handleRefreshLibrary() {
     const library = selectedLibrary();
-    if (!library || isPeerLibrary(library) || isCameraLibrary(library)) {
+    if (!library || isPeerLibrary(library) || isCameraLibrary(library) || isS3Library(library)) {
       return;
     }
     setIsSubmitting(true);
@@ -852,89 +921,196 @@ export const MediaView: Component = () => {
     <div class={shellClass()}>
       <Show when={!isEditorStrip()}>
         <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4`}>
-          <div class="flex items-center gap-8 w-full">
-            <div class="flex flex-1 gap-2 overflow-x-auto">
-              <For each={libraryEntries()}>
-                {(library) =>
-                  (() => {
-                    const offline = isLibraryOffline(library, onlinePeerIds());
-                    const refreshing = isLocalLibraryRefreshing(library);
-                    return (
-                      <Button
-                        type="button"
-                        onClick={() => setSelectedLibraryId(library.id)}
-                        class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
-                          selectedLibraryId() === library.id
-                            ? offline
-                              ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
-                              : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
-                            : offline
-                              ? "border-dashed border-amber-500/25 bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
-                              : "border-[var(--border-soft)] bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
-                        }`}
-                      >
-                        <span class="flex items-center gap-2">
-                          {(isPeerLibrary(library) ||
-                            isCameraLibrary(library) ||
-                            refreshing ||
-                            offline) && (
-                            <span
-                              class={`h-1.5 w-1.5 rounded-full ${
-                                refreshing
-                                  ? "animate-pulse bg-sky-400"
-                                  : offline
-                                    ? "bg-amber-400"
-                                    : "bg-emerald-400"
-                              }`}
-                            />
-                          )}
-                          <span>{library.name}</span>
-                        </span>
-                      </Button>
-                    );
-                  })()
-                }
-              </For>
-              <For each={suggestedPeers()}>
-                {(peer) => (
+          <div class="flex w-full flex-col gap-4">
+            <div class="flex items-center gap-8 w-full">
+              <div class="flex flex-1 gap-2 overflow-x-auto">
+                <For each={libraryEntries()}>
+                  {(library) =>
+                    (() => {
+                      const offline = isLibraryOffline(library, onlinePeerIds());
+                      const refreshing = isLocalLibraryRefreshing(library);
+                      return (
+                        <Button
+                          type="button"
+                          onClick={() => setSelectedLibraryId(library.id)}
+                          class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
+                            selectedLibraryId() === library.id
+                              ? offline
+                                ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
+                                : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+                              : offline
+                                ? "border-dashed border-amber-500/25 bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
+                                : "border-[var(--border-soft)] bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
+                          }`}
+                        >
+                          <span class="flex items-center gap-2">
+                            {(isPeerLibrary(library) ||
+                              isCameraLibrary(library) ||
+                              isS3Library(library) ||
+                              refreshing ||
+                              offline) && (
+                              <span
+                                class={`h-1.5 w-1.5 rounded-full ${
+                                  refreshing
+                                    ? "animate-pulse bg-sky-400"
+                                    : offline
+                                      ? "bg-amber-400"
+                                      : "bg-emerald-400"
+                                }`}
+                              />
+                            )}
+                            <span>{library.name}</span>
+                          </span>
+                        </Button>
+                      );
+                    })()
+                  }
+                </For>
+                <For each={suggestedPeers()}>
+                  {(peer) => (
+                    <Button
+                      type="button"
+                      class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)]"
+                      disabled={isSubmitting()}
+                      onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
+                    >
+                      {`Peer ${peer.endpoint_id.slice(0, 8)}`}
+                    </Button>
+                  )}
+                </For>
+                <Button
+                  type="button"
+                  class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-3 py-2 text-[14px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={isSubmitting()}
+                  onClick={() => void handleAddLibrary()}
+                  aria-label="Add library"
+                >
+                  +
+                </Button>
+                <Show when={supportsS3Libraries()}>
                   <Button
                     type="button"
-                    class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)]"
+                    class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={isSubmitting()}
-                    onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
+                    onClick={() => setShowS3Form((current) => !current)}
                   >
-                    {`Peer ${peer.endpoint_id.slice(0, 8)}`}
+                    S3
                   </Button>
-                )}
-              </For>
-              <Button
-                type="button"
-                class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-3 py-2 text-[14px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={isSubmitting()}
-                onClick={() => void handleAddLibrary()}
-                aria-label="Add library"
-              >
-                +
-              </Button>
+                </Show>
+              </div>
+              <div class="flex items-center gap-3">
+                <Button
+                  type="button"
+                  class="rounded-full border border-[var(--border-soft)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+                  onClick={() => void handleRefreshLibrary()}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  type="button"
+                  class="rounded-full border border-[var(--danger-border)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!selectedLibrary()?.removable || isSubmitting()}
+                  onClick={() => void handleRemoveLibrary()}
+                >
+                  Remove
+                </Button>
+              </div>
             </div>
-            <div class="flex items-center gap-3">
-              <Button
-                type="button"
-                class="rounded-full border border-[var(--border-soft)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={!canRefreshSelectedLibrary() || isSubmitting()}
-                onClick={() => void handleRefreshLibrary()}
-              >
-                Refresh
-              </Button>
-              <Button
-                type="button"
-                class="rounded-full border border-[var(--danger-border)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={!selectedLibrary()?.removable || isSubmitting()}
-                onClick={() => void handleRemoveLibrary()}
-              >
-                Remove
-              </Button>
-            </div>
+            <Show when={showS3Form()}>
+              <div class="grid grid-cols-1 gap-3 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface-faint)] p-4 md:grid-cols-3">
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    value={(s3Draft().name as string | undefined) ?? ""}
+                    onInput={(event) => updateS3Draft("name", event.currentTarget.value)}
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)] md:col-span-2">
+                  <span>Endpoint</span>
+                  <input
+                    type="text"
+                    value={s3Draft().endpoint}
+                    onInput={(event) => updateS3Draft("endpoint", event.currentTarget.value)}
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    placeholder="https://s3.example.com"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
+                  <span>Bucket</span>
+                  <input
+                    type="text"
+                    value={s3Draft().bucket}
+                    onInput={(event) => updateS3Draft("bucket", event.currentTarget.value)}
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
+                  <span>Region</span>
+                  <input
+                    type="text"
+                    value={s3Draft().region}
+                    onInput={(event) => updateS3Draft("region", event.currentTarget.value)}
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
+                  <span>Prefix</span>
+                  <input
+                    type="text"
+                    value={(s3Draft().prefix as string | undefined) ?? ""}
+                    onInput={(event) => updateS3Draft("prefix", event.currentTarget.value)}
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    placeholder="optional/path"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
+                  <span>Access Key ID</span>
+                  <input
+                    type="text"
+                    value={s3Draft().access_key_id}
+                    onInput={(event) =>
+                      updateS3Draft("access_key_id", event.currentTarget.value)
+                    }
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                  />
+                </label>
+                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)] md:col-span-2">
+                  <span>Secret Access Key</span>
+                  <input
+                    type="password"
+                    value={s3Draft().secret_access_key}
+                    onInput={(event) =>
+                      updateS3Draft("secret_access_key", event.currentTarget.value)
+                    }
+                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                  />
+                </label>
+                <div class="flex items-end gap-2 md:col-span-3">
+                  <Button
+                    type="button"
+                    class="rounded-full border border-[var(--border-soft)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={isSubmitting()}
+                    onClick={() => void handleAddS3Library()}
+                  >
+                    Add S3 Library
+                  </Button>
+                  <Button
+                    type="button"
+                    class="rounded-full border border-transparent px-4 py-2 text-[12px] font-semibold text-[var(--text-faint)] transition-colors hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={isSubmitting()}
+                    onClick={() => {
+                      resetS3Draft();
+                      setShowS3Form(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </Show>
           </div>
         </div>
       </Show>

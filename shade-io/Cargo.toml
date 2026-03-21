@@ -15,8 +15,15 @@ rawler = { workspace = true }
 kamadak-exif = "0.6"
 libsql = "0.6"
 serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 blake3 = "1"
 notify = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+hex = "0.4"
+percent-encoding = "2.3"
+quick-xml = { version = "0.38", features = ["serialize"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+sha2 = "0.10"
 video-rs = { version = "0.10", features = ["ndarray"], optional = true }
 ndarray = { version = "0.16.1", optional = true }

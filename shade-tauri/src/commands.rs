@@ -6,9 +6,9 @@ use shade_core::{
 };
 use shade_io::{
     delete_persisted_library_index, has_persisted_library_index,
-    library_index_db_path as shared_library_index_db_path,
-    load_image_bytes_f32_with_info, picture_display_name, scan_directory_images,
-    to_linear_srgb_f32, SourceImageInfo,
+    is_supported_library_image, library_index_db_path as shared_library_index_db_path,
+    load_image_bytes, load_image_bytes_f32_with_info, picture_display_name,
+    scan_directory_images, to_linear_srgb_f32, SourceImageInfo,
 };
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -89,14 +89,6 @@ pub struct LibraryImageListing {
     pub is_complete: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
-#[serde(default)]
-struct AppConfig {
-    directories: Vec<String>,
-    paired_peers: Vec<String>,
-    p2p_secret_key: Option<[u8; 32]>,
-}
-
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 const SUPERSEDED_IMAGE_LOAD_ERROR: &str = "image load superseded by newer request";
 
@@ -148,10 +140,6 @@ async fn require_p2p(
         .await
         .clone()
         .ok_or_else(|| "p2p is unavailable on this platform".to_string())
-}
-
-fn app_config_path() -> Result<PathBuf, String> {
-    Ok(app_config_dir()?.join("config.json"))
 }
 
 fn presets_dir_path() -> Result<PathBuf, String> {
@@ -577,24 +565,12 @@ pub struct LoadSnapshotParams {
     pub version: i64,
 }
 
-fn load_app_config() -> Result<AppConfig, String> {
-    let path = app_config_path()?;
-    if !path.exists() {
-        return Ok(AppConfig::default());
-    }
-    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json)
-        .map_err(|e| format!("invalid app config at {}: {e}", path.display()))
+fn load_app_config() -> Result<shade_io::AppConfig, String> {
+    shade_io::load_app_config(&app_config_dir()?)
 }
 
-fn save_app_config(config: &AppConfig) -> Result<(), String> {
-    let path = app_config_path()?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("invalid config path: {}", path.display()))?;
-    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+fn save_app_config(config: &shade_io::AppConfig) -> Result<(), String> {
+    shade_io::save_app_config(&app_config_dir()?, config)
 }
 
 pub fn load_p2p_secret_key() -> Result<Option<iroh::SecretKey>, String> {
@@ -610,23 +586,15 @@ pub fn save_p2p_secret_key(secret_key: [u8; 32]) -> Result<(), String> {
 }
 
 fn is_peer_paired(peer_endpoint_id: &str) -> Result<bool, String> {
-    Ok(load_app_config()?
-        .paired_peers
-        .iter()
-        .any(|peer| peer == peer_endpoint_id))
+    Ok(shade_io::is_peer_paired(
+        &load_app_config()?,
+        peer_endpoint_id,
+    ))
 }
 
 fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
     let mut config = load_app_config()?;
-    if config
-        .paired_peers
-        .iter()
-        .any(|peer| peer == peer_endpoint_id)
-    {
-        return Ok(());
-    }
-    config.paired_peers.push(peer_endpoint_id.to_owned());
-    config.paired_peers.sort();
+    shade_io::pair_peer(&mut config, peer_endpoint_id);
     save_app_config(&config)
 }
 
@@ -636,11 +604,15 @@ fn default_pictures_dir() -> Result<PathBuf, String> {
 }
 
 fn custom_library_id(path: &Path) -> String {
-    format!("dir:{}", path.display())
+    shade_io::local_library_id(path)
+}
+
+fn s3_library_id(source_id: &str) -> String {
+    shade_io::s3_library_id(source_id)
 }
 
 fn ccapi_library_id(host: &str) -> String {
-    format!("ccapi:{host}")
+    shade_io::camera_library_id(host)
 }
 
 fn ccapi_media_path(host: &str, file_path: &str) -> String {
@@ -689,6 +661,18 @@ fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
         removable: true,
         is_online: Some(is_online),
         is_refreshing: Some(is_refreshing && is_online),
+    }
+}
+
+fn library_for_s3(config: &shade_io::S3LibraryConfig) -> MediaLibrary {
+    MediaLibrary {
+        id: s3_library_id(&config.id),
+        name: shade_io::display_s3_library_name(config),
+        kind: "s3".into(),
+        path: Some(shade_io::format_s3_library_detail(config)),
+        removable: true,
+        is_online: None,
+        is_refreshing: None,
     }
 }
 
@@ -814,13 +798,28 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
     let config = load_app_config()?;
-    for directory in config.directories {
-        let path = PathBuf::from(directory);
-        libraries.push(library_for_directory(
-            path.clone(),
-            local_library_is_available(&path)
-                && scan_service.is_refreshing(&custom_library_id(&path))?,
-        ));
+    let mut configured_camera_hosts = std::collections::HashSet::new();
+    for library in &config.libraries {
+        match library {
+            shade_io::LibraryConfig::Local(config) => {
+                let path = PathBuf::from(&config.path);
+                libraries.push(library_for_directory(
+                    path.clone(),
+                    local_library_is_available(&path)
+                        && scan_service.is_refreshing(&custom_library_id(&path))?,
+                ));
+            }
+            shade_io::LibraryConfig::S3(config) => libraries.push(library_for_s3(config)),
+            shade_io::LibraryConfig::Camera(config) => {
+                configured_camera_hosts.insert(config.host.clone());
+                libraries.push(ccapi_library_for_host(
+                    &config.host,
+                    ccapi_host_is_online(&config.host).await,
+                    true,
+                ));
+            }
+            shade_io::LibraryConfig::Peer(_) => {}
+        }
     }
     for host in app
         .state::<crate::CameraDiscoveryService>()
@@ -828,6 +827,9 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         .snapshot()
         .await
     {
+        if configured_camera_hosts.contains(&host) {
+            continue;
+        }
         libraries.push(ccapi_library_for_host(&host, true, false));
     }
     Ok(libraries)
@@ -837,11 +839,12 @@ fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
     if library_id == "pictures" {
         return default_pictures_dir();
     }
-    let config = load_app_config()?;
-    for directory in config.directories {
-        let path = PathBuf::from(&directory);
-        if custom_library_id(&path) == library_id {
-            return Ok(path);
+    for library in load_app_config()?.libraries {
+        if let shade_io::LibraryConfig::Local(config) = library {
+            let path = PathBuf::from(&config.path);
+            if custom_library_id(&path) == library_id {
+                return Ok(path);
+            }
         }
     }
     Err(format!("unknown media library: {library_id}"))
@@ -849,9 +852,11 @@ fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
 
 fn desktop_local_library_roots() -> Result<Vec<(String, PathBuf)>, String> {
     let mut roots = vec![("pictures".to_string(), default_pictures_dir()?)];
-    for directory in load_app_config()?.directories {
-        let path = PathBuf::from(directory);
-        roots.push((custom_library_id(&path), path));
+    for library in load_app_config()?.libraries {
+        if let shade_io::LibraryConfig::Local(config) = library {
+            let path = PathBuf::from(config.path);
+            roots.push((custom_library_id(&path), path));
+        }
     }
     Ok(roots)
 }
@@ -943,6 +948,51 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
     })
 }
 
+fn resolve_s3_library_config(
+    library_id: &str,
+) -> Result<shade_io::S3LibraryConfig, String> {
+    let source_id = shade_io::resolve_s3_source_id_from_library_id(library_id)?;
+    for library in load_app_config()?.libraries {
+        if let shade_io::LibraryConfig::S3(config) = library {
+            if config.id == source_id {
+                return Ok(config);
+            }
+        }
+    }
+    Err(format!("unknown S3 media library: {library_id}"))
+}
+
+fn resolve_s3_library_for_media_path(
+    picture_id: &str,
+) -> Result<(shade_io::S3LibraryConfig, String), String> {
+    let (source_id, key) = shade_io::parse_s3_media_path(picture_id)?;
+    Ok((
+        resolve_s3_library_config(&s3_library_id(source_id))?,
+        key.to_string(),
+    ))
+}
+
+async fn list_s3_library_images(
+    config: &shade_io::S3LibraryConfig,
+) -> Result<LibraryImageListing, String> {
+    let mut items = shade_io::list_s3_objects(config)
+        .await?
+        .into_iter()
+        .filter(|object| is_supported_library_image(std::path::Path::new(&object.key)))
+        .map(|object| LibraryImage {
+            name: picture_display_name(&object.key),
+            path: shade_io::media_path_for_s3_object(&config.id, &object.key),
+            modified_at: object.modified_at,
+            metadata: Default::default(),
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    Ok(LibraryImageListing {
+        items,
+        is_complete: true,
+    })
+}
+
 fn chrono_like_timestamp_millis(value: &str) -> Result<Option<u64>, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -983,6 +1033,26 @@ async fn load_camera_thumbnail_from_tauri<R: tauri::Runtime>(
         .await
         .map(|bytes| bytes.to_vec())
         .map_err(|error| error.to_string())
+}
+
+async fn load_s3_thumbnail_from_tauri(picture_id: &str) -> Result<Vec<u8>, String> {
+    let (config, key) = resolve_s3_library_for_media_path(picture_id)?;
+    let bytes = shade_io::get_s3_object_bytes(&config, &key).await?;
+    let (pixels, width, height) =
+        load_image_bytes(&bytes, Some(&picture_display_name(&key)))
+            .map_err(|error| error.to_string())?;
+    let image = image::RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
+        format!("failed to decode S3 image for thumbnail: {picture_id}")
+    })?;
+    let thumbnail = image::DynamicImage::ImageRgba8(image).thumbnail(320, 320);
+    let mut jpeg = Vec::new();
+    thumbnail
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(jpeg)
 }
 
 async fn load_photo_thumbnail_from_tauri<R: tauri::Runtime>(
@@ -1035,6 +1105,11 @@ async fn load_camera_image_from_tauri(
         .await
         .map(|bytes| bytes.to_vec())
         .map_err(|error| error.to_string())
+}
+
+async fn load_s3_image_from_tauri(path: &str) -> Result<Vec<u8>, String> {
+    let (config, key) = resolve_s3_library_for_media_path(path)?;
+    shade_io::get_s3_object_bytes(&config, &key).await
 }
 
 async fn load_photo_image_from_tauri<R: tauri::Runtime>(
@@ -1403,6 +1478,7 @@ pub async fn open_image<R: tauri::Runtime>(
             |host, file_path| async move {
                 load_camera_image_from_tauri(&host, &file_path).await
             },
+            |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
             move |picture_id| {
                 let app = photo_app.clone();
                 async move { load_photo_image_from_tauri(&app, &picture_id).await }
@@ -2323,6 +2399,7 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
                 async move { load_camera_thumbnail_from_tauri(&app, &host, &file_path).await }
             }
         },
+        |s3_path| async move { load_s3_thumbnail_from_tauri(&s3_path).await },
         {
             let app = app.clone();
             move |picture_id| {
@@ -2341,6 +2418,7 @@ pub async fn load_picture_bytes<R: tauri::Runtime>(
     shade_io::load_picture_bytes(
         picture_id,
         |host, file_path| async move { load_camera_image_from_tauri(&host, &file_path).await },
+        |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
         {
             let app = app.clone();
             move |picture_id| {
@@ -2562,6 +2640,10 @@ async fn build_library_listing<R: tauri::Runtime>(
             return list_ccapi_library_images(&resolve_ccapi_library_host(&library_id)?)
                 .await;
         }
+        if library_id.starts_with("s3:") {
+            return list_s3_library_images(&resolve_s3_library_config(&library_id)?)
+                .await;
+        }
         let db_path = library_index_db_path()?;
         let library_path =
             require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
@@ -2625,14 +2707,13 @@ pub async fn add_media_library<R: tauri::Runtime>(
         .to_str()
         .ok_or_else(|| format!("non-utf8 path: {}", canonical.display()))?
         .to_string();
-    if !config
-        .directories
-        .iter()
-        .any(|existing| existing == &canonical_string)
-    {
-        config.directories.push(canonical_string);
-        save_app_config(&config)?;
-    }
+    shade_io::upsert_library_config(
+        &mut config.libraries,
+        shade_io::LibraryConfig::Local(shade_io::LocalLibraryConfig {
+            path: canonical_string,
+        }),
+    );
+    save_app_config(&config)?;
     let library = library_for_directory(canonical.clone(), true);
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
@@ -2646,6 +2727,20 @@ pub async fn add_media_library<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+pub async fn add_s3_media_library(
+    params: shade_io::AddS3LibraryParams,
+) -> Result<MediaLibrary, String> {
+    let library = shade_io::normalize_s3_library_input(params)?;
+    let mut config = load_app_config()?;
+    shade_io::upsert_library_config(
+        &mut config.libraries,
+        shade_io::LibraryConfig::S3(library.clone()),
+    );
+    save_app_config(&config)?;
+    Ok(library_for_s3(&library))
+}
+
+#[tauri::command]
 pub async fn remove_media_library<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
     id: String,
@@ -2654,20 +2749,26 @@ pub async fn remove_media_library<R: tauri::Runtime>(
         return Err(format!("media library is not removable: {id}"));
     }
     let mut config = load_app_config()?;
-    let before = config.directories.len();
-    config
-        .directories
-        .retain(|directory| custom_library_id(Path::new(directory)) != id);
-    if config.directories.len() == before {
+    let removed = config
+        .libraries
+        .iter()
+        .find(|library| shade_io::library_config_id(library) == id)
+        .cloned();
+    let Some(removed) = removed else {
         return Err(format!("unknown media library: {id}"));
-    }
+    };
+    config
+        .libraries
+        .retain(|library| shade_io::library_config_id(library) != id);
     save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        delete_persisted_library_index(&library_index_db_path()?, &id).await?;
-        _app.state::<crate::LibraryScanService>()
-            .0
-            .remove_library(&id)?;
+        if matches!(removed, shade_io::LibraryConfig::Local(_)) {
+            delete_persisted_library_index(&library_index_db_path()?, &id).await?;
+            _app.state::<crate::LibraryScanService>()
+                .0
+                .remove_library(&id)?;
+        }
     }
     Ok(())
 }

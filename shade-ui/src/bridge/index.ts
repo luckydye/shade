@@ -773,11 +773,21 @@ export async function listPictures(): Promise<string[]> {
 export interface MediaLibrary {
   id: string;
   name: string;
-  kind: "directory" | "camera";
+  kind: "directory" | "camera" | "s3";
   path?: string | null;
   removable: boolean;
   is_online?: boolean | null;
   is_refreshing?: boolean | null;
+}
+
+export interface S3MediaLibraryInput {
+  name?: string | null;
+  endpoint: string;
+  bucket: string;
+  region: string;
+  access_key_id: string;
+  secret_access_key: string;
+  prefix?: string | null;
 }
 
 export interface PresetInfo {
@@ -829,6 +839,16 @@ export async function addMediaLibrary(
     throw new Error("expected a directory handle in the browser runtime");
   }
   return addBrowserMediaLibrary(path);
+}
+
+export async function addS3MediaLibrary(
+  params: S3MediaLibraryInput,
+): Promise<MediaLibrary> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("S3 media libraries are only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  return inv("add_s3_media_library", { params }) as Promise<MediaLibrary>;
 }
 
 export async function removeMediaLibrary(id: string): Promise<void> {

@@ -71,6 +71,7 @@ pub fn run() {
             commands::list_library_images,
             commands::refresh_library_index,
             commands::add_media_library,
+            commands::add_s3_media_library,
             commands::remove_media_library,
             commands::list_presets,
             commands::save_preset,

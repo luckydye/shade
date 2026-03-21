@@ -13,10 +13,12 @@ use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
+pub mod app_config;
 pub mod camera_services;
 pub mod image_loader;
 pub mod library_index;
 pub mod library_scan_service;
+pub mod library_source;
 pub mod thumbnail_loader;
 pub mod thumbnail_queue;
 #[cfg(feature = "ffmpeg")]
@@ -24,6 +26,10 @@ pub mod video_decoder;
 #[cfg(feature = "ffmpeg")]
 pub mod video_encoder;
 
+pub use app_config::{
+    app_config_path, is_peer_paired, load_app_config, pair_peer, save_app_config,
+    upsert_library_config, AppConfig,
+};
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
 pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 pub use library_index::{
@@ -36,6 +42,14 @@ pub use library_index::{
 pub use library_scan_service::{
     flush_library_scan_batch, scan_library_into_snapshot, start_library_scan,
     LibraryScanService, LibraryScanSnapshot,
+};
+pub use library_source::{
+    camera_library_id, display_s3_library_name, format_s3_library_detail,
+    get_s3_object_bytes, library_config_id, list_s3_objects, local_library_id,
+    media_path_for_s3_object, normalize_s3_library_input, parse_s3_media_path,
+    peer_library_id, resolve_s3_source_id_from_library_id, s3_library_id,
+    AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LocalLibraryConfig,
+    PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry,
 };
 pub use thumbnail_loader::{
     generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
