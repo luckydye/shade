@@ -2138,18 +2138,24 @@ const Inspector: Component = () => {
                   }
                 >
                   <div class="flex flex-col gap-3">
-                    <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)]">
-                      Adjustments
+                    <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)] mb-2">
+                      Light
                     </div>
                     <LightSliders />
                     <LevelSliders />
+                    <CurvesEditor />
+                    <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)] mb-2">
+                      Color
+                    </div>
                     <SaturationSliders />
                     <WhiteBalanceSliders />
-                    <CurvesEditor />
                     <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)]">
                       HSL Color Balance
                     </div>
                     <HslSection />
+                    <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)] mb-2">
+                      Effects
+                    </div>
                     <VignetteSlider />
                     <SharpenSlider />
                     <GrainSliders />
