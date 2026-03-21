@@ -4,6 +4,11 @@ import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/pr
 import { refreshLayerStack } from "./editor-layers";
 
 const ARTBOARD_GAP = 96;
+const DEFAULT_PENDING_ARTBOARD_WIDTH = 1600;
+const DEFAULT_PENDING_ARTBOARD_HEIGHT = 1200;
+const SUPERSEDED_IMAGE_LOAD_ERROR = "image load superseded by newer request";
+
+let activeLoadToken = 0;
 
 function createArtboardId() {
   return globalThis.crypto?.randomUUID?.() ?? `artboard-${Date.now()}-${Math.random()}`;
@@ -31,6 +36,35 @@ function getArtboardTitle(source: ArtboardSource) {
     default:
       throw new Error("unknown artboard source");
   }
+}
+
+function beginLoadToken() {
+  activeLoadToken += 1;
+  return activeLoadToken;
+}
+
+function isActiveLoadToken(token: number) {
+  return activeLoadToken === token;
+}
+
+function isSupersededImageLoadError(error: unknown) {
+  return error instanceof Error && error.message === SUPERSEDED_IMAGE_LOAD_ERROR;
+}
+
+function getPendingArtboardSize() {
+  const selectedArtboard = state.artboards.find(
+    (artboard) => artboard.id === state.selectedArtboardId,
+  );
+  if (selectedArtboard && selectedArtboard.width > 0 && selectedArtboard.height > 0) {
+    return { width: selectedArtboard.width, height: selectedArtboard.height };
+  }
+  if (state.canvasWidth > 0 && state.canvasHeight > 0) {
+    return { width: state.canvasWidth, height: state.canvasHeight };
+  }
+  return {
+    width: DEFAULT_PENDING_ARTBOARD_WIDTH,
+    height: DEFAULT_PENDING_ARTBOARD_HEIGHT,
+  };
 }
 
 function artboardSourceMatches(a: ArtboardSource, b: ArtboardSource) {
@@ -105,6 +139,33 @@ function clearLoadedImageState() {
   });
 }
 
+function setPendingEditorState(
+  artboardId: string,
+  canvasWidth: number,
+  canvasHeight: number,
+  sourceBitDepth: string,
+  activeMediaSelection: {
+    libraryId: string;
+    itemId: string;
+  } | null,
+  loadingMediaSrc: string | null,
+) {
+  clearPreviewTiles();
+  resetViewportState(canvasWidth, canvasHeight);
+  setState({
+    currentView: "editor",
+    selectedArtboardId: artboardId,
+    activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
+    activeMediaItemId: activeMediaSelection?.itemId ?? null,
+    layers: [],
+    selectedLayerIdx: -1,
+    sourceBitDepth,
+    previewDisplayColorSpace: "Unknown",
+    isLoading: true,
+    loadingMediaSrc,
+  });
+}
+
 async function openImageFrom(
   load: () => Promise<{
     canvas_width: number;
@@ -128,53 +189,84 @@ async function openImageFrom(
     await focusExistingArtboard(existingArtboard.id);
     return;
   }
-  setState({
-    currentView: "editor",
+  const previousSelectedArtboardId = state.selectedArtboardId;
+  const { width: pendingWidth, height: pendingHeight } = getPendingArtboardSize();
+  const artboardId = createArtboardId();
+  const artboard = {
+    id: artboardId,
+    title: getArtboardTitle(source),
+    worldX: getNextArtboardWorldX(),
+    worldY: 0,
+    width: pendingWidth,
+    height: pendingHeight,
+    sourceBitDepth: "Loading",
+    source,
     activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
     activeMediaItemId: activeMediaSelection?.itemId ?? null,
-    isLoading: true,
+    previewTile: null,
+    backdropTile: null,
+  };
+  const loadToken = beginLoadToken();
+  setState("artboards", (artboards) => [...artboards, artboard]);
+  setPendingEditorState(
+    artboardId,
+    pendingWidth,
+    pendingHeight,
+    "Loading",
+    activeMediaSelection,
     loadingMediaSrc,
-  });
+  );
   try {
     const info = await load();
+    if (!isActiveLoadToken(loadToken)) {
+      return;
+    }
     clearPreviewTiles();
-    const artboardId = createArtboardId();
-    setState("artboards", (artboards) => [
-      ...artboards,
+    setState(
+      "artboards",
+      (candidate) => candidate.id === artboardId,
       {
-        id: artboardId,
-        title: getArtboardTitle(source),
-        worldX: getNextArtboardWorldX(),
-        worldY: 0,
+        ...artboard,
         width: info.canvas_width,
         height: info.canvas_height,
         sourceBitDepth: info.source_bit_depth,
-        source,
-        activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
-        activeMediaItemId: activeMediaSelection?.itemId ?? null,
-        previewTile: null,
-        backdropTile: null,
       },
-    ]);
+    );
     resetViewportState(info.canvas_width, info.canvas_height);
     setState({
-      selectedArtboardId: artboardId,
       sourceBitDepth: info.source_bit_depth,
     });
     await refreshLayerStack();
     await refreshPreview();
+  } catch (error) {
+    setState("artboards", (artboards) => artboards.filter((candidate) => candidate.id !== artboardId));
+    if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
+      return;
+    }
+    if (
+      previousSelectedArtboardId &&
+      state.artboards.some((candidate) => candidate.id === previousSelectedArtboardId)
+    ) {
+      await selectArtboard(previousSelectedArtboardId);
+    } else {
+      closeImage();
+    }
+    throw error;
   } finally {
     if (loadingMediaSrc?.startsWith("blob:")) {
       URL.revokeObjectURL(loadingMediaSrc);
     }
-    setState({
-      isLoading: false,
-      loadingMediaSrc: null,
-    });
+    if (isActiveLoadToken(loadToken)) {
+      setState({
+        isLoading: false,
+        loadingMediaSrc: null,
+      });
+    }
   }
 }
 
 export function closeImage() {
+  beginLoadToken();
   clearLoadedImageState();
   setState({
     currentView: "media",
@@ -199,6 +291,7 @@ export async function closeArtboard(artboardId: string) {
     setState("artboards", remainingArtboards);
     return;
   }
+  beginLoadToken();
   const nextArtboard =
     remainingArtboards[Math.min(artboardIndex, remainingArtboards.length - 1)];
   clearPreviewTiles();
@@ -280,12 +373,25 @@ export async function selectArtboard(artboardId: string) {
   if (!artboard) {
     throw new Error("artboard not found");
   }
-  setState({
-    isLoading: true,
-    loadingMediaSrc: null,
-  });
+  const loadToken = beginLoadToken();
+  setPendingEditorState(
+    artboardId,
+    artboard.width,
+    artboard.height,
+    artboard.sourceBitDepth,
+    artboard.activeMediaLibraryId && artboard.activeMediaItemId
+      ? {
+          libraryId: artboard.activeMediaLibraryId,
+          itemId: artboard.activeMediaItemId,
+        }
+      : null,
+    null,
+  );
   try {
     const info = await loadArtboardSource(artboard.source);
+    if (!isActiveLoadToken(loadToken)) {
+      return;
+    }
     clearPreviewTiles();
     setState(
       "artboards",
@@ -299,19 +405,22 @@ export async function selectArtboard(artboardId: string) {
     );
     resetViewportState(info.canvas_width, info.canvas_height);
     setState({
-      selectedArtboardId: artboardId,
-      activeMediaLibraryId: artboard.activeMediaLibraryId,
-      activeMediaItemId: artboard.activeMediaItemId,
       sourceBitDepth: info.source_bit_depth,
-      currentView: "editor",
     });
     await refreshLayerStack();
     await refreshPreview();
+  } catch (error) {
+    if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
+      return;
+    }
+    throw error;
   } finally {
-    setState({
-      isLoading: false,
-      loadingMediaSrc: null,
-    });
+    if (isActiveLoadToken(loadToken)) {
+      setState({
+        isLoading: false,
+        loadingMediaSrc: null,
+      });
+    }
   }
 }
 

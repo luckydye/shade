@@ -53,6 +53,8 @@ pub struct EditorState {
     pub current_image_hash: Option<String>,
     pub current_image_source: Option<String>,
     pub current_edit_version: Option<i64>,
+    pub next_open_request_id: u64,
+    pub active_open_request_id: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -95,6 +97,7 @@ struct AppConfig {
 }
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+const SUPERSEDED_IMAGE_LOAD_ERROR: &str = "image load superseded by newer request";
 
 pub fn init_app_paths<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -1202,11 +1205,23 @@ impl Default for EditorState {
             current_image_hash: None,
             current_image_source: None,
             current_edit_version: None,
+            next_open_request_id: 0,
+            active_open_request_id: 0,
         }
     }
 }
 
 impl EditorState {
+    pub fn begin_open_request(&mut self) -> u64 {
+        self.next_open_request_id += 1;
+        self.active_open_request_id = self.next_open_request_id;
+        self.active_open_request_id
+    }
+
+    pub fn is_current_open_request(&self, request_id: u64) -> bool {
+        self.active_open_request_id == request_id
+    }
+
     pub fn replace_with_image(
         &mut self,
         mut pixels: Vec<f32>,
@@ -1316,6 +1331,10 @@ pub async fn open_peer_image(
     p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    let open_request_id = {
+        let mut st = lock_editor_state(&state)?;
+        st.begin_open_request()
+    };
     let bytes = require_p2p(&p2p)
         .await?
         .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
@@ -1326,6 +1345,9 @@ pub async fn open_peer_image(
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let response = {
         let mut st = lock_editor_state(&state)?;
+        if !st.is_current_open_request(open_request_id) {
+            return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
+        }
         let response = st.replace_with_image(
             image.pixels.to_vec(),
             image.width,
@@ -1346,6 +1368,10 @@ pub async fn open_image<R: tauri::Runtime>(
     path: String,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    let open_request_id = {
+        let mut st = lock_editor_state(&state)?;
+        st.begin_open_request()
+    };
     let photo_app = app.clone();
     let opened = shade_io::open_image(
         &path,
@@ -1360,6 +1386,9 @@ pub async fn open_image<R: tauri::Runtime>(
     let persisted = load_latest_edit_version(&file_hash).await?;
     let response = {
         let mut st = lock_editor_state(&state)?;
+        if !st.is_current_open_request(open_request_id) {
+            return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
+        }
         let response = st.replace_with_image(
             opened.image.pixels.to_vec(),
             opened.image.width,
@@ -1379,11 +1408,18 @@ pub async fn open_image_encoded_bytes(
     file_name: Option<String>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    let open_request_id = {
+        let mut st = lock_editor_state(&state)?;
+        st.begin_open_request()
+    };
     let file_hash = hash_bytes(&bytes);
     let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let response = {
         let mut st = lock_editor_state(&state)?;
+        if !st.is_current_open_request(open_request_id) {
+            return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
+        }
         let response = st.replace_with_image(
             image.pixels.to_vec(),
             image.width,
@@ -1409,6 +1445,10 @@ pub async fn open_image_bytes(
     height: u32,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
+    let open_request_id = {
+        let mut st = lock_editor_state(&state)?;
+        st.begin_open_request()
+    };
     if pixels.len() != (width * height * 4) as usize {
         return Err(format!(
             "pixel buffer size mismatch: expected {}, got {}",
@@ -1420,6 +1460,9 @@ pub async fn open_image_bytes(
     let persisted = load_latest_edit_version(&file_hash).await?;
     let response = {
         let mut st = lock_editor_state(&state)?;
+        if !st.is_current_open_request(open_request_id) {
+            return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
+        }
         let response = st.replace_with_image(
             pixels
                 .into_iter()
