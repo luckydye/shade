@@ -41,6 +41,10 @@ type CropHandle =
   | "rotate";
 
 type MaskHandle = "start" | "end" | "center" | "edge";
+type PressedArtboardChrome =
+  | { kind: "title"; artboardId: string }
+  | { kind: "close"; artboardId: string }
+  | null;
 
 const HANDLE_SIZE = 10;
 const ARTBOARD_TITLE_HEIGHT = 24;
@@ -56,6 +60,8 @@ export const Viewport: Component = () => {
   let stageRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   const [dragging, setDragging] = createSignal(false);
+  const [pressedArtboardChrome, setPressedArtboardChrome] =
+    createSignal<PressedArtboardChrome>(null);
   const [draftCrop, setDraftCrop] = createSignal<{
     x: number;
     y: number;
@@ -66,7 +72,15 @@ export const Viewport: Component = () => {
   const [draftMask, setDraftMask] = createSignal<MaskParamsInfo | null>(null);
   const activePointers = new Map<number, { x: number; y: number }>();
   let gesture:
-    | { kind: "pan"; x: number; y: number }
+    | {
+        kind: "pan";
+        x: number;
+        y: number;
+        startX: number;
+        startY: number;
+        moved: boolean;
+        tapArtboardId: string | null;
+      }
     | { kind: "pinch"; dist: number; midX: number; midY: number }
     | {
         kind: "crop";
@@ -472,9 +486,18 @@ export const Viewport: Component = () => {
         );
         const labelX = sx;
         const labelY = sy - ARTBOARD_TITLE_HEIGHT - 6;
-        ctx.fillStyle = isSelected ? "rgba(255, 255, 255, 0.95)" : "rgba(148, 148, 148, 0.78)";
+        const pressedChrome = pressedArtboardChrome();
+        const titlePressed =
+          pressedChrome?.kind === "title" && pressedChrome.artboardId === artboard.id;
+        const closePressed =
+          pressedChrome?.kind === "close" && pressedChrome.artboardId === artboard.id;
+        ctx.fillStyle = titlePressed
+          ? "rgba(214, 214, 214, 0.98)"
+          : isSelected
+            ? "rgba(255, 255, 255, 0.95)"
+            : "rgba(148, 148, 148, 0.78)";
         ctx.fillRect(labelX, labelY, labelWidth, ARTBOARD_TITLE_HEIGHT);
-        ctx.fillStyle = "rgba(32, 32, 32, 0.95)";
+        ctx.fillStyle = titlePressed ? "rgba(12, 12, 12, 0.98)" : "rgba(32, 32, 32, 0.95)";
         ctx.textBaseline = "middle";
         ctx.fillText(
           artboard.title,
@@ -484,9 +507,11 @@ export const Viewport: Component = () => {
         );
         const closeX = sx + sw - ARTBOARD_CLOSE_SIZE;
         const closeY = labelY;
-        ctx.fillStyle = "rgba(148, 148, 148, 0.82)";
+        ctx.fillStyle = closePressed
+          ? "rgba(214, 214, 214, 0.98)"
+          : "rgba(148, 148, 148, 0.82)";
         ctx.fillRect(closeX, closeY, ARTBOARD_CLOSE_SIZE, ARTBOARD_CLOSE_SIZE);
-        ctx.strokeStyle = "rgba(32, 32, 32, 0.95)";
+        ctx.strokeStyle = closePressed ? "rgba(12, 12, 12, 0.98)" : "rgba(32, 32, 32, 0.95)";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(closeX + 5, closeY + 5);
@@ -512,6 +537,7 @@ export const Viewport: Component = () => {
     state.selectedArtboardId;
     state.layers;
     state.artboards;
+    pressedArtboardChrome();
     backdropTile();
     previewTile();
     drawFrame();
@@ -641,7 +667,10 @@ export const Viewport: Component = () => {
       e.clientY - rect.top,
     );
     if (clickedArtboardClose) {
-      void closeArtboard(clickedArtboardClose.id);
+      setPressedArtboardChrome({
+        kind: "close",
+        artboardId: clickedArtboardClose.id,
+      });
       return;
     }
     const clickedArtboardTitle = artboardTitleAtPoint(
@@ -687,7 +716,25 @@ export const Viewport: Component = () => {
         return;
       }
     }
+    if (activePointers.size === 2) {
+      if (
+        gesture?.kind === "artboard" &&
+        stageRef.hasPointerCapture(gesture.pointerId)
+      ) {
+        stageRef.releasePointerCapture(gesture.pointerId);
+      }
+      const [p1, p2] = [...activePointers.values()];
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      gesture = { kind: "pinch", dist, midX, midY };
+      return;
+    }
     if (clickedArtboardTitle) {
+      setPressedArtboardChrome({
+        kind: "title",
+        artboardId: clickedArtboardTitle.id,
+      });
       gesture = {
         kind: "artboard",
         pointerId: e.pointerId,
@@ -703,29 +750,28 @@ export const Viewport: Component = () => {
       return;
     }
     if (clickedArtboard) {
+      setPressedArtboardChrome(null);
       gesture = {
-        kind: "artboard",
-        pointerId: e.pointerId,
-        artboardId: clickedArtboard.id,
-        draggable: false,
-        moved: false,
-        startX: e.clientX,
-        startY: e.clientY,
+        kind: "pan",
         x: e.clientX,
         y: e.clientY,
+        startX: e.clientX,
+        startY: e.clientY,
+        moved: false,
+        tapArtboardId: clickedArtboard.id,
       };
-      stageRef.setPointerCapture(e.pointerId);
       return;
     }
-    if (activePointers.size === 2) {
-      const [p1, p2] = [...activePointers.values()];
-      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      const midX = (p1.x + p2.x) / 2;
-      const midY = (p1.y + p2.y) / 2;
-      gesture = { kind: "pinch", dist, midX, midY };
-      return;
-    }
-    gesture = { kind: "pan", x: e.clientX, y: e.clientY };
+    setPressedArtboardChrome(null);
+    gesture = {
+      kind: "pan",
+      x: e.clientX,
+      y: e.clientY,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      tapArtboardId: null,
+    };
   };
 
   const onPointerMove = (e: PointerEvent) => {
@@ -733,11 +779,26 @@ export const Viewport: Component = () => {
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (!gesture) return;
     if (gesture.kind === "pan") {
+      const movedX = e.clientX - gesture.startX;
+      const movedY = e.clientY - gesture.startY;
+      const didCrossThreshold =
+        Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
+      if (gesture.tapArtboardId && !gesture.moved && !didCrossThreshold) {
+        return;
+      }
       const dx = e.clientX - gesture.x;
       const dy = e.clientY - gesture.y;
       panViewport(dx, dy, false);
       drawFrame();
-      gesture = { kind: "pan", x: e.clientX, y: e.clientY };
+      gesture = {
+        kind: "pan",
+        x: e.clientX,
+        y: e.clientY,
+        startX: gesture.startX,
+        startY: gesture.startY,
+        moved: gesture.moved || didCrossThreshold,
+        tapArtboardId: gesture.tapArtboardId,
+      };
       return;
     }
     if (gesture.kind === "artboard") {
@@ -750,6 +811,9 @@ export const Viewport: Component = () => {
         Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
       if (!gesture.moved && !didCrossThreshold) {
         return;
+      }
+      if (!gesture.moved) {
+        setPressedArtboardChrome(null);
       }
       const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
       if (t.scale <= 0) return;
@@ -924,10 +988,27 @@ export const Viewport: Component = () => {
     if (e) {
       activePointers.delete(e.pointerId);
     }
+    if (pressedArtboardChrome()?.kind === "close" && e && stageRef) {
+      const rect = stageRef.getBoundingClientRect();
+      const releasedClose = artboardCloseAtPoint(
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+      );
+      const pressedClose = pressedArtboardChrome();
+      setPressedArtboardChrome(null);
+      if (
+        pressedClose?.kind === "close" &&
+        releasedClose?.id === pressedClose.artboardId
+      ) {
+        void closeArtboard(pressedClose.artboardId);
+      }
+      return;
+    }
     if (gesture?.kind === "artboard") {
       const shouldSelect = !gesture.moved && gesture.artboardId !== state.selectedArtboardId;
       const artboardId = gesture.artboardId;
       const artboardPointerId = gesture.pointerId;
+      setPressedArtboardChrome(null);
       gesture = null;
       if (shouldSelect) {
         void selectArtboard(artboardId);
@@ -941,6 +1022,7 @@ export const Viewport: Component = () => {
       }
       return;
     }
+    setPressedArtboardChrome(null);
     if (
       (gesture?.kind === "crop" ||
         gesture?.kind === "mask") &&
@@ -997,15 +1079,27 @@ export const Viewport: Component = () => {
       void refreshPreview();
       if (activePointers.size === 1) {
         const [p] = [...activePointers.values()];
-        gesture = { kind: "pan", x: p.x, y: p.y };
+        gesture = {
+          kind: "pan",
+          x: p.x,
+          y: p.y,
+          startX: p.x,
+          startY: p.y,
+          moved: true,
+          tapArtboardId: null,
+        };
       } else {
         gesture = null;
       }
       return;
     }
     if (gesture?.kind === "pan") {
+      const tappedArtboardId = !gesture.moved ? gesture.tapArtboardId : null;
       void refreshPreview();
       gesture = null;
+      if (tappedArtboardId && tappedArtboardId !== state.selectedArtboardId) {
+        void selectArtboard(tappedArtboardId);
+      }
       return;
     }
     gesture = null;

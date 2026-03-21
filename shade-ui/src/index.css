@@ -154,8 +154,7 @@ button {
 }
 
 button[data-pressed="true"] {
-  transform: translateY(1px);
-  box-shadow: inset 0 0 0 9999px var(--surface-active);
+  transform: scale(0.99);
 }
 
 /* ─── View transitions ───────────────────────────────────────────────────── */
