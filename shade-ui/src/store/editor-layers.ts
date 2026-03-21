@@ -39,6 +39,7 @@ async function flushPendingEdits() {
   for (const params of batch) {
     await bridge.applyEdit(params);
   }
+  setState("previewContentVersion", (version) => version + 1);
   await refreshPreview();
   if (pendingEdits.size > 0) {
     await flushPendingEdits();
@@ -98,6 +99,7 @@ export async function refreshLayerStack() {
     layers,
     canvasWidth: info.canvas_width,
     canvasHeight: info.canvas_height,
+    previewContentVersion: info.generation,
     selectedLayerIdx:
       layers.length === 0 ? -1 : resolveSelectedLayerIdx(layers, state.selectedLayerIdx),
   });

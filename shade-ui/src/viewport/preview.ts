@@ -37,6 +37,7 @@ let lastRenderedBackdrop:
   | null = null;
 
 type RefreshSnapshot = {
+  previewContentVersion: number;
   viewportZoom: number;
   viewportCenterX: number;
   viewportCenterY: number;
@@ -293,6 +294,7 @@ function buildBackdropRequest(quality: "interactive" | "final"): bridge.PreviewR
 function captureRefreshSnapshot(): RefreshSnapshot {
   const committedCrop = getCommittedCropRect();
   return {
+    previewContentVersion: state.previewContentVersion,
     viewportZoom: state.viewportZoom,
     viewportCenterX: state.viewportCenterX,
     viewportCenterY: state.viewportCenterY,
@@ -313,6 +315,7 @@ function captureRefreshSnapshot(): RefreshSnapshot {
 function refreshSnapshotMatches(snapshot: RefreshSnapshot) {
   const current = captureRefreshSnapshot();
   return (
+    current.previewContentVersion === snapshot.previewContentVersion &&
     current.viewportZoom === snapshot.viewportZoom &&
     current.viewportCenterX === snapshot.viewportCenterX &&
     current.viewportCenterY === snapshot.viewportCenterY &&

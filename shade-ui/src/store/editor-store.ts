@@ -59,6 +59,7 @@ export interface EditorState {
   previewDisplayColorSpace: string;
   previewRenderWidth: number;
   previewRenderHeight: number;
+  previewContentVersion: number;
   selectedLayerIdx: number;
   isLoading: boolean;
   webgpuAvailable: boolean;
@@ -86,6 +87,7 @@ export const [state, setState] = createStore<EditorState>({
   previewDisplayColorSpace: "Unknown",
   previewRenderWidth: 0,
   previewRenderHeight: 0,
+  previewContentVersion: 0,
   selectedLayerIdx: -1,
   isLoading: false,
   webgpuAvailable: true,
