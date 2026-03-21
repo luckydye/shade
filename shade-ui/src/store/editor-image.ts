@@ -1,5 +1,11 @@
 import * as bridge from "../bridge/index";
-import { fullCanvasCrop, setState, state, type ArtboardSource } from "./editor-store";
+import {
+  fullCanvasCrop,
+  setState,
+  state,
+  type ArtboardSource,
+  type ArtboardState,
+} from "./editor-store";
 import {
   clearPreviewTiles,
   refreshPreview,
@@ -15,6 +21,8 @@ const DEFAULT_PENDING_ARTBOARD_HEIGHT = 1200;
 const SUPERSEDED_IMAGE_LOAD_ERROR = "image load superseded by newer request";
 
 let activeLoadToken = 0;
+
+type OpenImageMode = "append" | "replace";
 
 function createArtboardId() {
   return globalThis.crypto?.randomUUID?.() ?? `artboard-${Date.now()}-${Math.random()}`;
@@ -109,6 +117,59 @@ async function focusExistingArtboard(artboardId: string) {
   resetViewport();
 }
 
+async function loadArtboardIntoEditor(artboard: ArtboardState) {
+  const loadToken = beginLoadToken();
+  setPendingEditorState(
+    artboard.id,
+    artboard.width,
+    artboard.height,
+    artboard.sourceBitDepth,
+    artboard.activeMediaLibraryId && artboard.activeMediaItemId
+      ? {
+          libraryId: artboard.activeMediaLibraryId,
+          itemId: artboard.activeMediaItemId,
+        }
+      : null,
+    null,
+  );
+  try {
+    const info = await loadArtboardSource(artboard.source);
+    if (!isActiveLoadToken(loadToken)) {
+      return;
+    }
+    clearPreviewTiles();
+    setState(
+      "artboards",
+      (candidate) => candidate.id === artboard.id,
+      {
+        ...artboard,
+        width: info.canvas_width,
+        height: info.canvas_height,
+        sourceBitDepth: info.source_bit_depth,
+      },
+    );
+    resetViewportState(info.canvas_width, info.canvas_height);
+    setState({
+      sourceBitDepth: info.source_bit_depth,
+    });
+    await refreshLayerStack();
+    resumePreview();
+    await refreshPreview();
+  } catch (error) {
+    if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
+      return;
+    }
+    throw error;
+  } finally {
+    if (isActiveLoadToken(loadToken)) {
+      setState({
+        isLoading: false,
+        loadingMediaSrc: null,
+      });
+    }
+  }
+}
+
 function resetViewportState(canvasWidth: number, canvasHeight: number) {
   const crop = fullCanvasCrop(canvasWidth, canvasHeight);
   setState({
@@ -185,6 +246,7 @@ async function openImageFrom(
     libraryId: string;
     itemId: string;
   } | null,
+  mode: OpenImageMode,
 ) {
   const existingArtboard = state.artboards.find((artboard) =>
     artboardSourceMatches(artboard.source, source),
@@ -196,16 +258,19 @@ async function openImageFrom(
     await focusExistingArtboard(existingArtboard.id);
     return;
   }
+  const replacementArtboard =
+    mode === "replace"
+      ? state.artboards.find((artboard) => artboard.id === state.selectedArtboardId) ?? null
+      : null;
   const previousSelectedArtboardId = state.selectedArtboardId;
-  const { width: pendingWidth, height: pendingHeight } = getPendingArtboardSize();
-  const artboardId = createArtboardId();
-  const artboard = {
-    id: artboardId,
+  const pendingSize = replacementArtboard ?? getPendingArtboardSize();
+  const artboard = replacementArtboard ?? {
+    id: createArtboardId(),
     title: getArtboardTitle(source),
     worldX: getNextArtboardWorldX(),
     worldY: 0,
-    width: pendingWidth,
-    height: pendingHeight,
+    width: pendingSize.width,
+    height: pendingSize.height,
     sourceBitDepth: "Loading",
     source,
     activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
@@ -214,11 +279,13 @@ async function openImageFrom(
     backdropTile: null,
   };
   const loadToken = beginLoadToken();
-  setState("artboards", (artboards) => [...artboards, artboard]);
+  if (!replacementArtboard) {
+    setState("artboards", (artboards) => [...artboards, artboard]);
+  }
   setPendingEditorState(
-    artboardId,
-    pendingWidth,
-    pendingHeight,
+    artboard.id,
+    pendingSize.width,
+    pendingSize.height,
     "Loading",
     activeMediaSelection,
     loadingMediaSrc,
@@ -231,12 +298,18 @@ async function openImageFrom(
     clearPreviewTiles();
     setState(
       "artboards",
-      (candidate) => candidate.id === artboardId,
+      (candidate) => candidate.id === artboard.id,
       {
         ...artboard,
+        title: getArtboardTitle(source),
         width: info.canvas_width,
         height: info.canvas_height,
         sourceBitDepth: info.source_bit_depth,
+        source,
+        activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
+        activeMediaItemId: activeMediaSelection?.itemId ?? null,
+        previewTile: null,
+        backdropTile: null,
       },
     );
     resetViewportState(info.canvas_width, info.canvas_height);
@@ -247,10 +320,16 @@ async function openImageFrom(
     resumePreview();
     await refreshPreview();
   } catch (error) {
-    setState("artboards", (artboards) => artboards.filter((candidate) => candidate.id !== artboardId));
     if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
       return;
     }
+    if (replacementArtboard) {
+      await loadArtboardIntoEditor(replacementArtboard);
+      throw error;
+    }
+    setState("artboards", (artboards) =>
+      artboards.filter((candidate) => candidate.id !== artboard.id),
+    );
     if (
       previousSelectedArtboardId &&
       state.artboards.some((candidate) => candidate.id === previousSelectedArtboardId)
@@ -330,17 +409,19 @@ export async function openImage(
     libraryId: string;
     itemId: string;
   } | null = null,
+  mode: OpenImageMode = "replace",
 ) {
   await openImageFrom(
     () => bridge.openImage(path),
     { kind: "path", path },
     loadingMediaSrc,
     activeMediaSelection,
+    mode,
   );
 }
 
-export async function openImageFile(file: File) {
-  await openImageFrom(() => bridge.openImageFile(file), { kind: "file", file }, null, null);
+export async function openImageFile(file: File, mode: OpenImageMode = "replace") {
+  await openImageFrom(() => bridge.openImageFile(file), { kind: "file", file }, null, null, mode);
 }
 
 export async function openPeerImage(
@@ -351,12 +432,14 @@ export async function openPeerImage(
     libraryId: string;
     itemId: string;
   } | null = null,
+  mode: OpenImageMode = "replace",
 ) {
   await openImageFrom(
     () => bridge.openPeerImage(peerEndpointId, picture),
     { kind: "peer", peerEndpointId, picture },
     loadingMediaSrc,
     activeMediaSelection,
+    mode,
   );
 }
 
@@ -381,56 +464,7 @@ export async function selectArtboard(artboardId: string) {
   if (!artboard) {
     throw new Error("artboard not found");
   }
-  const loadToken = beginLoadToken();
-  setPendingEditorState(
-    artboardId,
-    artboard.width,
-    artboard.height,
-    artboard.sourceBitDepth,
-    artboard.activeMediaLibraryId && artboard.activeMediaItemId
-      ? {
-          libraryId: artboard.activeMediaLibraryId,
-          itemId: artboard.activeMediaItemId,
-        }
-      : null,
-    null,
-  );
-  try {
-    const info = await loadArtboardSource(artboard.source);
-    if (!isActiveLoadToken(loadToken)) {
-      return;
-    }
-    clearPreviewTiles();
-    setState(
-      "artboards",
-      (candidate) => candidate.id === artboardId,
-      {
-        ...artboard,
-        width: info.canvas_width,
-        height: info.canvas_height,
-        sourceBitDepth: info.source_bit_depth,
-      },
-    );
-    resetViewportState(info.canvas_width, info.canvas_height);
-    setState({
-      sourceBitDepth: info.source_bit_depth,
-    });
-    await refreshLayerStack();
-    resumePreview();
-    await refreshPreview();
-  } catch (error) {
-    if (!isActiveLoadToken(loadToken) || isSupersededImageLoadError(error)) {
-      return;
-    }
-    throw error;
-  } finally {
-    if (isActiveLoadToken(loadToken)) {
-      setState({
-        isLoading: false,
-        loadingMediaSrc: null,
-      });
-    }
-  }
+  await loadArtboardIntoEditor(artboard);
 }
 
 export async function exportImage(path: string) {

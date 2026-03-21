@@ -124,8 +124,9 @@ export const Toolbar: Component = () => {
     if (!files || files.length === 0) {
       return;
     }
-    for (const file of Array.from(files)) {
-      await openImageFile(file);
+    const selectedFiles = Array.from(files);
+    for (const [index, file] of selectedFiles.entries()) {
+      await openImageFile(file, index === 0 ? "replace" : "append");
     }
     if (fileInputRef) fileInputRef.value = "";
   };

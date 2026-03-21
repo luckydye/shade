@@ -595,8 +595,8 @@ export const Viewport: Component = () => {
     const files = Array.from(e.dataTransfer?.files ?? []).filter((file) =>
       file.type.startsWith("image/"),
     );
-    for (const file of files) {
-      await openImageFile(file);
+    for (const [index, file] of files.entries()) {
+      await openImageFile(file, index === 0 ? "replace" : "append");
     }
   };
 
