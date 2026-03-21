@@ -49,7 +49,7 @@ type InspectorTab = "edit" | "presets";
 type LayerDropTarget = { layerIdx: number; position: "before" | "after" };
 
 const PANEL_SHELL_CLASS =
-  "gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-bg)] p-3";
+  "gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-bg)] p-3 pr-0";
 const SECTION_TITLE_CLASS =
   "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)]";
 const PARAMETER_ROW_CLASS =
@@ -1105,7 +1105,7 @@ export const Inspector: Component = () => {
         <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
           Master
         </span>
-        <div class="col-start-2 col-end-4 overflow-hidden rounded-md bg-[var(--surface-subtle)]">
+        <div class="col-start-1 col-end-4 overflow-hidden rounded-md bg-[var(--surface-subtle)]">
           <svg
             ref={svgRef!}
             viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
@@ -2183,7 +2183,7 @@ export const Inspector: Component = () => {
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class={`m-2 hidden h-[calc(100%-1rem)] lg:flex lg:flex-col ${PANEL_SHELL_CLASS}`}>
-        <div class="media-scroll flex-1 overflow-y-auto pr-1">
+        <div class="media-scroll flex-1 pr-5 overflow-y-auto">
           <DesktopEditPanel />
           {inspectorTab() === "presets" ? (
             <PresetsPanel />
