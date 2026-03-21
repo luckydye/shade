@@ -155,7 +155,7 @@ fn presets_dir_path() -> Result<PathBuf, String> {
 }
 
 fn app_config_dir() -> Result<PathBuf, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         return APP_CONFIG_DIR
             .get()
@@ -163,7 +163,7 @@ fn app_config_dir() -> Result<PathBuf, String> {
             .ok_or_else(|| "app config path is not initialized".to_string());
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
         Ok(PathBuf::from(home).join(".config/shade"))
