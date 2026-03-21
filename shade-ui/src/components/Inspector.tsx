@@ -1003,6 +1003,12 @@ const Inspector: Component = () => {
               finishDraggingPoint();
             }}
             onPointerLeave={() => {
+              setHoveredId(null);
+            }}
+            onPointerCancel={(e) => {
+              if (e.pointerType === "touch") return;
+              if (svgRef.hasPointerCapture(e.pointerId))
+                svgRef.releasePointerCapture(e.pointerId);
               finishDraggingPoint();
               setHoveredId(null);
             }}
