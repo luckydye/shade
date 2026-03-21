@@ -24,8 +24,12 @@ pub fn run() {
         .manage(RenderService(commands::spawn_render_worker()))
         .manage(ThumbnailService(shade_io::spawn_thumbnail_workers()))
         .manage(LibraryScanService(shade_io::LibraryScanService::new()))
-        .manage(CameraDiscoveryService(shade_io::CameraDiscoveryService::new()))
-        .manage(CameraThumbnailService(shade_io::CameraThumbnailService::new()))
+        .manage(CameraDiscoveryService(
+            shade_io::CameraDiscoveryService::new(),
+        ))
+        .manage(CameraThumbnailService(
+            shade_io::CameraThumbnailService::new(),
+        ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
             #[cfg(not(target_os = "ios"))]

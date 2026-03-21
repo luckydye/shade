@@ -2,8 +2,8 @@ use anyhow::Result;
 use futures_channel::oneshot;
 use half::f16;
 use shade_core::{
-    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack,
-    TextureId, ToneParams,
+    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack, TextureId,
+    ToneParams,
 };
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -144,8 +144,14 @@ impl Renderer {
             height,
             "input texture",
         );
-        let final_tex =
-            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false, None)?;
+        let final_tex = self.render_texture_with_ops(
+            &input_tex,
+            ops,
+            (0.0, 0.0),
+            (1.0, 1.0),
+            false,
+            None,
+        )?;
         self.readback_work_texture_to_u8(&final_tex, width, height)
             .await
     }
@@ -159,8 +165,14 @@ impl Renderer {
     ) -> Result<Vec<f32>> {
         let input_tex =
             self.upload_float_texture(input_data, width, height, "input texture");
-        let final_tex =
-            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), false, None)?;
+        let final_tex = self.render_texture_with_ops(
+            &input_tex,
+            ops,
+            (0.0, 0.0),
+            (1.0, 1.0),
+            false,
+            None,
+        )?;
         self.readback_work_texture_to_f32(&final_tex, width, height)
             .await
     }
@@ -178,7 +190,8 @@ impl Renderer {
         ops: &[AdjustmentOp],
         frame_index: u64,
     ) -> Result<Vec<u8>> {
-        let input_tex = self.upload_float_texture(input_data, width, height, "frame input");
+        let input_tex =
+            self.upload_float_texture(input_data, width, height, "frame input");
         let final_tex = self.render_texture_with_ops(
             &input_tex,
             ops,
@@ -517,11 +530,8 @@ impl Renderer {
                                 sin_r: 0.0,
                             },
                         )?;
-                        full_res_source = Some((
-                            src_size,
-                            source_texture.clone(),
-                            preprocess_owned,
-                        ));
+                        full_res_source =
+                            Some((src_size, source_texture.clone(), preprocess_owned));
                         image_result
                     } else {
                         // No source image: skip this layer.
@@ -1457,10 +1467,7 @@ mod tests {
         let expected = [3.0, 4.0, 7.0, 8.0, 11.0, 12.0, 15.0, 16.0];
         for (i, (got, want)) in r.iter().zip(expected.iter()).enumerate() {
             let diff = (got - want).abs();
-            assert!(
-                diff < 0.6,
-                "pixel {i}: expected {want}, got {got}"
-            );
+            assert!(diff < 0.6, "pixel {i}: expected {want}, got {got}");
         }
     }
 
@@ -1875,8 +1882,15 @@ mod tests {
         let mut accum = vec![0.0f32; (target_w * target_h * 4) as usize];
         for gy in 0..target_h {
             for gx in 0..target_w {
-                let (sx, sy) =
-                    cpu_crop_sample(gx, gy, target_w, target_h, src_w, src_h, &image_uniform);
+                let (sx, sy) = cpu_crop_sample(
+                    gx,
+                    gy,
+                    target_w,
+                    target_h,
+                    src_w,
+                    src_h,
+                    &image_uniform,
+                );
                 let px = cpu_bilinear(source, src_w, src_h, sx, sy);
                 let off = (gy * target_w + gx) as usize * 4;
                 accum[off..off + 4].copy_from_slice(&px);
@@ -1964,8 +1978,19 @@ mod tests {
     fn cpu_crop_no_rotation_identity() {
         // 4×4 source, full-canvas viewport, crop right half, no rotation.
         let source = make_grid(4, 4);
-        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 4.0, height: 4.0 };
-        let crop = CropRect { x: 2.0, y: 0.0, width: 2.0, height: 4.0, rotation: 0.0 };
+        let viewport = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+        };
+        let crop = CropRect {
+            x: 2.0,
+            y: 0.0,
+            width: 2.0,
+            height: 4.0,
+            rotation: 0.0,
+        };
         let out = cpu_render_image_then_crop(&source, 4, 4, 4, 4, &viewport, &crop);
         let r = r_from(&out);
         // Output covers crop rect (2,0)-(4,4) at 4×4 target.
@@ -1982,7 +2007,12 @@ mod tests {
     fn cpu_crop_90deg_rotation_square_canvas() {
         // 4×4 source, 90° rotation of center 2×2 crop.
         let source = make_grid(4, 4);
-        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 4.0, height: 4.0 };
+        let viewport = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+        };
         let crop = CropRect {
             x: 1.0,
             y: 1.0,
@@ -2016,7 +2046,8 @@ mod tests {
             assert!(
                 diff < 1.5,
                 "pixel {i}: half={}, expected≈{}, diff={diff}",
-                r_half[i], expected[i],
+                r_half[i],
+                expected[i],
             );
         }
     }
@@ -2029,7 +2060,12 @@ mod tests {
     #[test]
     fn cpu_crop_rotation_non_uniform_scaling() {
         let source = make_grid(8, 4);
-        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 4.0 };
+        let viewport = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: 8.0,
+            height: 4.0,
+        };
         let crop = CropRect {
             x: 2.0,
             y: 0.0,
@@ -2060,7 +2096,8 @@ mod tests {
                 diff < 1.5,
                 "pixel {i}: reference={}, preview={}, diff={diff} — \
                  rotation distorted by non-uniform scaling",
-                r_ref[i], r_preview[i],
+                r_ref[i],
+                r_preview[i],
             );
         }
     }
@@ -2070,7 +2107,12 @@ mod tests {
     #[test]
     fn cpu_crop_45deg_non_square_canvas() {
         let source = make_grid(8, 4);
-        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 4.0 };
+        let viewport = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: 8.0,
+            height: 4.0,
+        };
         let crop = CropRect {
             x: 2.0,
             y: 0.0,
@@ -2097,7 +2139,8 @@ mod tests {
             assert!(
                 diff < 1.5,
                 "pixel {i}: reference={}, preview={}, diff={diff}",
-                r_ref[i], r_preview[i],
+                r_ref[i],
+                r_preview[i],
             );
         }
     }
@@ -2128,27 +2171,15 @@ mod tests {
         // dx=0.5, dy=0.5. rot = (4+0.5, 2-0.5) = (4.5, 1.5).
         // src = (4.5-0)/8*8 - 0.5 = 4.0, (1.5-0)/4*4 - 0.5 = 1.0.
         let (sx, sy) = cpu_crop_sample(2, 2, 4, 4, 8, 4, &p);
-        assert!(
-            (sx - 4.0).abs() < 0.01,
-            "gid(2,2) src_x={sx}, expected 4.0"
-        );
-        assert!(
-            (sy - 1.0).abs() < 0.01,
-            "gid(2,2) src_y={sy}, expected 1.0"
-        );
+        assert!((sx - 4.0).abs() < 0.01, "gid(2,2) src_x={sx}, expected 4.0");
+        assert!((sy - 1.0).abs() < 0.01, "gid(2,2) src_y={sy}, expected 1.0");
 
         // gid (0,0): u=0.125, v=0.125. canvas=(2.5, 0.5).
         // dx=-1.5, dy=-1.5. rot = (4-1.5, 2+1.5) = (2.5, 3.5).
         // src = (2.5/8*8-0.5, 3.5/4*4-0.5) = (2.0, 3.0).
         let (sx, sy) = cpu_crop_sample(0, 0, 4, 4, 8, 4, &p);
-        assert!(
-            (sx - 2.0).abs() < 0.01,
-            "gid(0,0) src_x={sx}, expected 2.0"
-        );
-        assert!(
-            (sy - 3.0).abs() < 0.01,
-            "gid(0,0) src_y={sy}, expected 3.0"
-        );
+        assert!((sx - 2.0).abs() < 0.01, "gid(0,0) src_x={sx}, expected 2.0");
+        assert!((sy - 3.0).abs() < 0.01, "gid(0,0) src_y={sy}, expected 3.0");
     }
 
     /// Edge case: small rotation (5°) on a wide canvas.
@@ -2156,7 +2187,12 @@ mod tests {
     #[test]
     fn cpu_crop_small_rotation_wide_canvas() {
         let source = make_grid(16, 4);
-        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 16.0, height: 4.0 };
+        let viewport = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: 16.0,
+            height: 4.0,
+        };
         let crop = CropRect {
             x: 6.0,
             y: 0.0,
@@ -2187,7 +2223,8 @@ mod tests {
             assert!(
                 diff < 2.0,
                 "pixel {i}: reference={}, preview={}, diff={diff}",
-                r_ref[i], r_preview[i],
+                r_ref[i],
+                r_preview[i],
             );
         }
     }
@@ -2206,27 +2243,49 @@ mod tests {
         };
 
         let full = cpu_render_image_then_crop(
-            &source, 8, 8, 4, 4,
-            &PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 8.0 },
+            &source,
+            8,
+            8,
+            4,
+            4,
+            &PreviewCrop {
+                x: 0.0,
+                y: 0.0,
+                width: 8.0,
+                height: 8.0,
+            },
             &crop,
         );
         let r_full = r_from(&full);
 
         let preview = cpu_render_image_then_crop(
-            &source, 8, 8, 4, 4,
-            &PreviewCrop { x: 2.0, y: 2.0, width: 4.0, height: 4.0 },
+            &source,
+            8,
+            8,
+            4,
+            4,
+            &PreviewCrop {
+                x: 2.0,
+                y: 2.0,
+                width: 4.0,
+                height: 4.0,
+            },
             &crop,
         );
         let r_preview = r_from(&preview);
 
         eprintln!("--- viewport = crop rect ---");
         for row in 0..4 {
-            let v: Vec<String> = (0..4).map(|c| format!("{:6.1}", r_preview[row*4+c])).collect();
+            let v: Vec<String> = (0..4)
+                .map(|c| format!("{:6.1}", r_preview[row * 4 + c]))
+                .collect();
             eprintln!("  row {row}: {}", v.join(" "));
         }
         eprintln!("--- viewport = full canvas (reference) ---");
         for row in 0..4 {
-            let v: Vec<String> = (0..4).map(|c| format!("{:6.1}", r_full[row*4+c])).collect();
+            let v: Vec<String> = (0..4)
+                .map(|c| format!("{:6.1}", r_full[row * 4 + c]))
+                .collect();
             eprintln!("  row {row}: {}", v.join(" "));
         }
 
@@ -2245,7 +2304,12 @@ mod tests {
     #[test]
     fn cpu_crop_rotation_full_viewport_different_resolutions() {
         let source = make_grid(8, 8);
-        let viewport = PreviewCrop { x: 0.0, y: 0.0, width: 8.0, height: 8.0 };
+        let viewport = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: 8.0,
+            height: 8.0,
+        };
         let crop = CropRect {
             x: 2.0,
             y: 2.0,
@@ -2279,7 +2343,8 @@ mod tests {
             assert!(
                 diff < 2.0,
                 "pixel {i}: reference={}, lo_res={}, diff={diff}",
-                r_ref[i], r_lo[i],
+                r_ref[i],
+                r_lo[i],
             );
         }
     }

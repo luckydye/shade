@@ -1,6 +1,7 @@
 use crate::{
-    indexed_library_image_for_path, is_supported_library_image, load_persisted_library_index,
-    replace_persisted_library_index, sort_indexed_library_items, IndexedLibraryImage,
+    indexed_library_image_for_path, is_supported_library_image,
+    load_persisted_library_index, replace_persisted_library_index,
+    sort_indexed_library_items, IndexedLibraryImage,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -102,7 +103,10 @@ impl LibraryScanService {
             root,
             rx,
         )?;
-        watches.insert(library_id.to_string(), LibraryWatchHandle { _watcher: watcher });
+        watches.insert(
+            library_id.to_string(),
+            LibraryWatchHandle { _watcher: watcher },
+        );
         Ok(())
     }
 
@@ -112,8 +116,9 @@ impl LibraryScanService {
         library_id: &str,
         root: PathBuf,
     ) -> Result<bool, String> {
-        let (snapshot, _) =
-            self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
+        let (snapshot, _) = self
+            .ensure_snapshot_for_library(db_path, library_id, root.clone())
+            .await?;
         {
             let guard = snapshot
                 .lock()
@@ -139,8 +144,9 @@ impl LibraryScanService {
         root: PathBuf,
     ) -> Result<LibraryScanSnapshot, String> {
         self.watch_library(db_path, library_id, root.clone())?;
-        let (snapshot, should_scan) =
-            self.ensure_snapshot_for_library(db_path, library_id, root.clone()).await?;
+        let (snapshot, should_scan) = self
+            .ensure_snapshot_for_library(db_path, library_id, root.clone())
+            .await?;
         if should_scan {
             start_library_scan(
                 snapshot.clone(),
@@ -170,7 +176,9 @@ impl LibraryScanService {
         if self.request_refresh(db_path, library_id, root).await? {
             return Ok(());
         }
-        Err(format!("library index refresh already running: {library_id}"))
+        Err(format!(
+            "library index refresh already running: {library_id}"
+        ))
     }
 
     pub fn remove_library(&self, library_id: &str) -> Result<(), String> {
@@ -226,7 +234,8 @@ fn spawn_library_watch_loop(
                 loop {
                     match rx.recv_timeout(LIBRARY_WATCH_DEBOUNCE) {
                         Ok(Ok(event)) => {
-                            has_refreshable_event |= library_watch_event_requires_refresh(&event);
+                            has_refreshable_event |=
+                                library_watch_event_requires_refresh(&event);
                         }
                         Ok(Err(_)) => {
                             has_refreshable_event = true;
@@ -271,7 +280,9 @@ pub fn start_library_scan(
             .lock()
             .map_err(|_| "library scan snapshot lock poisoned".to_string())?;
         if guard.is_scanning {
-            return Err(format!("library index refresh already running: {library_id}"));
+            return Err(format!(
+                "library index refresh already running: {library_id}"
+            ));
         }
         guard.is_scanning = true;
         guard.is_complete = false;
@@ -284,8 +295,8 @@ pub fn start_library_scan(
     std::thread::Builder::new()
         .name("shade-library-scan".into())
         .spawn(move || {
-            let result = scan_library_into_snapshot(&root, &snapshot, publish_progress).and_then(
-                |items| {
+            let result = scan_library_into_snapshot(&root, &snapshot, publish_progress)
+                .and_then(|items| {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
@@ -298,8 +309,7 @@ pub fn start_library_scan(
                             &items,
                         ))
                         .map(|indexed_at| (items, indexed_at))
-                },
-            );
+                });
             let mut guard = snapshot
                 .lock()
                 .expect("library scan snapshot lock poisoned");
@@ -330,7 +340,8 @@ pub fn scan_library_into_snapshot(
     let mut batch = Vec::new();
     let mut items = Vec::new();
     while let Some(current_dir) = dirs.pop() {
-        let entries = std::fs::read_dir(&current_dir).map_err(|error| error.to_string())?;
+        let entries =
+            std::fs::read_dir(&current_dir).map_err(|error| error.to_string())?;
         for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();

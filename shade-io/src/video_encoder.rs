@@ -45,8 +45,9 @@ impl VideoEncoder {
     ) -> Result<Self> {
         let settings = build_settings(width, height, fps, codec);
         let location = video_rs::location::Location::File(path.to_path_buf());
-        let inner = Encoder::new(location, settings)
-            .with_context(|| format!("failed to open video for encoding: {}", path.display()))?;
+        let inner = Encoder::new(location, settings).with_context(|| {
+            format!("failed to open video for encoding: {}", path.display())
+        })?;
         Ok(Self {
             inner,
             width,
@@ -70,7 +71,9 @@ impl VideoEncoder {
     }
 
     pub fn finish(mut self) -> Result<()> {
-        self.inner.finish().context("failed to finish video encoding")
+        self.inner
+            .finish()
+            .context("failed to finish video encoding")
     }
 }
 

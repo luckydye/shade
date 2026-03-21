@@ -27,7 +27,12 @@ struct Bounds {
 }
 
 /// Equivalent to `fitPreviewSize()`.
-fn fit_preview_size(container_w: f64, container_h: f64, image_w: f64, image_h: f64) -> (f64, f64) {
+fn fit_preview_size(
+    container_w: f64,
+    container_h: f64,
+    image_w: f64,
+    image_h: f64,
+) -> (f64, f64) {
     let scale = (container_w / image_w).min(container_h / image_h);
     (
         (image_w * scale).floor().max(1.0),
@@ -97,9 +102,12 @@ fn preview_request(
     center_y: f64,
     device_pixel_ratio: f64,
 ) -> (u32, u32, PreviewCrop) {
-    let visible = get_visible_preview(bounds, viewport_w, viewport_h, zoom, center_x, center_y);
+    let visible =
+        get_visible_preview(bounds, viewport_w, viewport_h, zoom, center_x, center_y);
     let tw = (visible.screen_width * device_pixel_ratio).round().max(1.0) as u32;
-    let th = (visible.screen_height * device_pixel_ratio).round().max(1.0) as u32;
+    let th = (visible.screen_height * device_pixel_ratio)
+        .round()
+        .max(1.0) as u32;
     (tw, th, visible.crop)
 }
 
@@ -199,8 +207,9 @@ async fn render_with_frontend_viewport(
     let center_x = bounds.x + bounds.width * 0.5;
     let center_y = bounds.y + bounds.height * 0.5;
 
-    let (tw, th, viewport_crop) =
-        preview_request(&bounds, viewport_w, viewport_h, zoom, center_x, center_y, 1.0);
+    let (tw, th, viewport_crop) = preview_request(
+        &bounds, viewport_w, viewport_h, zoom, center_x, center_y, 1.0,
+    );
 
     eprintln!(
         "[{label}]  viewport={viewport_w}×{viewport_h}, zoom={zoom:.0}%, \
@@ -218,7 +227,15 @@ async fn render_with_frontend_viewport(
     sources.insert(1, image.clone());
 
     let pixels = renderer
-        .render_stack_preview(&stack, &sources, canvas_w, canvas_h, tw, th, Some(viewport_crop))
+        .render_stack_preview(
+            &stack,
+            &sources,
+            canvas_w,
+            canvas_h,
+            tw,
+            th,
+            Some(viewport_crop),
+        )
         .await
         .expect("render failed");
 
@@ -250,17 +267,31 @@ async fn frontend_viewport_zoom_synthetic() {
 
     // --- No crop layer (baseline) ---
     render_with_frontend_viewport(
-        &renderer, &image, w, h, None,
-        500.0, 500.0, 1.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        None,
+        500.0,
+        500.0,
+        1.0,
         "no crop, zoom=100%",
         "/tmp/shade_e2e_v2_no_crop_z100.png",
-    ).await;
+    )
+    .await;
     render_with_frontend_viewport(
-        &renderer, &image, w, h, None,
-        500.0, 500.0, 2.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        None,
+        500.0,
+        500.0,
+        2.0,
         "no crop, zoom=200%",
         "/tmp/shade_e2e_v2_no_crop_z200.png",
-    ).await;
+    )
+    .await;
 
     // --- Crop (no rotation) at zoom ---
     let crop_norot = CropRect {
@@ -271,37 +302,72 @@ async fn frontend_viewport_zoom_synthetic() {
         rotation: 0.0,
     };
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop_norot.clone()),
-        500.0, 500.0, 1.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop_norot.clone()),
+        500.0,
+        500.0,
+        1.0,
         "crop norot, zoom=100%",
         "/tmp/shade_e2e_v2_crop_norot_z100.png",
-    ).await;
+    )
+    .await;
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop_norot.clone()),
-        500.0, 500.0, 2.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop_norot.clone()),
+        500.0,
+        500.0,
+        2.0,
         "crop norot, zoom=200%",
         "/tmp/shade_e2e_v2_crop_norot_z200.png",
-    ).await;
+    )
+    .await;
 
     // --- Crop with 15° rotation at zoom ---
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop.clone()),
-        500.0, 500.0, 1.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop.clone()),
+        500.0,
+        500.0,
+        1.0,
         "crop rot=15°, zoom=100%",
         "/tmp/shade_e2e_v2_crop_rot15_z100.png",
-    ).await;
+    )
+    .await;
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop.clone()),
-        500.0, 500.0, 2.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop.clone()),
+        500.0,
+        500.0,
+        2.0,
         "crop rot=15°, zoom=200%",
         "/tmp/shade_e2e_v2_crop_rot15_z200.png",
-    ).await;
+    )
+    .await;
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop.clone()),
-        500.0, 500.0, 4.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop.clone()),
+        500.0,
+        500.0,
+        4.0,
         "crop rot=15°, zoom=400%",
         "/tmp/shade_e2e_v2_crop_rot15_z400.png",
-    ).await;
+    )
+    .await;
 
     // --- Smaller crop rect (center 60%) with rotation ---
     let small_crop = CropRect {
@@ -312,17 +378,31 @@ async fn frontend_viewport_zoom_synthetic() {
         rotation: 10.0f32.to_radians(),
     };
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(small_crop.clone()),
-        500.0, 500.0, 1.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(small_crop.clone()),
+        500.0,
+        500.0,
+        1.0,
         "small crop rot=10°, zoom=100%",
         "/tmp/shade_e2e_v2_small_rot10_z100.png",
-    ).await;
+    )
+    .await;
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(small_crop.clone()),
-        500.0, 500.0, 2.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(small_crop.clone()),
+        500.0,
+        500.0,
+        2.0,
         "small crop rot=10°, zoom=200%",
         "/tmp/shade_e2e_v2_small_rot10_z200.png",
-    ).await;
+    )
+    .await;
 }
 
 /// Uses the real fixture image if available.
@@ -344,15 +424,29 @@ async fn frontend_viewport_zoom_fixture() {
     };
 
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop.clone()),
-        600.0, 600.0, 1.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop.clone()),
+        600.0,
+        600.0,
+        1.0,
         "fixture crop rot=12°, zoom=100%",
         "/tmp/shade_e2e_v2_fixture_z100.png",
-    ).await;
+    )
+    .await;
     render_with_frontend_viewport(
-        &renderer, &image, w, h, Some(crop.clone()),
-        600.0, 600.0, 2.0,
+        &renderer,
+        &image,
+        w,
+        h,
+        Some(crop.clone()),
+        600.0,
+        600.0,
+        2.0,
         "fixture crop rot=12°, zoom=200%",
         "/tmp/shade_e2e_v2_fixture_z200.png",
-    ).await;
+    )
+    .await;
 }

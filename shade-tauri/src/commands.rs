@@ -6,8 +6,9 @@ use shade_core::{
 };
 use shade_io::{
     delete_persisted_library_index, has_persisted_library_index,
-    library_index_db_path as shared_library_index_db_path, load_image_bytes_f32_with_info,
-    picture_display_name, scan_directory_images, to_linear_srgb_f32, SourceImageInfo,
+    library_index_db_path as shared_library_index_db_path,
+    load_image_bytes_f32_with_info, picture_display_name, scan_directory_images,
+    to_linear_srgb_f32, SourceImageInfo,
 };
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -208,7 +209,10 @@ fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
         .filter_map(|entry| entry.mask)
         .filter_map(|id| stack.mask_params.get(&id).map(|p| (id, p.clone())))
         .collect();
-    PersistedLayerData { layers, mask_params }
+    PersistedLayerData {
+        layers,
+        mask_params,
+    }
 }
 
 fn ensure_non_image_layers(layers: &[shade_core::LayerEntry]) -> Result<(), String> {
@@ -449,13 +453,9 @@ async fn persist_current_edit_version(
             st.current_edit_version,
         )
     };
-    let version = persist_edit_version(
-        &file_hash,
-        source_name.as_deref(),
-        current_version,
-        &data,
-    )
-    .await?;
+    let version =
+        persist_edit_version(&file_hash, source_name.as_deref(), current_version, &data)
+            .await?;
     let mut st = lock_editor_state(state)?;
     st.current_edit_version = Some(version);
     Ok(version)
@@ -659,7 +659,23 @@ fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> Media
     }
 }
 
+fn local_library_is_available(path: &Path) -> bool {
+    path.is_dir()
+}
+
+fn unavailable_local_library_error(path: &Path) -> String {
+    format!("media library is unavailable: {}", path.display())
+}
+
+fn require_local_library_path(path: PathBuf) -> Result<PathBuf, String> {
+    if local_library_is_available(&path) {
+        return Ok(path);
+    }
+    Err(unavailable_local_library_error(&path))
+}
+
 fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
+    let is_online = local_library_is_available(&path);
     let name = path
         .file_name()
         .and_then(|segment| segment.to_str())
@@ -671,8 +687,8 @@ fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
         kind: "directory".into(),
         path: Some(path.display().to_string()),
         removable: true,
-        is_online: None,
-        is_refreshing: Some(is_refreshing),
+        is_online: Some(is_online),
+        is_refreshing: Some(is_refreshing && is_online),
     }
 }
 
@@ -787,21 +803,23 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
 ) -> Result<Vec<MediaLibrary>, String> {
     let pictures_dir = default_pictures_dir()?;
     let scan_service = &app.state::<crate::LibraryScanService>().0;
+    let pictures_online = local_library_is_available(&pictures_dir);
     let mut libraries = vec![MediaLibrary {
         id: "pictures".into(),
         name: "Pictures".into(),
         kind: "directory".into(),
         path: Some(pictures_dir.display().to_string()),
         removable: false,
-        is_online: None,
-        is_refreshing: Some(scan_service.is_refreshing("pictures")?),
+        is_online: Some(pictures_online),
+        is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
     let config = load_app_config()?;
     for directory in config.directories {
         let path = PathBuf::from(directory);
         libraries.push(library_for_directory(
             path.clone(),
-            scan_service.is_refreshing(&custom_library_id(&path))?,
+            local_library_is_available(&path)
+                && scan_service.is_refreshing(&custom_library_id(&path))?,
         ));
     }
     for host in app
@@ -852,6 +870,9 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
         let db_path = library_index_db_path()?;
         let library_scan_service = app.state::<crate::LibraryScanService>().0.clone();
         for (library_id, root) in desktop_local_library_roots()? {
+            if !local_library_is_available(&root) {
+                continue;
+            }
             library_scan_service.watch_library(&db_path, &library_id, root.clone())?;
             if tauri::async_runtime::block_on(has_persisted_library_index(
                 &db_path,
@@ -860,9 +881,11 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
             ))? {
                 continue;
             }
-            tauri::async_runtime::block_on(
-                library_scan_service.refresh_library(&db_path, &library_id, root),
-            )?;
+            tauri::async_runtime::block_on(library_scan_service.refresh_library(
+                &db_path,
+                &library_id,
+                root,
+            ))?;
         }
         Ok(())
     }
@@ -982,7 +1005,8 @@ async fn load_photo_thumbnail_from_tauri<R: tauri::Runtime>(
             let c_id =
                 std::ffi::CString::new(picture_id.as_str()).map_err(|e| e.to_string())?;
             let mut out_size: i32 = 0;
-            let ptr = unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
+            let ptr =
+                unsafe { ios_get_thumbnail(c_id.as_ptr(), 320, 320, &mut out_size) };
             if ptr.is_null() {
                 return Err("failed to get thumbnail from photo library".to_string());
             }
@@ -1373,15 +1397,18 @@ pub async fn open_image<R: tauri::Runtime>(
         st.begin_open_request()
     };
     let photo_app = app.clone();
-    let opened = shade_io::open_image(
-        &path,
-        |host, file_path| async move { load_camera_image_from_tauri(&host, &file_path).await },
-        move |picture_id| {
-            let app = photo_app.clone();
-            async move { load_photo_image_from_tauri(&app, &picture_id).await }
-        },
-    )
-    .await?;
+    let opened =
+        shade_io::open_image(
+            &path,
+            |host, file_path| async move {
+                load_camera_image_from_tauri(&host, &file_path).await
+            },
+            move |picture_id| {
+                let app = photo_app.clone();
+                async move { load_photo_image_from_tauri(&app, &picture_id).await }
+            },
+        )
+        .await?;
     let file_hash = opened.file_hash;
     let persisted = load_latest_edit_version(&file_hash).await?;
     let response = {
@@ -1904,9 +1931,16 @@ pub async fn apply_edit(
                         }
                     }
                     "grain" => {
-                        let existing = ops.iter().find_map(|op| {
-                            if let AdjustmentOp::Grain(p) = op { Some(*p) } else { None }
-                        }).unwrap_or_default();
+                        let existing = ops
+                            .iter()
+                            .find_map(|op| {
+                                if let AdjustmentOp::Grain(p) = op {
+                                    Some(*p)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_default();
                         let next = AdjustmentOp::Grain(GrainParams {
                             amount: params.grain_amount.unwrap_or(existing.amount),
                             size: params.grain_size.unwrap_or(existing.size),
@@ -2493,7 +2527,10 @@ async fn build_library_listing<R: tauri::Runtime>(
         return tokio::task::spawn_blocking(|| {
             let ptr = unsafe { ios_list_photos() };
             if ptr.is_null() {
-                return Ok(LibraryImageListing { items: vec![], is_complete: true });
+                return Ok(LibraryImageListing {
+                    items: vec![],
+                    is_complete: true,
+                });
             }
             let json = unsafe {
                 let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
@@ -2526,14 +2563,19 @@ async fn build_library_listing<R: tauri::Runtime>(
                 .await;
         }
         let db_path = library_index_db_path()?;
-        let library_path = resolve_desktop_library_path(&library_id)?;
+        let library_path =
+            require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
         let snapshot = _app
             .state::<crate::LibraryScanService>()
             .0
             .snapshot_for_library(&db_path, &library_id, library_path)
             .await?;
         Ok(LibraryImageListing {
-            items: snapshot.items.into_iter().map(local_library_image).collect(),
+            items: snapshot
+                .items
+                .into_iter()
+                .map(local_library_image)
+                .collect(),
             is_complete: snapshot.is_complete,
         })
     }
@@ -2547,16 +2589,21 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {
         let _ = _app;
-        return Err(format!("library indexing is not supported on this platform: {library_id}"));
+        return Err(format!(
+            "library indexing is not supported on this platform: {library_id}"
+        ));
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         if library_id.starts_with("ccapi:") {
-            return Err(format!("library indexing is not supported for camera libraries: {library_id}"));
+            return Err(format!(
+                "library indexing is not supported for camera libraries: {library_id}"
+            ));
         }
         let db_path = library_index_db_path()?;
-        let library_path = resolve_desktop_library_path(&library_id)?;
+        let library_path =
+            require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
         _app.state::<crate::LibraryScanService>()
             .0
             .refresh_library(&db_path, &library_id, library_path)
@@ -2618,7 +2665,9 @@ pub async fn remove_media_library<R: tauri::Runtime>(
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         delete_persisted_library_index(&library_index_db_path()?, &id).await?;
-        _app.state::<crate::LibraryScanService>().0.remove_library(&id)?;
+        _app.state::<crate::LibraryScanService>()
+            .0
+            .remove_library(&id)?;
     }
     Ok(())
 }
@@ -2764,7 +2813,13 @@ pub async fn load_snapshot(
         st.stack.layers.extend(snapshot.data.layers);
         let w = st.canvas_width;
         let h = st.canvas_height;
-        restore_masks_from_params(&mut st.stack, base_idx, &snapshot.data.mask_params, w, h);
+        restore_masks_from_params(
+            &mut st.stack,
+            base_idx,
+            &snapshot.data.mask_params,
+            w,
+            h,
+        );
         st.stack.generation += 1;
         st.current_edit_version = Some(params.version);
     }
@@ -2852,7 +2907,10 @@ pub async fn get_layer_stack(
             opacity: l.opacity,
             blend_mode: format!("{:?}", l.blend_mode),
             has_mask: l.mask.is_some(),
-            mask_params: l.mask.and_then(|id| st.stack.mask_params.get(&id)).map(MaskParamsInfo::from),
+            mask_params: l
+                .mask
+                .and_then(|id| st.stack.mask_params.get(&id))
+                .map(MaskParamsInfo::from),
             crop: match &l.layer {
                 shade_core::Layer::Crop { rect } => Some(CropValues {
                     x: rect.x,

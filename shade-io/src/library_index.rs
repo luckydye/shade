@@ -50,7 +50,8 @@ pub fn sort_indexed_library_items(items: &mut [IndexedLibraryImage]) {
 }
 
 async fn open_library_index_db(db_path: &Path) -> Result<libsql::Connection, String> {
-    std::fs::create_dir_all(library_index_db_parent(db_path)?).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(library_index_db_parent(db_path)?)
+        .map_err(|error| error.to_string())?;
     let db = libsql::Builder::new_local(db_path)
         .build()
         .await
@@ -106,7 +107,9 @@ pub fn is_supported_library_image(path: &Path) -> bool {
         .is_some_and(|ext| IMAGE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
 }
 
-pub fn indexed_library_image_for_path(path: &Path) -> Result<IndexedLibraryImage, String> {
+pub fn indexed_library_image_for_path(
+    path: &Path,
+) -> Result<IndexedLibraryImage, String> {
     let path_string = path
         .to_str()
         .ok_or_else(|| format!("non-utf8 path: {}", path.display()))?
@@ -127,7 +130,8 @@ pub fn scan_directory_images(root: &Path) -> Result<Vec<IndexedLibraryImage>, St
     let mut items = Vec::new();
     let mut dirs = vec![root.to_path_buf()];
     while let Some(current_dir) = dirs.pop() {
-        let entries = std::fs::read_dir(&current_dir).map_err(|error| error.to_string())?;
+        let entries =
+            std::fs::read_dir(&current_dir).map_err(|error| error.to_string())?;
         for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
@@ -218,7 +222,11 @@ pub async fn has_persisted_library_index(
         )
         .await
         .map_err(|error| error.to_string())?;
-    Ok(rows.next().await.map_err(|error| error.to_string())?.is_some())
+    Ok(rows
+        .next()
+        .await
+        .map_err(|error| error.to_string())?
+        .is_some())
 }
 
 pub async fn replace_persisted_library_index(
@@ -231,7 +239,9 @@ pub async fn replace_persisted_library_index(
     let indexed_at_u64 = system_time_millis(std::time::SystemTime::now())?;
     let indexed_at = i64::try_from(indexed_at_u64).map_err(|error| error.to_string())?;
     let root_path = library_index_root_path(root_path)?;
-    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|error| error.to_string())?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|error| error.to_string())?;
     let result = async {
         conn.execute(
             "INSERT INTO library_indexes (library_id, root_path, indexed_at)
@@ -267,7 +277,9 @@ pub async fn replace_persisted_library_index(
     .await;
     match result {
         Ok(()) => {
-            conn.execute("COMMIT", ()).await.map_err(|error| error.to_string())?;
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|error| error.to_string())?;
             Ok(indexed_at_u64)
         }
         Err(error) => {
@@ -282,7 +294,9 @@ pub async fn delete_persisted_library_index(
     library_id: &str,
 ) -> Result<(), String> {
     let conn = open_library_index_db(db_path).await?;
-    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|error| error.to_string())?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|error| error.to_string())?;
     let result = async {
         conn.execute(
             "DELETE FROM library_index_items WHERE library_id = ?1",
@@ -301,7 +315,9 @@ pub async fn delete_persisted_library_index(
     .await;
     match result {
         Ok(()) => {
-            conn.execute("COMMIT", ()).await.map_err(|error| error.to_string())?;
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|error| error.to_string())?;
             Ok(())
         }
         Err(error) => {

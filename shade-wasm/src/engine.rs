@@ -102,7 +102,10 @@ impl WasmEngine {
     }
 
     pub fn delete_layer(&mut self, layer_idx: usize) {
-        assert!(layer_idx < self.stack.layers.len(), "layer index out of bounds");
+        assert!(
+            layer_idx < self.stack.layers.len(),
+            "layer index out of bounds"
+        );
         if let Some(mask_id) = self.stack.layers[layer_idx].mask {
             self.stack.masks.remove(&mask_id);
             self.stack.mask_params.remove(&mask_id);
@@ -248,9 +251,8 @@ impl WasmEngine {
                     size,
                     ..existing.unwrap_or_default()
                 });
-                if let Some(op) = ops
-                    .iter_mut()
-                    .find(|o| matches!(o, AdjustmentOp::Grain(_)))
+                if let Some(op) =
+                    ops.iter_mut().find(|o| matches!(o, AdjustmentOp::Grain(_)))
                 {
                     *op = new_op;
                 } else {
@@ -298,10 +300,7 @@ impl WasmEngine {
         let max_y = self.canvas_height.saturating_sub(1) as f32;
         let x = rect.x.round().clamp(0.0, max_x);
         let y = rect.y.round().clamp(0.0, max_y);
-        let width = rect
-            .width
-            .round()
-            .clamp(1.0, self.canvas_width as f32 - x);
+        let width = rect.width.round().clamp(1.0, self.canvas_width as f32 - x);
         let height = rect
             .height
             .round()
@@ -521,7 +520,11 @@ impl WasmEngine {
             let edge0 = params.midpoint - params.feather;
             let edge1 = params.midpoint + params.feather;
             let t = if edge0 == edge1 {
-                if dist < edge0 { 0.0 } else { 1.0 }
+                if dist < edge0 {
+                    0.0
+                } else {
+                    1.0
+                }
             } else {
                 ((dist - edge0) / (edge1 - edge0)).clamp(0.0, 1.0)
             };
@@ -544,9 +547,10 @@ impl WasmEngine {
                     let mut count = 0.0;
                     for dy in -1..=1 {
                         for dx in -1..=1 {
-                            let sx = (x as isize + dx).clamp(0, (width - 1) as isize) as usize;
-                            let sy =
-                                (y as isize + dy).clamp(0, (height - 1) as isize) as usize;
+                            let sx =
+                                (x as isize + dx).clamp(0, (width - 1) as isize) as usize;
+                            let sy = (y as isize + dy).clamp(0, (height - 1) as isize)
+                                as usize;
                             sum += source[(sy * width + sx) * 4 + channel];
                             count += 1.0;
                         }
@@ -554,7 +558,8 @@ impl WasmEngine {
                     let idx = (y * width + x) * 4 + channel;
                     let blur = sum / count;
                     let detail = source[idx] - blur;
-                    pixels[idx] = (source[idx] + detail * params.amount * 1.5).clamp(0.0, 1.0);
+                    pixels[idx] =
+                        (source[idx] + detail * params.amount * 1.5).clamp(0.0, 1.0);
                 }
             }
         }
@@ -589,8 +594,10 @@ impl WasmEngine {
                 let mut count = 0.0;
                 for dy in -1..=1 {
                     for dx in -1..=1 {
-                        let sx = (x as isize + dx).clamp(0, (width - 1) as isize) as usize;
-                        let sy = (y as isize + dy).clamp(0, (height - 1) as isize) as usize;
+                        let sx =
+                            (x as isize + dx).clamp(0, (width - 1) as isize) as usize;
+                        let sy =
+                            (y as isize + dy).clamp(0, (height - 1) as isize) as usize;
                         let base = (sy * width + sx) * 4;
                         avg[0] += source[base];
                         avg[1] += source[base + 1];

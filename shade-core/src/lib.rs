@@ -711,7 +711,11 @@ mod tests {
         m.fill_linear_gradient(0.0, 0.0, 0.0, 256.0);
         // First pixel near 0, last pixel near 255
         assert!(m.pixels[0] < 2, "top should be ~0, got {}", m.pixels[0]);
-        assert!(m.pixels[255] > 253, "bottom should be ~255, got {}", m.pixels[255]);
+        assert!(
+            m.pixels[255] > 253,
+            "bottom should be ~255, got {}",
+            m.pixels[255]
+        );
         // Monotonically non-decreasing
         for i in 1..256 {
             assert!(m.pixels[i] >= m.pixels[i - 1]);
@@ -744,8 +748,16 @@ mod tests {
         // Bottom to top: y2 < y1
         m.fill_linear_gradient(0.0, 100.0, 0.0, 0.0);
         // First row (y=0) is the "end" → near 255, last row (y=99) is the "start" → near 0
-        assert!(m.pixels[0] > 250, "top should be bright, got {}", m.pixels[0]);
-        assert!(m.pixels[99] < 5, "bottom should be dark, got {}", m.pixels[99]);
+        assert!(
+            m.pixels[0] > 250,
+            "top should be bright, got {}",
+            m.pixels[0]
+        );
+        assert!(
+            m.pixels[99] < 5,
+            "bottom should be dark, got {}",
+            m.pixels[99]
+        );
     }
 
     // ── Radial gradient ──────────────────────────────────────────────────────
@@ -768,8 +780,10 @@ mod tests {
         for y in 0..100 {
             let left = m.pixels[y * 100 + 10];
             let right = m.pixels[y * 100 + 89];
-            assert!((left as i16 - right as i16).unsigned_abs() <= 1,
-                "row {y}: left={left}, right={right} should be symmetric");
+            assert!(
+                (left as i16 - right as i16).unsigned_abs() <= 1,
+                "row {y}: left={left}, right={right} should be symmetric"
+            );
         }
     }
 
@@ -832,7 +846,12 @@ mod tests {
         let mut stack = LayerStack::new();
         stack.add_adjustment_layer(vec![]);
         let mask = MaskData::new_empty(100, 100);
-        let params = MaskParams::Linear { x1: 0.0, y1: 0.0, x2: 0.0, y2: 100.0 };
+        let params = MaskParams::Linear {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 0.0,
+            y2: 100.0,
+        };
         let id = stack.set_mask_with_params(0, mask, params);
         assert!(stack.mask_params.contains_key(&id));
         match stack.get_mask_params(0) {
@@ -846,7 +865,11 @@ mod tests {
         let mut stack = LayerStack::new();
         stack.add_adjustment_layer(vec![]);
         let mask = MaskData::new_empty(100, 100);
-        let params = MaskParams::Radial { cx: 50.0, cy: 50.0, radius: 40.0 };
+        let params = MaskParams::Radial {
+            cx: 50.0,
+            cy: 50.0,
+            radius: 40.0,
+        };
         stack.set_mask_with_params(0, mask, params);
         match stack.get_mask_params(0) {
             Some(MaskParams::Radial { cx, cy, radius }) => {
@@ -863,7 +886,12 @@ mod tests {
         let mut stack = LayerStack::new();
         stack.add_adjustment_layer(vec![]);
         let mask = MaskData::new_empty(10, 10);
-        let params = MaskParams::Linear { x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0 };
+        let params = MaskParams::Linear {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 10.0,
+            y2: 0.0,
+        };
         let id = stack.set_mask_with_params(0, mask, params);
         stack.remove_mask(0);
         assert!(!stack.mask_params.contains_key(&id));

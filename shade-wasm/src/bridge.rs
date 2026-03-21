@@ -1,10 +1,12 @@
 use crate::engine::WasmEngine;
 use serde::{Deserialize, Serialize};
-use shade_core::{ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams};
+use shade_core::{
+    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams,
+};
 use shade_gpu::{PreviewCrop as GpuPreviewCrop, Renderer};
 use shade_io::load_image_bytes_f32_with_info;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 
@@ -71,7 +73,8 @@ fn apply_preview_request(
 #[wasm_bindgen]
 pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
     ENGINE.with(|e| {
-        e.borrow_mut().load_rgba8_image_data(pixels.to_vec(), width, height)
+        e.borrow_mut()
+            .load_rgba8_image_data(pixels.to_vec(), width, height)
     })
 }
 
@@ -180,8 +183,9 @@ pub fn apply_hsl(
 
 #[wasm_bindgen]
 pub fn apply_curves(layer_idx: usize, control_points: JsValue) -> Result<(), JsValue> {
-    let points: Vec<CurveControlPoint> = serde_wasm_bindgen::from_value(control_points)
-        .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    let points: Vec<CurveControlPoint> =
+        serde_wasm_bindgen::from_value(control_points)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
     ENGINE.with(|e| {
         e.borrow_mut().apply_curves(layer_idx, points);
     });
@@ -291,7 +295,11 @@ pub fn move_layer(from_idx: usize, to_idx: usize) -> usize {
             return from_idx;
         }
         let entry = eng.stack.layers.remove(from_idx);
-        let insert_idx = if to_idx > from_idx { to_idx - 1 } else { to_idx };
+        let insert_idx = if to_idx > from_idx {
+            to_idx - 1
+        } else {
+            to_idx
+        };
         eng.stack.layers.insert(insert_idx, entry);
         eng.stack.generation += 1;
         insert_idx
@@ -482,17 +490,18 @@ pub fn get_stack_json() -> String {
 
 #[wasm_bindgen]
 pub async fn render_preview_rgba(request: JsValue) -> Result<JsValue, JsValue> {
-    let request: Option<PreviewRenderRequest> = if request.is_undefined() || request.is_null() {
-        None
-    } else {
-        Some(
-            serde_wasm_bindgen::from_value(request)
-                .map_err(|err| JsValue::from_str(&err.to_string()))?,
-        )
-    };
-    let renderer = RENDERER.with(|slot| slot.borrow().clone()).ok_or_else(|| {
-        JsValue::from_str("renderer is not initialized")
-    })?;
+    let request: Option<PreviewRenderRequest> =
+        if request.is_undefined() || request.is_null() {
+            None
+        } else {
+            Some(
+                serde_wasm_bindgen::from_value(request)
+                    .map_err(|err| JsValue::from_str(&err.to_string()))?,
+            )
+        };
+    let renderer = RENDERER
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| JsValue::from_str("renderer is not initialized"))?;
     let (stack, sources, canvas_width, canvas_height) =
         ENGINE.with(|engine| engine.borrow().snapshot_render_state());
     if canvas_width == 0 || canvas_height == 0 {

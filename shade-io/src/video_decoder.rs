@@ -22,8 +22,9 @@ pub struct VideoDecoder {
 impl VideoDecoder {
     pub fn open(path: &Path) -> Result<Self> {
         let location = video_rs::location::Location::File(path.to_path_buf());
-        let inner = Decoder::new(location)
-            .with_context(|| format!("failed to open video for decoding: {}", path.display()))?;
+        let inner = Decoder::new(location).with_context(|| {
+            format!("failed to open video for decoding: {}", path.display())
+        })?;
         let size = inner.size();
         let (width, height) = (size.0 as u32, size.1 as u32);
         let fps = inner.frame_rate();

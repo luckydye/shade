@@ -302,7 +302,11 @@ impl DenoisePipeline {
             encoder.copy_texture_to_texture(
                 input_tex.as_image_copy(),
                 output.as_image_copy(),
-                Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
             );
             ctx.queue.submit(std::iter::once(encoder.finish()));
             return output;

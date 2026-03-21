@@ -107,6 +107,19 @@ function isLocalLibraryRefreshing(library: LibraryEntry | null) {
   return !!library && !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_refreshing;
 }
 
+function isLibraryOffline(
+  library: LibraryEntry | null,
+  onlinePeerIds: Set<string>,
+) {
+  if (!library) {
+    return false;
+  }
+  if (isPeerLibrary(library)) {
+    return !onlinePeerIds.has(library.peerId);
+  }
+  return library.is_online === false;
+}
+
 function isCameraLibrary(
   library: LibraryEntry | null,
 ): library is MediaLibrary & { kind: "camera" } {
@@ -534,9 +547,17 @@ export const MediaView: Component = () => {
   const selectedLibraryIsRefreshing = createMemo(() =>
     isLocalLibraryRefreshing(selectedLibrary()),
   );
+  const selectedLibraryIsOffline = createMemo(() =>
+    isLibraryOffline(selectedLibrary(), onlinePeerIds()),
+  );
   const canRefreshSelectedLibrary = createMemo(() => {
     const library = selectedLibrary();
-    return !!library && !isPeerLibrary(library) && !isCameraLibrary(library);
+    return (
+      !!library &&
+      !isPeerLibrary(library) &&
+      !isCameraLibrary(library) &&
+      library.is_online !== false
+    );
   });
   const columns = createMemo(() =>
     Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))),
@@ -836,11 +857,7 @@ export const MediaView: Component = () => {
               <For each={libraryEntries()}>
                 {(library) =>
                   (() => {
-                    const offline = isPeerLibrary(library)
-                      ? !onlinePeerIds().has(library.peerId)
-                      : isCameraLibrary(library)
-                        ? library.is_online === false
-                        : false;
+                    const offline = isLibraryOffline(library, onlinePeerIds());
                     const refreshing = isLocalLibraryRefreshing(library);
                     return (
                       <Button
@@ -857,7 +874,10 @@ export const MediaView: Component = () => {
                         }`}
                       >
                         <span class="flex items-center gap-2">
-                          {(isPeerLibrary(library) || isCameraLibrary(library) || refreshing) && (
+                          {(isPeerLibrary(library) ||
+                            isCameraLibrary(library) ||
+                            refreshing ||
+                            offline) && (
                             <span
                               class={`h-1.5 w-1.5 rounded-full ${
                                 refreshing
@@ -993,8 +1013,10 @@ export const MediaView: Component = () => {
         <Show when={selectedLibraryDetail()}>
           <p class="truncate text-xs text-[var(--text-dim)]">
             {selectedLibraryDetail()}
+            {selectedLibraryIsOffline() && " • offline"}
             {selectedLibraryIsRefreshing() && " • refreshing library index"}
             {!selectedLibraryIsRefreshing() &&
+              !selectedLibraryIsOffline() &&
               !isLibraryScanComplete() &&
               ` • indexing ${displayedItems().length} images`}
           </p>

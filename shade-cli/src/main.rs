@@ -670,15 +670,20 @@ async fn main() -> Result<()> {
             shade_io::init_video();
 
             // Open the input video and read its properties.
-            let mut decoder = VideoDecoder::open(&input)
-                .with_context(|| format!("failed to open input video: {}", input.display()))?;
+            let mut decoder = VideoDecoder::open(&input).with_context(|| {
+                format!("failed to open input video: {}", input.display())
+            })?;
             let (width, height) = decoder.dimensions();
             let fps = decoder.fps();
             let total = decoder.frame_count();
             log::info!(
                 "Input video: {}×{} @ {:.3} fps, ~{} frames",
-                width, height, fps,
-                total.map(|n| n.to_string()).unwrap_or_else(|| "unknown".to_string())
+                width,
+                height,
+                fps,
+                total
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
             );
 
             // Build the adjustment ops vector (same logic as Edit command).
@@ -692,7 +697,11 @@ async fn main() -> Result<()> {
                 shadows,
                 gamma: 1.0,
             });
-            if saturation.is_some() || vibrancy.is_some() || temperature.is_some() || tint.is_some() {
+            if saturation.is_some()
+                || vibrancy.is_some()
+                || temperature.is_some()
+                || tint.is_some()
+            {
                 ops.push(AdjustmentOp::Color(ColorParams {
                     saturation: saturation.unwrap_or(1.0),
                     vibrancy: vibrancy.unwrap_or(0.0),
@@ -702,9 +711,15 @@ async fn main() -> Result<()> {
             }
             if vignette.is_some() {
                 let mut vp = VignetteParams::default();
-                if let Some(v) = vignette { vp.amount = v; }
-                if let Some(v) = vignette_midpoint { vp.midpoint = v; }
-                if let Some(v) = vignette_feather { vp.feather = v; }
+                if let Some(v) = vignette {
+                    vp.amount = v;
+                }
+                if let Some(v) = vignette_midpoint {
+                    vp.midpoint = v;
+                }
+                if let Some(v) = vignette_feather {
+                    vp.feather = v;
+                }
                 ops.push(AdjustmentOp::Vignette(vp));
             }
             if sharpen.is_some() {
@@ -725,8 +740,11 @@ async fn main() -> Result<()> {
             let renderer = Renderer::new().await?;
 
             log::info!("Opening output video: {}", output.display());
-            let mut encoder = VideoEncoder::open(&output, width, height, fps, video_codec)
-                .with_context(|| format!("failed to open output video: {}", output.display()))?;
+            let mut encoder =
+                VideoEncoder::open(&output, width, height, fps, video_codec)
+                    .with_context(|| {
+                        format!("failed to open output video: {}", output.display())
+                    })?;
 
             let start = start_frame.unwrap_or(0);
             let mut frames_written: u64 = 0;
@@ -755,10 +773,8 @@ async fn main() -> Result<()> {
                     .await?;
 
                 // Convert linear sRGB → sRGB for video output.
-                let mut out_f32: Vec<f32> = rgba8
-                    .iter()
-                    .map(|&b| b as f32 / 255.0)
-                    .collect();
+                let mut out_f32: Vec<f32> =
+                    rgba8.iter().map(|&b| b as f32 / 255.0).collect();
                 from_linear_srgb_f32(&mut out_f32, &ColorSpace::Srgb);
                 let out_rgba8 = quantize_rgba_f32(&out_f32);
 
@@ -771,7 +787,11 @@ async fn main() -> Result<()> {
             }
 
             encoder.finish()?;
-            log::info!("Done. Encoded {} frames → {}", frames_written, output.display());
+            log::info!(
+                "Done. Encoded {} frames → {}",
+                frames_written,
+                output.display()
+            );
         }
     }
 

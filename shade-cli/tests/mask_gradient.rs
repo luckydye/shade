@@ -73,7 +73,9 @@ fn compute_region_stats(path: &Path) -> RegionStats {
 
         let xi = x as i32;
         let yi = y as i32;
-        if (xi - cx as i32).unsigned_abs() < center_r && (yi - cy as i32).unsigned_abs() < center_r {
+        if (xi - cx as i32).unsigned_abs() < center_r
+            && (yi - cy as i32).unsigned_abs() < center_r
+        {
             center_sum += lum;
             center_count += 1;
         }

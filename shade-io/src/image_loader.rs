@@ -79,11 +79,14 @@ where
     PhotoFuture: std::future::Future<Output = Result<Option<Vec<u8>>, String>>,
 {
     if path.starts_with("ccapi://") {
-        let bytes = load_picture_bytes(path, &load_camera_image, &load_photo_image).await?;
+        let bytes =
+            load_picture_bytes(path, &load_camera_image, &load_photo_image).await?;
         let (_, file_path) = parse_ccapi_media_path(path)?;
-        let (image, info) =
-            load_image_bytes_f32_with_info(&bytes, Some(&picture_display_name(file_path)))
-                .map_err(|error| error.to_string())?;
+        let (image, info) = load_image_bytes_f32_with_info(
+            &bytes,
+            Some(&picture_display_name(file_path)),
+        )
+        .map_err(|error| error.to_string())?;
         return Ok(OpenedImage {
             file_hash: hash_bytes(&bytes),
             source_name: Some(path.to_string()),
@@ -92,8 +95,8 @@ where
         });
     }
     if let Some(bytes) = load_photo_image(path.to_string()).await? {
-        let (image, info) =
-            load_image_bytes_f32_with_info(&bytes, None).map_err(|error| error.to_string())?;
+        let (image, info) = load_image_bytes_f32_with_info(&bytes, None)
+            .map_err(|error| error.to_string())?;
         return Ok(OpenedImage {
             file_hash: hash_bytes(&bytes),
             source_name: Some(path.to_string()),
@@ -102,7 +105,8 @@ where
         });
     }
     let source = Path::new(path);
-    let (image, info) = load_image_f32_with_info(source).map_err(|error| error.to_string())?;
+    let (image, info) =
+        load_image_f32_with_info(source).map_err(|error| error.to_string())?;
     Ok(OpenedImage {
         file_hash: hash_file(source)?,
         source_name: Some(path.to_string()),

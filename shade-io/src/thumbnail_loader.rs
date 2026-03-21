@@ -42,13 +42,17 @@ pub fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
     if cache_path.exists() {
         return std::fs::read(&cache_path).map_err(|error| error.to_string());
     }
-    let (pixels, width, height) = crate::load_image(source).map_err(|error| error.to_string())?;
+    let (pixels, width, height) =
+        crate::load_image(source).map_err(|error| error.to_string())?;
     let img = image::RgbaImage::from_raw(width, height, pixels)
         .ok_or("failed to wrap pixels in RgbaImage")?;
     let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
     let mut jpeg = Vec::new();
     thumb
-        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )
         .map_err(|error| error.to_string())?;
     std::fs::write(&cache_path, &jpeg).map_err(|error| error.to_string())?;
     Ok(jpeg)
@@ -72,7 +76,12 @@ pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue<ThumbnailResponseSender>>
     queue
 }
 
-pub async fn load_thumbnail_bytes<CameraThumbnail, CameraFuture, PhotoThumbnail, PhotoFuture>(
+pub async fn load_thumbnail_bytes<
+    CameraThumbnail,
+    CameraFuture,
+    PhotoThumbnail,
+    PhotoFuture,
+>(
     picture_id: &str,
     thumbnail_queue: &ThumbnailQueue<ThumbnailResponseSender>,
     load_camera_thumbnail: CameraThumbnail,

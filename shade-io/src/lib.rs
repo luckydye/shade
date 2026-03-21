@@ -13,32 +13,35 @@ use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
+pub mod camera_services;
+pub mod image_loader;
 pub mod library_index;
 pub mod library_scan_service;
-pub mod camera_services;
-pub mod thumbnail_queue;
 pub mod thumbnail_loader;
-pub mod image_loader;
+pub mod thumbnail_queue;
 #[cfg(feature = "ffmpeg")]
 pub mod video_decoder;
 #[cfg(feature = "ffmpeg")]
 pub mod video_encoder;
 
+pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
+pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 pub use library_index::{
-    delete_persisted_library_index, indexed_library_image_for_path,
-    is_supported_library_image, library_index_db_path, has_persisted_library_index,
+    delete_persisted_library_index, has_persisted_library_index,
+    indexed_library_image_for_path, is_supported_library_image, library_index_db_path,
     load_persisted_library_index, picture_display_name, replace_persisted_library_index,
     scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
     PersistedLibraryIndex,
 };
-pub use library_scan_service::{flush_library_scan_batch, scan_library_into_snapshot, start_library_scan, LibraryScanService, LibraryScanSnapshot};
-pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
-pub use thumbnail_queue::{PendingThumbnailJob, ThumbnailJob, ThumbnailQueue};
+pub use library_scan_service::{
+    flush_library_scan_batch, scan_library_into_snapshot, start_library_scan,
+    LibraryScanService, LibraryScanSnapshot,
+};
 pub use thumbnail_loader::{
     generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
     ThumbnailResponseSender,
 };
-pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
+pub use thumbnail_queue::{PendingThumbnailJob, ThumbnailJob, ThumbnailQueue};
 #[cfg(feature = "ffmpeg")]
 pub use video_decoder::{FrameInfo, VideoDecoder};
 #[cfg(feature = "ffmpeg")]
