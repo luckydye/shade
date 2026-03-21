@@ -71,6 +71,8 @@ export const Viewport: Component = () => {
     rotation: number;
   } | null>(null);
   const [draftMask, setDraftMask] = createSignal<MaskParamsInfo | null>(null);
+  const [loadingArtboardImage, setLoadingArtboardImage] =
+    createSignal<HTMLImageElement | null>(null);
   const activePointers = new Map<number, { x: number; y: number }>();
   let gesture:
     | {
@@ -432,6 +434,32 @@ export const Viewport: Component = () => {
     return fill || (isLoading ? "rgba(128, 128, 128, 0.32)" : "rgba(128, 128, 128, 0.18)");
   }
 
+  function drawLoadingImageOnArtboard(
+    ctx: CanvasRenderingContext2D,
+    artboard: ArtboardState,
+    t: WorldTransform,
+  ) {
+    const image = loadingArtboardImage();
+    if (!image) {
+      return;
+    }
+    const screenX = artboard.worldX * t.scale + t.dx;
+    const screenY = artboard.worldY * t.scale + t.dy;
+    const screenWidth = artboard.width * t.scale;
+    const screenHeight = artboard.height * t.scale;
+    if (screenWidth <= 0 || screenHeight <= 0) {
+      return;
+    }
+    const scale = Math.min(screenWidth / image.naturalWidth, screenHeight / image.naturalHeight);
+    const drawWidth = image.naturalWidth * scale;
+    const drawHeight = image.naturalHeight * scale;
+    const drawX = screenX + (screenWidth - drawWidth) * 0.5;
+    const drawY = screenY + (screenHeight - drawHeight) * 0.5;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  }
+
   function drawFrame() {
     if (!canvasRef || !containerRef) return;
     const ctx = canvasRef.getContext("2d");
@@ -483,6 +511,9 @@ export const Viewport: Component = () => {
         if (!visibleBackdrop && !visiblePreview) {
           ctx.fillStyle = getArtboardPlaceholderFill(isSelected && state.isLoading);
           ctx.fillRect(sx, sy, sw, sh);
+          if (isSelected && state.isLoading && state.loadingMediaSrc) {
+            drawLoadingImageOnArtboard(ctx, artboard, t);
+          }
         }
         compositeArtboard(
           ctx,
@@ -556,10 +587,37 @@ export const Viewport: Component = () => {
     state.selectedArtboardId;
     state.layers;
     state.artboards;
+    state.loadingMediaSrc;
     pressedArtboardChrome();
     backdropTile();
     previewTile();
+    loadingArtboardImage();
     drawFrame();
+  });
+
+  createEffect(() => {
+    const src = state.loadingMediaSrc;
+    if (!src) {
+      setLoadingArtboardImage(null);
+      return;
+    }
+    let cancelled = false;
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      if (!cancelled) {
+        setLoadingArtboardImage(image);
+      }
+    };
+    image.onerror = () => {
+      if (!cancelled) {
+        setLoadingArtboardImage(null);
+      }
+    };
+    image.src = src;
+    onCleanup(() => {
+      cancelled = true;
+    });
   });
 
   createEffect(() => {

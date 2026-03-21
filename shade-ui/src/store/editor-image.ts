@@ -286,6 +286,21 @@ async function openImageFrom(
   const loadToken = beginLoadToken();
   if (!replacementArtboard) {
     setState("artboards", (artboards) => [...artboards, artboard]);
+  } else {
+    setState(
+      "artboards",
+      (candidate) => candidate.id === artboard.id,
+      {
+        ...artboard,
+        title: getArtboardTitle(source),
+        source,
+        sourceBitDepth: "Loading",
+        activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
+        activeMediaItemId: activeMediaSelection?.itemId ?? null,
+        previewTile: null,
+        backdropTile: null,
+      },
+    );
   }
   setPendingEditorState(
     artboard.id,
