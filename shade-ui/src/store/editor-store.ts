@@ -101,6 +101,7 @@ export const [state, setState] = createStore<EditorState>({
 });
 
 export const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);
+export const [transitionMediaSrc, setTransitionMediaSrc] = createSignal<string | null>(null);
 
 export function getSelectedArtboard() {
   if (!state.selectedArtboardId) {

@@ -42,7 +42,12 @@ import {
   resetLocalThumbnailFailure,
   resolveLocalThumbnailSrc,
 } from "../local-library-cache";
-import { openImage, openPeerImage, state } from "../store/editor";
+import {
+  openImage,
+  openPeerImage,
+  setTransitionMediaSrc,
+  state,
+} from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 
 type LibraryEntry = MediaLibrary | PeerLibrary;
@@ -327,6 +332,12 @@ const MediaTile: Component<{
       setLoadError(false);
       setLoadRequestVersion((current) => current + 1);
     }
+    const clearViewTransitionName = () => {
+      if (!imgRef) {
+        return;
+      }
+      imgRef.style.viewTransitionName = "";
+    };
     if (imgRef) {
       imgRef.style.viewTransitionName = "active-media";
     }
@@ -337,12 +348,21 @@ const MediaTile: Component<{
 
     const currentSrc = src() ?? null;
     if (document.startViewTransition) {
-      document.startViewTransition(
-        () => void openMediaItem(props.item, props.libraryId, currentSrc).catch(handleError),
-      );
+      setTransitionMediaSrc(currentSrc);
+      const transition = document.startViewTransition(() => {
+        void openMediaItem(props.item, props.libraryId, currentSrc).catch(handleError);
+        clearViewTransitionName();
+      });
+      void transition.finished.finally(() => {
+        clearViewTransitionName();
+        setTransitionMediaSrc(null);
+      });
       return;
     }
-    void openMediaItem(props.item, props.libraryId, currentSrc).catch(handleError);
+    setTransitionMediaSrc(null);
+    void openMediaItem(props.item, props.libraryId, currentSrc)
+      .catch(handleError)
+      .finally(clearViewTransitionName);
   }
 
   const buttonClass = () =>

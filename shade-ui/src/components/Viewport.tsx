@@ -18,6 +18,7 @@ import {
   selectArtboard,
   setViewportScreenSize,
   state,
+  transitionMediaSrc,
   zoomViewport,
 } from "../store/editor";
 import type { MaskParamsInfo } from "../bridge/index";
@@ -127,6 +128,7 @@ export const Viewport: Component = () => {
   const shouldShowZoomIndicator = () =>
     state.viewportZoom > 1.001 || state.viewportZoom < 0.999;
   const viewportZoomPercent = () => getViewportZoomPercent();
+  const transitionOverlaySrc = () => transitionMediaSrc() ?? state.loadingMediaSrc;
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
 
@@ -1147,21 +1149,27 @@ export const Viewport: Component = () => {
             }}
             class={`${state.layers.length === 0 ? "opacity-0" : "opacity-100"}`}
           />
-          {state.isLoading && state.loadingMediaSrc && !previewTile() && (
+          {transitionOverlaySrc() &&
+            (transitionMediaSrc() !== null || (state.isLoading && !previewTile())) && (
             <div class="pointer-events-none absolute inset-0">
               <img
-                src={state.loadingMediaSrc}
+                src={transitionOverlaySrc()!}
                 alt=""
                 class="absolute inset-0 h-full w-full object-contain"
-                style={{ "view-transition-name": "active-media" }}
+                style={{
+                  "view-transition-name":
+                    transitionMediaSrc() !== null ? "active-media" : "none",
+                }}
               />
               <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_40%)]" />
-              <div class="absolute inset-x-0 bottom-6 flex items-center justify-center">
-                <span class="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur">
-                  <span class="h-2 w-2 animate-pulse rounded-full bg-white" />
-                  Loading
-                </span>
-              </div>
+              {state.isLoading && (
+                <div class="absolute inset-x-0 bottom-6 flex items-center justify-center">
+                  <span class="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/82 backdrop-blur">
+                    <span class="h-2 w-2 animate-pulse rounded-full bg-white" />
+                    Loading
+                  </span>
+                </div>
+              )}
             </div>
           )}
           {selectedCropLayer() && activeCrop() && (

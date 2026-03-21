@@ -4,6 +4,8 @@ export {
   isDrawerOpen,
   setIsDrawerOpen,
   state,
+  setTransitionMediaSrc,
+  transitionMediaSrc,
 } from "./editor-store";
 
 export {
