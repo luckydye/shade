@@ -17,6 +17,7 @@ const COLOR_WGSL: &str = include_str!("../shaders/color.wgsl");
 const VIGNETTE_WGSL: &str = include_str!("../shaders/vignette.wgsl");
 const SHARPEN_WGSL: &str = include_str!("../shaders/sharpen.wgsl");
 const GRAIN_WGSL: &str = include_str!("../shaders/grain.wgsl");
+const GLOW_WGSL: &str = include_str!("../shaders/glow.wgsl");
 const HSL_WGSL: &str = include_str!("../shaders/hsl_adjust.wgsl");
 const CROP_WGSL: &str = include_str!("../shaders/crop.wgsl");
 
@@ -824,6 +825,79 @@ impl GrainPipeline {
             height,
             "grain pass",
         );
+
+        Ok(output_tex)
+    }
+}
+
+// ─── HslPipeline ──────────────────────────────────────────────────────────────
+
+pub struct GlowPipeline {
+    pipeline: ComputePipeline,
+    bind_group_layout: BindGroupLayout,
+}
+
+impl GlowPipeline {
+    pub fn new(ctx: &GpuContext) -> Result<Self> {
+        let device = &ctx.device;
+        let bind_group_layout =
+            make_simple_bind_group_layout(device, "glow bind group layout");
+        let pipeline = make_simple_pipeline(
+            device,
+            GLOW_WGSL,
+            "glow.wgsl",
+            "glow pipeline layout",
+            "glow compute pipeline",
+            &bind_group_layout,
+        );
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
+    }
+
+    pub fn process(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        params: shade_core::GlowParams,
+    ) -> Result<Texture> {
+        let device = &ctx.device;
+        let size = input_tex.size();
+        let (width, height) = (size.width, size.height);
+
+        let output_tex =
+            create_output_texture(device, width, height, "glow output texture");
+
+        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("glow params uniform"),
+            contents: bytemuck::bytes_of(&params),
+            usage: BufferUsages::UNIFORM,
+        });
+
+        let input_view = input_tex.create_view(&TextureViewDescriptor::default());
+        let output_view = output_tex.create_view(&TextureViewDescriptor::default());
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("glow bind group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&input_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&output_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        dispatch_simple(ctx, &self.pipeline, &bind_group, width, height, "glow pass");
 
         Ok(output_tex)
     }

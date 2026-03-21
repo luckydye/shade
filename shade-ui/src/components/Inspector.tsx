@@ -40,6 +40,7 @@ type MobileLayerFocus =
   | "wb"
   | "curves"
   | "grain"
+  | "glow"
   | "vignette"
   | "sharpen"
   | "hsl"
@@ -228,6 +229,7 @@ const DEFAULT_COLOR = {
 const DEFAULT_VIGNETTE = { amount: 0 } as const;
 const DEFAULT_SHARPEN = { amount: 0 } as const;
 const DEFAULT_GRAIN = { amount: 0, size: 1 } as const;
+const DEFAULT_GLOW = { amount: 0 } as const;
 const DEFAULT_DENOISE = { luma_strength: 0, chroma_strength: 0, mode: 0 } as const;
 const DEFAULT_CURVES = {
   lut_r: IDENTITY_LUT,
@@ -546,6 +548,7 @@ const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
   wb: () => <ToneIcon />,
   curves: () => <CurveIcon />,
   grain: () => <GrainIcon />,
+  glow: () => <SparkIcon />,
   vignette: () => <CircleIcon />,
   sharpen: () => <DropletIcon />,
   hsl: () => <HslIcon />,
@@ -559,6 +562,7 @@ const focusLabels: Record<MobileLayerFocus, string> = {
   wb: "WB",
   curves: "Curves",
   grain: "Grain",
+  glow: "Glow",
   vignette: "Vignette",
   sharpen: "Sharpen",
   hsl: "HSL",
@@ -573,6 +577,7 @@ const ADJUSTMENT_FOCUS_MAP: readonly {
   { key: "color", focus: "color" },
   { key: "curves", focus: "curves" },
   { key: "grain", focus: "grain" },
+  { key: "glow", focus: "glow" },
   { key: "vignette", focus: "vignette" },
   { key: "sharpen", focus: "sharpen" },
   { key: "hsl", focus: "hsl" },
@@ -638,6 +643,7 @@ const Inspector: Component = () => {
   const sharpen = () =>
     selectedAdjustmentLayer()?.adjustments?.sharpen ?? DEFAULT_SHARPEN;
   const grain = () => selectedAdjustmentLayer()?.adjustments?.grain ?? DEFAULT_GRAIN;
+  const glow = () => selectedAdjustmentLayer()?.adjustments?.glow ?? DEFAULT_GLOW;
   const hsl = () => selectedAdjustmentLayer()?.adjustments?.hsl ?? DEFAULT_HSL;
   const denoise = () =>
     selectedAdjustmentLayer()?.adjustments?.denoise ?? DEFAULT_DENOISE;
@@ -1487,6 +1493,26 @@ const Inspector: Component = () => {
     />
   );
 
+  const GlowSlider: Component = () => (
+    <Slider
+      label="Glow"
+      icon={<SparkIcon />}
+      value={glow().amount}
+      defaultValue={DEFAULT_GLOW.amount}
+      valueLabel={valueLabel(glow().amount)}
+      min={0}
+      max={1}
+      onChange={(v) => {
+        selectedAdjustmentLayerOrThrow();
+        void applyEdit({
+          layer_idx: state.selectedLayerIdx,
+          op: "glow",
+          glow_amount: v,
+        });
+      }}
+    />
+  );
+
   const SharpenSlider: Component = () => (
     <Slider
       label="Sharpen"
@@ -1719,6 +1745,8 @@ const Inspector: Component = () => {
         return <CurvesEditor />;
       case "grain":
         return <GrainSliders />;
+      case "glow":
+        return <GlowSlider />;
       case "vignette":
         return <VignetteSlider />;
       case "sharpen":
@@ -2156,9 +2184,13 @@ const Inspector: Component = () => {
                     <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)] mb-2">
                       Effects
                     </div>
+                    <GlowSlider />
                     <VignetteSlider />
                     <SharpenSlider />
                     <GrainSliders />
+                    <div class="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--text-subtle)] mb-2">
+                      Denoise
+                    </div>
                     <DenoiseSliders />
                   </div>
                 </Show>
@@ -2292,7 +2324,7 @@ const Inspector: Component = () => {
               Add adjustment layer
             </div>
             <div class="grid grid-rows-6 gap-2">
-              {(["light", "levels", "color", "wb", "curves", "grain", "vignette", "sharpen", "hsl", "denoise"] as const).map(
+              {(["light", "levels", "color", "wb", "curves", "grain", "glow", "vignette", "sharpen", "hsl", "denoise"] as const).map(
                 (focus) => (
                   <Button
                     type="button"

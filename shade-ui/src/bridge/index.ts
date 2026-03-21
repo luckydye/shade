@@ -252,6 +252,7 @@ export interface AdjustmentValues {
   vignette: { amount: number } | null;
   sharpen: { amount: number } | null;
   grain: { amount: number; size: number } | null;
+  glow: { amount: number } | null;
   hsl: HslValues | null;
   denoise: { luma_strength: number; chroma_strength: number; mode: number } | null;
 }
@@ -668,6 +669,12 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
       await workerCall(
         { type: "apply_grain", layerIdx: layer_idx, ...rest },
         "grain_applied",
+      );
+      break;
+    case "glow":
+      await workerCall(
+        { type: "apply_glow", layerIdx: layer_idx, ...rest },
+        "glow_applied",
       );
       break;
     case "denoise":

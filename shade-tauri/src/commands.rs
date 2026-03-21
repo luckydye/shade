@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use shade_core::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
-    CurveControlPoint, DenoiseParams, FloatImage, GrainParams, HslParams, LayerStack,
-    MaskData, MaskParams, SharpenParams, VignetteParams,
+    CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
+    LayerStack, MaskData, MaskParams, SharpenParams, VignetteParams,
 };
 use shade_io::{
     delete_persisted_library_index, has_persisted_library_index,
@@ -1871,6 +1871,7 @@ pub struct EditParams {
     pub sharpen_amount: Option<f32>,
     pub grain_amount: Option<f32>,
     pub grain_size: Option<f32>,
+    pub glow_amount: Option<f32>,
     pub red_hue: Option<f32>,
     pub red_sat: Option<f32>,
     pub red_lum: Option<f32>,
@@ -2025,6 +2026,20 @@ pub async fn apply_edit(
                         if let Some(op) = ops
                             .iter_mut()
                             .find(|op| matches!(op, AdjustmentOp::Grain(_)))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "glow" => {
+                        let next = AdjustmentOp::Glow(GlowParams {
+                            amount: params.glow_amount.unwrap_or(0.0),
+                            ..GlowParams::default()
+                        });
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::Glow(_)))
                         {
                             *op = next;
                         } else {
@@ -2307,6 +2322,7 @@ pub struct AdjustmentValues {
     pub vignette: Option<VignetteValues>,
     pub sharpen: Option<SharpenValues>,
     pub grain: Option<GrainValues>,
+    pub glow: Option<GlowValues>,
     pub hsl: Option<HslValues>,
     pub denoise: Option<DenoiseValues>,
 }
@@ -2360,6 +2376,11 @@ pub struct SharpenValues {
 pub struct GrainValues {
     pub amount: f32,
     pub size: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GlowValues {
+    pub amount: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3086,6 +3107,11 @@ pub async fn get_layer_stack(
                                 adjustments.grain = Some(GrainValues {
                                     amount: params.amount,
                                     size: params.size,
+                                });
+                            }
+                            AdjustmentOp::Glow(params) => {
+                                adjustments.glow = Some(GlowValues {
+                                    amount: params.amount,
                                 });
                             }
                             AdjustmentOp::Hsl(params) => {

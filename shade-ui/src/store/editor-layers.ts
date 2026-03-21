@@ -81,6 +81,7 @@ function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
     vignette: null,
     sharpen: null,
     grain: null,
+    glow: null,
     hsl: null,
     denoise: null,
   };
@@ -208,6 +209,12 @@ function applyAdjustmentLayerEdit(layerIdx: number, params: Record<string, unkno
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
         grain: { amount: params.grain_amount as number, size: params.grain_size as number },
+      });
+      return;
+    case "glow":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        glow: { amount: params.glow_amount as number },
       });
       return;
     case "hsl":

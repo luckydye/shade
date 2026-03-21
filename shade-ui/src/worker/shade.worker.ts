@@ -147,6 +147,13 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "apply_glow": {
+        await ensureWasmReady();
+        wasm.apply_glow(msg.layerIdx, msg.glow_amount ?? 0);
+        self.postMessage({ type: "glow_applied", requestId });
+        break;
+      }
+
       case "apply_denoise": {
         await ensureWasmReady();
         wasm.apply_denoise(

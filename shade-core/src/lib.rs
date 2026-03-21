@@ -106,6 +106,25 @@ impl Default for GrainParams {
     }
 }
 
+/// Highlight glow / film halation parameters.
+#[repr(C)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
+pub struct GlowParams {
+    pub amount: f32,
+    pub _pad: [f32; 3],
+}
+
+impl Default for GlowParams {
+    fn default() -> Self {
+        Self {
+            amount: 0.0,
+            _pad: [0.0; 3],
+        }
+    }
+}
+
 /// Returns a 256-element identity LUT: [0/255, 1/255, ..., 1.0].
 pub fn linear_lut() -> Vec<f32> {
     (0u32..256).map(|i| i as f32 / 255.0).collect()
@@ -274,6 +293,7 @@ pub enum AdjustmentOp {
     Vignette(VignetteParams),
     Sharpen(SharpenParams),
     Grain(GrainParams),
+    Glow(GlowParams),
     Hsl(HslParams),
     Denoise(DenoiseParams),
 }

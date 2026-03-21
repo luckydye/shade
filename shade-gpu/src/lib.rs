@@ -21,8 +21,8 @@ pub use context::GpuContext;
 pub use denoise::DenoisePipeline;
 pub use pipeline::TonePipeline;
 pub use pipelines::{
-    ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GrainPipeline, HslPipeline,
-    SharpenPipeline, VignettePipeline,
+    ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GlowPipeline,
+    GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
 };
 pub use profiler::{GpuProfiler, PassTiming};
 pub use renderer::{PreviewCrop, Renderer};

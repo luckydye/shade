@@ -208,6 +208,11 @@ pub fn apply_grain(layer_idx: usize, amount: f32, size: f32) {
 }
 
 #[wasm_bindgen]
+pub fn apply_glow(layer_idx: usize, amount: f32) {
+    ENGINE.with(|e| e.borrow_mut().apply_glow(layer_idx, amount));
+}
+
+#[wasm_bindgen]
 pub fn apply_denoise(
     layer_idx: usize,
     luma_strength: f32,
@@ -358,6 +363,7 @@ pub fn get_stack_json() -> String {
                         let mut vignette = None;
                         let mut sharpen = None;
                         let mut grain = None;
+                        let mut glow = None;
                         let mut denoise = None;
                         for op in ops {
                             match op {
@@ -434,6 +440,11 @@ pub fn get_stack_json() -> String {
                                         "size": params.size,
                                     }));
                                 }
+                                shade_core::AdjustmentOp::Glow(params) => {
+                                    glow = Some(serde_json::json!({
+                                        "amount": params.amount,
+                                    }));
+                                }
                                 shade_core::AdjustmentOp::Denoise(params) => {
                                     denoise = Some(serde_json::json!({
                                         "luma_strength": params.luma_strength,
@@ -450,6 +461,7 @@ pub fn get_stack_json() -> String {
                             "vignette": vignette,
                             "sharpen": sharpen,
                             "grain": grain,
+                            "glow": glow,
                             "hsl": hsl,
                             "denoise": denoise,
                         }))
