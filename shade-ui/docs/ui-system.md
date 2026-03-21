@@ -19,6 +19,8 @@ This version is tailored for the current `shade-ui` stack:
 - Use a small number of visual levels. Most screens should rely on background, content, and active state only.
 - One active signal at a time. Selection, focus, and manipulation should be obvious without adding noise everywhere else.
 - Keep structure mechanical. Similar controls should share the same height, spacing, and columns.
+- Calm the chrome first. When a screen feels busy, remove border emphasis before shrinking content.
+- Selected states should be decisive. Active items should read immediately without requiring stronger borders everywhere else.
 - Prefer Tailwind utilities for structure. Keep semantic color in tokens like `var(--panel-bg)` and `var(--text-strong)`.
 - Avoid arbitrary values unless the system needs a size Tailwind does not express cleanly.
 
@@ -66,6 +68,7 @@ Rules:
 - Use tabular numerals for all changing values.
 - Slider tracks should share the same left and right edges across the panel.
 - If a row does not need an icon, keep the column empty rather than shifting the label.
+- Decorative icons should not compete with labels. If they are not required for meaning, fade them further than the main text.
 
 Preferred row shell:
 
@@ -79,10 +82,12 @@ Rules for that grid:
 - Put the label or main content in column `2` with `min-w-0`.
 - Put the value in column `3` with `text-right tabular-nums`.
 - Put slider tracks or secondary controls on a second row using `col-start-2 col-end-4`.
+- Keep the vertical gap between label row and slider track tight. Parameter controls should read as one unit, not two stacked rows.
 
 ## Control Sizes
 
 - Parameter row height: `h-7` to `h-8`.
+- Slider track row height should usually prefer the compact end of that range, such as `h-7`, unless touch interaction requires more room.
 - Button height: `h-8` by default.
 - Segmented control height: `h-8`.
 - Small section header height: `h-5` to `h-6`.
@@ -103,6 +108,7 @@ Rules for that grid:
 - Do not stack boxes inside boxes unless the user needs to perceive a real container boundary.
 - Prefer spacing and subtle tone shifts over borders.
 - Borders should be quieter than text and quieter than active controls.
+- In list-heavy panels, prefer inset rings or surface changes for selection over full heavy row borders.
 - Expanded content may use a slightly stronger surface, but only one step above the panel.
 - Extend existing semantic tokens before adding new screen-specific colors.
 
@@ -129,6 +135,10 @@ State order:
 - Hover: slightly brighter surface or text.
 - Active: strongest contrast and accent.
 - Disabled: clearly unavailable, never confused with default.
+
+Practical rule:
+
+- Unselected states should get quieter before selected states get louder. Reduce the noise floor first, then strengthen the active item.
 
 ## Pattern Rules
 
@@ -166,6 +176,12 @@ Every parameter row should follow the same pattern:
 
 Do not let each parameter invent its own geometry.
 
+Second-pass refinement:
+
+- Keep row stacks compact. If a parameter feels visually detached from its slider, reduce `gap-y` before reducing font size.
+- Keep value text stable and easy to scan. Values should remain slightly quieter than labels, but never faint enough to disappear.
+- If icons are decorative, use a lower contrast token such as `text-[var(--text-subtle)]` instead of `text-[var(--text-icon)]` or stronger.
+
 Preferred row recipe:
 
 ```tsx
@@ -192,8 +208,14 @@ Preferred segmented control shell:
 
 Preferred segment states:
 
-- Selected: `bg-[var(--surface-active)] text-[var(--text)]`
-- Unselected: `text-[var(--text-muted)] hover:text-[var(--text-strong)]`
+- Selected: `bg-[var(--surface-selected)] text-[var(--text)]`
+- Selected may also use an inset ring or inner shadow to separate it from the track.
+- Unselected: `text-[var(--text-faint)] hover:text-[var(--text-strong)]`
+
+Second-pass refinement:
+
+- Utility action blocks inside inspectors should stay slightly quieter than editing controls.
+- If add buttons or setup actions compete with the main editing content, shorten them or flatten their surface treatment before reducing their text contrast.
 
 ### Lists
 
@@ -206,6 +228,13 @@ Preferred list row shell:
 ```tsx
 <div class="grid h-8 grid-cols-[16px_minmax(0,1fr)_16px_16px] items-center gap-2 rounded-md px-2">
 ```
+
+Second-pass refinement:
+
+- Keep list rows calmer than the controls below them. The list should establish context, not dominate the panel.
+- Use subtle surface fills for default rows and reserve the strongest emphasis for the selected row.
+- Separate trailing row actions from titles with spacing or a quiet divider when they start to read as part of the label.
+- Avoid full-strength borders on every row. A quiet inset ring or low-contrast border is usually enough for default state.
 
 ## Accessibility Rules
 
@@ -231,6 +260,9 @@ Use this checklist when updating the current UI or adding a new one:
 - Are labels, values, and tracks easy to scan in a vertical pass?
 - Does the screen still make sense to a first-time user with no domain knowledge?
 - Does the implementation mostly use Tailwind utilities plus existing semantic tokens, without adding screen-specific CSS for layout?
+- Can the screen afford to remove more borders without losing clarity?
+- Do utility/setup actions stay visually below the importance of the editing content?
+- Are selected states obvious because they are stronger, or only because everything else is too loud?
 
 ## Immediate Application To The Current Inspector
 
@@ -241,3 +273,6 @@ Use this checklist when updating the current UI or adding a new one:
 - Give `Curves` more vertical emphasis when expanded.
 - Treat the top adjustment stack as a list pattern, not as another control group.
 - Replace repeated ad hoc row layouts with one shared Tailwind row recipe.
+- Keep the layer list visually calmer than the parameter controls.
+- Tighten the parameter label-to-track spacing so sliders read as compact units.
+- Use stronger selected-state contrast before adding more borders.

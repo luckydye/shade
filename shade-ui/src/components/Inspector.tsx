@@ -51,9 +51,9 @@ type LayerDropTarget = { layerIdx: number; position: "before" | "after" };
 const PANEL_SHELL_CLASS =
   "gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-bg)] p-3";
 const SECTION_TITLE_CLASS =
-  "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)]";
+  "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)]";
 const PARAMETER_ROW_CLASS =
-  "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-1 py-1";
+  "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";
 const SEGMENTED_CONTROL_CLASS =
   "grid h-8 rounded-lg bg-[var(--surface)] p-0.5";
 const SEGMENT_BUTTON_CLASS =
@@ -65,7 +65,7 @@ const INPUT_CLASS =
 const EMPTY_STATE_CLASS =
   "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
 const LAYER_ROW_CLASS =
-  "grid h-8 grid-cols-[16px_16px_minmax(0,1fr)_18px_18px] items-center gap-2 rounded-md border px-2";
+  "grid h-8 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const ADD_LAYER_FOCI = [
@@ -126,7 +126,7 @@ const Slider: Component<SliderProps> = (props) => {
 
   return (
     <div class={`${PARAMETER_ROW_CLASS} ${props.class ?? ""}`}>
-      <span class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4">
+      <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
         {props.icon}
       </span>
       <span class="min-w-0 self-center text-[13px] font-medium text-[var(--text-strong)]">
@@ -137,7 +137,7 @@ const Slider: Component<SliderProps> = (props) => {
       </span>
       <div
         ref={trackRef!}
-        class="relative col-start-2 col-end-4 h-8 cursor-pointer select-none touch-none"
+        class="relative col-start-2 col-end-4 h-7 cursor-pointer select-none touch-none"
         style={{ "touch-action": "pan-y" }}
         onPointerDown={(e) => {
           if (e.pointerType === "mouse") {
@@ -623,7 +623,7 @@ function inferFocus(layer: LayerInfo | undefined): MobileLayerFocus {
 }
 
 const SectionHeader: Component<{ title: string; detail?: string }> = (props) => (
-  <div class="flex items-center justify-between gap-3">
+  <div class="flex items-center justify-between gap-3 mt-2">
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
     <Show when={props.detail}>
       {(detail) => (
@@ -1095,8 +1095,8 @@ export const Inspector: Component = () => {
     };
 
     return (
-      <div class={`${PARAMETER_ROW_CLASS} gap-y-2`}>
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4">
+      <div class={`${PARAMETER_ROW_CLASS} gap-y-1.5`}>
+        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
           <CurveIcon />
         </span>
         <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
@@ -1105,7 +1105,7 @@ export const Inspector: Component = () => {
         <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
           Master
         </span>
-        <div class="col-start-2 col-end-4 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)]">
+        <div class="col-start-2 col-end-4 overflow-hidden rounded-md bg-[var(--surface-subtle)]">
           <svg
             ref={svgRef!}
             viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
@@ -1258,9 +1258,9 @@ export const Inspector: Component = () => {
             {TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
               <text
                 x={chartThresholdX(boundary.value)}
-                y={svgSize().height - 2}
+                y={svgSize().height - 4}
                 fill="var(--curve-label)"
-                font-size="9"
+                font-size="10"
                 text-anchor={
                   boundary.value === 0 ? "start" : boundary.value === 1 ? "end" : "middle"
                 }
@@ -2014,8 +2014,8 @@ export const Inspector: Component = () => {
             onClick={() => setInspectorTab(tab)}
             class={`${SEGMENT_BUTTON_CLASS} ${
               inspectorTab() === tab
-                ? "bg-[var(--surface-active)] text-[var(--text)]"
-                : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                ? "bg-[var(--surface-selected)] text-[var(--text)] shadow-[inset_0_0_0_1px_var(--border-active)]"
+                : "text-[var(--text-faint)] hover:text-[var(--text-strong)]"
             }`}
           >
             {tab}
@@ -2026,7 +2026,7 @@ export const Inspector: Component = () => {
   );
 
   const DesktopEditPanel: Component = () => (
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-5">
       <div class="flex flex-col gap-3">
         <div ref={desktopLayerListRef} class="relative flex flex-col gap-1">
           <div
@@ -2047,8 +2047,8 @@ export const Inspector: Component = () => {
                   data-layer-idx={realIdx}
                   class={`${LAYER_ROW_CLASS} ${
                     state.selectedLayerIdx === realIdx
-                      ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
-                      : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-secondary)] hover:border-[var(--border-medium)] hover:bg-[var(--surface-hover)]"
+                      ? "bg-[var(--surface-active)] text-[var(--text)] shadow-[inset_0_0_0_1px_var(--border-active)]"
+                      : "bg-[var(--surface-subtle)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface)]"
                   } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
                 >
                   <Button
@@ -2096,7 +2096,7 @@ export const Inspector: Component = () => {
                           event.stopPropagation();
                           void handleRemoveMask(realIdx);
                         }}
-                        class="text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-value)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
+                        class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-value)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
                         title="Remove mask"
                       >
                         M
@@ -2109,7 +2109,7 @@ export const Inspector: Component = () => {
                           event.stopPropagation();
                           setMaskPickerLayer(maskPickerLayer() === realIdx ? null : realIdx);
                         }}
-                        class="text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
+                        class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                         title="Add gradient mask"
                       >
                         +M
@@ -2157,7 +2157,7 @@ export const Inspector: Component = () => {
           <Button
             type="button"
             onClick={() => void addLayer("adjustment")}
-            class="flex h-12 flex-col items-center justify-center gap-1 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
+            class="flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
           >
             <span class="[&>svg]:h-4 [&>svg]:w-4">
               <SparkIcon />
@@ -2167,7 +2167,7 @@ export const Inspector: Component = () => {
           <Button
             type="button"
             onClick={() => void addLayer("crop")}
-            class="flex h-12 flex-col items-center justify-center gap-1 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
+            class="flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:bg-[var(--surface)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
           >
             <span class="[&>svg]:h-4 [&>svg]:w-4">
               <CropIcon />
@@ -2197,7 +2197,7 @@ export const Inspector: Component = () => {
                     <EmptyState>Open an image and select a layer to edit.</EmptyState>
                   }
                 >
-                  <div class="flex flex-col gap-4 pt-1">
+                  <div class="flex flex-col gap-3 pt-2">
                     <ControlSection title="Light">
                       <LightSliders />
                       <LevelSliders />
