@@ -11,20 +11,22 @@ export function Button(props: ButtonProps) {
   const merged = mergeProps({ type: "button" as const }, props);
   const [local, rest] = splitProps(merged, [
     "ref",
-    "onPointerDown",
-    "onPointerMove",
-    "onPointerUp",
-    "onPointerCancel",
+    "onTouchStart",
+    "onTouchMove",
+    "onTouchEnd",
+    "onTouchCancel",
+    "onMouseDown",
+    "onMouseUp",
+    "onMouseLeave",
     "onClick",
     "disabled",
     "type",
   ]);
   const [pressed, setPressed] = createSignal(false);
   let buttonRef!: HTMLButtonElement;
-  let activePointer:
+  let activeTouch:
     | {
-        pointerId: number;
-        pointerType: string;
+        identifier: number;
         startX: number;
         startY: number;
       }
@@ -33,8 +35,18 @@ export function Button(props: ButtonProps) {
   let suppressNativeClickUntil = 0;
 
   const clearPressed = () => {
-    activePointer = null;
+    activeTouch = null;
     setPressed(false);
+  };
+
+  const findTouch = (touches: TouchList, identifier: number) => {
+    for (let index = 0; index < touches.length; index += 1) {
+      const touch = touches.item(index);
+      if (touch?.identifier === identifier) {
+        return touch;
+      }
+    }
+    return null;
   };
 
   return (
@@ -47,46 +59,54 @@ export function Button(props: ButtonProps) {
       type={local.type}
       disabled={local.disabled}
       data-pressed={pressed() ? "true" : undefined}
-      onPointerDown={(event) => {
-        local.onPointerDown?.(event);
-        if (
-          event.defaultPrevented ||
-          !event.isPrimary ||
-          event.button !== 0 ||
-          local.disabled
-        ) {
+      onTouchStart={(event) => {
+        local.onTouchStart?.(event);
+        if (event.defaultPrevented || local.disabled || event.touches.length !== 1) {
+          clearPressed();
           return;
         }
-        activePointer = {
-          pointerId: event.pointerId,
-          pointerType: event.pointerType,
-          startX: event.clientX,
-          startY: event.clientY,
+        const touch = event.touches.item(0);
+        if (!touch) {
+          throw new Error("touch interaction requires an active touch point");
+        }
+        activeTouch = {
+          identifier: touch.identifier,
+          startX: touch.clientX,
+          startY: touch.clientY,
         };
         setPressed(true);
       }}
-      onPointerMove={(event) => {
-        local.onPointerMove?.(event);
-        if (!activePointer || activePointer.pointerId !== event.pointerId) {
+      onTouchMove={(event) => {
+        local.onTouchMove?.(event);
+        if (!activeTouch) {
+          return;
+        }
+        const touch = findTouch(event.touches, activeTouch.identifier);
+        if (!touch) {
           return;
         }
         if (
           Math.hypot(
-            event.clientX - activePointer.startX,
-            event.clientY - activePointer.startY,
+            touch.clientX - activeTouch.startX,
+            touch.clientY - activeTouch.startY,
           ) > BUTTON_MOVE_THRESHOLD_PX
         ) {
           clearPressed();
         }
       }}
-      onPointerUp={(event) => {
-        local.onPointerUp?.(event);
-        if (!activePointer || activePointer.pointerId !== event.pointerId) {
+      onTouchEnd={(event) => {
+        local.onTouchEnd?.(event);
+        if (!activeTouch) {
           return;
         }
-        const releasedInside = buttonRef.contains(event.target as Node);
-        const pointerType = activePointer.pointerType;
-        const shouldTrigger = pressed() && releasedInside && pointerType !== "mouse";
+        const touch = findTouch(event.changedTouches, activeTouch.identifier);
+        if (!touch) {
+          return;
+        }
+        const releasedInside = buttonRef.contains(
+          document.elementFromPoint(touch.clientX, touch.clientY),
+        );
+        const shouldTrigger = pressed() && releasedInside;
         clearPressed();
         if (!shouldTrigger) {
           return;
@@ -98,8 +118,23 @@ export function Button(props: ButtonProps) {
         dispatchingSyntheticClick = false;
         event.preventDefault();
       }}
-      onPointerCancel={(event) => {
-        local.onPointerCancel?.(event);
+      onTouchCancel={(event) => {
+        local.onTouchCancel?.(event);
+        clearPressed();
+      }}
+      onMouseDown={(event) => {
+        local.onMouseDown?.(event);
+        if (event.defaultPrevented || local.disabled || event.button !== 0) {
+          return;
+        }
+        setPressed(true);
+      }}
+      onMouseUp={(event) => {
+        local.onMouseUp?.(event);
+        setPressed(false);
+      }}
+      onMouseLeave={(event) => {
+        local.onMouseLeave?.(event);
         clearPressed();
       }}
       onClick={(event) => {
