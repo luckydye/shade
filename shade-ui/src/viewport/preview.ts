@@ -19,6 +19,8 @@ const INTERACTIVE_SCALE = 0.33;
 const THROTTLE_MS = 16;
 const MIN_ZOOM = 0.1;
 const MAX_IMAGE_SCALE = 8;
+const FINAL_PREVIEW_SKIP_THRESHOLD_MS = 120;
+const FINAL_PREVIEW_LATENCY_TRAINING_WEIGHT = 0.35;
 
 let refreshVersion = 0;
 let refreshQueued: { version: number; quality: "interactive" | "final" } | null = null;
@@ -26,6 +28,7 @@ let refreshPromise: Promise<void> | null = null;
 let refreshLastStartAt = 0;
 let refreshWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
 let previewSuspended = false;
+let finalPreviewLatencyEstimateMs: number | null = null;
 let lastRenderedPreview:
   | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
   | null = null;
@@ -66,6 +69,10 @@ export function suspendPreview() {
 
 export function resumePreview() {
   previewSuspended = false;
+}
+
+export function resetPreviewLatencyEstimate() {
+  finalPreviewLatencyEstimateMs = null;
 }
 
 export function getViewportFitRef(): FitReference {
@@ -210,12 +217,32 @@ function toImageData(frame: bridge.PreviewFrame): ImageData {
 }
 
 async function throttledRender(request: bridge.PreviewRequest) {
-  const elapsed = Date.now() - refreshLastStartAt;
+  const elapsed = performance.now() - refreshLastStartAt;
   if (elapsed < THROTTLE_MS) {
     await new Promise<void>((r) => setTimeout(r, THROTTLE_MS - elapsed));
   }
-  refreshLastStartAt = Date.now();
-  return bridge.renderPreview(request);
+  refreshLastStartAt = performance.now();
+  const renderStartedAt = performance.now();
+  const frame = await bridge.renderPreview(request);
+  return { frame, elapsedMs: performance.now() - renderStartedAt };
+}
+
+function recordFinalPreviewLatency(elapsedMs: number) {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    throw new Error("final preview latency must be a finite non-negative number");
+  }
+  finalPreviewLatencyEstimateMs =
+    finalPreviewLatencyEstimateMs === null
+      ? elapsedMs
+      : finalPreviewLatencyEstimateMs * (1 - FINAL_PREVIEW_LATENCY_TRAINING_WEIGHT) +
+        elapsedMs * FINAL_PREVIEW_LATENCY_TRAINING_WEIGHT;
+}
+
+function shouldRenderInteractivePreview() {
+  return (
+    finalPreviewLatencyEstimateMs === null ||
+    finalPreviewLatencyEstimateMs > FINAL_PREVIEW_SKIP_THRESHOLD_MS
+  );
 }
 
 function buildPreviewRequest(quality: "interactive" | "final"): bridge.PreviewRequest | null {
@@ -344,15 +371,15 @@ function canReuseRenderedPreview(
   );
 }
 
-async function performRefresh() {  
+async function performRefresh() {
   const queued = refreshQueued;
   if (!queued) return;
   if (previewSuspended) return;
-  refreshQueued = null;  
+  refreshQueued = null;
   const snapshot = captureRefreshSnapshot();
   const previewReq = buildPreviewRequest(queued.quality);
   const backdropReq = buildBackdropRequest(queued.quality);
-  if (!previewReq || !backdropReq) return;  
+  if (!previewReq || !backdropReq) return;
   if (
     canReuseRenderedPreview(
       lastRenderedPreview,
@@ -364,18 +391,19 @@ async function performRefresh() {
   ) {
     return;
   }
-  const frame = await throttledRender(previewReq);
-  
-  // if (queued.version !== refreshVersion) return;
-  
+  const { frame, elapsedMs } = await throttledRender(previewReq);
+
   if (frame.width === 0 || frame.height === 0) return;
+  if (queued.quality === "final") {
+    recordFinalPreviewLatency(elapsedMs);
+  }
   const crop = previewReq.crop;
   if (!crop) throw new Error("preview request must have a crop");
-  
+
   if (!refreshSnapshotMatches(snapshot)) {
     return;
   }
-  
+
   if (queued.quality === "final") {
     setState({
       previewDisplayColorSpace:
@@ -422,7 +450,7 @@ async function performRefresh() {
   ) {
     return;
   }
-  const bdFrame = await throttledRender(backdropReq);
+  const { frame: bdFrame } = await throttledRender(backdropReq);
   if (queued.version !== refreshVersion) return;
   if (bdFrame.width === 0 || bdFrame.height === 0) return;
   const bdCrop = backdropReq.crop ?? fullCanvasCrop();
@@ -456,9 +484,11 @@ export function refreshPreview() {
     try {
       while (true) {
         const version = refreshVersion;
-        refreshQueued = { version, quality: "interactive" };
-        await performRefresh();
-        if (version !== refreshVersion) continue;
+        if (shouldRenderInteractivePreview()) {
+          refreshQueued = { version, quality: "interactive" };
+          await performRefresh();
+          if (version !== refreshVersion) continue;
+        }
         refreshQueued = { version, quality: "final" };
         await performRefresh();
         if (version !== refreshVersion) continue;

@@ -9,6 +9,7 @@ import {
 import {
   clearPreviewTiles,
   refreshPreview,
+  resetPreviewLatencyEstimate,
   resetViewport,
   resumePreview,
   suspendPreview,
@@ -137,6 +138,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
     if (!isActiveLoadToken(loadToken)) {
       return;
     }
+    resetPreviewLatencyEstimate();
     clearPreviewTiles();
     setState(
       "artboards",
@@ -186,6 +188,7 @@ function resetViewportState(canvasWidth: number, canvasHeight: number) {
 
 function clearLoadedImageState() {
   resumePreview();
+  resetPreviewLatencyEstimate();
   clearPreviewTiles();
   setState({
     artboards: [],
@@ -295,6 +298,7 @@ async function openImageFrom(
     if (!isActiveLoadToken(loadToken)) {
       return;
     }
+    resetPreviewLatencyEstimate();
     clearPreviewTiles();
     setState(
       "artboards",
