@@ -94,13 +94,18 @@ const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
 const HEADER_ROW_HEIGHT = 32;
 const OVERSCAN_ROWS = 2;
-
-function shortPeerId(peerId: string) {
-  if (peerId.length <= 18) {
-    return peerId;
-  }
-  return `${peerId.slice(0, 8)}...${peerId.slice(-8)}`;
-}
+const PANEL_SECTION_TITLE_CLASS =
+  "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)]";
+const SURFACE_BUTTON_CLASS =
+  "h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
+const DANGER_BUTTON_CLASS =
+  "h-8 rounded-md border border-[var(--danger-border)] bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
+const INPUT_CLASS =
+  "h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+const EMPTY_STATE_CLASS =
+  "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
+const LIBRARY_TAB_BASE_CLASS =
+  "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 
 function isPeerLibrary(library: LibraryEntry | null): library is PeerLibrary {
   return library?.kind === "peer";
@@ -395,19 +400,19 @@ const MediaTile: Component<{
 
   const buttonClass = () =>
     props.compact
-      ? `group flex w-full flex-col gap-1.5 rounded-2xl border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      ? `group flex w-full flex-col gap-1.5 rounded-md border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           props.selected
             ? "border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
-              ? "border-red-500/40"
-              : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
+              ? "border-red-500/40 bg-[var(--surface-subtle)]"
+              : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`
-      : `group flex flex-col gap-1.5 rounded-xl p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      : `group flex flex-col gap-1.5 rounded-md border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           props.selected
-            ? "bg-[var(--surface-active)] ring-1 ring-[var(--border-active)]"
+            ? "border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
-              ? "ring-1 ring-red-500/50"
-              : "hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
+              ? "border-red-500/50 bg-[var(--surface-subtle)]"
+              : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`;
 
   return (
@@ -443,7 +448,7 @@ const MediaTile: Component<{
         )}
       </div>
       <span
-        class={`truncate px-0.5 text-[11px] ${props.selected ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
+        class={`truncate px-0.5 text-[11px] font-medium ${props.selected ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
       >
         {props.item.name}
       </span>
@@ -769,7 +774,7 @@ export const MediaView: Component = () => {
         return;
       }
       void Promise.resolve(refetchItems()).catch((error) => {
-        console.warn("failed to refresh media library items", error);
+        setError(error instanceof Error ? error.message : String(error));
       });
     }, 300);
     onCleanup(() => clearTimeout(timer));
@@ -910,20 +915,19 @@ export const MediaView: Component = () => {
   const mediaVisibleClass = () => (isEditorStrip() ? "hidden lg:flex" : "flex");
   const shellClass = () =>
     isEditorStrip()
-      ? "hidden w-[100px] shrink-0 border-r border-[var(--border)] lg:flex lg:flex-col"
+      ? "hidden w-[112px] shrink-0 border-r border-[var(--border)] bg-[var(--panel-bg)] lg:flex lg:flex-col"
       : "mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0";
   const scrollClass = () =>
     isEditorStrip()
       ? "media-scroll flex-1 overflow-y-auto px-2 py-3"
-      : "media-scroll flex-1 overflow-y-auto p-6";
+      : "media-scroll flex-1 overflow-y-auto p-4 md:p-6";
 
   return (
     <div class={shellClass()}>
       <Show when={!isEditorStrip()}>
-        <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4`}>
-          <div class="flex w-full flex-col gap-4">
-            <div class="flex items-center gap-8 w-full">
-              <div class="flex flex-1 gap-2 overflow-x-auto">
+        <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}>
+          <div class="flex w-full items-center gap-3">
+            <div class="flex flex-1 gap-2 overflow-x-auto">
                 <For each={libraryEntries()}>
                   {(library) =>
                     (() => {
@@ -933,14 +937,14 @@ export const MediaView: Component = () => {
                         <Button
                           type="button"
                           onClick={() => setSelectedLibraryId(library.id)}
-                          class={`shrink-0 rounded-full border px-4 py-2 text-[12px] font-semibold transition-colors ${
+                          class={`${LIBRARY_TAB_BASE_CLASS} ${
                             selectedLibraryId() === library.id
                               ? offline
                                 ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
                                 : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
                               : offline
-                                ? "border-dashed border-amber-500/25 bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
-                                : "border-[var(--border-soft)] bg-[var(--surface-faint)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
+                                ? "border-dashed border-amber-500/25 bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
+                                : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
                           }`}
                         >
                           <span class="flex items-center gap-2">
@@ -970,7 +974,7 @@ export const MediaView: Component = () => {
                   {(peer) => (
                     <Button
                       type="button"
-                      class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)]"
+                      class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
                       disabled={isSubmitting()}
                       onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                     >
@@ -980,7 +984,7 @@ export const MediaView: Component = () => {
                 </For>
                 <Button
                   type="button"
-                  class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-3 py-2 text-[14px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                  class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
                   disabled={isSubmitting()}
                   onClick={() => void handleAddLibrary()}
                   aria-label="Add library"
@@ -990,108 +994,110 @@ export const MediaView: Component = () => {
                 <Show when={supportsS3Libraries()}>
                   <Button
                     type="button"
-                    class="shrink-0 rounded-full border border-dashed border-[var(--border-dashed)] bg-[var(--surface-faint)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                    class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
                     disabled={isSubmitting()}
                     onClick={() => setShowS3Form((current) => !current)}
                   >
                     S3
                   </Button>
                 </Show>
-              </div>
-              <div class="flex items-center gap-3">
-                <Button
-                  type="button"
-                  class="rounded-full border border-[var(--border-soft)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canRefreshSelectedLibrary() || isSubmitting()}
-                  onClick={() => void handleRefreshLibrary()}
-                >
-                  Refresh
-                </Button>
-                <Button
-                  type="button"
-                  class="rounded-full border border-[var(--danger-border)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!selectedLibrary()?.removable || isSubmitting()}
-                  onClick={() => void handleRemoveLibrary()}
-                >
-                  Remove
-                </Button>
-              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <Button
+                type="button"
+                class={SURFACE_BUTTON_CLASS}
+                disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+                onClick={() => void handleRefreshLibrary()}
+              >
+                Refresh
+              </Button>
+              <Button
+                type="button"
+                class={DANGER_BUTTON_CLASS}
+                disabled={!selectedLibrary()?.removable || isSubmitting()}
+                onClick={() => void handleRemoveLibrary()}
+              >
+                Remove
+              </Button>
             </div>
             <Show when={showS3Form()}>
-              <div class="grid grid-cols-1 gap-3 rounded-2xl border border-[var(--border-soft)] bg-[var(--surface-faint)] p-4 md:grid-cols-3">
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
-                  <span>Name</span>
+              <div class="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 md:grid-cols-3">
+                <div class="md:col-span-3">
+                  <div class={PANEL_SECTION_TITLE_CLASS}>S3 Library</div>
+                </div>
+                <label class="flex flex-col gap-1">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Name</span>
                   <input
                     type="text"
                     value={(s3Draft().name as string | undefined) ?? ""}
                     onInput={(event) => updateS3Draft("name", event.currentTarget.value)}
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                   />
                 </label>
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)] md:col-span-2">
-                  <span>Endpoint</span>
+                <label class="flex flex-col gap-1 md:col-span-2">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Endpoint</span>
                   <input
                     type="text"
                     value={s3Draft().endpoint}
                     onInput={(event) => updateS3Draft("endpoint", event.currentTarget.value)}
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                     placeholder="https://s3.example.com"
                   />
                 </label>
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
-                  <span>Bucket</span>
+                <label class="flex flex-col gap-1">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Bucket</span>
                   <input
                     type="text"
                     value={s3Draft().bucket}
                     onInput={(event) => updateS3Draft("bucket", event.currentTarget.value)}
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                   />
                 </label>
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
-                  <span>Region</span>
+                <label class="flex flex-col gap-1">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Region</span>
                   <input
                     type="text"
                     value={s3Draft().region}
                     onInput={(event) => updateS3Draft("region", event.currentTarget.value)}
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                   />
                 </label>
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
-                  <span>Prefix</span>
+                <label class="flex flex-col gap-1">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Prefix</span>
                   <input
                     type="text"
                     value={(s3Draft().prefix as string | undefined) ?? ""}
                     onInput={(event) => updateS3Draft("prefix", event.currentTarget.value)}
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                     placeholder="optional/path"
                   />
                 </label>
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
-                  <span>Access Key ID</span>
+                <label class="flex flex-col gap-1">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Access Key ID</span>
                   <input
                     type="text"
                     value={s3Draft().access_key_id}
                     onInput={(event) =>
                       updateS3Draft("access_key_id", event.currentTarget.value)
                     }
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                   />
                 </label>
-                <label class="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)] md:col-span-2">
-                  <span>Secret Access Key</span>
+                <label class="flex flex-col gap-1 md:col-span-2">
+                  <span class={PANEL_SECTION_TITLE_CLASS}>Secret Access Key</span>
                   <input
                     type="password"
                     value={s3Draft().secret_access_key}
                     onInput={(event) =>
                       updateS3Draft("secret_access_key", event.currentTarget.value)
                     }
-                    class="min-h-10 rounded-xl border border-[var(--border-soft)] bg-[var(--input-bg)] px-3 text-[13px] font-medium text-[var(--text)] outline-none transition-colors"
+                    class={INPUT_CLASS}
                   />
                 </label>
                 <div class="flex items-end gap-2 md:col-span-3">
                   <Button
                     type="button"
-                    class="rounded-full border border-[var(--border-soft)] px-4 py-2 text-[12px] font-semibold text-[var(--text-muted)] transition-colors hover:border-[var(--border-medium)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                    class={SURFACE_BUTTON_CLASS}
                     disabled={isSubmitting()}
                     onClick={() => void handleAddS3Library()}
                   >
@@ -1099,7 +1105,7 @@ export const MediaView: Component = () => {
                   </Button>
                   <Button
                     type="button"
-                    class="rounded-full border border-transparent px-4 py-2 text-[12px] font-semibold text-[var(--text-faint)] transition-colors hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                    class="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
                     disabled={isSubmitting()}
                     onClick={() => {
                       resetS3Draft();
@@ -1122,11 +1128,15 @@ export const MediaView: Component = () => {
         <Show
           when={displayedItems().length > 0}
           fallback={
-            <p class={`text-[var(--text-subtle)] ${isEditorStrip() ? "px-1 text-xs" : "text-sm"}`}>
+            <div
+              class={`${EMPTY_STATE_CLASS} ${
+                isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+              }`}
+            >
               {items.loading || !isLibraryScanComplete()
                 ? "Loading…"
                 : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
-            </p>
+            </div>
           }
         >
           <Show
@@ -1157,7 +1167,7 @@ export const MediaView: Component = () => {
                 <For each={visibleRows()}>
                   {(row) =>
                     row.kind === "date" ? (
-                      <h2 class="col-span-full pt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)] first:pt-0">
+                      <h2 class="col-span-full pt-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
                         {formatModificationMonth(row.modifiedAt)}
                       </h2>
                     ) : (
@@ -1183,11 +1193,15 @@ export const MediaView: Component = () => {
           </Show>
         </Show>
       </div>
-      
-      <div class="flex flex-col gap-4 py-2 px-6">
+
+      <div
+        class={`flex flex-col gap-2 border-t border-[var(--border)] ${
+          isEditorStrip() ? "px-3 py-2" : "px-4 py-3 md:px-6"
+        }`}
+      >
         {error() && <p class="text-sm text-[var(--danger-text)]">{error()}</p>}
         <Show when={selectedLibraryDetail()}>
-          <p class="truncate text-xs text-[var(--text-dim)]">
+          <p class="truncate text-[11px] font-medium text-[var(--text-dim)]">
             {selectedLibraryDetail()}
             {selectedLibraryIsOffline() && " • offline"}
             {selectedLibraryIsRefreshing() && " • refreshing library index"}

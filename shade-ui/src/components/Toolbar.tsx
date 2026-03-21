@@ -20,36 +20,31 @@ interface ActionButtonProps {
   primary?: boolean;
 }
 
+const TOOLBAR_BUTTON_BASE_CLASS =
+  "inline-flex h-8 items-center gap-2 rounded-md border px-3 text-[11px] font-semibold uppercase tracking-[0.03em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-45";
+const TOOLBAR_BUTTON_PRIMARY_CLASS =
+  "border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)] enabled:hover:bg-[var(--btn-primary-hover)]";
+const TOOLBAR_BUTTON_SECONDARY_CLASS =
+  "border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-active)] enabled:hover:bg-[var(--surface-hover)] enabled:hover:text-[var(--text)]";
+const STATUS_TRIGGER_CLASS =
+  "min-w-0 rounded-md px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+const STATUS_PILL_CLASS =
+  "inline-flex h-8 items-center rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-medium text-[var(--text-value)]";
+
 const ActionButton: Component<ActionButtonProps> = (props) => (
   <Button
     type="button"
     onClick={props.onClick}
     disabled={props.disabled}
-    class={`inline-flex min-h-10 items-center gap-2 rounded-2xl border px-3.5 transition-colors ${
+    class={`${TOOLBAR_BUTTON_BASE_CLASS} ${
       props.primary
-        ? "border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)] enabled:hover:bg-[var(--btn-primary-hover)]"
-        : "border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-dashed)] enabled:hover:bg-[var(--surface-hover)] enabled:hover:text-[var(--text)]"
-    } ${props.disabled ? "opacity-45" : ""}`}
+        ? TOOLBAR_BUTTON_PRIMARY_CLASS
+        : TOOLBAR_BUTTON_SECONDARY_CLASS
+    }`}
   >
     <span class="inline-flex items-center justify-center">{props.icon}</span>
-    <span class="hidden text-[13px] font-medium sm:inline">{props.label}</span>
+    <span class="hidden sm:inline">{props.label}</span>
   </Button>
-);
-
-const BrandIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    class="h-4 w-4"
-  >
-    <path d="M12 3.5 14.2 8l4.8.8-3.5 3.4.8 4.8-4.3-2.3-4.3 2.3.8-4.8L5 8.8 9.8 8 12 3.5Z" />
-    <path d="M8.5 12h7" />
-    <path d="M12 8.5v7" />
-  </svg>
 );
 
 const UploadIcon = () => (
@@ -65,21 +60,6 @@ const UploadIcon = () => (
     <path d="M12 16V6" />
     <path d="m7.5 10.5 4.5-4.5 4.5 4.5" />
     <path d="M5 18.5c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2" />
-  </svg>
-);
-
-const ResetIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    class="h-4 w-4"
-  >
-    <path d="M6.5 8A7 7 0 1 1 5 12" />
-    <path d="M5 5.5v4h4" />
   </svg>
 );
 
@@ -148,8 +128,11 @@ export const Toolbar: Component = () => {
   };
 
   return (
-    <header data-tauri-drag-region class="absolute select-none lg:static top-0 w-full z-50 grid grid-cols-[40px_auto_40px] md:grid-cols-[auto_auto_auto] items-center gap-6 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 py-3 backdrop-blur-[18px] lg:px-3 pt-[calc(env(safe-area-inset-top))] lg:pt-2">
-      <div>
+    <header
+      data-tauri-drag-region
+      class="absolute top-0 z-50 grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-3 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-[18px] lg:static lg:grid-cols-[56px_minmax(0,1fr)_auto] lg:pt-2"
+    >
+      <div class="flex h-8 items-center">
         <Show when={hasImage() && state.currentView === "editor"}>
           <ActionButton
             label="Back"
@@ -177,11 +160,13 @@ export const Toolbar: Component = () => {
         </Show>
       </div>
 
-      <div class="min-w-0 flex justify-center text-center pointer-events-none">
+      <div class="min-w-0 flex justify-center text-center">
         <Button
           type="button"
-          class={`min-w-0 flex flex-col pointer-events-auto ${
-            canResumeEditor() ? "cursor-pointer" : "cursor-default"
+          class={`min-w-0 max-w-full ${STATUS_TRIGGER_CLASS} ${
+            canResumeEditor()
+              ? "cursor-pointer hover:bg-[var(--surface-subtle)]"
+              : "cursor-default"
           }`}
           style={{
             "view-transition-name":
@@ -199,9 +184,9 @@ export const Toolbar: Component = () => {
           }}
           disabled={!canResumeEditor()}
         >
-          <span class="block max-w-full truncate text-[11px] text-[var(--text-faint)]">
+          <span class="block max-w-full truncate text-[11px] font-medium text-[var(--text-value)]">
             {(state.isLoading && (
-              <span class="hidden rounded-full border border-[var(--border-medium)] bg-[var(--surface-hover)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] sm:inline-flex">
+              <span class={STATUS_PILL_CLASS}>
                 Processing
               </span>
             )) ||
@@ -225,6 +210,7 @@ export const Toolbar: Component = () => {
             icon={<SaveIcon />}
             onClick={() => void handleExport()}
             disabled={!canExport()}
+            primary
           />
           <ActionButton
             label="Open"

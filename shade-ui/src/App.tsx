@@ -1,6 +1,6 @@
 import { Component, onMount } from "solid-js";
 import { Toolbar } from "./components/Toolbar";
-import Inspector from "./components/Inspector";
+import { Inspector } from "./components/Inspector";
 import { Viewport } from "./components/Viewport";
 import { MediaView } from "./components/MediaView";
 import { isTauriRuntime } from "./bridge";
