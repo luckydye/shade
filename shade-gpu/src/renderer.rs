@@ -21,8 +21,8 @@ use crate::{
     },
     denoise::DenoisePipeline,
     pipelines::{
-        ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GlowPipeline,
-        GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
+        ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, EffectSpace,
+        GlowPipeline, GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
     },
     sharpen2::SharpenTwoPassPipeline,
     texture_cache::TextureCache,
@@ -147,8 +147,14 @@ impl Renderer {
             height,
             "input texture",
         );
-        let final_tex =
-            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), None)?;
+        let final_tex = self.render_texture_with_ops(
+            &input_tex,
+            ops,
+            (0.0, 0.0),
+            (1.0, 1.0),
+            full_texture_effect_space(&input_tex),
+            None,
+        )?;
         self.readback_work_texture_to_u8(&final_tex, width, height)
             .await
     }
@@ -162,8 +168,14 @@ impl Renderer {
     ) -> Result<Vec<f32>> {
         let input_tex =
             self.upload_float_texture(input_data, width, height, "input texture");
-        let final_tex =
-            self.render_texture_with_ops(&input_tex, ops, (0.0, 0.0), (1.0, 1.0), None)?;
+        let final_tex = self.render_texture_with_ops(
+            &input_tex,
+            ops,
+            (0.0, 0.0),
+            (1.0, 1.0),
+            full_texture_effect_space(&input_tex),
+            None,
+        )?;
         self.readback_work_texture_to_f32(&final_tex, width, height)
             .await
     }
@@ -188,6 +200,7 @@ impl Renderer {
             ops,
             (0.0, 0.0),
             (1.0, 1.0),
+            full_texture_effect_space(&input_tex),
             Some(frame_index),
         )?;
         self.readback_work_texture_to_u8(&final_tex, width, height)
@@ -201,6 +214,7 @@ impl Renderer {
         // Full-image UV offset/scale for vignette (use (0,0)/(1,1) when no crop).
         vignette_uv_offset: (f32, f32),
         vignette_uv_scale: (f32, f32),
+        effect_space: EffectSpace,
         // Video frame index for temporal grain variation. None for single-image rendering.
         frame_index: Option<u64>,
     ) -> Result<wgpu::Texture> {
@@ -257,10 +271,12 @@ impl Renderer {
                     vignette_uv_offset,
                     vignette_uv_scale,
                 )?,
-                AdjustmentOp::Sharpen(params) => {
-                    self.sharpen2_pipeline
-                        .process(&self.ctx, current_tex, *params)
-                }
+                AdjustmentOp::Sharpen(params) => self.sharpen2_pipeline.process(
+                    &self.ctx,
+                    current_tex,
+                    *params,
+                    effect_space,
+                ),
                 AdjustmentOp::Grain(params) => {
                     let mut grain = *params;
                     // Modulate seed per-frame so grain varies temporally in video.
@@ -268,12 +284,19 @@ impl Renderer {
                     if let Some(fi) = frame_index {
                         grain.seed += fi as f32 * 0.12345678;
                     }
-                    self.grain_pipeline.process(&self.ctx, current_tex, grain)?
+                    self.grain_pipeline.process(
+                        &self.ctx,
+                        current_tex,
+                        grain,
+                        effect_space,
+                    )?
                 }
-                AdjustmentOp::Glow(params) => {
-                    self.glow_pipeline
-                        .process(&self.ctx, current_tex, *params)?
-                }
+                AdjustmentOp::Glow(params) => self.glow_pipeline.process(
+                    &self.ctx,
+                    current_tex,
+                    *params,
+                    effect_space,
+                )?,
                 AdjustmentOp::Hsl(params) => {
                     self.hsl_pipeline.process(&self.ctx, current_tex, *params)?
                 }
@@ -469,90 +492,109 @@ impl Renderer {
                                         .last()
                                         .map(|t| t as &wgpu::Texture)
                                         .unwrap_or(&*source_texture);
-                                    let output =
-                                        match op {
-                                            AdjustmentOp::Tone {
-                                                exposure,
-                                                contrast,
-                                                blacks,
-                                                whites,
-                                                highlights,
-                                                shadows,
-                                                gamma,
-                                            } => Some(self.tone_pipeline.process(
-                                                &self.ctx,
-                                                tex_in,
-                                                ToneParams {
-                                                    exposure: *exposure,
-                                                    contrast: *contrast,
-                                                    blacks: *blacks,
-                                                    whites: *whites,
-                                                    highlights: *highlights,
-                                                    shadows: *shadows,
-                                                    gamma: *gamma,
-                                                    _pad: 0.0,
-                                                },
-                                            )?),
-                                            AdjustmentOp::Curves {
-                                                lut_r,
-                                                lut_g,
-                                                lut_b,
-                                                lut_master,
-                                                per_channel,
-                                                control_points: _,
-                                            } => Some(self.curves_pipeline.process(
-                                                &self.ctx,
-                                                tex_in,
-                                                lut_r,
-                                                lut_g,
-                                                lut_b,
-                                                lut_master,
-                                                *per_channel,
-                                            )?),
-                                            AdjustmentOp::Color(params) => {
-                                                Some(self.color_pipeline.process(
-                                                    &self.ctx, tex_in, *params,
+                                    let output = match op {
+                                        AdjustmentOp::Tone {
+                                            exposure,
+                                            contrast,
+                                            blacks,
+                                            whites,
+                                            highlights,
+                                            shadows,
+                                            gamma,
+                                        } => Some(self.tone_pipeline.process(
+                                            &self.ctx,
+                                            tex_in,
+                                            ToneParams {
+                                                exposure: *exposure,
+                                                contrast: *contrast,
+                                                blacks: *blacks,
+                                                whites: *whites,
+                                                highlights: *highlights,
+                                                shadows: *shadows,
+                                                gamma: *gamma,
+                                                _pad: 0.0,
+                                            },
+                                        )?),
+                                        AdjustmentOp::Curves {
+                                            lut_r,
+                                            lut_g,
+                                            lut_b,
+                                            lut_master,
+                                            per_channel,
+                                            control_points: _,
+                                        } => Some(self.curves_pipeline.process(
+                                            &self.ctx,
+                                            tex_in,
+                                            lut_r,
+                                            lut_g,
+                                            lut_b,
+                                            lut_master,
+                                            *per_channel,
+                                        )?),
+                                        AdjustmentOp::Color(params) => Some(
+                                            self.color_pipeline
+                                                .process(&self.ctx, tex_in, *params)?,
+                                        ),
+                                        AdjustmentOp::Hsl(params) => Some(
+                                            self.hsl_pipeline
+                                                .process(&self.ctx, tex_in, *params)?,
+                                        ),
+                                        AdjustmentOp::Denoise(params) => {
+                                            if params.luma_strength > 0.0
+                                                || params.chroma_strength > 0.0
+                                            {
+                                                Some(
+                                                    self.denoise_pipeline.process(
+                                                        &self.ctx, tex_in, *params,
+                                                    ),
+                                                )
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                        AdjustmentOp::Sharpen(params) => {
+                                            if params.amount > 0.0 {
+                                                let effect_space =
+                                                    texture_to_reference_effect_space(
+                                                        tex_in.size().width,
+                                                        tex_in.size().height,
+                                                        canvas_width,
+                                                        canvas_height,
+                                                    );
+                                                Some(self.sharpen2_pipeline.process(
+                                                    &self.ctx,
+                                                    tex_in,
+                                                    *params,
+                                                    effect_space,
+                                                ))
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                        AdjustmentOp::Glow(params) => {
+                                            if params.amount > 0.0 {
+                                                let effect_space =
+                                                    texture_to_reference_effect_space(
+                                                        tex_in.size().width,
+                                                        tex_in.size().height,
+                                                        canvas_width,
+                                                        canvas_height,
+                                                    );
+                                                Some(self.glow_pipeline.process(
+                                                    &self.ctx,
+                                                    tex_in,
+                                                    *params,
+                                                    effect_space,
                                                 )?)
+                                            } else {
+                                                None
                                             }
-                                            AdjustmentOp::Hsl(params) => {
-                                                Some(self.hsl_pipeline.process(
-                                                    &self.ctx, tex_in, *params,
-                                                )?)
-                                            }
-                                            AdjustmentOp::Denoise(params) => {
-                                                if params.luma_strength > 0.0
-                                                    || params.chroma_strength > 0.0
-                                                {
-                                                    Some(self.denoise_pipeline.process(
-                                                        &self.ctx, tex_in, *params,
-                                                    ))
-                                                } else {
-                                                    None
-                                                }
-                                            }
-                                            AdjustmentOp::Sharpen(params) => {
-                                                if params.amount > 0.0 {
-                                                    Some(self.sharpen2_pipeline.process(
-                                                        &self.ctx, tex_in, *params,
-                                                    ))
-                                                } else {
-                                                    None
-                                                }
-                                            }
-                                            AdjustmentOp::Glow(params) => {
-                                                if params.amount > 0.0 {
-                                                    Some(self.glow_pipeline.process(
-                                                        &self.ctx, tex_in, *params,
-                                                    )?)
-                                                } else {
-                                                    None
-                                                }
-                                            }
-                                            AdjustmentOp::Vignette(_)
-                                            | AdjustmentOp::Grain(_) => {
-                                                break;
-                                            }
-                                        };
+                                        }
+                                        AdjustmentOp::Vignette(_)
+                                        | AdjustmentOp::Grain(_) => {
+                                            break;
+                                        }
+                                    };
                                     if let Some(output) = output {
                                         preprocess_owned.push(output);
                                     }
@@ -694,11 +736,19 @@ impl Renderer {
                         Some((adj_idx, op_count)) if adj_idx == idx => op_count,
                         _ => 0,
                     };
+                    let effect_space = preview_effect_space(
+                        &current_view,
+                        current_accum.size().width,
+                        current_accum.size().height,
+                        canvas_width,
+                        canvas_height,
+                    );
                     self.render_texture_with_ops(
                         current_accum,
                         &ops[pre_applied_op_count..],
                         vignette_uv_offset,
                         vignette_uv_scale,
+                        effect_space,
                         None,
                     )?
                 }
@@ -1086,6 +1136,44 @@ fn normalize_preview_crop(
     crop.x = crop.x.clamp(0.0, max_width - crop.width);
     crop.y = crop.y.clamp(0.0, max_height - crop.height);
     crop
+}
+
+fn full_texture_effect_space(texture: &wgpu::Texture) -> EffectSpace {
+    let size = texture.size();
+    texture_to_reference_effect_space(size.width, size.height, size.width, size.height)
+}
+
+fn texture_to_reference_effect_space(
+    texture_width: u32,
+    texture_height: u32,
+    reference_width: u32,
+    reference_height: u32,
+) -> EffectSpace {
+    EffectSpace {
+        origin_x: 0.0,
+        origin_y: 0.0,
+        step_x: reference_width as f32 / texture_width as f32,
+        step_y: reference_height as f32 / texture_height as f32,
+        reference_width: reference_width as f32,
+        reference_height: reference_height as f32,
+    }
+}
+
+fn preview_effect_space(
+    view: &PreviewCrop,
+    output_width: u32,
+    output_height: u32,
+    reference_width: u32,
+    reference_height: u32,
+) -> EffectSpace {
+    EffectSpace {
+        origin_x: view.x,
+        origin_y: view.y,
+        step_x: view.width / output_width as f32,
+        step_y: view.height / output_height as f32,
+        reference_width: reference_width as f32,
+        reference_height: reference_height as f32,
+    }
 }
 
 fn resample_mask_region(
@@ -2000,6 +2088,197 @@ mod tests {
 
         let mut downscaled_full = Vec::with_capacity(4 * 4 * 4);
         for row in 0..4usize {
+            for col in 0..4usize {
+                for channel in 0..4usize {
+                    let tl = px_full[((row * 2) * 8 + col * 2) * 4 + channel];
+                    let tr = px_full[((row * 2) * 8 + col * 2 + 1) * 4 + channel];
+                    let bl = px_full[((row * 2 + 1) * 8 + col * 2) * 4 + channel];
+                    let br = px_full[((row * 2 + 1) * 8 + col * 2 + 1) * 4 + channel];
+                    downscaled_full.push((tl + tr + bl + br) * 0.25);
+                }
+            }
+        }
+
+        for (i, (preview, full)) in
+            px_preview.iter().zip(downscaled_full.iter()).enumerate()
+        {
+            let diff = (preview - full).abs();
+            assert!(
+                diff < 0.08,
+                "channel {i}: preview={preview}, downscaled_full={full}, diff={diff}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cropped_glow_preview_matches_downscaled_zoomed_render() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut pixels = vec![0.0; 16 * 16 * 4];
+        for row in 0..16usize {
+            for col in 0..16usize {
+                let base = (row * 16 + col) * 4;
+                pixels[base] = 0.1;
+                pixels[base + 1] = 0.08;
+                pixels[base + 2] = 0.06;
+                pixels[base + 3] = 1.0;
+            }
+        }
+        for &(row, col, r, g, b) in &[
+            (7usize, 9usize, 8.0, 2.5, 0.8),
+            (8usize, 10usize, 5.0, 1.7, 0.5),
+            (6usize, 8usize, 3.0, 1.2, 0.4),
+        ] {
+            let base = (row * 16 + col) * 4;
+            pixels[base] = r;
+            pixels[base + 1] = g;
+            pixels[base + 2] = b;
+        }
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 16, 16);
+        stack.add_adjustment_layer(vec![AdjustmentOp::Glow(GlowParams {
+            amount: 1.0,
+            _pad: [0.0; 3],
+        })]);
+
+        let mut sources = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 16,
+                height: 16,
+                pixels: pixels.into(),
+            },
+        );
+
+        let crop = PreviewCrop {
+            x: 4.0,
+            y: 3.0,
+            width: 8.0,
+            height: 6.0,
+        };
+
+        let tex_full = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                16,
+                16,
+                8,
+                6,
+                Some(crop.clone()),
+            )
+            .expect("full cropped render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 8, 6)
+            .await
+            .expect("readback");
+
+        let tex_preview = renderer
+            .render_stack_preview_texture(&stack, &sources, 16, 16, 4, 3, Some(crop))
+            .expect("preview cropped render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 4, 3)
+            .await
+            .expect("readback");
+
+        let mut downscaled_full = Vec::with_capacity(4 * 3 * 4);
+        for row in 0..3usize {
+            for col in 0..4usize {
+                for channel in 0..4usize {
+                    let tl = px_full[((row * 2) * 8 + col * 2) * 4 + channel];
+                    let tr = px_full[((row * 2) * 8 + col * 2 + 1) * 4 + channel];
+                    let bl = px_full[((row * 2 + 1) * 8 + col * 2) * 4 + channel];
+                    let br = px_full[((row * 2 + 1) * 8 + col * 2 + 1) * 4 + channel];
+                    downscaled_full.push((tl + tr + bl + br) * 0.25);
+                }
+            }
+        }
+
+        for (i, (preview, full)) in
+            px_preview.iter().zip(downscaled_full.iter()).enumerate()
+        {
+            let diff = (preview - full).abs();
+            assert!(
+                diff < 0.08,
+                "channel {i}: preview={preview}, downscaled_full={full}, diff={diff}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cropped_sharpen_preview_matches_downscaled_zoomed_render() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut pixels = vec![0.0; 16 * 16 * 4];
+        for row in 0..16usize {
+            for col in 0..16usize {
+                let base = (row * 16 + col) * 4;
+                let checker = if (row + col) % 2 == 0 { 0.18 } else { 0.72 };
+                pixels[base] = checker;
+                pixels[base + 1] = checker * 0.95;
+                pixels[base + 2] = checker * 0.9;
+                pixels[base + 3] = 1.0;
+            }
+        }
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 16, 16);
+        stack.add_adjustment_layer(vec![AdjustmentOp::Sharpen(
+            shade_core::SharpenParams {
+                amount: 1.0,
+                threshold: 0.0,
+            },
+        )]);
+
+        let mut sources = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 16,
+                height: 16,
+                pixels: pixels.into(),
+            },
+        );
+
+        let crop = PreviewCrop {
+            x: 4.0,
+            y: 3.0,
+            width: 8.0,
+            height: 6.0,
+        };
+
+        let tex_full = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                16,
+                16,
+                8,
+                6,
+                Some(crop.clone()),
+            )
+            .expect("full cropped render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 8, 6)
+            .await
+            .expect("readback");
+
+        let tex_preview = renderer
+            .render_stack_preview_texture(&stack, &sources, 16, 16, 4, 3, Some(crop))
+            .expect("preview cropped render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 4, 3)
+            .await
+            .expect("readback");
+
+        let mut downscaled_full = Vec::with_capacity(4 * 3 * 4);
+        for row in 0..3usize {
             for col in 0..4usize {
                 for channel in 0..4usize {
                     let tl = px_full[((row * 2) * 8 + col * 2) * 4 + channel];

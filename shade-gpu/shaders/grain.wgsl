@@ -1,8 +1,7 @@
 struct GrainParams {
-    amount: f32,
-    size: f32,
-    roughness: f32,
-    seed: f32,
+    grain: vec4<f32>,
+    image_space0: vec4<f32>,
+    image_space1: vec4<f32>,
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -18,7 +17,7 @@ fn pcg(v: u32) -> u32 {
 // Random unit gradient vector for a lattice point.
 // Full 360° continuous rotation — no directional bias from a discrete set.
 fn grad(ix: i32, iy: i32, channel: u32) -> vec2<f32> {
-    let seed_u = bitcast<u32>(params.seed);
+    let seed_u = bitcast<u32>(params.grain.w);
     let key = u32(ix) ^ (u32(iy) * 2654435761u) ^ (channel * 1234567891u) ^ (seed_u * 3266489917u);
     let h = pcg(pcg(key));
     let angle = f32(h) * (6.28318530718 / 4294967296.0);
@@ -51,7 +50,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // +0.5 shifts pixel centers to sit between lattice points.
     // Perlin is always 0 at integer coords, so without this offset size=1
     // would sample only zero-crossings and produce no visible grain.
-    let p = vec2<f32>(gid.xy) / max(params.size, 1.0) + 0.5;
+    let image_pos =
+        params.image_space0.xy + (vec2<f32>(gid.xy) + vec2<f32>(0.5, 0.5)) * params.image_space0.zw;
+    let p = image_pos / max(params.grain.y, 1.0) + 0.5;
 
     // Independent grain per channel (R/G/B film emulsion layers)
     let gr = perlin(p, 0u);
@@ -61,10 +62,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Tonal weighting: grain peaks in midtones, rolls off toward deep shadows and highlights
     let shadow_lift    = smoothstep(0.0, 0.25, luma);
     let highlight_drop = smoothstep(1.0, 0.65, luma);
-    let tonal_weight   = mix(1.0, shadow_lift * highlight_drop, params.roughness);
+    let tonal_weight = mix(1.0, shadow_lift * highlight_drop, params.grain.z);
 
     // Perlin output range ≈ [-0.7, 0.7]; 0.15 maps amount=1 to strong visible grain
-    let scale = params.amount * 0.15 * tonal_weight;
+    let scale = params.grain.x * 0.15 * tonal_weight;
 
     c = vec4<f32>(
         c.r + gr * scale,

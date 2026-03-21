@@ -1,11 +1,20 @@
 // Two-pass separable Gaussian unsharp mask pipeline
-use crate::{context::GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::GpuContext, pipelines::EffectSpace, INTERNAL_TEXTURE_FORMAT};
 use bytemuck::{Pod, Zeroable};
 use shade_core::SharpenParams;
 use wgpu::*;
 
 const SHADER_H: &str = include_str!("../shaders/sharpen_h.wgsl");
 const SHADER_V: &str = include_str!("../shaders/sharpen_v.wgsl");
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy)]
+struct SharpenUniform {
+    amount: f32,
+    threshold: f32,
+    step_x: f32,
+    step_y: f32,
+}
 
 pub struct SharpenTwoPassPipeline {
     h_pipeline: ComputePipeline,
@@ -43,6 +52,16 @@ impl SharpenTwoPassPipeline {
                         access: StorageTextureAccess::WriteOnly,
                         format: INTERNAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -139,6 +158,7 @@ impl SharpenTwoPassPipeline {
         ctx: &GpuContext,
         input_tex: &Texture,
         params: SharpenParams,
+        effect_space: EffectSpace,
     ) -> Texture {
         let device = &ctx.device;
         let queue = &ctx.queue;
@@ -179,18 +199,11 @@ impl SharpenTwoPassPipeline {
 
         use wgpu::util::DeviceExt;
 
-        // Pad SharpenParams to 16 bytes for uniform alignment
-        #[repr(C)]
-        #[derive(Pod, Zeroable, Clone, Copy)]
-        struct SharpenUniform {
-            amount: f32,
-            threshold: f32,
-            _pad: [f32; 2],
-        }
         let uniform = SharpenUniform {
             amount: params.amount,
             threshold: params.threshold,
-            _pad: [0.0; 2],
+            step_x: effect_space.step_x,
+            step_y: effect_space.step_y,
         };
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sharpen_params"),
@@ -213,6 +226,10 @@ impl SharpenTwoPassPipeline {
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::TextureView(&hblur_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
                 },
             ],
         });

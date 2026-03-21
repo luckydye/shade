@@ -51,6 +51,16 @@ pub struct CropUniform {
     pub sin_r: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct EffectSpace {
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub step_x: f32,
+    pub step_y: f32,
+    pub reference_width: f32,
+    pub reference_height: f32,
+}
+
 // ─── Helper: create a simple 3-binding compute pipeline ──────────────────────
 // binding 0: texture_2d<f32>  (TEXTURE_BINDING)
 // binding 1: texture_storage_2d (STORAGE_BINDING write)
@@ -757,6 +767,34 @@ pub struct GrainPipeline {
     bind_group_layout: BindGroupLayout,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GrainUniform {
+    grain: [f32; 4],
+    image_space0: [f32; 4],
+    image_space1: [f32; 4],
+}
+
+impl GrainUniform {
+    fn new(params: shade_core::GrainParams, effect_space: EffectSpace) -> Self {
+        Self {
+            grain: [params.amount, params.size, params.roughness, params.seed],
+            image_space0: [
+                effect_space.origin_x,
+                effect_space.origin_y,
+                effect_space.step_x,
+                effect_space.step_y,
+            ],
+            image_space1: [
+                effect_space.reference_width,
+                effect_space.reference_height,
+                0.0,
+                0.0,
+            ],
+        }
+    }
+}
+
 impl GrainPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
@@ -781,6 +819,7 @@ impl GrainPipeline {
         ctx: &GpuContext,
         input_tex: &Texture,
         params: shade_core::GrainParams,
+        effect_space: EffectSpace,
     ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();
@@ -788,10 +827,11 @@ impl GrainPipeline {
 
         let output_tex =
             create_output_texture(device, width, height, "grain output texture");
+        let uniform = GrainUniform::new(params, effect_space);
 
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("grain params uniform"),
-            contents: bytemuck::bytes_of(&params),
+            contents: bytemuck::bytes_of(&uniform),
             usage: BufferUsages::UNIFORM,
         });
 
@@ -837,6 +877,27 @@ pub struct GlowPipeline {
     bind_group_layout: BindGroupLayout,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GlowUniform {
+    glow: [f32; 4],
+    image_space: [f32; 4],
+}
+
+impl GlowUniform {
+    fn new(params: shade_core::GlowParams, effect_space: EffectSpace) -> Self {
+        Self {
+            glow: [params.amount, effect_space.step_x, effect_space.step_y, 0.0],
+            image_space: [
+                effect_space.reference_width,
+                effect_space.reference_height,
+                0.0,
+                0.0,
+            ],
+        }
+    }
+}
+
 impl GlowPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
@@ -861,6 +922,7 @@ impl GlowPipeline {
         ctx: &GpuContext,
         input_tex: &Texture,
         params: shade_core::GlowParams,
+        effect_space: EffectSpace,
     ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();
@@ -868,10 +930,11 @@ impl GlowPipeline {
 
         let output_tex =
             create_output_texture(device, width, height, "glow output texture");
+        let uniform = GlowUniform::new(params, effect_space);
 
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("glow params uniform"),
-            contents: bytemuck::bytes_of(&params),
+            contents: bytemuck::bytes_of(&uniform),
             usage: BufferUsages::UNIFORM,
         });
 
