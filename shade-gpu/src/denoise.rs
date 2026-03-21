@@ -9,7 +9,7 @@ use shade_core::DenoiseParams;
 use wgpu::util::DeviceExt;
 use wgpu::*;
 
-use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{pipelines::EffectSpace, GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 const GUIDE_H_WGSL: &str = include_str!("../shaders/denoise_guide_h.wgsl");
 const GUIDE_V_WGSL: &str = include_str!("../shaders/denoise_guide_v.wgsl");
@@ -22,8 +22,8 @@ const NLM_WGSL: &str = include_str!("../shaders/denoise_nlm.wgsl");
 struct DenoiseUniform {
     luma_strength: f32,
     chroma_strength: f32,
-    _pad0: f32,
-    _pad1: f32,
+    step_x: f32,
+    step_y: f32,
 }
 
 pub struct DenoisePipeline {
@@ -45,34 +45,6 @@ pub struct DenoisePipeline {
 }
 
 // ─── Layout helpers ───────────────────────────────────────────────────────────
-
-fn two_binding_bgl(device: &Device, label: &str) -> BindGroupLayout {
-    device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-        label: Some(label),
-        entries: &[
-            BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: false },
-                    view_dimension: TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            BindGroupLayoutEntry {
-                binding: 1,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::StorageTexture {
-                    access: StorageTextureAccess::WriteOnly,
-                    format: INTERNAL_TEXTURE_FORMAT,
-                    view_dimension: TextureViewDimension::D2,
-                },
-                count: None,
-            },
-        ],
-    })
-}
 
 fn three_binding_bgl(device: &Device, label: &str) -> BindGroupLayout {
     device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -235,8 +207,8 @@ impl DenoisePipeline {
     pub fn new(ctx: &GpuContext) -> Self {
         let device = &ctx.device;
 
-        let guide_h_bgl = two_binding_bgl(device, "denoise_guide_h_bgl");
-        let guide_v_bgl = two_binding_bgl(device, "denoise_guide_v_bgl");
+        let guide_h_bgl = three_binding_bgl(device, "denoise_guide_h_bgl");
+        let guide_v_bgl = three_binding_bgl(device, "denoise_guide_v_bgl");
         let bilateral_h_bgl = four_binding_bgl(device, "denoise_bilateral_h_bgl");
         let bilateral_v_bgl = four_binding_bgl(device, "denoise_bilateral_v_bgl");
         let nlm_bgl = three_binding_bgl(device, "denoise_nlm_bgl");
@@ -290,6 +262,7 @@ impl DenoisePipeline {
         ctx: &GpuContext,
         input_tex: &Texture,
         params: DenoiseParams,
+        effect_space: EffectSpace,
     ) -> Texture {
         let device = &ctx.device;
         let (w, h) = (input_tex.width(), input_tex.height());
@@ -315,8 +288,8 @@ impl DenoisePipeline {
         let uniform = DenoiseUniform {
             luma_strength: params.luma_strength,
             chroma_strength: params.chroma_strength,
-            _pad0: 0.0,
-            _pad1: 0.0,
+            step_x: effect_space.step_x,
+            step_y: effect_space.step_y,
         };
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("denoise_params"),
@@ -354,6 +327,10 @@ impl DenoisePipeline {
                     binding: 1,
                     resource: BindingResource::TextureView(&guide_h_view),
                 },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
             ],
         });
         dispatch(ctx, &self.guide_h_pipeline, &bg, w, h, "denoise_guide_h");
@@ -370,6 +347,10 @@ impl DenoisePipeline {
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::TextureView(&guide_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
                 },
             ],
         });

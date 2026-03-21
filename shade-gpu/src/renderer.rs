@@ -300,10 +300,12 @@ impl Renderer {
                 AdjustmentOp::Hsl(params) => {
                     self.hsl_pipeline.process(&self.ctx, current_tex, *params)?
                 }
-                AdjustmentOp::Denoise(params) => {
-                    self.denoise_pipeline
-                        .process(&self.ctx, current_tex, *params)
-                }
+                AdjustmentOp::Denoise(params) => self.denoise_pipeline.process(
+                    &self.ctx,
+                    current_tex,
+                    *params,
+                    effect_space,
+                ),
             };
             owned_textures.push(output);
             current_tex = owned_textures.last().unwrap();
@@ -405,6 +407,12 @@ impl Renderer {
         assert!(target_height > 0, "preview target_height must be > 0");
         let crop = normalize_preview_crop(crop, canvas_width, canvas_height);
         let mut current_view = crop.clone();
+        let mut post_crop_view = PreviewCrop {
+            x: 0.0,
+            y: 0.0,
+            width: canvas_width as f32,
+            height: canvas_height as f32,
+        };
 
         // 1. Create accumulator texture (black RGBA8).
         let accum_tex = {
@@ -543,11 +551,19 @@ impl Renderer {
                                             if params.luma_strength > 0.0
                                                 || params.chroma_strength > 0.0
                                             {
-                                                Some(
-                                                    self.denoise_pipeline.process(
-                                                        &self.ctx, tex_in, *params,
-                                                    ),
-                                                )
+                                                let effect_space =
+                                                    texture_to_reference_effect_space(
+                                                        tex_in.size().width,
+                                                        tex_in.size().height,
+                                                        canvas_width,
+                                                        canvas_height,
+                                                    );
+                                                Some(self.denoise_pipeline.process(
+                                                    &self.ctx,
+                                                    tex_in,
+                                                    *params,
+                                                    effect_space,
+                                                ))
                                             } else {
                                                 None
                                             }
@@ -643,6 +659,12 @@ impl Renderer {
                 Layer::Crop { rect } => {
                     let prev_view = current_view.clone();
                     if rect.rotation != 0.0 {
+                        post_crop_view = PreviewCrop {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height,
+                        };
                         // For rotation: the output texture represents prev_view (the viewport).
                         // out_* must be prev_view so each output pixel maps to its correct canvas
                         // coordinate. current_view is not updated — the accumulator still covers
@@ -702,6 +724,7 @@ impl Renderer {
                             width: rect.width,
                             height: rect.height,
                         };
+                        post_crop_view = current_view.clone();
                         self.crop_pipeline.process(
                             &self.ctx,
                             current_accum,
@@ -723,15 +746,10 @@ impl Renderer {
                     }
                 }
                 Layer::Adjustment { ops } => {
-                    // Vignette UV maps preview pixels back to full-image UV space.
-                    let vignette_uv_offset = (
-                        current_view.x / canvas_width as f32,
-                        current_view.y / canvas_height as f32,
-                    );
-                    let vignette_uv_scale = (
-                        current_view.width / canvas_width as f32,
-                        current_view.height / canvas_height as f32,
-                    );
+                    // Post-crop effects use the logical crop frame from the stack.
+                    // Preview tiles are just a window into that frame, not a crop of their own.
+                    let (vignette_uv_offset, vignette_uv_scale) =
+                        view_uv_mapping(&current_view, &post_crop_view);
                     let pre_applied_op_count = match pre_applied_adj {
                         Some((adj_idx, op_count)) if adj_idx == idx => op_count,
                         _ => 0,
@@ -1176,6 +1194,24 @@ fn preview_effect_space(
     }
 }
 
+fn view_uv_mapping(
+    sampled_view: &PreviewCrop,
+    frame_view: &PreviewCrop,
+) -> ((f32, f32), (f32, f32)) {
+    assert!(frame_view.width > 0.0, "frame_view.width must be > 0");
+    assert!(frame_view.height > 0.0, "frame_view.height must be > 0");
+    (
+        (
+            (sampled_view.x - frame_view.x) / frame_view.width,
+            (sampled_view.y - frame_view.y) / frame_view.height,
+        ),
+        (
+            sampled_view.width / frame_view.width,
+            sampled_view.height / frame_view.height,
+        ),
+    )
+}
+
 fn resample_mask_region(
     pixels: &[u8],
     source_width: u32,
@@ -1372,10 +1408,11 @@ fn preview_alpha_channel_to_u8(value: f32) -> u8 {
 mod tests {
     use super::{
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        rgba_display_f32_to_u8, FloatImage, PreviewCrop, Renderer,
+        rgba_display_f32_to_u8, view_uv_mapping, FloatImage, PreviewCrop, Renderer,
     };
     use shade_core::{
         AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, TextureId,
+        VignetteParams,
     };
     use std::collections::HashMap;
 
@@ -1396,6 +1433,27 @@ mod tests {
         assert_eq!(crop.y, 50.0);
         assert_eq!(crop.width, 200.0);
         assert_eq!(crop.height, 50.0);
+    }
+
+    #[test]
+    fn view_uv_mapping_uses_post_crop_frame_not_preview_tile() {
+        let sampled_view = PreviewCrop {
+            x: 3.0,
+            y: 4.0,
+            width: 2.0,
+            height: 3.0,
+        };
+        let frame_view = PreviewCrop {
+            x: 2.0,
+            y: 2.0,
+            width: 8.0,
+            height: 10.0,
+        };
+
+        let (offset, scale) = view_uv_mapping(&sampled_view, &frame_view);
+
+        assert_eq!(offset, (0.125, 0.2));
+        assert_eq!(scale, (0.25, 0.3));
     }
 
     #[test]
@@ -2296,6 +2354,198 @@ mod tests {
             let diff = (preview - full).abs();
             assert!(
                 diff < 0.08,
+                "channel {i}: preview={preview}, downscaled_full={full}, diff={diff}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cropped_vignette_preview_matches_full_res_subregion() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut pixels = vec![0.0; 16 * 16 * 4];
+        for row in 0..16usize {
+            for col in 0..16usize {
+                let base = (row * 16 + col) * 4;
+                pixels[base] = 1.0;
+                pixels[base + 1] = 1.0;
+                pixels[base + 2] = 1.0;
+                pixels[base + 3] = 1.0;
+            }
+        }
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 16, 16);
+        stack.add_crop_layer(CropRect {
+            x: 4.0,
+            y: 3.0,
+            width: 8.0,
+            height: 6.0,
+            rotation: 0.0,
+        });
+        stack.add_adjustment_layer(vec![AdjustmentOp::Vignette(VignetteParams {
+            amount: 1.0,
+            midpoint: 0.25,
+            feather: 0.2,
+            roundness: 1.0,
+        })]);
+
+        let mut sources = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 16,
+                height: 16,
+                pixels: pixels.into(),
+            },
+        );
+
+        let tex_full = renderer
+            .render_stack_preview_texture(&stack, &sources, 16, 16, 8, 6, None)
+            .expect("full cropped render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 8, 6)
+            .await
+            .expect("readback");
+
+        let tex_preview = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                16,
+                16,
+                4,
+                3,
+                Some(PreviewCrop {
+                    x: 5.0,
+                    y: 4.0,
+                    width: 4.0,
+                    height: 3.0,
+                }),
+            )
+            .expect("preview cropped render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 4, 3)
+            .await
+            .expect("readback");
+
+        let mut full_subregion = Vec::with_capacity(4 * 3 * 4);
+        for row in 0..3usize {
+            for col in 0..4usize {
+                let full_row = row + 1;
+                let full_col = col + 1;
+                let base = (full_row * 8 + full_col) * 4;
+                full_subregion.extend_from_slice(&px_full[base..base + 4]);
+            }
+        }
+
+        for (i, (preview, full)) in
+            px_preview.iter().zip(full_subregion.iter()).enumerate()
+        {
+            let diff = (preview - full).abs();
+            assert!(
+                diff < 0.08,
+                "channel {i}: preview={preview}, full_subregion={full}, diff={diff}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cropped_denoise_preview_matches_downscaled_zoomed_render() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut pixels = vec![0.0; 16 * 16 * 4];
+        for row in 0..16usize {
+            for col in 0..16usize {
+                let base = (row * 16 + col) * 4;
+                let signal: f32 = if (row + col) % 3 == 0 { 0.75 } else { 0.25 };
+                let noise: f32 = if (row * 17 + col * 31) % 5 == 0 {
+                    0.18
+                } else {
+                    -0.12
+                };
+                pixels[base] = (signal + noise).clamp(0.0, 1.0);
+                pixels[base + 1] = (signal * 0.9 - noise * 0.5).clamp(0.0, 1.0);
+                pixels[base + 2] = (signal * 0.8 + noise * 0.3).clamp(0.0, 1.0);
+                pixels[base + 3] = 1.0;
+            }
+        }
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 16, 16);
+        stack.add_adjustment_layer(vec![AdjustmentOp::Denoise(
+            shade_core::DenoiseParams {
+                luma_strength: 0.8,
+                chroma_strength: 0.6,
+                mode: 0,
+                _pad: 0.0,
+            },
+        )]);
+
+        let mut sources = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 16,
+                height: 16,
+                pixels: pixels.into(),
+            },
+        );
+
+        let crop = PreviewCrop {
+            x: 4.0,
+            y: 3.0,
+            width: 8.0,
+            height: 6.0,
+        };
+
+        let tex_full = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                16,
+                16,
+                8,
+                6,
+                Some(crop.clone()),
+            )
+            .expect("full cropped render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 8, 6)
+            .await
+            .expect("readback");
+
+        let tex_preview = renderer
+            .render_stack_preview_texture(&stack, &sources, 16, 16, 4, 3, Some(crop))
+            .expect("preview cropped render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 4, 3)
+            .await
+            .expect("readback");
+
+        let mut downscaled_full = Vec::with_capacity(4 * 3 * 4);
+        for row in 0..3usize {
+            for col in 0..4usize {
+                for channel in 0..4usize {
+                    let tl = px_full[((row * 2) * 8 + col * 2) * 4 + channel];
+                    let tr = px_full[((row * 2) * 8 + col * 2 + 1) * 4 + channel];
+                    let bl = px_full[((row * 2 + 1) * 8 + col * 2) * 4 + channel];
+                    let br = px_full[((row * 2 + 1) * 8 + col * 2 + 1) * 4 + channel];
+                    downscaled_full.push((tl + tr + bl + br) * 0.25);
+                }
+            }
+        }
+
+        for (i, (preview, full)) in
+            px_preview.iter().zip(downscaled_full.iter()).enumerate()
+        {
+            let diff = (preview - full).abs();
+            assert!(
+                diff < 0.1,
                 "channel {i}: preview={preview}, downscaled_full={full}, diff={diff}"
             );
         }
