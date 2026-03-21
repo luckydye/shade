@@ -5,8 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
+  resolve: {
+    dedupe: ["solid-js"],
+  },
   clearScreen: false,
-  base: "/app/",
+  base: "/shade/",
   server: {
     port: 4173,
     strictPort: true,
@@ -19,8 +22,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist",
+    outDir: "dist/shade",
     target: ["es2021", "chrome100", "safari13"],
+    minify: false
   },
   worker: {
     format: "es",
