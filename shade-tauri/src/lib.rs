@@ -76,6 +76,7 @@ pub fn run() {
             commands::add_s3_media_library,
             commands::upload_media_library_file,
             commands::upload_media_library_path,
+            commands::delete_media_library_item,
             commands::remove_media_library,
             commands::list_presets,
             commands::save_preset,

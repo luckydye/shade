@@ -65,7 +65,7 @@ pub struct MediaLibrary {
     pub kind: String,
     pub path: Option<String>,
     pub removable: bool,
-    pub can_upload_images: bool,
+    pub readonly: bool,
     pub is_online: Option<bool>,
     pub is_refreshing: Option<bool>,
 }
@@ -703,7 +703,7 @@ fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> Media
         kind: "camera".into(),
         path: Some(host.to_string()),
         removable,
-        can_upload_images: false,
+        readonly: true,
         is_online: Some(is_online),
         is_refreshing: None,
     }
@@ -737,7 +737,7 @@ fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
         kind: "directory".into(),
         path: Some(path.display().to_string()),
         removable: true,
-        can_upload_images: false,
+        readonly: true,
         is_online: Some(is_online),
         is_refreshing: Some(is_refreshing && is_online),
     }
@@ -750,7 +750,7 @@ fn library_for_s3(config: &shade_io::S3LibraryConfig) -> MediaLibrary {
         kind: "s3".into(),
         path: Some(shade_io::format_s3_library_detail(config)),
         removable: true,
-        can_upload_images: true,
+        readonly: false,
         is_online: None,
         is_refreshing: None,
     }
@@ -892,7 +892,7 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         kind: "directory".into(),
         path: Some(pictures_dir.display().to_string()),
         removable: false,
-        can_upload_images: false,
+        readonly: true,
         is_online: Some(pictures_online),
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
@@ -2686,7 +2686,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             kind: "directory".into(),
             path: None,
             removable: false,
-            can_upload_images: false,
+            readonly: true,
             is_online: None,
             is_refreshing: None,
         }]);
@@ -2701,7 +2701,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             kind: "directory".into(),
             path: None,
             removable: false,
-            can_upload_images: false,
+            readonly: true,
             is_online: None,
             is_refreshing: None,
         }]);
@@ -2987,6 +2987,12 @@ pub async fn upload_media_library_path(
         &bytes,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn delete_media_library_item(path: String) -> Result<(), String> {
+    let (config, key) = resolve_s3_library_for_media_path(&path)?;
+    shade_io::delete_s3_object(&config, &key).await
 }
 
 #[tauri::command]

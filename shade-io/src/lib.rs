@@ -58,7 +58,7 @@ pub use library_scan_service::{
 };
 #[cfg(feature = "native")]
 pub use library_source::{
-    camera_library_id, display_s3_library_name, format_s3_library_detail,
+    camera_library_id, delete_s3_object, display_s3_library_name, format_s3_library_detail,
     get_s3_object_bytes, library_config_id, list_s3_objects, local_library_id,
     media_path_for_s3_object, normalize_s3_library_input, parse_s3_media_path,
     peer_library_id, put_s3_object_bytes, resolve_s3_source_id_from_library_id,

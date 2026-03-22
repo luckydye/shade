@@ -25,6 +25,7 @@ import {
   type MediaLibrary,
   type S3MediaLibraryInput,
   type SharedPicture,
+  deleteMediaLibraryItem,
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
 } from "../bridge/index";
@@ -165,8 +166,8 @@ function isS3Library(
   return library?.kind === "s3";
 }
 
-function libraryCanUploadImages(library: LibraryEntry | null) {
-  return !!library && !isPeerLibrary(library) && library.can_upload_images;
+function libraryIsWritable(library: LibraryEntry | null) {
+  return !!library && !isPeerLibrary(library) && !library.readonly;
 }
 
 function droppedFiles(dataTransfer: DataTransfer | null | undefined) {
@@ -687,7 +688,7 @@ export const MediaView: Component = () => {
   });
 
   createEffect(() => {
-    if (canUploadSelectedLibrary()) {
+    if (canWriteSelectedLibrary()) {
       return;
     }
     setUploadDragFeedback(null);
@@ -750,9 +751,7 @@ export const MediaView: Component = () => {
       library.is_online !== false
     );
   });
-  const canUploadSelectedLibrary = createMemo(() =>
-    libraryCanUploadImages(selectedLibrary()),
-  );
+  const canWriteSelectedLibrary = createMemo(() => libraryIsWritable(selectedLibrary()));
   const isUploadDragActive = createMemo(() => uploadDragFeedback() !== null);
   const uploadDragLabel = createMemo(() => {
     const feedback = uploadDragFeedback();
@@ -940,7 +939,7 @@ export const MediaView: Component = () => {
       setUsesNativeDragDrop(true);
       const { getCurrentWebview } = await import("@tauri-apps/api/webview");
       unlisten = await getCurrentWebview().onDragDropEvent((event) => {
-        if (!canUploadSelectedLibrary()) {
+        if (!canWriteSelectedLibrary()) {
           setUploadDragFeedback(null);
           return;
         }
@@ -1155,8 +1154,8 @@ export const MediaView: Component = () => {
 
   async function handleUploadLibraryFiles(files: File[]) {
     const library = selectedLibrary();
-    if (!libraryCanUploadImages(library)) {
-      throw new Error("selected library does not support image uploads");
+    if (!libraryIsWritable(library)) {
+      throw new Error("selected library is readonly");
     }
     if (files.length === 0) {
       return;
@@ -1191,8 +1190,8 @@ export const MediaView: Component = () => {
 
   async function handleUploadLibraryPaths(paths: string[]) {
     const library = selectedLibrary();
-    if (!libraryCanUploadImages(library)) {
-      throw new Error("selected library does not support image uploads");
+    if (!libraryIsWritable(library)) {
+      throw new Error("selected library is readonly");
     }
     if (paths.length === 0) {
       return;
@@ -1226,7 +1225,7 @@ export const MediaView: Component = () => {
   }
 
   function handleUploadDragEnter(event: DragEvent) {
-    if (usesNativeDragDrop() || !canUploadSelectedLibrary()) {
+    if (usesNativeDragDrop() || !canWriteSelectedLibrary()) {
       return;
     }
     event.preventDefault();
@@ -1236,7 +1235,7 @@ export const MediaView: Component = () => {
   }
 
   function handleUploadDragOver(event: DragEvent) {
-    if (usesNativeDragDrop() || !canUploadSelectedLibrary()) {
+    if (usesNativeDragDrop() || !canWriteSelectedLibrary()) {
       return;
     }
     event.preventDefault();
@@ -1250,7 +1249,7 @@ export const MediaView: Component = () => {
 
   function handleUploadDragLeave(event: DragEvent) {
     if (
-      !canUploadSelectedLibrary() ||
+      !canWriteSelectedLibrary() ||
       usesNativeDragDrop() ||
       (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)
     ) {
@@ -1260,7 +1259,7 @@ export const MediaView: Component = () => {
   }
 
   function handleUploadDrop(event: DragEvent) {
-    if (usesNativeDragDrop() || !canUploadSelectedLibrary()) {
+    if (usesNativeDragDrop() || !canWriteSelectedLibrary()) {
       return;
     }
     event.preventDefault();
@@ -1311,6 +1310,37 @@ export const MediaView: Component = () => {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleDeleteSelectedItems() {
+    if (!canWriteSelectedLibrary()) {
+      throw new Error("selected library is readonly");
+    }
+    const itemIds = selectedMediaItemIds();
+    if (itemIds.length === 0) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      for (const itemId of itemIds) {
+        const item = itemsById().get(itemId);
+        if (!item) {
+          throw new Error(`selected media item not found: ${itemId}`);
+        }
+        if (item.kind !== "local") {
+          throw new Error(`media item is not deletable: ${itemId}`);
+        }
+        await deleteMediaLibraryItem(item.path);
+      }
+      setSelectedMediaItemIds([]);
+      await refetchCachedLibraryItems();
+      await refetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -1642,6 +1672,16 @@ export const MediaView: Component = () => {
               >
                 Open Selected
               </Button>
+              <Show when={canWriteSelectedLibrary()}>
+                <Button
+                  type="button"
+                  class={DANGER_BUTTON_CLASS}
+                  disabled={isSubmitting()}
+                  onClick={() => void handleDeleteSelectedItems()}
+                >
+                  Delete Selected
+                </Button>
+              </Show>
               <Button
                 type="button"
                 class={SURFACE_BUTTON_CLASS}

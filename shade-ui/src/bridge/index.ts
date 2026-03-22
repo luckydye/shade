@@ -801,7 +801,7 @@ export interface MediaLibrary {
   kind: "directory" | "camera" | "s3";
   path?: string | null;
   removable: boolean;
-  can_upload_images: boolean;
+  readonly: boolean;
   is_online?: boolean | null;
   is_refreshing?: boolean | null;
 }
@@ -908,6 +908,16 @@ export async function uploadMediaLibraryPath(
   const inv = await getTauriInvoke();
   await inv("upload_media_library_path", {
     libraryId,
+    path,
+  });
+}
+
+export async function deleteMediaLibraryItem(path: string): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("media item deletion is only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  await inv("delete_media_library_item", {
     path,
   });
 }

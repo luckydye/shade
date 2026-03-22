@@ -16,6 +16,7 @@ export type PeerLibrary = {
   name: string;
   path: null;
   removable: true;
+  readonly: true;
   peerId: string;
 };
 
@@ -135,6 +136,7 @@ function toPeerLibrary(peerId: string): PeerLibrary {
     name: peerLibraryName(peerId),
     path: null,
     removable: true,
+    readonly: true,
     peerId,
   };
 }

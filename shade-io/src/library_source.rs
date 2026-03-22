@@ -303,6 +303,32 @@ pub async fn put_s3_object_bytes(
     Ok(())
 }
 
+pub async fn delete_s3_object(
+    config: &S3LibraryConfig,
+    key: &str,
+) -> Result<(), String> {
+    let client = http_client()?;
+    let request = signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX)?;
+    client
+        .delete(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date)
+        .send()
+        .await
+        .map_err(|error| {
+            format!("S3 delete request failed for {}: {}", config.endpoint, error)
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            format!(
+                "S3 delete failed for s3://{}/{} at {}: {}",
+                config.bucket, key, config.endpoint, error
+            )
+        })?;
+    Ok(())
+}
+
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
