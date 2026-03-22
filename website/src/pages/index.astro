@@ -46,7 +46,7 @@ const features = [
   <span
     class="fixed left-5 top-5 z-50 text-[11px] font-medium uppercase tracking-widest text-white/25"
   >
-    An Open Source Project
+    ♥︎ Photography
   </span>
   <span
     class="fixed right-5 top-20 z-50 -translate-y-1/2 rotate-90 text-[11px] font-medium uppercase tracking-widest text-white/20"
@@ -56,41 +56,45 @@ const features = [
   </span>
 
   <main class="relative isolate overflow-hidden">
-    <div class="pointer-events-none absolute inset-0 -z-10">
+    <div class="pointer-events-none absolute inset-0 z-10">
       <div class="absolute inset-x-0 top-0 h-[46rem] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_42%)]"></div>
       <div class="absolute left-1/2 top-40 h-[34rem] w-[72rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(220,165,108,0.16),rgba(0,0,0,0)_62%)] blur-3xl"></div>
       <div class="absolute inset-x-0 bottom-0 h-72 bg-[linear-gradient(180deg,rgba(5,5,5,0),#050505_82%)]"></div>
     </div>
 
-    <section class="mx-auto flex min-h-screen container flex-col px-2 pb-24 pt-32 text-center">
-      <div
-        class="mx-auto mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5"
-      >
-        <span class="h-1.5 w-1.5 rounded-full bg-white/50"></span>
-        <span class="text-[12px] text-white/50">v1.0 — WebGPU RAW processing</span>
-      </div>
-
-      <h1
-        class="mx-auto mb-6 max-w-6xl text-[clamp(4.2rem,15vw,10rem)] font-black uppercase leading-[0.9] tracking-[-0.04em] text-white"
-      >
-        Raw Editing,<br />Front And Center.
-      </h1>
-
-      <p class="mx-auto mb-10 max-w-2xl text-[clamp(0.98rem,2vw,1.16rem)] leading-relaxed text-white/50">
-        A focused RAW editor with GPU speed, layered adjustments, and a canvas
-        that stays out of your way.
-      </p>
-
-      <div class="ml-6 mb-14 flex flex-wrap items-center justify-center gap-3">
-        <span
-          aria-disabled="true"
-          class="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] px-7 text-[14px] font-semibold text-white/45"
+    <section class="mx-auto flex min-h-screen max-w-[2000px] flex-col px-6 pb-24 pt-32 text-center">
+      <div class="relative z-20">
+        <div
+          class="mx-auto mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5"
         >
-          Coming soon
-        </span>
+          <span class="h-1.5 w-1.5 rounded-full bg-white/50"></span>
+          <span class="text-[12px] text-white/50">v1.0 — WebGPU RAW processing</span>
+        </div>
+
+        <h1
+          class="mx-auto mb-6 max-w-6xl text-[clamp(4.2rem,10vw,9rem)] font-black uppercase leading-[0.9] tracking-[-0.04em] text-white"
+        >
+          Raw Editing,<br />Front And Center.
+        </h1>
+
+        <p class="mx-auto mb-10 max-w-2xl text-[clamp(0.98rem,2vw,1.16rem)] leading-relaxed text-white/60">
+            A focused RAW editor with GPU speed, layered adjustments, <br/>
+            and a canvas that stays out of your way.
+        </p>
+
+        <div class="ml-6 flex flex-wrap items-center justify-center gap-3">
+          <span
+            aria-disabled="true"
+            class="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] backdrop-blur-sm px-7 text-[14px] font-semibold text-white/45"
+          >
+            Coming soon
+          </span>
+        </div>
       </div>
-      <div class="relative w-full">
+
+      <div class="relative z-1 -mt-20 w-full lg:-mt-86 xl:-mt-124 transition-all">
         <div class="relative">
+          <div class="pointer-events-none absolute inset-x-0 top-0 z-10 h-[80%] bg-[linear-gradient(180deg,#050505_0%,rgba(5,5,5,0.8)_18%,rgba(5,5,5,0.65)_42%,rgba(5,5,5,0.5)_70%,rgba(5,5,5,0)_100%)]"></div>
           <img
             src={screenshot.src}
             width={screenshot.width}
@@ -128,7 +132,7 @@ const features = [
     </section>
 
     <!-- Use cases -->
-    <section class="pb-36 container mx-auto">
+    <section class="mx-auto max-w-6xl px-6 pb-36 lg:px-10">
       <h2
         class="mb-4 text-center text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
       >
