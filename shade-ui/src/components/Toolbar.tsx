@@ -1,4 +1,5 @@
 import { Component, JSX, Show } from "solid-js";
+import { MEDIA_FILE_ACCEPT } from "../media-file-accept";
 import {
   exportImage,
   pickExportTarget,
@@ -8,9 +9,6 @@ import {
   state,
 } from "../store/editor";
 import { Button } from "./Button";
-
-const ACCEPTED =
-  "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
 
 interface ActionButtonProps {
   label: string;
@@ -200,7 +198,7 @@ export const Toolbar: Component = () => {
           ref={fileInputRef}
           type="file"
           multiple
-          accept={ACCEPTED}
+          accept={MEDIA_FILE_ACCEPT}
           class="hidden"
           onChange={handleFileChange}
         />

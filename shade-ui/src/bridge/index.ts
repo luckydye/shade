@@ -801,6 +801,7 @@ export interface MediaLibrary {
   kind: "directory" | "camera" | "s3";
   path?: string | null;
   removable: boolean;
+  can_upload_images: boolean;
   is_online?: boolean | null;
   is_refreshing?: boolean | null;
 }
@@ -879,6 +880,36 @@ export async function addS3MediaLibrary(
   }
   const inv = await getTauriInvoke();
   return inv("add_s3_media_library", { params }) as Promise<MediaLibrary>;
+}
+
+export async function uploadMediaLibraryFile(
+  libraryId: string,
+  file: File,
+): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("library uploads are only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  await inv("upload_media_library_file", {
+    libraryId,
+    fileName: file.name,
+    bytes,
+  });
+}
+
+export async function uploadMediaLibraryPath(
+  libraryId: string,
+  path: string,
+): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("library uploads from paths are only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  await inv("upload_media_library_path", {
+    libraryId,
+    path,
+  });
 }
 
 export async function removeMediaLibrary(id: string): Promise<void> {

@@ -85,10 +85,11 @@ struct ListBucketObject {
     last_modified: Option<String>,
 }
 
-struct SignedGetRequest {
+struct SignedRequest {
     url: String,
     authorization: String,
     amz_date: String,
+    content_sha256: String,
 }
 
 pub fn local_library_id(path: &Path) -> String {
@@ -205,11 +206,11 @@ pub async fn list_s3_objects(
         if let Some(token) = continuation_token.as_ref() {
             query.push(("continuation-token", token.clone()));
         }
-        let request = signed_get_request(config, None, &query)?;
+        let request = signed_request("GET", config, None, &query, EMPTY_SHA256_HEX)?;
         let response = client
             .get(&request.url)
             .header("authorization", request.authorization)
-            .header("x-amz-content-sha256", EMPTY_SHA256_HEX)
+            .header("x-amz-content-sha256", request.content_sha256)
             .header("x-amz-date", request.amz_date)
             .send()
             .await
@@ -249,11 +250,11 @@ pub async fn get_s3_object_bytes(
     key: &str,
 ) -> Result<Vec<u8>, String> {
     let client = http_client()?;
-    let request = signed_get_request(config, Some(key), &[])?;
+    let request = signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX)?;
     let response = client
         .get(&request.url)
         .header("authorization", request.authorization)
-        .header("x-amz-content-sha256", EMPTY_SHA256_HEX)
+        .header("x-amz-content-sha256", request.content_sha256)
         .header("x-amz-date", request.amz_date)
         .send()
         .await
@@ -271,6 +272,35 @@ pub async fn get_s3_object_bytes(
         .await
         .map(|bytes| bytes.to_vec())
         .map_err(|error| error.to_string())
+}
+
+pub async fn put_s3_object_bytes(
+    config: &S3LibraryConfig,
+    key: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let client = http_client()?;
+    let content_sha256 = sha256_hex(bytes);
+    let request = signed_request("PUT", config, Some(key), &[], &content_sha256)?;
+    client
+        .put(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date)
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .map_err(|error| {
+            format!("S3 upload request failed for {}: {}", config.endpoint, error)
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            format!(
+                "S3 upload failed for s3://{}/{} at {}: {}",
+                config.bucket, key, config.endpoint, error
+            )
+        })?;
+    Ok(())
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
@@ -360,11 +390,13 @@ fn parse_last_modified(value: Option<&str>) -> Result<Option<u64>, String> {
         .map_err(|error| error.to_string())
 }
 
-fn signed_get_request(
+fn signed_request(
+    method: &str,
     config: &S3LibraryConfig,
     key: Option<&str>,
     query: &[(&str, String)],
-) -> Result<SignedGetRequest, String> {
+    content_sha256: &str,
+) -> Result<SignedRequest, String> {
     let endpoint = reqwest::Url::parse(&config.endpoint)
         .map_err(|error| format!("invalid S3 endpoint `{}`: {error}", config.endpoint))?;
     let host = endpoint
@@ -380,11 +412,11 @@ fn signed_get_request(
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = now.format("%Y%m%d").to_string();
     let canonical_headers = format!(
-        "host:{authority}\nx-amz-content-sha256:{EMPTY_SHA256_HEX}\nx-amz-date:{amz_date}\n"
+        "host:{authority}\nx-amz-content-sha256:{content_sha256}\nx-amz-date:{amz_date}\n"
     );
     let signed_headers = "host;x-amz-content-sha256;x-amz-date";
     let canonical_request = format!(
-        "GET\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{EMPTY_SHA256_HEX}"
+        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{content_sha256}"
     );
     let credential_scope = format!("{date_stamp}/{}/s3/aws4_request", config.region);
     let string_to_sign = format!(
@@ -402,7 +434,7 @@ fn signed_get_request(
     } else {
         format!("?{canonical_query}")
     };
-    Ok(SignedGetRequest {
+    Ok(SignedRequest {
         url: format!(
             "{}://{}{}{}",
             endpoint.scheme(),
@@ -412,6 +444,7 @@ fn signed_get_request(
         ),
         authorization,
         amz_date,
+        content_sha256: content_sha256.to_string(),
     })
 }
 

@@ -65,6 +65,7 @@ pub struct MediaLibrary {
     pub kind: String,
     pub path: Option<String>,
     pub removable: bool,
+    pub can_upload_images: bool,
     pub is_online: Option<bool>,
     pub is_refreshing: Option<bool>,
 }
@@ -702,6 +703,7 @@ fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> Media
         kind: "camera".into(),
         path: Some(host.to_string()),
         removable,
+        can_upload_images: false,
         is_online: Some(is_online),
         is_refreshing: None,
     }
@@ -735,6 +737,7 @@ fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
         kind: "directory".into(),
         path: Some(path.display().to_string()),
         removable: true,
+        can_upload_images: false,
         is_online: Some(is_online),
         is_refreshing: Some(is_refreshing && is_online),
     }
@@ -747,8 +750,27 @@ fn library_for_s3(config: &shade_io::S3LibraryConfig) -> MediaLibrary {
         kind: "s3".into(),
         path: Some(shade_io::format_s3_library_detail(config)),
         removable: true,
+        can_upload_images: true,
         is_online: None,
         is_refreshing: None,
+    }
+}
+
+fn normalize_upload_file_name(file_name: &str) -> Result<String, String> {
+    let trimmed = file_name.trim();
+    if trimmed.is_empty() {
+        return Err("upload file name cannot be empty".to_string());
+    }
+    if trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(format!("invalid upload file name: {file_name}"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn s3_upload_object_key(config: &shade_io::S3LibraryConfig, file_name: &str) -> String {
+    match config.prefix.as_deref() {
+        Some(prefix) => format!("{prefix}/{file_name}"),
+        None => file_name.to_string(),
     }
 }
 
@@ -870,6 +892,7 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         kind: "directory".into(),
         path: Some(pictures_dir.display().to_string()),
         removable: false,
+        can_upload_images: false,
         is_online: Some(pictures_online),
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
@@ -2663,6 +2686,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             kind: "directory".into(),
             path: None,
             removable: false,
+            can_upload_images: false,
             is_online: None,
             is_refreshing: None,
         }]);
@@ -2677,6 +2701,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             kind: "directory".into(),
             path: None,
             removable: false,
+            can_upload_images: false,
             is_online: None,
             is_refreshing: None,
         }]);
@@ -2905,6 +2930,63 @@ pub async fn add_s3_media_library(
     );
     save_app_config(&config)?;
     Ok(library_for_s3(&library))
+}
+
+#[tauri::command]
+pub async fn upload_media_library_file(
+    library_id: String,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    if !library_id.starts_with("s3:") {
+        return Err(format!(
+            "image uploads are not supported for media library: {library_id}"
+        ));
+    }
+    if bytes.is_empty() {
+        return Err(format!("upload file is empty: {file_name}"));
+    }
+    let file_name = normalize_upload_file_name(&file_name)?;
+    if !shade_io::is_supported_library_image(Path::new(&file_name)) {
+        return Err(format!("unsupported image upload: {file_name}"));
+    }
+    let config = resolve_s3_library_config(&library_id)?;
+    shade_io::put_s3_object_bytes(&config, &s3_upload_object_key(&config, &file_name), &bytes)
+        .await
+}
+
+#[tauri::command]
+pub async fn upload_media_library_path(
+    library_id: String,
+    path: String,
+) -> Result<(), String> {
+    if !library_id.starts_with("s3:") {
+        return Err(format!(
+            "image uploads are not supported for media library: {library_id}"
+        ));
+    }
+    let file_path = PathBuf::from(&path);
+    if !file_path.is_file() {
+        return Err(format!("upload path is not a file: {path}"));
+    }
+    if !shade_io::is_supported_library_image(&file_path) {
+        return Err(format!("unsupported image upload: {path}"));
+    }
+    let file_name = file_path
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .ok_or_else(|| format!("invalid upload path: {path}"))?;
+    let bytes = std::fs::read(&file_path).map_err(|error| error.to_string())?;
+    if bytes.is_empty() {
+        return Err(format!("upload file is empty: {path}"));
+    }
+    let config = resolve_s3_library_config(&library_id)?;
+    shade_io::put_s3_object_bytes(
+        &config,
+        &s3_upload_object_key(&config, &normalize_upload_file_name(file_name)?),
+        &bytes,
+    )
+    .await
 }
 
 #[tauri::command]

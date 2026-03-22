@@ -216,6 +216,7 @@ function toMediaLibrary(record: BrowserMediaLibraryRecord): MediaLibrary {
     kind: "directory",
     path: record.path,
     removable: true,
+    can_upload_images: false,
   };
 }
 

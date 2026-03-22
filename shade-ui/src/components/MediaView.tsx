@@ -25,6 +25,8 @@ import {
   type MediaLibrary,
   type S3MediaLibraryInput,
   type SharedPicture,
+  uploadMediaLibraryFile,
+  uploadMediaLibraryPath,
 } from "../bridge/index";
 import {
   getCachedCameraLibraryItems,
@@ -96,6 +98,17 @@ type LibraryData = {
 
 type OpenMediaMode = "append" | "replace";
 
+type UploadProgress = {
+  phase: "uploading" | "refreshing";
+  totalFiles: number;
+  completedFiles: number;
+  currentFileName: string | null;
+};
+
+type UploadDragFeedback = {
+  itemCount: number | null;
+};
+
 const TILE_MIN_WIDTH = 160;
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -150,6 +163,34 @@ function isS3Library(
   library: LibraryEntry | null,
 ): library is MediaLibrary & { kind: "s3" } {
   return library?.kind === "s3";
+}
+
+function libraryCanUploadImages(library: LibraryEntry | null) {
+  return !!library && !isPeerLibrary(library) && library.can_upload_images;
+}
+
+function droppedFiles(dataTransfer: DataTransfer | null | undefined) {
+  if (!dataTransfer) {
+    return [];
+  }
+  return Array.from(dataTransfer.files ?? []);
+}
+
+function draggedItemCount(dataTransfer: DataTransfer | null | undefined) {
+  if (!dataTransfer) {
+    return null;
+  }
+  if (dataTransfer.items && dataTransfer.items.length > 0) {
+    const fileItems = Array.from(dataTransfer.items).filter(
+      (item) => item.kind === "file",
+    );
+    return fileItems.length > 0 ? fileItems.length : null;
+  }
+  return dataTransfer.files.length > 0 ? dataTransfer.files.length : null;
+}
+
+function draggedPathCount(paths: string[] | null | undefined) {
+  return paths && paths.length > 0 ? paths.length : null;
 }
 
 function cameraLibraryHost(libraryId: string) {
@@ -607,6 +648,10 @@ export const MediaView: Component = () => {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
+  const [uploadDragFeedback, setUploadDragFeedback] =
+    createSignal<UploadDragFeedback | null>(null);
+  const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
+  const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
   let scrollRef!: HTMLDivElement;
 
@@ -639,6 +684,13 @@ export const MediaView: Component = () => {
       (library) => !isPeerLibrary(library),
     );
     setSelectedLibraryId(firstLocalLibrary?.id ?? null);
+  });
+
+  createEffect(() => {
+    if (canUploadSelectedLibrary()) {
+      return;
+    }
+    setUploadDragFeedback(null);
   });
 
   const selectedLibrary = createMemo(
@@ -697,6 +749,29 @@ export const MediaView: Component = () => {
       !isS3Library(library) &&
       library.is_online !== false
     );
+  });
+  const canUploadSelectedLibrary = createMemo(() =>
+    libraryCanUploadImages(selectedLibrary()),
+  );
+  const isUploadDragActive = createMemo(() => uploadDragFeedback() !== null);
+  const uploadDragLabel = createMemo(() => {
+    const feedback = uploadDragFeedback();
+    if (!feedback) {
+      return "";
+    }
+    if (feedback.itemCount === null) {
+      return "Drop Files To Upload";
+    }
+    return feedback.itemCount === 1
+      ? "Drop 1 File To Upload"
+      : `Drop ${feedback.itemCount} Files To Upload`;
+  });
+  const uploadProgressPercent = createMemo(() => {
+    const progress = uploadProgress();
+    if (!progress) {
+      return 0;
+    }
+    return Math.round((progress.completedFiles / progress.totalFiles) * 100);
   });
   const columns = createMemo(() =>
     Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))),
@@ -852,6 +927,48 @@ export const MediaView: Component = () => {
       window.clearInterval(libraryRefreshTimer);
       observer.disconnect();
       stopP2pPolling();
+    });
+  });
+
+  onMount(() => {
+    let unlisten: (() => void) | null = null;
+    let isUnmounted = false;
+    void isTauriRuntime().then(async (tauriRuntime) => {
+      if (!tauriRuntime || isUnmounted) {
+        return;
+      }
+      setUsesNativeDragDrop(true);
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+        if (!canUploadSelectedLibrary()) {
+          setUploadDragFeedback(null);
+          return;
+        }
+        if (event.payload.type === "leave") {
+          setUploadDragFeedback(null);
+          return;
+        }
+        if (event.payload.type === "enter") {
+          setUploadDragFeedback({
+            itemCount: draggedPathCount(event.payload.paths),
+          });
+          return;
+        }
+        if (event.payload.type === "over") {
+          setUploadDragFeedback((current) => current ?? { itemCount: null });
+          return;
+        }
+        setUploadDragFeedback(null);
+        if (event.payload.paths.length === 0) {
+          setError("drop did not contain files");
+          return;
+        }
+        void handleUploadLibraryPaths(event.payload.paths);
+      });
+    });
+    onCleanup(() => {
+      isUnmounted = true;
+      unlisten?.();
     });
   });
 
@@ -1036,6 +1153,126 @@ export const MediaView: Component = () => {
     }
   }
 
+  async function handleUploadLibraryFiles(files: File[]) {
+    const library = selectedLibrary();
+    if (!libraryCanUploadImages(library)) {
+      throw new Error("selected library does not support image uploads");
+    }
+    if (files.length === 0) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      for (const [index, file] of files.entries()) {
+        setUploadProgress({
+          phase: "uploading",
+          totalFiles: files.length,
+          completedFiles: index,
+          currentFileName: file.name,
+        });
+        await uploadMediaLibraryFile(library.id, file);
+      }
+      setUploadProgress({
+        phase: "refreshing",
+        totalFiles: files.length,
+        completedFiles: files.length,
+        currentFileName: null,
+      });
+      await refetchCachedLibraryItems();
+      await refetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadProgress(null);
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleUploadLibraryPaths(paths: string[]) {
+    const library = selectedLibrary();
+    if (!libraryCanUploadImages(library)) {
+      throw new Error("selected library does not support image uploads");
+    }
+    if (paths.length === 0) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      for (const [index, path] of paths.entries()) {
+        setUploadProgress({
+          phase: "uploading",
+          totalFiles: paths.length,
+          completedFiles: index,
+          currentFileName: path.split(/[/\\\\]/).pop() ?? path,
+        });
+        await uploadMediaLibraryPath(library.id, path);
+      }
+      setUploadProgress({
+        phase: "refreshing",
+        totalFiles: paths.length,
+        completedFiles: paths.length,
+        currentFileName: null,
+      });
+      await refetchCachedLibraryItems();
+      await refetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadProgress(null);
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleUploadDragEnter(event: DragEvent) {
+    if (usesNativeDragDrop() || !canUploadSelectedLibrary()) {
+      return;
+    }
+    event.preventDefault();
+    setUploadDragFeedback({
+      itemCount: draggedItemCount(event.dataTransfer),
+    });
+  }
+
+  function handleUploadDragOver(event: DragEvent) {
+    if (usesNativeDragDrop() || !canUploadSelectedLibrary()) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+    setUploadDragFeedback({
+      itemCount: draggedItemCount(event.dataTransfer),
+    });
+  }
+
+  function handleUploadDragLeave(event: DragEvent) {
+    if (
+      !canUploadSelectedLibrary() ||
+      usesNativeDragDrop() ||
+      (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)
+    ) {
+      return;
+    }
+    setUploadDragFeedback(null);
+  }
+
+  function handleUploadDrop(event: DragEvent) {
+    if (usesNativeDragDrop() || !canUploadSelectedLibrary()) {
+      return;
+    }
+    event.preventDefault();
+    setUploadDragFeedback(null);
+    const files = droppedFiles(event.dataTransfer);
+    if (files.length === 0) {
+      setError("drop did not contain files");
+      return;
+    }
+    void handleUploadLibraryFiles(files);
+  }
+
   function toggleMediaSelection(itemId: string) {
     setSelectedMediaItemIds((current) =>
       current.includes(itemId)
@@ -1089,7 +1326,25 @@ export const MediaView: Component = () => {
       : "media-scroll flex-1 overflow-y-auto p-4 md:p-6";
 
   return (
-    <div class={shellClass()}>
+    <div
+      class={`${shellClass()} relative`}
+      onDragEnter={handleUploadDragEnter}
+      onDragOver={handleUploadDragOver}
+      onDragLeave={handleUploadDragLeave}
+      onDrop={handleUploadDrop}
+    >
+      <Show when={isUploadDragActive()}>
+        <div class="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-xl border border-dashed border-[var(--border-active)] bg-[color-mix(in_srgb,var(--surface-active)_68%,transparent)]">
+          <div class="flex flex-col items-center gap-2 rounded-2xl border border-[var(--border-active)] bg-[var(--panel-bg)] px-5 py-4 text-center shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text)]">
+              {uploadDragLabel()}
+            </div>
+            <p class="text-[12px] font-medium text-[var(--text-dim)]">
+              {selectedLibrary()?.name ?? "Selected library"}
+            </p>
+          </div>
+        </div>
+      </Show>
       <Show when={!isEditorStrip()}>
         <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}>
           <div class="flex w-full items-center gap-3">
@@ -1409,6 +1664,33 @@ export const MediaView: Component = () => {
           </p>
         </Show>
       </div>
+      <Show when={uploadProgress()}>
+        {(progress) => (
+          <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
+            <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
+              <span>
+                {progress().phase === "uploading"
+                  ? "Uploading"
+                  : "Refreshing Library"}
+              </span>
+              <span class="text-[var(--text-dim)]">
+                {progress().completedFiles}/{progress().totalFiles}
+              </span>
+            </div>
+            <Show when={progress().currentFileName}>
+              <p class="mt-1 overflow-hidden whitespace-nowrap text-ellipsis text-[12px] font-medium text-[var(--text-dim)]">
+                {progress().currentFileName}
+              </p>
+            </Show>
+            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              <div
+                class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
+                style={{ width: `${uploadProgressPercent()}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </Show>
     </div>
   );
 };
