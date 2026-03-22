@@ -7,17 +7,12 @@ import {
 } from "./bridge/index";
 
 const DB_NAME = "shade-local-library-cache";
-const DB_VERSION = 1;
-const LIBRARIES_STORE = "libraries";
+const DB_VERSION = 2;
 const ITEMS_STORE = "items";
 const THUMBNAILS_STORE = "thumbnails";
 const FAILURE_COOLDOWN_MS = 5_000;
 
 type CachedFailures = Map<string, { error: unknown; retryAt: number }>;
-
-type CachedLocalLibrary = {
-  is_complete: boolean;
-};
 
 type CachedLocalItem = {
   libraryId: string;
@@ -112,14 +107,14 @@ function openDb(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(LIBRARIES_STORE)) {
-        db.createObjectStore(LIBRARIES_STORE);
-      }
       if (!db.objectStoreNames.contains(ITEMS_STORE)) {
         db.createObjectStore(ITEMS_STORE);
       }
       if (!db.objectStoreNames.contains(THUMBNAILS_STORE)) {
         db.createObjectStore(THUMBNAILS_STORE);
+      }
+      if (db.objectStoreNames.contains("libraries")) {
+        db.deleteObjectStore("libraries");
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -161,10 +156,7 @@ function localItemKey(libraryId: string, path: string) {
 }
 
 async function loadLocalLibraryListing(libraryId: string): Promise<LibraryImageListing> {
-  return withStores([LIBRARIES_STORE, ITEMS_STORE], "readonly", async (stores) => {
-    const library = (await requestToPromise(stores[LIBRARIES_STORE].get(libraryId))) as
-      | CachedLocalLibrary
-      | undefined;
+  return withStores([ITEMS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(stores[ITEMS_STORE].getAll());
     const items = Array.isArray(result)
       ? result
@@ -174,7 +166,7 @@ async function loadLocalLibraryListing(libraryId: string): Promise<LibraryImageL
       : [];
     return {
       items,
-      is_complete: library?.is_complete ?? false,
+      is_complete: true,
     };
   });
 }
@@ -183,13 +175,7 @@ async function saveLocalLibraryListing(
   libraryId: string,
   listing: LibraryImageListing,
 ): Promise<void> {
-  await withStores([LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
-    await requestToPromise(
-      stores[LIBRARIES_STORE].put(
-        { is_complete: listing.is_complete } satisfies CachedLocalLibrary,
-        libraryId,
-      ),
-    );
+  await withStores([ITEMS_STORE], "readwrite", async (stores) => {
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(
       keys
