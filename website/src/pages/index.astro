@@ -1,199 +1,226 @@
 ---
-import Layout from "../layouts/Layout.astro";
 import screenshot from "../assets/screenshot.png";
+import Layout from "../layouts/Layout.astro";
 
 const features = [
-  {
-    icon: "📷",
-    title: "Universal RAW Support",
-    description:
-      "Canon, Nikon, Sony, Fujifilm, Leica, DNG, EXR — 60+ formats. If your camera shoots it, Shade opens it.",
-  },
-  {
-    icon: "⚡",
-    title: "WebGPU Accelerated",
-    description:
-      "Edits render in real time on your GPU. No waiting, no progress bars. Just instant feedback.",
-  },
-  {
-    icon: "🎚️",
-    title: "Full Tone Control",
-    description:
-      "Exposure, contrast, highlights, shadows, whites, blacks, and a proper curve editor. The whole toolkit.",
-  },
-  {
-    icon: "🗂️",
-    title: "Non-Destructive Layers",
-    description:
-      "Stack adjustments freely. Every change is reversible. Your original file is never touched.",
-  },
-  {
-    icon: "📤",
-    title: "One-Click Export",
-    description:
-      "Export to JPEG, PNG, WebP, or AVIF at any resolution. Full color-space control.",
-  },
-  {
-    icon: "🌐",
-    title: "No Install Required",
-    description:
-      "Opens in your browser. Nothing to download, nothing to update, nothing to maintain.",
-  },
+    {
+        icon: "📷",
+        title: "Universal RAW Support",
+        description:
+            "Canon, Nikon, Sony, Fujifilm, Leica, DNG, EXR — 60+ formats. If your camera shoots it, Shade opens it.",
+    },
+    {
+        icon: "⚡",
+        title: "WebGPU Accelerated",
+        description:
+            "Edits render in real time on your GPU. No waiting, no progress bars. Just instant feedback.",
+    },
+    {
+        icon: "🎚️",
+        title: "Full Tone Control",
+        description:
+            "Exposure, contrast, highlights, shadows, whites, blacks, and a proper curve editor. The whole toolkit.",
+    },
+    {
+        icon: "🗂️",
+        title: "Non-Destructive Layers",
+        description:
+            "Stack adjustments freely. Every change is reversible. Your original file is never touched.",
+    },
+    {
+        icon: "📤",
+        title: "One-Click Export",
+        description:
+            "Export to JPEG, PNG, WebP, or AVIF at any resolution. Full color-space control.",
+    },
+    {
+        icon: "🌐",
+        title: "No Install Required",
+        description:
+            "Opens in your browser. Nothing to download, nothing to update, nothing to maintain.",
+    },
 ];
 ---
 
 <Layout>
-  <span
-    class="fixed left-5 top-5 z-50 text-[11px] font-medium uppercase tracking-widest text-white/25"
-  >
-    ♥︎ Photography
-  </span>
-  <span
-    class="fixed right-5 top-20 z-50 -translate-y-1/2 rotate-90 text-[11px] font-medium uppercase tracking-widest text-white/20"
-  >
-    Made with love<br/>
-    by luckydye
-  </span>
-
-  <main class="relative isolate overflow-hidden">
-    <div class="pointer-events-none absolute inset-0 z-10">
-      <div class="absolute inset-x-0 top-0 h-[46rem] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_42%)]"></div>
-      <div class="absolute left-1/2 top-40 h-[34rem] w-[72rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(220,165,108,0.16),rgba(0,0,0,0)_62%)] blur-3xl"></div>
-      <div class="absolute inset-x-0 bottom-0 h-72 bg-[linear-gradient(180deg,rgba(5,5,5,0),#050505_82%)]"></div>
-    </div>
-
-    <section class="mx-auto flex min-h-screen max-w-[2000px] flex-col px-6 pb-24 pt-32 text-center">
-      <div class="relative z-20">
-        <div
-          class="mx-auto mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5"
-        >
-          <span class="h-1.5 w-1.5 rounded-full bg-white/50"></span>
-          <span class="text-[12px] text-white/50">v1.0 — WebGPU RAW processing</span>
+    <main class="relative isolate overflow-hidden">
+        <div class="pointer-events-none absolute inset-0 z-10">
+            <div
+                class="absolute inset-x-0 top-0 h-[46rem] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_42%)]"
+            >
+            </div>
+            <div
+                class="absolute left-1/2 top-40 h-[34rem] w-[72rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(220,165,108,0.16),rgba(0,0,0,0)_62%)] blur-3xl"
+            >
+            </div>
+            <div
+                class="absolute inset-x-0 bottom-0 h-72 bg-[linear-gradient(180deg,rgba(5,5,5,0),#050505_82%)]"
+            >
+            </div>
         </div>
 
-        <h1
-          class="mx-auto mb-6 max-w-6xl text-[clamp(4.2rem,10vw,9rem)] font-black uppercase leading-[0.9] tracking-[-0.04em] text-white"
+        <section class="relative z-10 aspect-2/1 max-w-400 mx-auto px-6 mt-6">
+            <div
+                class="md:aspect-4/1 flex justify-end items-center flex-col text-center pt-12 relative"
+            >
+                <div
+                    class="absolute top-0 left-0 uppercase hidden md:block opacity-50 text-sm"
+                >
+                    <span>♥︎ Photography</span>
+                </div>
+
+                <div
+                    class="absolute top-0 right-0 uppercase hidden md:block text-left [writing-mode:vertical-rl] opacity-50 text-sm"
+                >
+                    <span>Made by</span><br />
+                    <span>luckydye</span>
+                </div>
+
+                <div
+                    class="flex items-center gap-2 border border-neutral-800 rounded-full px-4 py-1.5 text-sm text-neutral-200 mb-10 bg-black"
+                >
+                    <span class="w-2 h-2 rounded-full bg-green-500 inline-block"
+                    ></span>
+                    v1.1.3 — Multi-source calendar support
+                </div>
+
+                <h1
+                    class="text-6xl md:text-7xl font-black uppercase leading-none tracking-tight max-w-2xl -mb-[10px]"
+                >
+                    Raw Editing,<br />Front And Center.
+                </h1>
+            </div>
+
+            <div
+                class="md:aspect-4/1 flex justify-start items-center flex-col text-center gap-10 pt-10 pb-20"
+            >
+                <p class="text-neutral-500 text-lg max-w-[400px]">
+                    A focused RAW editor with GPU speed, layered adjustments,
+                    and a canvas that stays out of your way.
+                </p>
+
+                <div class="flex items-center gap-4">
+                    <a
+                        href="#"
+                        class="bg-black text-white/60 font-semibold px-6 py-3 rounded-lg flex items-center gap-2 transition-colors"
+                    >
+                        Coming Soon
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <section
+            class="mx-auto flex max-w-400 flex-col px-6 pb-10 text-center relative z-1 w-full -mt-20 lg:-mt-86 xl:-mt-124 transition-all"
         >
-          Raw Editing,<br />Front And Center.
-        </h1>
+            <div class="relative">
+                <div
+                    class="pointer-events-none absolute inset-x-0 top-0 z-10 h-[80%] bg-[linear-gradient(180deg,#050505_0%,rgba(5,5,5,0.8)_18%,rgba(5,5,5,0.65)_42%,rgba(5,5,5,0.5)_70%,rgba(5,5,5,0)_100%)]"
+                >
+                </div>
+                <img
+                    src={screenshot.src}
+                    width={screenshot.width}
+                    height={screenshot.height}
+                    alt="Shade editor interface with a photo open in the canvas and adjustment controls on the right."
+                    class="block h-auto w-full"
+                />
+            </div>
+        </section>
 
-        <p class="mx-auto mb-10 max-w-2xl text-[clamp(0.98rem,2vw,1.16rem)] leading-relaxed text-white/60">
-            A focused RAW editor with GPU speed, layered adjustments, <br/>
-            and a canvas that stays out of your way.
-        </p>
+        <section class="mx-auto max-w-6xl px-6 pb-36 lg:px-10">
+            <h2
+                class="mb-16 text-center text-[clamp(2.4rem,8vw,4rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
+            >
+                Why Shade?
+            </h2>
 
-        <div class="ml-6 flex flex-wrap items-center justify-center gap-3">
-          <span
-            aria-disabled="true"
-            class="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] backdrop-blur-sm px-7 text-[14px] font-semibold text-white/45"
-          >
-            Coming soon
-          </span>
-        </div>
-      </div>
+            <div class="grid gap-x-16 gap-y-12 sm:grid-cols-2">
+                {
+                    features.map((f) => (
+                        <div>
+                            <div class="mb-3 text-2xl">{f.icon}</div>
+                            <h3 class="mb-2 text-[15px] font-bold text-white">
+                                {f.title}
+                            </h3>
+                            <p class="text-[14px] leading-relaxed text-white/40">
+                                {f.description}
+                            </p>
+                        </div>
+                    ))
+                }
+            </div>
+        </section>
 
-      <div class="relative z-1 -mt-20 w-full lg:-mt-86 xl:-mt-124 transition-all">
-        <div class="relative">
-          <div class="pointer-events-none absolute inset-x-0 top-0 z-10 h-[80%] bg-[linear-gradient(180deg,#050505_0%,rgba(5,5,5,0.8)_18%,rgba(5,5,5,0.65)_42%,rgba(5,5,5,0.5)_70%,rgba(5,5,5,0)_100%)]"></div>
-          <img
-            src={screenshot.src}
-            width={screenshot.width}
-            height={screenshot.height}
-            alt="Shade editor interface with a photo open in the canvas and adjustment controls on the right."
-            class="block h-auto w-full"
-          />
-          <div class="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-4">
-            <span class="rounded-full border border-white/[0.08] bg-black/50 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/35 backdrop-blur">
-              Actual interface
+        <!-- Use cases -->
+        <section class="mx-auto max-w-6xl px-6 pb-36 lg:px-10">
+            <h2
+                class="mb-4 text-center text-[clamp(2.4rem,8vw,4rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
+            >
+                Who's It For?
+            </h2>
+            <p class="mb-16 text-center text-[15px] text-white/35">
+                Built for photographers who want real tools without the
+                overhead.
+            </p>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+                {
+                    [
+                        {
+                            tag: "Hobbyists",
+                            text: "You shoot RAW but don't want to pay $200/year just to develop your photos.",
+                        },
+                        {
+                            tag: "Travel photographers",
+                            text: "Edit on any machine, anywhere. Hotel laptop, borrowed computer — Shade just works.",
+                        },
+                        {
+                            tag: "Content creators",
+                            text: "Drag in a file, make it look right, export and post. Fast turnaround, no bloat.",
+                        },
+                        {
+                            tag: "Photography students",
+                            text: "Learn real tone control and color science without a subscription or install.",
+                        },
+                    ].map((u) => (
+                        <div class="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-7 transition-colors hover:bg-white/[0.04]">
+                            <span class="mb-3 block text-[11px] font-semibold uppercase tracking-widest text-white/30">
+                                {u.tag}
+                            </span>
+                            <p class="text-[15px] leading-relaxed text-white/60">
+                                {u.text}
+                            </p>
+                        </div>
+                    ))
+                }
+            </div>
+        </section>
+
+        <!-- Get Started -->
+        <section class="pb-40 text-center">
+            <h2
+                class="mb-5 text-[clamp(2.4rem,8vw,4rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
+            >
+                Get Started
+            </h2>
+            <p class="mb-10 text-[15px] text-white/40">
+                No account. No credit card. Open the app and drop in your first
+                RAW file.
+            </p>
+            <span
+                aria-disabled="true"
+                class="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] px-8 text-[14px] font-semibold text-white/45"
+            >
+                Coming soon
             </span>
-          </div>
-        </div>
-      </div>
-    </section>
+        </section>
+    </main>
 
-    <section class="mx-auto max-w-6xl px-6 pb-36 lg:px-10">
-      <h2
-        class="mb-16 text-center text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
-      >
-        Why Shade?
-      </h2>
-
-      <div class="grid gap-x-16 gap-y-12 sm:grid-cols-2">
-        {
-          features.map((f) => (
-            <div>
-              <div class="mb-3 text-2xl">{f.icon}</div>
-              <h3 class="mb-2 text-[15px] font-bold text-white">{f.title}</h3>
-              <p class="text-[14px] leading-relaxed text-white/40">{f.description}</p>
-            </div>
-          ))
-        }
-      </div>
-    </section>
-
-    <!-- Use cases -->
-    <section class="mx-auto max-w-6xl px-6 pb-36 lg:px-10">
-      <h2
-        class="mb-4 text-center text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
-      >
-        Who's It For?
-      </h2>
-      <p class="mb-16 text-center text-[15px] text-white/35">
-        Built for photographers who want real tools without the overhead.
-      </p>
-
-      <div class="grid gap-3 sm:grid-cols-2">
-        {
-          [
-            {
-              tag: "Hobbyists",
-              text: "You shoot RAW but don't want to pay $200/year just to develop your photos.",
-            },
-            {
-              tag: "Travel photographers",
-              text: "Edit on any machine, anywhere. Hotel laptop, borrowed computer — Shade just works.",
-            },
-            {
-              tag: "Content creators",
-              text: "Drag in a file, make it look right, export and post. Fast turnaround, no bloat.",
-            },
-            {
-              tag: "Photography students",
-              text: "Learn real tone control and color science without a subscription or install.",
-            },
-          ].map((u) => (
-            <div class="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-7 transition-colors hover:bg-white/[0.04]">
-              <span class="mb-3 block text-[11px] font-semibold uppercase tracking-widest text-white/30">
-                {u.tag}
-              </span>
-              <p class="text-[15px] leading-relaxed text-white/60">{u.text}</p>
-            </div>
-          ))
-        }
-      </div>
-    </section>
-
-    <!-- Get Started -->
-    <section class="pb-40 text-center">
-      <h2
-        class="mb-5 text-[clamp(2.4rem,8vw,5rem)] font-black uppercase leading-none tracking-[-0.03em] text-white"
-      >
-        Get Started
-      </h2>
-      <p class="mb-10 text-[15px] text-white/40">
-        No account. No credit card. Open the app and drop in your first RAW file.
-      </p>
-      <span
-        aria-disabled="true"
-        class="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] px-8 text-[14px] font-semibold text-white/45"
-      >
-        Coming soon
-      </span>
-    </section>
-  </main>
-
-  <!-- Footer -->
-  <footer class="border-t border-white/[0.06] py-7 text-center">
-    <p class="text-[12px] text-white/20">shade — Professional RAW editing in your browser.</p>
-  </footer>
+    <!-- Footer -->
+    <footer class="border-t border-white/[0.06] py-7 text-center">
+        <p class="text-[12px] text-white/20">
+            shade — Professional RAW editing in your browser.
+        </p>
+    </footer>
 </Layout>
