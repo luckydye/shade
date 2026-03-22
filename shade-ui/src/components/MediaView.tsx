@@ -5,6 +5,7 @@ import {
   createResource,
   createSignal,
   For,
+  JSX,
   onCleanup,
   onMount,
   Show,
@@ -92,6 +93,8 @@ type LibraryData = {
   isComplete: boolean;
   error: string | null;
 };
+
+type OpenMediaMode = "append" | "replace";
 
 const TILE_MIN_WIDTH = 160;
 const GRID_GAP = 12;
@@ -327,7 +330,12 @@ async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string
   return resolveLocalThumbnailSrc(item.path, signal);
 }
 
-async function openMediaItem(item: MediaItem, libraryId: string, src: string | null) {
+async function openMediaItem(
+  item: MediaItem,
+  libraryId: string,
+  src: string | null,
+  mode: OpenMediaMode = "replace",
+) {
   const activeMediaSelection = {
     libraryId,
     itemId: mediaItemKey(item),
@@ -340,23 +348,25 @@ async function openMediaItem(item: MediaItem, libraryId: string, src: string | n
       name: item.name,
       modified_at: item.modifiedAt,
     };
-    await openPeerImage(item.peerId, picture, src, activeMediaSelection);
+    await openPeerImage(item.peerId, picture, src, activeMediaSelection, mode);
     return;
   }
-  await openImage(item.path, src, activeMediaSelection);
+  await openImage(item.path, src, activeMediaSelection, mode);
 }
 
 const MediaTile: Component<{
   item: MediaItem;
-  libraryId: string;
   compact?: boolean;
+  active?: boolean;
   selected?: boolean;
+  onActivate: (src: string | null) => void;
+  onToggleSelection: () => void;
 }> = (props) => {
   const [isIntersecting, setIsIntersecting] = createSignal(false);
   const [src, setSrc] = createSignal<string | undefined>(undefined);
   const [loadError, setLoadError] = createSignal(false);
   const [loadRequestVersion, setLoadRequestVersion] = createSignal(0);
-  let containerRef: HTMLButtonElement | undefined;
+  let containerRef: HTMLDivElement | undefined;
   let imgRef: HTMLImageElement | undefined;
   let isLoadingSrc = false;
 
@@ -403,7 +413,11 @@ const MediaTile: Component<{
     }
   });
 
-  function handleClick() {
+  function handleClick(event: JSX.MouseEventHandler<HTMLButtonElement, MouseEvent>) {
+    if (event.metaKey || event.ctrlKey) {
+      props.onToggleSelection();
+      return;
+    }
     if (!src()) {
       if (props.item.kind === "local") {
         if (props.item.path.startsWith("ccapi://")) {
@@ -433,7 +447,7 @@ const MediaTile: Component<{
     if (document.startViewTransition) {
       setTransitionMediaSrc(currentSrc);
       const transition = document.startViewTransition(() => {
-        void openMediaItem(props.item, props.libraryId, currentSrc).catch(handleError);
+        props.onActivate(currentSrc);
         clearViewTransitionName();
       });
       void transition.finished.finally(() => {
@@ -443,22 +457,27 @@ const MediaTile: Component<{
       return;
     }
     setTransitionMediaSrc(null);
-    void openMediaItem(props.item, props.libraryId, currentSrc)
-      .catch(handleError)
-      .finally(clearViewTransitionName);
+    try {
+      props.onActivate(currentSrc);
+    } catch {
+      handleError();
+    } finally {
+      clearViewTransitionName();
+    }
   }
 
+  const isHighlighted = () => props.active || props.selected;
   const buttonClass = () =>
     props.compact
-      ? `group flex w-full flex-col gap-1.5 rounded-md border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
-          props.selected
+      ? `group flex w-full min-w-0 flex-col gap-1.5 rounded-md border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+          isHighlighted()
             ? "border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/40 bg-[var(--surface-subtle)]"
               : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`
-      : `group flex flex-col gap-1.5 rounded-md border p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
-          props.selected
+      : `group flex w-full min-w-0 flex-col gap-1.5 rounded-md border p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+          isHighlighted()
             ? "border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/50 bg-[var(--surface-subtle)]"
@@ -466,50 +485,73 @@ const MediaTile: Component<{
         }`;
 
   return (
-    <Button
-      type="button"
+    <div
       ref={(element) => {
         containerRef = element;
       }}
-      class={buttonClass()}
-      onClick={handleClick}
-      aria-pressed={props.selected ? "true" : "false"}
+      class="relative w-full min-w-0"
     >
-      <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
-        {!src() && !loadError() && (
-          <div class="h-full w-full animate-pulse bg-[var(--surface-hover)]" />
-        )}
-        {src() && (
-          <img
-            ref={imgRef}
-            src={src()}
-            alt={props.item.name}
-            class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
-            loading="lazy"
-          />
-        )}
-        {loadError() && (
-          <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
-            <span class="text-[11px] font-medium text-red-400">Thumbnail failed</span>
-          </div>
-        )}
-        <Show when={props.item.metadata.rating !== null}>
-          <MediaRating
-            rating={props.item.metadata.rating}
-            readOnly
-            class="pointer-events-none absolute left-1.5 top-1.5"
-          />
-        </Show>
-        {props.item.metadata.hasSnapshots && (
-          <div class="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-400/90 shadow-sm" />
-        )}
-      </div>
-      <span
-        class={`truncate px-0.5 text-[11px] font-medium ${props.selected ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
+      <Button
+        type="button"
+        class={buttonClass()}
+        onClick={handleClick}
+        aria-pressed={isHighlighted() ? "true" : "false"}
       >
-        {props.item.name}
-      </span>
-    </Button>
+        <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
+          {!src() && !loadError() && (
+            <div class="h-full w-full animate-pulse bg-[var(--surface-hover)]" />
+          )}
+          {src() && (
+            <img
+              ref={imgRef}
+              src={src()}
+              alt={props.item.name}
+              class="h-full w-full object-contain transition-opacity group-hover:opacity-90"
+              loading="lazy"
+            />
+          )}
+          {loadError() && (
+            <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
+              <span class="text-[11px] font-medium text-red-400">Thumbnail failed</span>
+            </div>
+          )}
+          <Show when={props.item.metadata.rating !== null}>
+            <MediaRating
+              rating={props.item.metadata.rating}
+              readOnly
+              class="pointer-events-none absolute left-8 top-1.5"
+            />
+          </Show>
+        </div>
+        <div class="flex w-full min-w-0 items-center gap-1 px-0.5">
+          <span
+            class={`block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[11px] font-medium ${isHighlighted() ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
+          >
+            {props.item.name}
+          </span>
+          {props.item.metadata.hasSnapshots && (
+            <div class="h-2 w-2 shrink-0 rounded-full bg-blue-400/90 shadow-sm" />
+          )}
+        </div>
+      </Button>
+      <button
+        type="button"
+        class={`absolute left-2.5 top-2.5 z-10 flex h-4 w-4 items-center justify-center rounded-sm border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+          props.selected
+            ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+            : "border-white/45 bg-black/35 text-transparent hover:border-white/70"
+        }`}
+        aria-label={props.selected ? `Deselect ${props.item.name}` : `Select ${props.item.name}`}
+        aria-pressed={props.selected ? "true" : "false"}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onToggleSelection();
+        }}
+      >
+        <span class="text-[9px] font-semibold leading-none">✓</span>
+      </button>
+    </div>
   );
 };
 
@@ -551,6 +593,7 @@ export const MediaView: Component = () => {
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
   const [showS3Form, setShowS3Form] = createSignal(false);
+  const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
     name: "",
     endpoint: "",
@@ -604,6 +647,7 @@ export const MediaView: Component = () => {
   const activeMediaItemId = createMemo(() =>
     state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,
   );
+  const selectedMediaItemIdSet = createMemo(() => new Set(selectedMediaItemIds()));
   const displayedItems = createMemo(() => {
     const current = items();
     if (current?.libraryId === selectedLibraryId()) {
@@ -814,9 +858,18 @@ export const MediaView: Component = () => {
   createEffect(() => {
     selectedLibraryId();
     setScrollTop(0);
+    setSelectedMediaItemIds([]);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
+  });
+
+  createEffect(() => {
+    const availableItemIds = new Set(displayedItems().map(mediaItemKey));
+    setSelectedMediaItemIds((current) => {
+      const next = current.filter((id) => availableItemIds.has(id));
+      return next.length === current.length ? current : next;
+    });
   });
 
   createEffect(() => {
@@ -980,6 +1033,47 @@ export const MediaView: Component = () => {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  function toggleMediaSelection(itemId: string) {
+    setSelectedMediaItemIds((current) =>
+      current.includes(itemId)
+        ? current.filter((candidate) => candidate !== itemId)
+        : [...current, itemId],
+    );
+  }
+
+  async function handleOpenItem(item: MediaItem, libraryId: string, src: string | null) {
+    setSelectedMediaItemIds([]);
+    setError(null);
+    try {
+      await openMediaItem(item, libraryId, src);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleOpenSelectedItems() {
+    const libraryId = selectedLibraryId();
+    if (!libraryId) {
+      throw new Error("cannot open selected media without a library");
+    }
+    const itemIds = selectedMediaItemIds();
+    if (itemIds.length === 0) {
+      return;
+    }
+    setError(null);
+    try {
+      for (const [index, itemId] of itemIds.entries()) {
+        const item = itemsById().get(itemId);
+        if (!item) {
+          throw new Error(`selected media item not found: ${itemId}`);
+        }
+        await openMediaItem(item, libraryId, null, index === 0 ? "replace" : "append");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -1219,9 +1313,13 @@ export const MediaView: Component = () => {
                   {(item) => (
                     <MediaTile
                       item={item}
-                      libraryId={selectedLibraryId()!}
                       compact
-                      selected={activeMediaItemId() === mediaItemKey(item)}
+                      active={activeMediaItemId() === mediaItemKey(item)}
+                      selected={selectedMediaItemIdSet().has(mediaItemKey(item))}
+                      onActivate={(src) =>
+                        void handleOpenItem(item, selectedLibraryId()!, src)
+                      }
+                      onToggleSelection={() => toggleMediaSelection(mediaItemKey(item))}
                     />
                   )}
                 </For>
@@ -1250,8 +1348,12 @@ export const MediaView: Component = () => {
                             item && (
                               <MediaTile
                                 item={item}
-                                libraryId={selectedLibraryId()!}
-                                selected={activeMediaItemId() === id}
+                                active={activeMediaItemId() === id}
+                                selected={selectedMediaItemIdSet().has(id)}
+                                onActivate={(src) =>
+                                  void handleOpenItem(item, selectedLibraryId()!, src)
+                                }
+                                onToggleSelection={() => toggleMediaSelection(id)}
                               />
                             )
                           );
@@ -1272,8 +1374,31 @@ export const MediaView: Component = () => {
         }`}
       >
         {error() && <p class="text-sm text-[var(--danger-text)]">{error()}</p>}
+        <Show when={selectedMediaItemIds().length > 0}>
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-medium text-[var(--text-dim)]">
+              {selectedMediaItemIds().length} selected
+            </p>
+            <div class="flex items-center gap-2">
+              <Button
+                type="button"
+                class={SURFACE_BUTTON_CLASS}
+                onClick={() => void handleOpenSelectedItems()}
+              >
+                Open Selected
+              </Button>
+              <Button
+                type="button"
+                class={SURFACE_BUTTON_CLASS}
+                onClick={() => setSelectedMediaItemIds([])}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        </Show>
         <Show when={selectedLibraryDetail()}>
-          <p class="truncate text-[11px] font-medium text-[var(--text-dim)]">
+          <p class="overflow-hidden whitespace-nowrap text-ellipsis text-[11px] font-medium text-[var(--text-dim)]">
             {selectedLibraryDetail()}
             {selectedLibraryIsOffline() && " • offline"}
             {selectedLibraryIsRefreshing() && " • refreshing library index"}
