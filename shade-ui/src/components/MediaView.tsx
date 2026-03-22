@@ -407,7 +407,7 @@ const MediaTile: Component<{
               ? "border-red-500/40 bg-[var(--surface-subtle)]"
               : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`
-      : `group flex flex-col gap-1.5 rounded-md border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      : `group flex flex-col gap-1.5 rounded-md border p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           props.selected
             ? "border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()

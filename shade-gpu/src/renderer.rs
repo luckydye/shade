@@ -487,7 +487,11 @@ impl Renderer {
                             .iter()
                             .enumerate()
                             .find(|(_, e)| {
-                                e.visible && matches!(e.layer, Layer::Adjustment { .. })
+                                e.visible
+                                    && e.mask.is_none()
+                                    && e.opacity == 1.0
+                                    && e.blend_mode == shade_core::BlendMode::Normal
+                                    && matches!(e.layer, Layer::Adjustment { .. })
                             })
                             .map(|(j, e)| (idx + 1 + j, e));
 
@@ -1411,8 +1415,8 @@ mod tests {
         rgba_display_f32_to_u8, view_uv_mapping, FloatImage, PreviewCrop, Renderer,
     };
     use shade_core::{
-        AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, TextureId,
-        VignetteParams,
+        AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, MaskData,
+        TextureId, VignetteParams,
     };
     use std::collections::HashMap;
 
@@ -1558,6 +1562,102 @@ mod tests {
         assert!(
             right > 0.9,
             "expected brighter highlight to stay above SDR white after two adjustment layers, got {right}"
+        );
+    }
+
+    #[tokio::test]
+    async fn masked_adjustment_only_affects_unmasked_pixels() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let make_sources = || {
+            let mut image_sources = HashMap::new();
+            image_sources.insert(
+                1,
+                FloatImage {
+                    width: 1,
+                    height: 2,
+                    pixels: vec![
+                        0.25, 0.25, 0.25, 1.0,
+                        0.25, 0.25, 0.25, 1.0,
+                    ]
+                    .into(),
+                },
+            );
+            image_sources
+        };
+
+        let baseline_stack = {
+            let mut stack = LayerStack::new();
+            stack.add_image_layer(1, 1, 2);
+            stack
+        };
+        let unmasked_stack = {
+            let mut stack = LayerStack::new();
+            stack.add_image_layer(1, 1, 2);
+            stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+                exposure: 2.0,
+                contrast: 0.0,
+                blacks: 0.0,
+                whites: 0.0,
+                highlights: 0.0,
+                shadows: 0.0,
+                gamma: 1.0,
+            }]);
+            stack
+        };
+        let masked_stack = {
+            let mut stack = unmasked_stack.clone();
+            stack.set_mask(
+                1,
+                MaskData {
+                    width: 1,
+                    height: 2,
+                    pixels: vec![0, 255],
+                },
+            );
+            stack
+        };
+
+        let baseline_tex = renderer
+            .render_stack_preview_texture(&baseline_stack, &make_sources(), 1, 2, 1, 2, None)
+            .expect("baseline render");
+        let baseline = renderer
+            .readback_work_texture_to_f32(&baseline_tex, 1, 2)
+            .await
+            .expect("baseline readback");
+
+        let unmasked_tex = renderer
+            .render_stack_preview_texture(&unmasked_stack, &make_sources(), 1, 2, 1, 2, None)
+            .expect("unmasked render");
+        let unmasked = renderer
+            .readback_work_texture_to_f32(&unmasked_tex, 1, 2)
+            .await
+            .expect("unmasked readback");
+
+        let masked_tex = renderer
+            .render_stack_preview_texture(&masked_stack, &make_sources(), 1, 2, 1, 2, None)
+            .expect("masked render");
+        let masked = renderer
+            .readback_work_texture_to_f32(&masked_tex, 1, 2)
+            .await
+            .expect("masked readback");
+
+        let top_baseline = baseline[0];
+        let top_unmasked = unmasked[0];
+        let top_masked = masked[0];
+        let bottom_baseline = baseline[4];
+        let bottom_unmasked = unmasked[4];
+        let bottom_masked = masked[4];
+
+        assert!(
+            (top_masked - top_baseline).abs() < (top_unmasked - top_baseline).abs() * 0.25,
+            "top pixel should stay near baseline when mask is zero: baseline={top_baseline}, masked={top_masked}, unmasked={top_unmasked}"
+        );
+        assert!(
+            (bottom_masked - bottom_unmasked).abs() < (bottom_unmasked - bottom_baseline).abs() * 0.25,
+            "bottom pixel should stay near unmasked result when mask is one: baseline={bottom_baseline}, masked={bottom_masked}, unmasked={bottom_unmasked}"
         );
     }
 

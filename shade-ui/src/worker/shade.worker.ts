@@ -208,6 +208,38 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "apply_linear_mask": {
+        await ensureWasmReady();
+        wasm.apply_linear_gradient_mask(
+          msg.layerIdx,
+          msg.x1,
+          msg.y1,
+          msg.x2,
+          msg.y2,
+        );
+        self.postMessage({ type: "mask_applied", requestId });
+        break;
+      }
+
+      case "apply_radial_mask": {
+        await ensureWasmReady();
+        wasm.apply_radial_gradient_mask(
+          msg.layerIdx,
+          msg.cx,
+          msg.cy,
+          msg.radius,
+        );
+        self.postMessage({ type: "mask_applied", requestId });
+        break;
+      }
+
+      case "remove_mask": {
+        await ensureWasmReady();
+        wasm.remove_mask(msg.layerIdx);
+        self.postMessage({ type: "mask_removed", requestId });
+        break;
+      }
+
       case "get_stack": {
         await ensureWasmReady();
         const json = wasm.get_stack_json();

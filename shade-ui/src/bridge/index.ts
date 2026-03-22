@@ -980,7 +980,18 @@ export async function applyGradientMask(params: GradientMaskParams): Promise<voi
     await inv("apply_gradient_mask", { params });
     return;
   }
-  throw new Error("applyGradientMask is not implemented for WASM");
+  await ensureWorkerReady();
+  if (params.kind === "linear") {
+    await workerCall(
+      { type: "apply_linear_mask", layerIdx: params.layer_idx, ...params },
+      "mask_applied",
+    );
+    return;
+  }
+  await workerCall(
+    { type: "apply_radial_mask", layerIdx: params.layer_idx, ...params },
+    "mask_applied",
+  );
 }
 
 export async function removeMask(idx: number): Promise<void> {
@@ -989,5 +1000,6 @@ export async function removeMask(idx: number): Promise<void> {
     await inv("remove_mask", { params: { layer_idx: idx } });
     return;
   }
-  throw new Error("removeMask is not implemented for WASM");
+  await ensureWorkerReady();
+  await workerCall({ type: "remove_mask", layerIdx: idx }, "mask_removed");
 }

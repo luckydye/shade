@@ -1,7 +1,8 @@
 use crate::engine::WasmEngine;
 use serde::{Deserialize, Serialize};
 use shade_core::{
-    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, ToneParams,
+    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, MaskParams,
+    ToneParams,
 };
 use shade_gpu::{PreviewCrop as GpuPreviewCrop, Renderer};
 use shade_io::{load_image_bytes_f32_with_info, to_linear_srgb_f32};
@@ -334,6 +335,42 @@ pub fn rename_layer(layer_idx: usize, name: Option<String>) {
 }
 
 #[wasm_bindgen]
+pub fn apply_linear_gradient_mask(
+    layer_idx: usize,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_gradient_mask(
+            layer_idx,
+            MaskParams::Linear { x1, y1, x2, y2 },
+        )
+    });
+}
+
+#[wasm_bindgen]
+pub fn apply_radial_gradient_mask(
+    layer_idx: usize,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_gradient_mask(
+            layer_idx,
+            MaskParams::Radial { cx, cy, radius },
+        )
+    });
+}
+
+#[wasm_bindgen]
+pub fn remove_mask(layer_idx: usize) {
+    ENGINE.with(|e| e.borrow_mut().remove_mask(layer_idx));
+}
+
+#[wasm_bindgen]
 pub fn apply_crop(
     layer_idx: usize,
     crop_x: f32,
@@ -366,6 +403,31 @@ pub fn get_stack_json() -> String {
             .layers
             .iter()
             .map(|l| {
+                let mask_params = l
+                    .mask
+                    .and_then(|id| eng.stack.mask_params.get(&id))
+                    .map(|params| match params {
+                        MaskParams::Linear { x1, y1, x2, y2 } => serde_json::json!({
+                            "kind": "linear",
+                            "x1": x1,
+                            "y1": y1,
+                            "x2": x2,
+                            "y2": y2,
+                            "cx": serde_json::Value::Null,
+                            "cy": serde_json::Value::Null,
+                            "radius": serde_json::Value::Null,
+                        }),
+                        MaskParams::Radial { cx, cy, radius } => serde_json::json!({
+                            "kind": "radial",
+                            "x1": serde_json::Value::Null,
+                            "y1": serde_json::Value::Null,
+                            "x2": serde_json::Value::Null,
+                            "y2": serde_json::Value::Null,
+                            "cx": cx,
+                            "cy": cy,
+                            "radius": radius,
+                        }),
+                    });
                 let adjustments = match &l.layer {
                     shade_core::Layer::Adjustment { ops } => {
                         let mut tone = None;
@@ -489,6 +551,8 @@ pub fn get_stack_json() -> String {
                     "name": l.name.clone(),
                     "visible": l.visible,
                     "opacity": l.opacity,
+                    "has_mask": l.mask.is_some(),
+                    "mask_params": mask_params,
                     "crop": match &l.layer {
                         shade_core::Layer::Crop { rect } => Some(serde_json::json!({
                             "x": rect.x,

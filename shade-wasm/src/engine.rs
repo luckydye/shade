@@ -1,7 +1,8 @@
 use shade_core::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
     CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
-    Layer, LayerStack, SharpenParams, TextureId, ToneParams, VignetteParams,
+    Layer, LayerStack, MaskData, MaskParams, SharpenParams, TextureId, ToneParams,
+    VignetteParams,
 };
 use shade_io::to_linear_srgb_f32;
 use std::collections::HashMap;
@@ -125,6 +126,31 @@ impl WasmEngine {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         self.stack.generation += 1;
+    }
+
+    pub fn apply_gradient_mask(&mut self, layer_idx: usize, params: MaskParams) {
+        assert!(
+            layer_idx < self.stack.layers.len(),
+            "layer index out of bounds"
+        );
+        let mut mask = MaskData::new_empty(self.canvas_width, self.canvas_height);
+        match &params {
+            MaskParams::Linear { x1, y1, x2, y2 } => {
+                mask.fill_linear_gradient(*x1, *y1, *x2, *y2);
+            }
+            MaskParams::Radial { cx, cy, radius } => {
+                mask.fill_radial_gradient(*cx, *cy, *radius);
+            }
+        }
+        self.stack.set_mask_with_params(layer_idx, mask, params);
+    }
+
+    pub fn remove_mask(&mut self, layer_idx: usize) {
+        assert!(
+            layer_idx < self.stack.layers.len(),
+            "layer index out of bounds"
+        );
+        self.stack.remove_mask(layer_idx);
     }
 
     pub fn apply_tone(&mut self, layer_idx: usize, params: ToneParams) {
@@ -359,5 +385,63 @@ impl WasmEngine {
             self.canvas_width,
             self.canvas_height,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WasmEngine;
+    use shade_core::MaskParams;
+
+    fn create_engine() -> WasmEngine {
+        let mut engine = WasmEngine::new();
+        engine.load_rgba8_image_data(vec![0, 0, 0, 255, 0, 0, 0, 255], 1, 2);
+        engine
+    }
+
+    #[test]
+    fn apply_gradient_mask_stores_mask_params() {
+        let mut engine = create_engine();
+
+        engine.apply_gradient_mask(
+            1,
+            MaskParams::Linear {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 0.0,
+                y2: 2.0,
+            },
+        );
+
+        let mask_id = engine.stack.layers[1].mask.expect("mask should be attached");
+        let params = engine
+            .stack
+            .mask_params
+            .get(&mask_id)
+            .expect("mask params should be stored");
+        match params {
+            MaskParams::Linear { x1, y1, x2, y2 } => {
+                assert_eq!((*x1, *y1, *x2, *y2), (0.0, 0.0, 0.0, 2.0));
+            }
+            MaskParams::Radial { .. } => panic!("expected a linear mask"),
+        }
+    }
+
+    #[test]
+    fn remove_mask_clears_attached_mask() {
+        let mut engine = create_engine();
+        engine.apply_gradient_mask(
+            1,
+            MaskParams::Radial {
+                cx: 0.5,
+                cy: 1.0,
+                radius: 1.0,
+            },
+        );
+
+        engine.remove_mask(1);
+
+        assert!(engine.stack.layers[1].mask.is_none());
+        assert!(engine.stack.mask_params.is_empty());
     }
 }
