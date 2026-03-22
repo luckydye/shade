@@ -10,10 +10,12 @@ import {
   Show,
 } from "solid-js";
 import { Button } from "./Button";
+import { MediaRating } from "./MediaRating";
 import {
   addS3MediaLibrary,
   addMediaLibrary,
   isTauriRuntime,
+  listMediaRatings,
   pickDirectory,
   refreshLibraryIndex,
   type LibraryImage,
@@ -58,6 +60,7 @@ type LibraryEntry = MediaLibrary | PeerLibrary;
 
 type MediaItemMetadata = {
   hasSnapshots: boolean;
+  baseRating: number | null;
   rating: number | null;
 };
 
@@ -172,8 +175,29 @@ function normalizeRating(rating: number | null | undefined) {
     : null;
 }
 
-function ratingStars(rating: number) {
-  return `${"★".repeat(rating)}${"☆".repeat(5 - rating)}`;
+function mediaRatingId(item: MediaItem) {
+  return item.kind === "peer" ? `peer:${item.peerId}:${item.id}` : item.path;
+}
+
+function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem {
+  return {
+    ...item,
+    metadata: {
+      ...item.metadata,
+      rating,
+    },
+  };
+}
+
+async function applyStoredRatings(items: MediaItem[]) {
+  const ratings = await listMediaRatings(items.map(mediaRatingId));
+  return items.map((item) => {
+    const storedRating = ratings[mediaRatingId(item)];
+    if (storedRating === undefined) {
+      return item;
+    }
+    return withMediaItemRating(item, normalizeRating(storedRating));
+  });
 }
 
 function modificationMonthKey(modifiedAt: number | null | undefined) {
@@ -207,6 +231,7 @@ function localMediaItem(image: LibraryImage): MediaItem {
     modifiedAt: normalizeModifiedAt(image.modified_at),
     metadata: {
       hasSnapshots: image.metadata?.has_snapshots ?? false,
+      baseRating: normalizeRating(image.metadata?.rating),
       rating: normalizeRating(image.metadata?.rating),
     },
   };
@@ -219,7 +244,7 @@ function peerMediaItem(image: PeerLibraryItem): MediaItem {
     name: image.name,
     peerId: image.peerId,
     modifiedAt: normalizeModifiedAt(image.modified_at),
-    metadata: { hasSnapshots: false, rating: null },
+    metadata: { hasSnapshots: false, baseRating: null, rating: null },
   };
 }
 
@@ -233,14 +258,20 @@ async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> 
   }
   if (libraryId.startsWith("peer:")) {
     const peerId = libraryId.slice("peer:".length);
-    return (await loadPeerLibraryItemsCachedOrRemote(peerId)).map(peerMediaItem);
-  }
-  if (libraryId.startsWith("ccapi:")) {
-    return (await loadCameraLibraryItemsCachedOrRemote(cameraLibraryHost(libraryId))).map(
-      localMediaItem,
+    return applyStoredRatings(
+      (await loadPeerLibraryItemsCachedOrRemote(peerId)).map(peerMediaItem),
     );
   }
-  return (await loadLocalLibraryItemsCachedOrRemote(libraryId)).items.map(localMediaItem);
+  if (libraryId.startsWith("ccapi:")) {
+    return applyStoredRatings(
+      (await loadCameraLibraryItemsCachedOrRemote(cameraLibraryHost(libraryId))).map(
+        localMediaItem,
+      ),
+    );
+  }
+  return applyStoredRatings(
+    (await loadLocalLibraryItemsCachedOrRemote(libraryId)).items.map(localMediaItem),
+  );
 }
 
 async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
@@ -272,7 +303,7 @@ async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
     const listing = await loadLocalLibraryItemsCachedOrRemote(libraryId);
     return {
       libraryId,
-      items: listing.items.map(localMediaItem),
+      items: await applyStoredRatings(listing.items.map(localMediaItem)),
       isComplete: listing.is_complete,
       error: null,
     };
@@ -300,6 +331,8 @@ async function openMediaItem(item: MediaItem, libraryId: string, src: string | n
   const activeMediaSelection = {
     libraryId,
     itemId: mediaItemKey(item),
+    rating: item.metadata.rating,
+    baseRating: item.metadata.baseRating,
   };
   if (item.kind === "peer") {
     const picture: SharedPicture = {
@@ -460,14 +493,13 @@ const MediaTile: Component<{
             <span class="text-[11px] font-medium text-red-400">Thumbnail failed</span>
           </div>
         )}
-        {props.item.metadata.rating !== null && (
-          <div
-            class="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-amber-300 shadow-sm"
-            aria-label={`${props.item.metadata.rating} star rating`}
-          >
-            {ratingStars(props.item.metadata.rating)}
-          </div>
-        )}
+        <Show when={props.item.metadata.rating !== null}>
+          <MediaRating
+            rating={props.item.metadata.rating}
+            readOnly
+            class="pointer-events-none absolute left-1.5 top-1.5"
+          />
+        </Show>
         {props.item.metadata.hasSnapshots && (
           <div class="absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-400/90 shadow-sm" />
         )}
@@ -490,23 +522,30 @@ export const MediaView: Component = () => {
     selectedLibraryId,
     loadLibraryData,
   );
-  const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] = createResource(
+  const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] =
+    createResource(
     selectedLibraryId,
     async (libraryId) => {
       if (!libraryId) {
         return [];
       }
       if (libraryId.startsWith("peer:")) {
-        return (await getCachedPeerLibraryItems(libraryId.slice("peer:".length))).map(
-          peerMediaItem,
+        return applyStoredRatings(
+          (await getCachedPeerLibraryItems(libraryId.slice("peer:".length))).map(
+            peerMediaItem,
+          ),
         );
       }
       if (libraryId.startsWith("ccapi:")) {
-        return (await getCachedCameraLibraryItems(cameraLibraryHost(libraryId))).map(
-          localMediaItem,
+        return applyStoredRatings(
+          (await getCachedCameraLibraryItems(cameraLibraryHost(libraryId))).map(
+            localMediaItem,
+          ),
         );
       }
-      return (await getCachedLocalLibraryItems(libraryId)).map(localMediaItem);
+      return applyStoredRatings(
+        (await getCachedLocalLibraryItems(libraryId)).map(localMediaItem),
+      );
     },
   );
   const [isSubmitting, setIsSubmitting] = createSignal(false);
@@ -778,6 +817,14 @@ export const MediaView: Component = () => {
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
+  });
+
+  createEffect(() => {
+    if (state.currentView !== "media" || !selectedLibraryId()) {
+      return;
+    }
+    void refetchCachedLibraryItems();
+    void refetchItems();
   });
 
   createEffect(() => {

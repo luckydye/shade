@@ -43,6 +43,8 @@ export interface ArtboardState {
   source: ArtboardSource;
   activeMediaLibraryId: string | null;
   activeMediaItemId: string | null;
+  activeMediaRating: number | null;
+  activeMediaBaseRating: number | null;
   previewTile: RenderedTile | null;
   backdropTile: RenderedTile | null;
 }

@@ -140,6 +140,8 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       ? {
           libraryId: artboard.activeMediaLibraryId,
           itemId: artboard.activeMediaItemId,
+          rating: artboard.activeMediaRating,
+          baseRating: artboard.activeMediaBaseRating,
         }
       : null,
     null,
@@ -231,6 +233,8 @@ function setPendingEditorState(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    rating: number | null;
+    baseRating: number | null;
   } | null,
   loadingMediaSrc: string | null,
 ) {
@@ -263,6 +267,8 @@ async function openImageFrom(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    rating: number | null;
+    baseRating: number | null;
   } | null,
   mode: OpenImageMode,
 ) {
@@ -293,6 +299,8 @@ async function openImageFrom(
     source,
     activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
     activeMediaItemId: activeMediaSelection?.itemId ?? null,
+    activeMediaRating: activeMediaSelection?.rating ?? null,
+    activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
     previewTile: null,
     backdropTile: null,
   };
@@ -310,6 +318,8 @@ async function openImageFrom(
         sourceBitDepth: "Loading",
         activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
         activeMediaItemId: activeMediaSelection?.itemId ?? null,
+        activeMediaRating: activeMediaSelection?.rating ?? null,
+        activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
         previewTile: null,
         backdropTile: null,
       },
@@ -342,6 +352,8 @@ async function openImageFrom(
         source,
         activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
         activeMediaItemId: activeMediaSelection?.itemId ?? null,
+        activeMediaRating: activeMediaSelection?.rating ?? null,
+        activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
         previewTile: null,
         backdropTile: null,
       },
@@ -452,6 +464,8 @@ export async function openImage(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    rating: number | null;
+    baseRating: number | null;
   } | null = null,
   mode: OpenImageMode = "replace",
 ) {
@@ -475,6 +489,8 @@ export async function openPeerImage(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    rating: number | null;
+    baseRating: number | null;
   } | null = null,
   mode: OpenImageMode = "replace",
 ) {

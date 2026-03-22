@@ -1,4 +1,4 @@
-import { Component, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Component, createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import {
   applyEdit,
   applyGradientMask,
@@ -21,13 +21,14 @@ import {
   transitionMediaSrc,
   zoomViewport,
 } from "../store/editor";
-import type { MaskParamsInfo } from "../bridge/index";
+import { setMediaRating, type MaskParamsInfo } from "../bridge/index";
 import { compositeArtboard } from "../viewport/compositor";
 import { buildTransform, worldToScreen } from "../viewport/transform";
 import { getViewportFitRef } from "../viewport/preview";
 import type { WorldTransform } from "../viewport/transform";
-import type { ArtboardState } from "../store/editor-store";
+import { setState, type ArtboardState } from "../store/editor-store";
 import { Button } from "./Button";
+import { MediaRating } from "./MediaRating";
 
 type CropHandle =
   | "move"
@@ -56,6 +57,22 @@ const ARTBOARD_CLOSE_MARGIN = 6;
 const ARTBOARD_CHROME_FADE = 0;
 const ARTBOARD_DRAG_THRESHOLD = 6;
 
+function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
+  if (!artboard) {
+    return null;
+  }
+  switch (artboard.source.kind) {
+    case "path":
+      return artboard.source.path;
+    case "peer":
+      return `peer:${artboard.source.peerEndpointId}:${artboard.source.picture.id}`;
+    case "file":
+      return null;
+    default:
+      throw new Error("unknown artboard source");
+  }
+}
+
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
@@ -73,6 +90,7 @@ export const Viewport: Component = () => {
   const [draftMask, setDraftMask] = createSignal<MaskParamsInfo | null>(null);
   const [loadingArtboardImage, setLoadingArtboardImage] =
     createSignal<HTMLImageElement | null>(null);
+  const [isSavingRating, setIsSavingRating] = createSignal(false);
   const activePointers = new Map<number, { x: number; y: number }>();
   let gesture:
     | {
@@ -132,6 +150,41 @@ export const Viewport: Component = () => {
   const viewportZoomPercent = () => getViewportZoomPercent();
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
+  const selectedArtboard = () => getSelectedArtboard();
+  const selectedArtboardRating = () => selectedArtboard()?.activeMediaRating ?? null;
+
+  async function handleSetRating(rating: number | null) {
+    const artboard = selectedArtboard();
+    const mediaId = mediaRatingIdForArtboard(artboard);
+    if (!artboard || !mediaId || isSavingRating()) {
+      return;
+    }
+    const nextRating = rating ?? artboard.activeMediaBaseRating;
+    const previousRating = artboard.activeMediaRating;
+    setState(
+      "artboards",
+      (candidate) => candidate.id === artboard.id,
+      "activeMediaRating",
+      nextRating,
+    );
+    setIsSavingRating(true);
+    try {
+      await setMediaRating({
+        media_id: mediaId,
+        rating,
+      });
+    } catch (error) {
+      setState(
+        "artboards",
+        (candidate) => candidate.id === artboard.id,
+        "activeMediaRating",
+        previousRating,
+      );
+      setState("loadError", error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingRating(false);
+    }
+  }
 
   // Build the camera for the current viewport state
   function getCamera() {
@@ -1274,6 +1327,14 @@ export const Viewport: Component = () => {
               <span class="text-white/35">{viewportZoomPercent()}%</span>
             </Button>
           )}
+          <Show when={mediaRatingIdForArtboard(selectedArtboard()) !== null}>
+            <MediaRating
+              rating={selectedArtboardRating()}
+              pending={isSavingRating()}
+              onChange={(rating) => void handleSetRating(rating)}
+              class="absolute bottom-4 left-1/2 -translate-x-1/2"
+            />
+          </Show>
           {state.layers.length === 0 && !state.isLoading && (
             <div class="pointer-events-none absolute flex max-w-sm flex-col items-center gap-3 rounded-[26px] border border-white/8 bg-black/40 px-8 py-10 text-center backdrop-blur-sm">
               <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-white/80">

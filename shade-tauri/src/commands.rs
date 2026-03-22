@@ -289,6 +289,16 @@ async fn open_edits_db() -> Result<libsql::Connection, String> {
     )
     .await
     .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS media_ratings (
+            media_id TEXT PRIMARY KEY NOT NULL,
+            rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+            updated_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(conn)
 }
 
@@ -297,6 +307,65 @@ fn unix_timestamp_millis() -> Result<i64, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?;
     i64::try_from(duration.as_millis()).map_err(|e| e.to_string())
+}
+
+fn validate_media_rating(rating: Option<u8>) -> Result<Option<u8>, String> {
+    match rating {
+        Some(value) if (1..=5).contains(&value) => Ok(Some(value)),
+        Some(value) => Err(format!("rating out of range: {value}")),
+        None => Ok(None),
+    }
+}
+
+async fn load_media_ratings_map(
+    media_ids: &[String],
+) -> Result<HashMap<String, u8>, String> {
+    if media_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let requested_ids = media_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query("SELECT media_id, rating FROM media_ratings", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut ratings = HashMap::new();
+    while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
+        let media_id = row.get::<String>(0).map_err(|error| error.to_string())?;
+        if !requested_ids.contains(&media_id) {
+            continue;
+        }
+        let rating = row
+            .get::<i64>(1)
+            .map_err(|error| error.to_string())
+            .and_then(|value| u8::try_from(value).map_err(|error| error.to_string()))?;
+        ratings.insert(media_id, rating);
+    }
+    Ok(ratings)
+}
+
+async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), String> {
+    let normalized = validate_media_rating(rating)?;
+    let conn = open_edits_db().await?;
+    if let Some(value) = normalized {
+        conn.execute(
+            "INSERT INTO media_ratings (media_id, rating, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(media_id)
+             DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
+            libsql::params![media_id, i64::from(value), unix_timestamp_millis()?],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    conn.execute("DELETE FROM media_ratings WHERE media_id = ?1", [media_id])
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 async fn load_latest_edit_version(
@@ -559,6 +628,12 @@ pub struct SnapshotInfo {
     pub version: i64,
     pub created_at: i64,
     pub is_current: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MediaRatingParams {
+    pub media_id: String,
+    pub rating: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -2645,6 +2720,21 @@ pub async fn list_library_images<R: tauri::Runtime>(
     let mut listing = build_library_listing(&_app, library_id).await?;
     enrich_listing_metadata(&mut listing).await?;
     Ok(listing)
+}
+
+#[tauri::command]
+pub async fn list_media_ratings(
+    media_ids: Vec<String>,
+) -> Result<HashMap<String, u8>, String> {
+    load_media_ratings_map(&media_ids).await
+}
+
+#[tauri::command]
+pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
+    if params.media_id.trim().is_empty() {
+        return Err("media id cannot be empty".to_string());
+    }
+    persist_media_rating(&params.media_id, params.rating).await
 }
 
 async fn build_library_listing<R: tauri::Runtime>(

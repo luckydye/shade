@@ -829,6 +829,11 @@ export interface SnapshotInfo {
   is_current: boolean;
 }
 
+export interface MediaRatingParams {
+  media_id: string;
+  rating: number | null;
+}
+
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
@@ -932,6 +937,28 @@ export async function listSnapshots(): Promise<SnapshotInfo[]> {
     return inv("list_snapshots") as Promise<SnapshotInfo[]>;
   }
   throw new Error("listSnapshots is only implemented for Tauri");
+}
+
+export async function listMediaRatings(
+  mediaIds: string[],
+): Promise<Record<string, number>> {
+  if (mediaIds.length === 0) {
+    return {};
+  }
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_media_ratings", { mediaIds }) as Promise<Record<string, number>>;
+  }
+  return {};
+}
+
+export async function setMediaRating(params: MediaRatingParams): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("set_media_rating", { params });
+    return;
+  }
+  throw new Error("setMediaRating is only implemented for Tauri");
 }
 
 export async function loadSnapshot(version: number): Promise<void> {
