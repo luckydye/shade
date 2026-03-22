@@ -730,13 +730,6 @@ export const MediaView: Component = () => {
     }
     return current.isComplete;
   });
-  createEffect(() => {
-    const current = items();
-    if (!current || current.libraryId !== selectedLibraryId()) {
-      return;
-    }
-    setError(current.error);
-  });
   const selectedLibraryDetail = createMemo(() => {
     const library = selectedLibrary();
     if (!library) {
@@ -747,6 +740,13 @@ export const MediaView: Component = () => {
   const selectedLibraryIsRefreshing = createMemo(() =>
     isLocalLibraryRefreshing(selectedLibrary()),
   );
+  const displayedError = createMemo(() => {
+    const current = items();
+    if (current && current.libraryId === selectedLibraryId() && current.error) {
+      return current.error;
+    }
+    return error();
+  });
   const hasLibraries = createMemo(() => libraryEntries().length > 0);
   const selectedLibraryIsOffline = createMemo(() =>
     isLibraryOffline(selectedLibrary(), onlinePeerIds()),
@@ -1787,7 +1787,9 @@ export const MediaView: Component = () => {
           isEditorStrip() ? "px-3 py-2" : "px-4 py-3 md:px-6"
         }`}
       >
-        {error() && <p class="text-sm text-[var(--danger-text)]">{error()}</p>}
+        {displayedError() && (
+          <p class="text-sm text-[var(--danger-text)]">{displayedError()}</p>
+        )}
         <Show when={selectedMediaItemIds().length > 0}>
           <div class="flex items-center justify-between gap-2">
             <p class="text-[11px] font-medium text-[var(--text-dim)]">

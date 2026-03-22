@@ -12,6 +12,7 @@ import {
   listBrowserMediaLibraries,
   openBrowserMountedImage,
   pickBrowserDirectory,
+  requestBrowserMountedImageReadPermission,
   removeBrowserMediaLibrary,
 } from "../browser-media-library";
 import type { BrowserDirectoryHandle } from "../browser-media-library";
@@ -447,6 +448,13 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
   await ensureWorkerReady();
   const response = await fetch(path);
   return _loadEncodedBytes(new Uint8Array(await response.arrayBuffer()), path);
+}
+
+export function prepareImageOpen(path: string): Promise<void> {
+  if (!path.startsWith("browser-library://")) {
+    return Promise.resolve();
+  }
+  return requestBrowserMountedImageReadPermission(path);
 }
 
 export async function exportImage(path: string): Promise<void> {

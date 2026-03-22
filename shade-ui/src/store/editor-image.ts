@@ -334,6 +334,9 @@ async function openImageFrom(
     loadingMediaSrc,
   );
   try {
+    if (source.kind === "path") {
+      await bridge.prepareImageOpen(source.path);
+    }
     const info = await load();
     if (!isActiveLoadToken(loadToken)) {
       return;
