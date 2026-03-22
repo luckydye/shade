@@ -519,7 +519,7 @@ const MediaTile: Component<{
             <MediaRating
               rating={props.item.metadata.rating}
               readOnly
-              class="pointer-events-none absolute left-8 top-1.5"
+              class="pointer-events-none absolute bottom-1.5 left-1/2 -translate-x-1/2 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]"
             />
           </Show>
         </div>
