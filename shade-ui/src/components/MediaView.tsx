@@ -121,10 +121,16 @@ const SURFACE_BUTTON_CLASS =
   "h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
 const DANGER_BUTTON_CLASS =
   "h-8 rounded-md border border-[var(--danger-border)] bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
+const MENU_ITEM_BUTTON_CLASS =
+  "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
+const MENU_DANGER_ITEM_BUTTON_CLASS =
+  "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
 const INPUT_CLASS =
   "h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const EMPTY_STATE_CLASS =
   "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
+const EMPTY_STATE_PANEL_CLASS =
+  "mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-6 py-8 text-center";
 const LIBRARY_TAB_BASE_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 
@@ -636,6 +642,7 @@ export const MediaView: Component = () => {
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
   const [showS3Form, setShowS3Form] = createSignal(false);
+  const [showLibraryActions, setShowLibraryActions] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
     name: "",
@@ -656,6 +663,7 @@ export const MediaView: Component = () => {
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
   let scrollRef!: HTMLDivElement;
+  let libraryActionsRef: HTMLDivElement | undefined;
 
   const discoveredPeerIds = createMemo(() =>
     p2pState.peers.map((peer) => peer.endpoint_id),
@@ -739,6 +747,7 @@ export const MediaView: Component = () => {
   const selectedLibraryIsRefreshing = createMemo(() =>
     isLocalLibraryRefreshing(selectedLibrary()),
   );
+  const hasLibraries = createMemo(() => libraryEntries().length > 0);
   const selectedLibraryIsOffline = createMemo(() =>
     isLibraryOffline(selectedLibrary(), onlinePeerIds()),
   );
@@ -934,6 +943,33 @@ export const MediaView: Component = () => {
   });
 
   onMount(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!showLibraryActions()) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        throw new Error("pointer event target must be a node");
+      }
+      if (libraryActionsRef?.contains(target)) {
+        return;
+      }
+      setShowLibraryActions(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowLibraryActions(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    });
+  });
+
+  onMount(() => {
     let unlisten: (() => void) | null = null;
     let isUnmounted = false;
     void isTauriRuntime().then(async (tauriRuntime) => {
@@ -979,6 +1015,7 @@ export const MediaView: Component = () => {
     selectedLibraryId();
     setScrollTop(0);
     setSelectedMediaItemIds([]);
+    setShowLibraryActions(false);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
@@ -1457,23 +1494,49 @@ export const MediaView: Component = () => {
                   </Button>
                 </Show>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="relative flex items-center" ref={libraryActionsRef}>
               <Button
                 type="button"
-                class={SURFACE_BUTTON_CLASS}
-                disabled={!canRefreshSelectedLibrary() || isSubmitting()}
-                onClick={() => void handleRefreshLibrary()}
+                class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
+                disabled={isSubmitting() || !selectedLibrary()}
+                aria-label="Library actions"
+                aria-haspopup="menu"
+                aria-expanded={showLibraryActions() ? "true" : "false"}
+                onClick={() => setShowLibraryActions((current) => !current)}
               >
-                Refresh
+                •••
               </Button>
-              <Button
-                type="button"
-                class={DANGER_BUTTON_CLASS}
-                disabled={!selectedLibrary()?.removable || isSubmitting()}
-                onClick={() => void handleRemoveLibrary()}
-              >
-                Remove
-              </Button>
+              <Show when={showLibraryActions()}>
+                <div
+                  role="menu"
+                  class="absolute right-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                >
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    class={MENU_ITEM_BUTTON_CLASS}
+                    disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+                    onClick={() => {
+                      setShowLibraryActions(false);
+                      void handleRefreshLibrary();
+                    }}
+                  >
+                    Refresh
+                  </Button>
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    class={MENU_DANGER_ITEM_BUTTON_CLASS}
+                    disabled={!selectedLibrary()?.removable || isSubmitting()}
+                    onClick={() => {
+                      setShowLibraryActions(false);
+                      void handleRemoveLibrary();
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </Show>
             </div>
             <Show when={showS3Form()}>
               <div class="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 md:grid-cols-3">
@@ -1583,15 +1646,53 @@ export const MediaView: Component = () => {
         <Show
           when={displayedItems().length > 0}
           fallback={
-            <div
-              class={`${EMPTY_STATE_CLASS} ${
-                isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-              }`}
+            <Show
+              when={hasLibraries()}
+              fallback={
+                <Show
+                  when={!isEditorStrip()}
+                  fallback={
+                    <div class={`${EMPTY_STATE_CLASS} mx-1 text-xs`}>
+                      Open the media view to add your first library.
+                    </div>
+                  }
+                >
+                  <div class={EMPTY_STATE_PANEL_CLASS}>
+                    <div class="space-y-1">
+                      <p class={PANEL_SECTION_TITLE_CLASS}>Media Library</p>
+                      <h2 class="text-lg font-semibold text-[var(--text)]">
+                        Add your first library
+                      </h2>
+                    </div>
+                    <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                      Pick a folder with your images. Shade will index it and show it
+                      here in the media view.
+                    </p>
+                    <Button
+                      type="button"
+                      class={SURFACE_BUTTON_CLASS}
+                      disabled={isSubmitting()}
+                      onClick={() => void handleAddLibrary()}
+                    >
+                      Add Library
+                    </Button>
+                    <p class="text-xs text-[var(--text-faint)]">
+                      You can also use the + button in the library bar.
+                    </p>
+                  </div>
+                </Show>
+              }
             >
-              {items.loading || !isLibraryScanComplete()
-                ? "Loading…"
-                : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
-            </div>
+              <div
+                class={`${EMPTY_STATE_CLASS} ${
+                  isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                }`}
+              >
+                {items.loading || !isLibraryScanComplete()
+                  ? "Loading…"
+                  : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+              </div>
+            </Show>
           }
         >
           <Show
