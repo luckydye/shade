@@ -2248,205 +2248,202 @@ export const Inspector: Component = () => {
     </div>
   );
 
-  const DesktopEditPanel: Component = () => (
-    <div class="flex flex-col gap-5">
-      <div class="flex flex-col gap-3">
-        <div ref={desktopLayerListRef} class="relative flex flex-col gap-1">
-          <div
-            class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)] transition-opacity"
-            style={getDesktopDropCursorStyle()}
-          />
-          <Button
-            type="button"
-            onClick={() => void addLayer("adjustment", topLayerInsertPosition())}
-            class={ADD_LAYER_ROW_CLASS}
-          >
-            <span />
-            <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
-              +
-            </span>
-            <span />
-            <span>Add Adjustment</span>
-            <span />
-            <span />
-          </Button>
-          {[...state.layers].reverse().map((layer, reverseIdx) => {
-            const realIdx = state.layers.length - 1 - reverseIdx;
-            return (
-              <>
-                <Show when={layer.kind === "image"}>
-                  <Button
-                    type="button"
-                    onClick={() => void addLayer("crop", cropLayerInsertPosition())}
-                    class={ADD_LAYER_ROW_CLASS}
-                  >
-                    <span />
-                    <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
-                      +
-                    </span>
-                    <span />
-                    <span>Add Crop</span>
-                    <span />
-                    <span />
-                  </Button>
-                </Show>
-                <div
-                  data-layer-idx={realIdx}
-                  class={`${LAYER_ROW_CLASS} ${
-                    state.selectedLayerIdx === realIdx
-                      ? "bg-[var(--surface-active)] text-[var(--text)] shadow-[inset_0_0_0_1px_var(--border-active)]"
-                      : "bg-[var(--surface-subtle)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface)]"
-                  } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
+  const DesktopLayerList: Component = () => (
+    <div class="flex flex-col gap-3">
+      <div ref={desktopLayerListRef} class="relative flex flex-col gap-1">
+        <div
+          class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)] transition-opacity"
+          style={getDesktopDropCursorStyle()}
+        />
+        <Button
+          type="button"
+          onClick={() => void addLayer("adjustment", topLayerInsertPosition())}
+          class={ADD_LAYER_ROW_CLASS}
+        >
+          <span />
+          <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+            +
+          </span>
+          <span />
+          <span>Add Adjustment</span>
+          <span />
+          <span />
+        </Button>
+        {[...state.layers].reverse().map((layer, reverseIdx) => {
+          const realIdx = state.layers.length - 1 - reverseIdx;
+          return (
+            <>
+              <Show when={layer.kind === "image"}>
+                <Button
+                  type="button"
+                  onClick={() => void addLayer("crop", cropLayerInsertPosition())}
+                  class={ADD_LAYER_ROW_CLASS}
                 >
-                  <Button
-                    type="button"
-                    onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
-                    class="inline-flex h-4 w-4 cursor-grab items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] active:cursor-grabbing"
-                    title="Reorder layer"
-                  >
-                    <span class="grid grid-cols-2 gap-[2px]">
-                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                    </span>
-                  </Button>
-                  <button
-                    type="button"
-                    class={`inline-flex h-4 w-4 items-center justify-center text-xs leading-none transition-colors ${
-                      layer.visible ? "text-[var(--text)]" : "text-[var(--text-subtle)]"
-                    }`}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void setLayerVisible(realIdx, !layer.visible);
-                    }}
-                  >
-                    {layer.visible ? "●" : "○"}
-                  </button>
-                  <span class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4">
-                    <LayerTypeIcon layer={layer} />
+                  <span />
+                  <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+                    +
                   </span>
-                  <Show
-                    when={editingLayerIdx() === realIdx}
-                    fallback={
-                      <Button
-                        type="button"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() => selectLayer(realIdx)}
-                        onDblClick={(event) => {
-                          event.stopPropagation();
-                          startInlineLayerRename(realIdx);
-                        }}
-                        class="min-w-0 truncate py-1 text-left text-[13px] font-medium focus-visible:outline-none"
-                      >
-                        {getLayerDisplayName(layer)}
-                      </Button>
-                    }
-                  >
-                    <input
-                      ref={(input) => {
-                        queueMicrotask(() => {
-                          if (editingLayerIdx() !== realIdx) {
-                            return;
-                          }
-                          input.focus();
-                          input.select();
-                        });
-                      }}
-                      type="text"
-                      value={editingLayerName()}
-                      placeholder={getLayerDefaultName(layer.kind)}
-                      class="h-6 w-full rounded-sm border border-[var(--border-active)] bg-[var(--input-bg)] px-1.5 text-[13px] font-medium text-[var(--text)] outline-none"
+                  <span />
+                  <span>Add Crop</span>
+                  <span />
+                  <span />
+                </Button>
+              </Show>
+              <div
+                data-layer-idx={realIdx}
+                class={`${LAYER_ROW_CLASS} ${
+                  state.selectedLayerIdx === realIdx
+                    ? "bg-[var(--surface-active)] text-[var(--text)] shadow-[inset_0_0_0_1px_var(--border-active)]"
+                    : "bg-[var(--surface-subtle)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface)]"
+                } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
+              >
+                <Button
+                  type="button"
+                  onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
+                  class="inline-flex h-4 w-4 cursor-grab items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] active:cursor-grabbing"
+                  title="Reorder layer"
+                >
+                  <span class="grid grid-cols-2 gap-[2px]">
+                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                  </span>
+                </Button>
+                <button
+                  type="button"
+                  class={`inline-flex h-4 w-4 items-center justify-center text-xs leading-none transition-colors ${
+                    layer.visible ? "text-[var(--text)]" : "text-[var(--text-subtle)]"
+                  }`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void setLayerVisible(realIdx, !layer.visible);
+                  }}
+                >
+                  {layer.visible ? "●" : "○"}
+                </button>
+                <span class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4">
+                  <LayerTypeIcon layer={layer} />
+                </span>
+                <Show
+                  when={editingLayerIdx() === realIdx}
+                  fallback={
+                    <Button
+                      type="button"
                       onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => event.stopPropagation()}
-                      onDblClick={(event) => event.stopPropagation()}
-                      onInput={(event) => setEditingLayerName(event.currentTarget.value)}
-                      onBlur={() => void commitInlineLayerRename()}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                          return;
-                        }
-                        if (event.key !== "Escape") {
-                          return;
-                        }
-                        event.preventDefault();
-                        cancelInlineLayerRename();
+                      onClick={() => selectLayer(realIdx)}
+                      onDblClick={(event) => {
+                        event.stopPropagation();
+                        startInlineLayerRename(realIdx);
                       }}
-                    />
-                  </Show>
-                  <Show when={layer.kind !== "crop"}>
-                    {layer.has_mask ? (
-                      <Button
-                        type="button"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleRemoveMask(realIdx);
-                        }}
-                        class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-value)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
-                        title="Remove mask"
-                      >
-                        M
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setMaskPickerLayer(maskPickerLayer() === realIdx ? null : realIdx);
-                        }}
-                        class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
-                        title="Add gradient mask"
-                      >
-                        +M
-                      </Button>
-                    )}
-                  </Show>
-                  <Show when={layer.kind !== "image"}>
+                      class="min-w-0 truncate py-1 text-left text-[13px] font-medium focus-visible:outline-none"
+                    >
+                      {getLayerDisplayName(layer)}
+                    </Button>
+                  }
+                >
+                  <input
+                    ref={(input) => {
+                      queueMicrotask(() => {
+                        if (editingLayerIdx() !== realIdx) {
+                          return;
+                        }
+                        input.focus();
+                        input.select();
+                      });
+                    }}
+                    type="text"
+                    value={editingLayerName()}
+                    placeholder={getLayerDefaultName(layer.kind)}
+                    class="h-6 w-full rounded-sm border border-[var(--border-active)] bg-[var(--input-bg)] px-1.5 text-[13px] font-medium text-[var(--text)] outline-none"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onDblClick={(event) => event.stopPropagation()}
+                    onInput={(event) => setEditingLayerName(event.currentTarget.value)}
+                    onBlur={() => void commitInlineLayerRename()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                        return;
+                      }
+                      if (event.key !== "Escape") {
+                        return;
+                      }
+                      event.preventDefault();
+                      cancelInlineLayerRename();
+                    }}
+                  />
+                </Show>
+                <Show when={layer.kind !== "crop"}>
+                  {layer.has_mask ? (
                     <Button
                       type="button"
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
-                        void deleteLayer(realIdx);
+                        void handleRemoveMask(realIdx);
                       }}
-                      class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
-                      title="Delete layer"
+                      class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-value)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
+                      title="Remove mask"
                     >
-                      <TrashIcon />
+                      M
                     </Button>
-                  </Show>
-                </div>
-                <Show when={maskPickerLayer() === realIdx}>
-                  <div class="ml-6 grid grid-cols-2 gap-2">
+                  ) : (
                     <Button
                       type="button"
-                      onClick={() => void handleApplyLinearMask(realIdx)}
-                      class={SECONDARY_BUTTON_CLASS}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setMaskPickerLayer(maskPickerLayer() === realIdx ? null : realIdx);
+                      }}
+                      class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
+                      title="Add gradient mask"
                     >
-                      Linear
+                      +M
                     </Button>
-                    <Button
-                      type="button"
-                      onClick={() => void handleApplyRadialMask(realIdx)}
-                      class={SECONDARY_BUTTON_CLASS}
-                    >
-                      Radial
-                    </Button>
-                  </div>
+                  )}
                 </Show>
-              </>
-            );
-          })}
-        </div>
+                <Show when={layer.kind !== "image"}>
+                  <Button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteLayer(realIdx);
+                    }}
+                    class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
+                    title="Delete layer"
+                  >
+                    <TrashIcon />
+                  </Button>
+                </Show>
+              </div>
+              <Show when={maskPickerLayer() === realIdx}>
+                <div class="ml-6 grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handleApplyLinearMask(realIdx)}
+                    class={SECONDARY_BUTTON_CLASS}
+                  >
+                    Linear
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleApplyRadialMask(realIdx)}
+                    class={SECONDARY_BUTTON_CLASS}
+                  >
+                    Radial
+                  </Button>
+                </div>
+              </Show>
+            </>
+          );
+        })}
       </div>
-      <InspectorTabs />
     </div>
   );
 
@@ -2574,8 +2571,16 @@ export const Inspector: Component = () => {
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class={`m-2 hidden h-[calc(100%-1rem)] lg:flex lg:flex-col ${PANEL_SHELL_CLASS}`}>
         <div class="media-scroll flex-1 pr-5 overflow-y-auto">
-          <DesktopEditPanel />
-          {inspectorTab() === "presets" ? <PresetsPanel /> : <DesktopSelectedLayerPanel />}
+          <InspectorTabs class="mb-5" />
+          <Show
+            when={inspectorTab() === "edit"}
+            fallback={<PresetsPanel />}
+          >
+            <div class="flex flex-col gap-5">
+              <DesktopLayerList />
+              <DesktopSelectedLayerPanel />
+            </div>
+          </Show>
         </div>
       </div>
 
@@ -2592,16 +2597,16 @@ export const Inspector: Component = () => {
           <div class="mb-2 h-1.5 w-14 rounded-full bg-[var(--surface-active)]" />
         </div>
 
-        <div class="px-4 pb-2">
+        <div class="border-b border-[var(--border)] px-4 pb-3">
+          <InspectorTabs />
+        </div>
+
+        <div class="px-4 pt-3 pb-2">
           <Show when={inspectorTab() === "presets"} fallback={<MobileSelectedLayerPanel />}>
             <div class="px-1">
               <PresetsPanel />
             </div>
           </Show>
-        </div>
-
-        <div class="border-t border-[var(--border)] px-4 pt-3">
-          <InspectorTabs />
         </div>
 
         <div class="pb-[env(safe-area-inset-bottom)]"></div>
