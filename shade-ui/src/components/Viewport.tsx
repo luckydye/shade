@@ -17,16 +17,17 @@ import {
   resetViewport,
   selectArtboard,
   setViewportScreenSize,
+  setViewportToneSample,
   state,
   transitionMediaSrc,
   zoomViewport,
 } from "../store/editor";
 import { setMediaRating, type MaskParamsInfo } from "../bridge/index";
 import { compositeArtboard } from "../viewport/compositor";
-import { buildTransform, worldToScreen } from "../viewport/transform";
+import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
 import { getViewportFitRef } from "../viewport/preview";
 import type { WorldTransform } from "../viewport/transform";
-import { setState, type ArtboardState } from "../store/editor-store";
+import { clamp, setState, type ArtboardState } from "../store/editor-store";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 
@@ -73,6 +74,17 @@ function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
   }
 }
 
+function rotatePoint(x: number, y: number, centerX: number, centerY: number, angle: number) {
+  const deltaX = x - centerX;
+  const deltaY = y - centerY;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: centerX + deltaX * cos - deltaY * sin,
+    y: centerY + deltaX * sin + deltaY * cos,
+  };
+}
+
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
@@ -92,6 +104,11 @@ export const Viewport: Component = () => {
     createSignal<HTMLImageElement | null>(null);
   const [isSavingRating, setIsSavingRating] = createSignal(false);
   const activePointers = new Map<number, { x: number; y: number }>();
+  let lastStagePointer: { x: number; y: number } | null = null;
+  let toneSmoothingFrame: number | null = null;
+  let smoothedToneSample: number | null = null;
+  let targetToneSample: number | null = null;
+  let lastToneSampleTime = 0;
   let gesture:
     | {
         kind: "pan";
@@ -245,6 +262,163 @@ export const Viewport: Component = () => {
         height: state.canvasHeight,
       },
     );
+  }
+
+  function stopToneSmoothing() {
+    if (toneSmoothingFrame === null) {
+      return;
+    }
+    cancelAnimationFrame(toneSmoothingFrame);
+    toneSmoothingFrame = null;
+  }
+
+  function updateSmoothedToneSample(nextTarget: number | null) {
+    targetToneSample = nextTarget;
+    if (nextTarget === null) {
+      stopToneSmoothing();
+      smoothedToneSample = null;
+      lastToneSampleTime = 0;
+      setViewportToneSample(null);
+      return;
+    }
+    if (smoothedToneSample === null) {
+      smoothedToneSample = nextTarget;
+      lastToneSampleTime = performance.now();
+      setViewportToneSample(nextTarget);
+      return;
+    }
+    if (toneSmoothingFrame !== null) {
+      return;
+    }
+    const tick = (time: number) => {
+      if (targetToneSample === null || smoothedToneSample === null) {
+        stopToneSmoothing();
+        return;
+      }
+      const deltaMs = Math.max(1, time - lastToneSampleTime);
+      lastToneSampleTime = time;
+      const blend = 1 - Math.exp(-deltaMs / 90);
+      smoothedToneSample += (targetToneSample - smoothedToneSample) * blend;
+      if (Math.abs(targetToneSample - smoothedToneSample) < 0.002) {
+        smoothedToneSample = targetToneSample;
+      }
+      setViewportToneSample(smoothedToneSample);
+      if (smoothedToneSample === targetToneSample) {
+        toneSmoothingFrame = null;
+        return;
+      }
+      toneSmoothingFrame = requestAnimationFrame(tick);
+    };
+    lastToneSampleTime = performance.now();
+    toneSmoothingFrame = requestAnimationFrame(tick);
+  }
+
+  function sampleTileTone(tile: { image: ImageData; x: number; y: number; width: number; height: number } | null, x: number, y: number) {
+    if (!tile) {
+      return null;
+    }
+    if (x < tile.x || y < tile.y || x >= tile.x + tile.width || y >= tile.y + tile.height) {
+      return null;
+    }
+    const imageX = clamp(
+      Math.floor(((x - tile.x) / tile.width) * tile.image.width),
+      0,
+      tile.image.width - 1,
+    );
+    const imageY = clamp(
+      Math.floor(((y - tile.y) / tile.height) * tile.image.height),
+      0,
+      tile.image.height - 1,
+    );
+    const pixelData = tile.image.data as ArrayLike<number>;
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+    let alpha = 0;
+    let count = 0;
+    for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+      const sampleY = clamp(imageY + offsetY, 0, tile.image.height - 1);
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        const sampleX = clamp(imageX + offsetX, 0, tile.image.width - 1);
+        const index = (sampleY * tile.image.width + sampleX) * 4;
+        red += pixelData[index];
+        green += pixelData[index + 1];
+        blue += pixelData[index + 2];
+        alpha += pixelData[index + 3];
+        count += 1;
+      }
+    }
+    if (count <= 0) {
+      throw new Error("tile tone sampling requires at least one sample");
+    }
+    const normalize = tile.image.data instanceof Uint8ClampedArray ? 255 : 1;
+    const averageAlpha = (alpha / count) / normalize;
+    if (averageAlpha <= 0) {
+      return null;
+    }
+    const averageRed = (red / count) / normalize;
+    const averageGreen = (green / count) / normalize;
+    const averageBlue = (blue / count) / normalize;
+    return (
+      (averageRed * 0.2126 + averageGreen * 0.7152 + averageBlue * 0.0722) * averageAlpha
+    );
+  }
+
+  function updateViewportToneFromPointer(clientX: number, clientY: number) {
+    if (!stageRef) {
+      updateSmoothedToneSample(null);
+      return;
+    }
+    const artboard = getSelectedArtboard();
+    if (!artboard) {
+      updateSmoothedToneSample(null);
+      return;
+    }
+    const rect = stageRef.getBoundingClientRect();
+    const cssX = clientX - rect.left;
+    const cssY = clientY - rect.top;
+    const transform = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+    if (transform.scale <= 0) {
+      updateSmoothedToneSample(null);
+      return;
+    }
+    let sampleX = cssX;
+    let sampleY = cssY;
+    const cropLayer = selectedCropLayer();
+    const committedCrop = cropLayer ? null : getCommittedCropRect();
+    if (committedCrop && committedCrop.rotation !== 0) {
+      const cropCenter = worldToScreen(
+        toWorldX(committedCrop.x + committedCrop.width * 0.5),
+        toWorldY(committedCrop.y + committedCrop.height * 0.5),
+        transform,
+      );
+      const unrotated = rotatePoint(sampleX, sampleY, cropCenter.x, cropCenter.y, committedCrop.rotation);
+      sampleX = unrotated.x;
+      sampleY = unrotated.y;
+    }
+    const world = screenToWorld(sampleX, sampleY, transform);
+    const localX = world.x - artboard.worldX;
+    const localY = world.y - artboard.worldY;
+    if (localX < 0 || localY < 0 || localX >= artboard.width || localY >= artboard.height) {
+      updateSmoothedToneSample(null);
+      return;
+    }
+    if (
+      committedCrop &&
+      (localX < committedCrop.x ||
+        localY < committedCrop.y ||
+        localX >= committedCrop.x + committedCrop.width ||
+        localY >= committedCrop.y + committedCrop.height)
+    ) {
+      updateSmoothedToneSample(null);
+      return;
+    }
+    const visiblePreview = cropLayer ? null : previewTile() ?? artboard.previewTile;
+    const visibleBackdrop = backdropTile() ?? artboard.backdropTile;
+    const tone =
+      sampleTileTone(visiblePreview, localX, localY) ??
+      sampleTileTone(visibleBackdrop, localX, localY);
+    updateSmoothedToneSample(tone);
   }
 
   function maskHandleAtPoint(sx: number, sy: number): MaskHandle | null {
@@ -792,6 +966,8 @@ export const Viewport: Component = () => {
     const delta = e.deltaY * deltaModeScale;
     const rect = stageRef.getBoundingClientRect();
     zoomViewport(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
+    lastStagePointer = { x: e.clientX, y: e.clientY };
+    updateViewportToneFromPointer(e.clientX, e.clientY);
   };
 
   const onPointerDown = (e: PointerEvent) => {
@@ -815,6 +991,7 @@ export const Viewport: Component = () => {
       e.clientY - rect.top,
     );
     const clickedArtboard = artboardAtPoint(e.clientX - rect.left, e.clientY - rect.top);
+    lastStagePointer = { x: e.clientX, y: e.clientY };
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (selectedCropLayer()) {
       const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
@@ -913,7 +1090,9 @@ export const Viewport: Component = () => {
 
   const onPointerMove = (e: PointerEvent) => {
     if (!stageRef) return;
+    lastStagePointer = { x: e.clientX, y: e.clientY };
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    updateViewportToneFromPointer(e.clientX, e.clientY);
     if (!gesture) return;
     if (gesture.kind === "pan") {
       const movedX = e.clientX - gesture.startX;
@@ -1242,6 +1421,22 @@ export const Viewport: Component = () => {
     gesture = null;
   };
 
+  createEffect(() => {
+    previewTile();
+    backdropTile();
+    state.selectedArtboardId;
+    state.selectedLayerIdx;
+    if (lastStagePointer) {
+      updateViewportToneFromPointer(lastStagePointer.x, lastStagePointer.y);
+      return;
+    }
+    updateSmoothedToneSample(null);
+  });
+
+  onCleanup(() => {
+    stopToneSmoothing();
+  });
+
   return (
     <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
       <div
@@ -1255,8 +1450,16 @@ export const Viewport: Component = () => {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onPointerLeave={(e) => {
+          lastStagePointer = null;
+          updateSmoothedToneSample(null);
+          onPointerUp(e);
+        }}
+        onPointerCancel={(e) => {
+          lastStagePointer = null;
+          updateSmoothedToneSample(null);
+          onPointerUp(e);
+        }}
       >
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_45%)]" />
 

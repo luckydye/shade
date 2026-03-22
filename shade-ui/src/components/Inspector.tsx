@@ -30,6 +30,7 @@ import {
   setIsDrawerOpen,
   setLayerVisible,
   state,
+  viewportToneSample,
 } from "../store/editor";
 import type { LayerInfo } from "../store/editor";
 import {
@@ -423,6 +424,15 @@ function remapPath(path: string, width: number, height: number, padding: number)
     const nextY = padding + (parseFloat(y) / 100) * innerHeight;
     return `${nextX} ${nextY}`;
   });
+}
+
+function sampleCurveValue(lut: readonly number[], x: number) {
+  const clampedX = clamp(x, 0, 255);
+  const lower = Math.floor(clampedX);
+  const upper = Math.ceil(clampedX);
+  const start = clamp(lut[lower] ?? 0, 0, 1);
+  const end = clamp(lut[upper] ?? start, 0, 1);
+  return start + (end - start) * (clampedX - lower);
 }
 
 function valueLabel(value: number, scale = 100) {
@@ -988,6 +998,13 @@ export const Inspector: Component = () => {
         svgSize().height,
         graphPadding,
       );
+    const hoveredToneGuide = createMemo(() => {
+      const x = viewportToneSample();
+      if (x === null) {
+        return null;
+      }
+      return { x: x * 255, y: sampleCurveValue(lut(), x * 255) };
+    });
 
     onMount(() => {
       const updateSize = () => {
@@ -1240,6 +1257,32 @@ export const Inspector: Component = () => {
               fill="none"
               pointer-events="none"
             />
+            <Show when={hoveredToneGuide()}>
+              {(guide) => (
+                <>
+                  <line
+                    x1={chartX(guide().x)}
+                    y1={graphPadding}
+                    x2={chartX(guide().x)}
+                    y2={graphPadding + innerHeight()}
+                    stroke="var(--curve-guide-mid)"
+                    stroke-width="1"
+                    stroke-dasharray="4 4"
+                    opacity="0.9"
+                    pointer-events="none"
+                  />
+                  <circle
+                    cx={chartX(guide().x)}
+                    cy={chartY(guide().y)}
+                    r="4"
+                    fill="var(--curve-guide-mid)"
+                    stroke="var(--curve-point-stroke)"
+                    stroke-width="1.5"
+                    pointer-events="none"
+                  />
+                </>
+              )}
+            </Show>
             {pts().map((pt) => (
               <>
                 <circle

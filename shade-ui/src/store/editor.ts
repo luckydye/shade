@@ -4,6 +4,8 @@ export {
   isDrawerOpen,
   setIsDrawerOpen,
   state,
+  setViewportToneSample,
+  viewportToneSample,
   setTransitionMediaSrc,
   transitionMediaSrc,
 } from "./editor-store";
