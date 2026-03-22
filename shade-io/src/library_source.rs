@@ -291,7 +291,10 @@ pub async fn put_s3_object_bytes(
         .send()
         .await
         .map_err(|error| {
-            format!("S3 upload request failed for {}: {}", config.endpoint, error)
+            format!(
+                "S3 upload request failed for {}: {}",
+                config.endpoint, error
+            )
         })?
         .error_for_status()
         .map_err(|error| {
@@ -303,10 +306,7 @@ pub async fn put_s3_object_bytes(
     Ok(())
 }
 
-pub async fn delete_s3_object(
-    config: &S3LibraryConfig,
-    key: &str,
-) -> Result<(), String> {
+pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(), String> {
     let client = http_client()?;
     let request = signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX)?;
     client
@@ -317,7 +317,10 @@ pub async fn delete_s3_object(
         .send()
         .await
         .map_err(|error| {
-            format!("S3 delete request failed for {}: {}", config.endpoint, error)
+            format!(
+                "S3 delete request failed for {}: {}",
+                config.endpoint, error
+            )
         })?
         .error_for_status()
         .map_err(|error| {

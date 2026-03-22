@@ -173,7 +173,12 @@ function isS3Library(
 }
 
 function libraryIsWritable(library: LibraryEntry | null) {
-  return !!library && !isPeerLibrary(library) && !library.readonly;
+  return (
+    !!library &&
+    !isPeerLibrary(library) &&
+    !library.readonly &&
+    library.is_online !== false
+  );
 }
 
 function droppedFiles(dataTransfer: DataTransfer | null | undefined) {
@@ -198,6 +203,76 @@ function draggedItemCount(dataTransfer: DataTransfer | null | undefined) {
 
 function draggedPathCount(paths: string[] | null | undefined) {
   return paths && paths.length > 0 ? paths.length : null;
+}
+
+function clipboardImageExtension(type: string) {
+  switch (type.toLowerCase()) {
+    case "image/avif":
+      return "avif";
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/tiff":
+      return "tiff";
+    case "image/webp":
+      return "webp";
+    default:
+      return null;
+  }
+}
+
+function clipboardImageFiles(dataTransfer: DataTransfer | null | undefined) {
+  if (!dataTransfer?.items || dataTransfer.items.length === 0) {
+    return [];
+  }
+  const createdAt = Date.now();
+  let generatedCount = 0;
+  const files: File[] = [];
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== "file") {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (!file || !file.type.toLowerCase().startsWith("image/")) {
+      continue;
+    }
+    if (file.name) {
+      files.push(file);
+      continue;
+    }
+    const extension = clipboardImageExtension(file.type);
+    if (!extension) {
+      throw new Error(`unsupported pasted image type: ${file.type}`);
+    }
+    generatedCount += 1;
+    files.push(
+      new File([file], `pasted-image-${createdAt}-${generatedCount}.${extension}`, {
+        type: file.type,
+      }),
+    );
+  }
+  return files;
+}
+
+function targetAcceptsTextInput(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.isContentEditable ||
+    target.closest("input, textarea, select, [contenteditable='true']") !== null
+  );
+}
+
+function targetUsesOwnFocus(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.closest("button, input, textarea, select, a, [contenteditable='true']") !==
+    null
+  );
 }
 
 function cameraLibraryHost(libraryId: string) {
@@ -662,6 +737,7 @@ export const MediaView: Component = () => {
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
+  let mediaShellRef: HTMLDivElement | undefined;
   let scrollRef!: HTMLDivElement;
   let libraryActionsRef: HTMLDivElement | undefined;
 
@@ -1193,12 +1269,19 @@ export const MediaView: Component = () => {
     }
   }
 
-  async function handleUploadLibraryFiles(files: File[]) {
+  async function handleUploadLibraryFiles(
+    files: File[],
+    appendTimestampOnConflict = false,
+  ) {
     const library = selectedLibrary();
     if (!libraryIsWritable(library)) {
       throw new Error("selected library is readonly");
     }
     if (files.length === 0) {
+      return;
+    }
+    if (isSubmitting()) {
+      setError("media library operation already in progress");
       return;
     }
     setIsSubmitting(true);
@@ -1211,7 +1294,11 @@ export const MediaView: Component = () => {
           completedFiles: index,
           currentFileName: file.name,
         });
-        await uploadMediaLibraryFile(library.id, file);
+        await uploadMediaLibraryFile(
+          library.id,
+          file,
+          appendTimestampOnConflict,
+        );
       }
       setUploadProgress({
         phase: "refreshing",
@@ -1235,6 +1322,10 @@ export const MediaView: Component = () => {
       throw new Error("selected library is readonly");
     }
     if (paths.length === 0) {
+      return;
+    }
+    if (isSubmitting()) {
+      setError("media library operation already in progress");
       return;
     }
     setIsSubmitting(true);
@@ -1311,6 +1402,25 @@ export const MediaView: Component = () => {
       return;
     }
     void handleUploadLibraryFiles(files);
+  }
+
+  function handleUploadPaste(event: ClipboardEvent) {
+    if (!canWriteSelectedLibrary() || targetAcceptsTextInput(event.target)) {
+      return;
+    }
+    let files: File[];
+    try {
+      files = clipboardImageFiles(event.clipboardData);
+    } catch (error) {
+      event.preventDefault();
+      setError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (files.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void handleUploadLibraryFiles(files, true);
   }
 
   function toggleMediaSelection(itemId: string) {
@@ -1398,11 +1508,20 @@ export const MediaView: Component = () => {
 
   return (
     <div
+      ref={mediaShellRef}
+      tabIndex={-1}
       class={`${shellClass()} relative`}
       onDragEnter={handleUploadDragEnter}
       onDragOver={handleUploadDragOver}
       onDragLeave={handleUploadDragLeave}
       onDrop={handleUploadDrop}
+      onPaste={handleUploadPaste}
+      onPointerDown={(event) => {
+        if (targetUsesOwnFocus(event.target)) {
+          return;
+        }
+        mediaShellRef?.focus();
+      }}
     >
       <Show when={isUploadDragActive()}>
         <div class="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-xl border border-dashed border-[var(--border-active)] bg-[color-mix(in_srgb,var(--surface-active)_68%,transparent)]">

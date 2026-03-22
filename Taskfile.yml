@@ -39,3 +39,8 @@ tasks:
     desc: Start the Tauri dev environment
     dir: shade-tauri
     cmd: cargo tauri dev
+
+  build:
+    desc: Start the Tauri dev environment
+    dir: shade-tauri
+    cmd: cargo tauri build

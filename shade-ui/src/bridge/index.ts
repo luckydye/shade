@@ -893,6 +893,7 @@ export async function addS3MediaLibrary(
 export async function uploadMediaLibraryFile(
   libraryId: string,
   file: File,
+  appendTimestampOnConflict = false,
 ): Promise<void> {
   if (!(await isTauriRuntime())) {
     throw new Error("library uploads are only implemented for Tauri");
@@ -903,6 +904,7 @@ export async function uploadMediaLibraryFile(
     libraryId,
     fileName: file.name,
     bytes,
+    appendTimestampOnConflict,
   });
 }
 

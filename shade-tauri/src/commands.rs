@@ -11,6 +11,7 @@ use shade_io::{
     scan_directory_images, to_linear_srgb_f32, SourceImageInfo,
 };
 use std::collections::HashMap;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -737,7 +738,7 @@ fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
         kind: "directory".into(),
         path: Some(path.display().to_string()),
         removable: true,
-        readonly: true,
+        readonly: false,
         is_online: Some(is_online),
         is_refreshing: Some(is_refreshing && is_online),
     }
@@ -761,7 +762,11 @@ fn normalize_upload_file_name(file_name: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("upload file name cannot be empty".to_string());
     }
-    if trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\\') {
+    if trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+    {
         return Err(format!("invalid upload file name: {file_name}"));
     }
     Ok(trimmed.to_string())
@@ -892,7 +897,7 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         kind: "directory".into(),
         path: Some(pictures_dir.display().to_string()),
         removable: false,
-        readonly: true,
+        readonly: false,
         is_online: Some(pictures_online),
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
@@ -958,6 +963,89 @@ fn desktop_local_library_roots() -> Result<Vec<(String, PathBuf)>, String> {
         }
     }
     Ok(roots)
+}
+
+fn local_upload_target_path(
+    library_root: &Path,
+    file_name: &str,
+) -> Result<PathBuf, String> {
+    let normalized = normalize_upload_file_name(file_name)?;
+    let target_path = library_root.join(&normalized);
+    if target_path.exists() {
+        return Err(format!(
+            "upload destination already exists: {}",
+            target_path.display()
+        ));
+    }
+    Ok(target_path)
+}
+
+fn timestamp_suffix_file_name(file_name: &str) -> Result<String, String> {
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|segment| segment.to_str())
+        .ok_or_else(|| format!("invalid upload file name: {file_name}"))?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let suffixed = match path.extension().and_then(|segment| segment.to_str()) {
+        Some(extension) => format!("{stem}-{timestamp}.{extension}"),
+        None => format!("{stem}-{timestamp}"),
+    };
+    normalize_upload_file_name(&suffixed)
+}
+
+fn local_upload_target_path_with_conflict_policy(
+    library_root: &Path,
+    file_name: &str,
+    append_timestamp_on_conflict: bool,
+) -> Result<PathBuf, String> {
+    match local_upload_target_path(library_root, file_name) {
+        Ok(path) => Ok(path),
+        Err(error)
+            if append_timestamp_on_conflict
+                && error.starts_with("upload destination already exists: ") =>
+        {
+            local_upload_target_path(
+                library_root,
+                &timestamp_suffix_file_name(file_name)?,
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn resolve_local_library_item(path: &str) -> Result<(String, PathBuf), String> {
+    let item_path = PathBuf::from(path);
+    if !item_path.is_file() {
+        return Err(format!("media item path is not a file: {path}"));
+    }
+    let canonical_item_path =
+        std::fs::canonicalize(&item_path).map_err(|e| e.to_string())?;
+    for (library_id, root) in desktop_local_library_roots()? {
+        if !local_library_is_available(&root) {
+            continue;
+        }
+        let canonical_root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+        if canonical_item_path.starts_with(&canonical_root) {
+            return Ok((library_id, canonical_item_path));
+        }
+    }
+    Err(format!("media item is not part of a local library: {path}"))
+}
+
+async fn refresh_desktop_local_library<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
+    library_root: PathBuf,
+) -> Result<(), String> {
+    let db_path = library_index_db_path()?;
+    app.state::<crate::LibraryScanService>()
+        .0
+        .refresh_library(&db_path, library_id, library_root)
+        .await
 }
 
 pub fn prime_missing_library_indexes<R: tauri::Runtime>(
@@ -2933,16 +3021,13 @@ pub async fn add_s3_media_library(
 }
 
 #[tauri::command]
-pub async fn upload_media_library_file(
+pub async fn upload_media_library_file<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
     library_id: String,
     file_name: String,
     bytes: Vec<u8>,
+    append_timestamp_on_conflict: bool,
 ) -> Result<(), String> {
-    if !library_id.starts_with("s3:") {
-        return Err(format!(
-            "image uploads are not supported for media library: {library_id}"
-        ));
-    }
     if bytes.is_empty() {
         return Err(format!("upload file is empty: {file_name}"));
     }
@@ -2950,21 +3035,53 @@ pub async fn upload_media_library_file(
     if !shade_io::is_supported_library_image(Path::new(&file_name)) {
         return Err(format!("unsupported image upload: {file_name}"));
     }
-    let config = resolve_s3_library_config(&library_id)?;
-    shade_io::put_s3_object_bytes(&config, &s3_upload_object_key(&config, &file_name), &bytes)
-        .await
-}
-
-#[tauri::command]
-pub async fn upload_media_library_path(
-    library_id: String,
-    path: String,
-) -> Result<(), String> {
-    if !library_id.starts_with("s3:") {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = _app;
         return Err(format!(
             "image uploads are not supported for media library: {library_id}"
         ));
     }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    if library_id.starts_with("s3:") {
+        let config = resolve_s3_library_config(&library_id)?;
+        return shade_io::put_s3_object_bytes(
+            &config,
+            &s3_upload_object_key(&config, &file_name),
+            &bytes,
+        )
+        .await;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let library_root =
+            require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
+        let target_path = local_upload_target_path_with_conflict_policy(
+            &library_root,
+            &file_name,
+            append_timestamp_on_conflict,
+        )?;
+        let mut file = std::fs::File::options()
+            .create_new(true)
+            .write(true)
+            .open(&target_path)
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = file.write_all(&bytes) {
+            let _ = std::fs::remove_file(&target_path);
+            return Err(error.to_string());
+        }
+        refresh_desktop_local_library(&_app, &library_id, library_root).await
+    }
+}
+
+#[tauri::command]
+pub async fn upload_media_library_path<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    library_id: String,
+    path: String,
+) -> Result<(), String> {
     let file_path = PathBuf::from(&path);
     if !file_path.is_file() {
         return Err(format!("upload path is not a file: {path}"));
@@ -2980,19 +3097,60 @@ pub async fn upload_media_library_path(
     if bytes.is_empty() {
         return Err(format!("upload file is empty: {path}"));
     }
-    let config = resolve_s3_library_config(&library_id)?;
-    shade_io::put_s3_object_bytes(
-        &config,
-        &s3_upload_object_key(&config, &normalize_upload_file_name(file_name)?),
-        &bytes,
-    )
-    .await
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = _app;
+        return Err(format!(
+            "image uploads are not supported for media library: {library_id}"
+        ));
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    if library_id.starts_with("s3:") {
+        let config = resolve_s3_library_config(&library_id)?;
+        return shade_io::put_s3_object_bytes(
+            &config,
+            &s3_upload_object_key(&config, &normalize_upload_file_name(file_name)?),
+            &bytes,
+        )
+        .await;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let library_root =
+            require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
+        let target_path = local_upload_target_path(&library_root, file_name)?;
+        std::fs::copy(&file_path, &target_path).map_err(|error| error.to_string())?;
+        refresh_desktop_local_library(&_app, &library_id, library_root).await
+    }
 }
 
 #[tauri::command]
-pub async fn delete_media_library_item(path: String) -> Result<(), String> {
-    let (config, key) = resolve_s3_library_for_media_path(&path)?;
-    shade_io::delete_s3_object(&config, &key).await
+pub async fn delete_media_library_item<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<(), String> {
+    if path.starts_with("s3://") {
+        let (config, key) = resolve_s3_library_for_media_path(&path)?;
+        return shade_io::delete_s3_object(&config, &key).await;
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = _app;
+        return Err(format!(
+            "media item deletion is not supported for path: {path}"
+        ));
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let (library_id, canonical_item_path) = resolve_local_library_item(&path)?;
+        let library_root =
+            require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
+        std::fs::remove_file(&canonical_item_path).map_err(|error| error.to_string())?;
+        refresh_desktop_local_library(&_app, &library_id, library_root).await
+    }
 }
 
 #[tauri::command]

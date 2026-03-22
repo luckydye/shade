@@ -161,8 +161,14 @@ fn normalize_curve_points(points: &[CurveControlPoint]) -> Vec<CurveControlPoint
 
 pub fn build_curve_lut_from_points(points: &[CurveControlPoint]) -> Vec<f32> {
     let anchors = normalize_curve_points(points);
-    assert!(anchors.len() >= 2, "curve requires explicit left and right endpoint clamps");
-    assert!(anchors[0].x == 0.0, "curve must include a left endpoint clamp at x=0");
+    assert!(
+        anchors.len() >= 2,
+        "curve requires explicit left and right endpoint clamps"
+    );
+    assert!(
+        anchors[0].x == 0.0,
+        "curve must include a left endpoint clamp at x=0"
+    );
     assert!(
         anchors[anchors.len() - 1].x == 255.0,
         "curve must include a right endpoint clamp at x=255"
@@ -956,7 +962,10 @@ mod tests {
             CurveControlPoint { x: 192.0, y: 0.75 },
             CurveControlPoint { x: 255.0, y: 0.8 },
         ]);
-        assert!((lut[0] - 0.2).abs() < 0.0001, "left clamp should drive lut[0]");
+        assert!(
+            (lut[0] - 0.2).abs() < 0.0001,
+            "left clamp should drive lut[0]"
+        );
         assert!(
             (lut[255] - 0.8).abs() < 0.0001,
             "right clamp should drive lut[255]"
