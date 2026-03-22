@@ -401,6 +401,7 @@ const MediaTile: Component<{
   compact?: boolean;
   active?: boolean;
   selected?: boolean;
+  disableThumbnailLoad?: boolean;
   onActivate: (src: string | null) => void;
   onToggleSelection: () => void;
 }> = (props) => {
@@ -425,7 +426,7 @@ const MediaTile: Component<{
 
   createEffect(() => {
     loadRequestVersion();
-    if (!isIntersecting() || src() || isLoadingSrc) {
+    if (props.disableThumbnailLoad || !isIntersecting() || src() || isLoadingSrc) {
       return;
     }
     const controller = new AbortController();
@@ -752,6 +753,9 @@ export const MediaView: Component = () => {
     );
   });
   const canWriteSelectedLibrary = createMemo(() => libraryIsWritable(selectedLibrary()));
+  const shouldDeferEditorStripThumbnails = createMemo(
+    () => state.currentView === "editor" && isS3Library(selectedLibrary()),
+  );
   const isUploadDragActive = createMemo(() => uploadDragFeedback() !== null);
   const uploadDragLabel = createMemo(() => {
     const feedback = uploadDragFeedback();
@@ -1593,21 +1597,45 @@ export const MediaView: Component = () => {
           <Show
             when={!isEditorStrip()}
             fallback={
-              <div class="flex flex-col gap-2">
-                <For each={displayedItems()}>
-                  {(item) => (
-                    <MediaTile
-                      item={item}
-                      compact
-                      active={activeMediaItemId() === mediaItemKey(item)}
-                      selected={selectedMediaItemIdSet().has(mediaItemKey(item))}
-                      onActivate={(src) =>
-                        void handleOpenItem(item, selectedLibraryId()!, src)
-                      }
-                      onToggleSelection={() => toggleMediaSelection(mediaItemKey(item))}
-                    />
-                  )}
-                </For>
+              <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
+                <div
+                  class="grid gap-2"
+                  style={{
+                    "grid-template-columns": gridTemplateColumns(),
+                    transform: `translateY(${offsetY()}px)`,
+                  }}
+                >
+                  <For each={visibleRows()}>
+                    {(row) =>
+                      row.kind === "date" ? (
+                        <h2 class="col-span-full px-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
+                          {formatModificationMonth(row.modifiedAt)}
+                        </h2>
+                      ) : (
+                        <For each={row.ids}>
+                          {(id) => {
+                            const item = itemsById().get(id);
+                            return (
+                              item && (
+                                <MediaTile
+                                  item={item}
+                                  compact
+                                  disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
+                                  active={activeMediaItemId() === id}
+                                  selected={selectedMediaItemIdSet().has(id)}
+                                  onActivate={(src) =>
+                                    void handleOpenItem(item, selectedLibraryId()!, src)
+                                  }
+                                  onToggleSelection={() => toggleMediaSelection(id)}
+                                />
+                              )
+                            );
+                          }}
+                        </For>
+                      )
+                    }
+                  </For>
+                </div>
               </div>
             }
           >
