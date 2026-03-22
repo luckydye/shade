@@ -973,7 +973,7 @@ export const Inspector: Component = () => {
     );
 
     const lut = () => buildLutFromPoints(pts());
-    const graphPadding = 10;
+    const graphPadding = 0;
     const innerWidth = () => Math.max(1, svgSize().width - graphPadding * 2);
     const innerHeight = () => Math.max(1, svgSize().height - graphPadding * 2);
     const chartX = (value: number) => graphPadding + (value / 255) * innerWidth();
@@ -1155,7 +1155,7 @@ export const Inspector: Component = () => {
         <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
           Master
         </span>
-        <div class="col-start-1 col-end-4 overflow-hidden rounded-md bg-[var(--surface-subtle)]">
+        <div class="col-start-1 col-end-4 overflow-hidden">
           <svg
             ref={svgRef!}
             viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
@@ -1165,6 +1165,7 @@ export const Inspector: Component = () => {
               "touch-action": "none",
             }}
             onPointerDown={(e) => {
+              if (e.button !== 0) return;
               if (e.pointerType === "touch") return;
               if (e.target !== svgRef) return;
               e.preventDefault();
@@ -1205,10 +1206,10 @@ export const Inspector: Component = () => {
                 y1={graphPadding}
                 x2={chartThresholdX(boundary.value)}
                 y2={graphPadding + innerHeight()}
-                stroke={boundary.value === 0.5 ? "var(--curve-guide-mid)" : "var(--curve-guide)"}
-                stroke-width={boundary.value === 0.5 ? "0.9" : "0.7"}
-                stroke-dasharray={boundary.value === 0.5 ? "4 4" : "2 6"}
-                opacity={boundary.value === 0.5 ? "0.4" : "0.28"}
+                stroke="var(--curve-guide)"
+                stroke-width="0.7"
+                stroke-dasharray="4 6"
+                opacity="0.5"
                 pointer-events="none"
               />
             ))}
@@ -1304,20 +1305,6 @@ export const Inspector: Component = () => {
                   pointer-events="none"
                 />
               </>
-            ))}
-            {TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
-              <text
-                x={chartThresholdX(boundary.value)}
-                y={svgSize().height - 4}
-                fill="var(--curve-label)"
-                font-size="10"
-                text-anchor={
-                  boundary.value === 0 ? "start" : boundary.value === 1 ? "end" : "middle"
-                }
-                pointer-events="none"
-              >
-                {boundary.label}
-              </text>
             ))}
           </svg>
         </div>
