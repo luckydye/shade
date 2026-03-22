@@ -453,6 +453,8 @@ pub enum LayerPrecision {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerEntry {
     pub layer: Layer,
+    #[serde(default)]
+    pub name: Option<String>,
     pub precision: LayerPrecision,
     pub blend_mode: BlendMode,
     pub opacity: f32,
@@ -479,6 +481,7 @@ impl LayerStack {
         let idx = self.layers.len();
         self.layers.push(LayerEntry {
             layer: Layer::Adjustment { ops },
+            name: None,
             precision: LayerPrecision::Half,
             blend_mode: BlendMode::Normal,
             opacity: 1.0,
@@ -501,6 +504,7 @@ impl LayerStack {
                 texture_id,
                 transform: AffineTransform::default(),
             },
+            name: None,
             precision: LayerPrecision::Half,
             blend_mode: BlendMode::Normal,
             opacity: 1.0,
@@ -515,6 +519,7 @@ impl LayerStack {
         let idx = self.layers.len();
         self.layers.push(LayerEntry {
             layer: Layer::Crop { rect },
+            name: None,
             precision: LayerPrecision::Half,
             blend_mode: BlendMode::Normal,
             opacity: 1.0,

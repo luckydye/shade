@@ -201,6 +201,13 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "rename_layer": {
+        await ensureWasmReady();
+        wasm.rename_layer(msg.layerIdx, msg.name ?? null);
+        self.postMessage({ type: "layer_renamed", requestId });
+        break;
+      }
+
       case "get_stack": {
         await ensureWasmReady();
         const json = wasm.get_stack_json();

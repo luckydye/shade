@@ -23,6 +23,7 @@ import {
   backdropTile,
   moveLayer,
   removeMask,
+  renameLayer,
   savePreset,
   saveSnapshot,
   selectLayer,
@@ -31,7 +32,12 @@ import {
   state,
 } from "../store/editor";
 import type { LayerInfo } from "../store/editor";
-import { getSelectedArtboard, type ArtboardSource } from "../store/editor-store";
+import {
+  getLayerDefaultName,
+  getLayerDisplayName,
+  getSelectedArtboard,
+  type ArtboardSource,
+} from "../store/editor-store";
 import { Button } from "./Button";
 
 type MobileLayerFocus =
@@ -66,9 +72,9 @@ const INPUT_CLASS =
 const EMPTY_STATE_CLASS =
   "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
 const LAYER_ROW_CLASS =
-  "grid h-8 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
+  "grid h-8 grid-cols-[16px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
 const ADD_LAYER_ROW_CLASS =
-  "grid h-7 grid-cols-[0px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+  "grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const ADD_LAYER_FOCI = [
@@ -625,6 +631,18 @@ function inferFocus(layer: LayerInfo | undefined): MobileLayerFocus {
   return "light";
 }
 
+const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
+  if (props.layer.kind === "crop") {
+    return <CropIcon />;
+  }
+  if (props.layer.kind === "adjustment") {
+    return <SparkIcon />;
+  }
+  return (
+    <span class="inline-block h-4 w-4 rounded-sm border border-[var(--border-medium)]" />
+  );
+};
+
 const SectionHeader: Component<{ title: string; detail?: string }> = (props) => (
   <div class="flex items-center justify-between gap-3 mt-2">
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
@@ -690,6 +708,9 @@ export const Inspector: Component = () => {
   const [presetName, setPresetName] = createSignal("");
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);
+  const [layerNameDraft, setLayerNameDraft] = createSignal("");
+  const [editingLayerIdx, setEditingLayerIdx] = createSignal<number | null>(null);
+  const [editingLayerName, setEditingLayerName] = createSignal("");
   const [draggedLayerIdx, setDraggedLayerIdx] = createSignal<number | null>(null);
   const [dropTarget, setDropTarget] = createSignal<LayerDropTarget | null>(null);
   let desktopLayerListRef: HTMLDivElement | undefined;
@@ -1770,6 +1791,35 @@ export const Inspector: Component = () => {
 
   const formatSnapshotDate = (createdAt: number) => new Date(createdAt).toLocaleString();
 
+  createEffect(
+    on(
+      () => {
+        const layer = selectedLayer();
+        return `${state.selectedLayerIdx}:${layer?.name ?? ""}`;
+      },
+      () => {
+        setLayerNameDraft(selectedLayer()?.name ?? "");
+      },
+    ),
+  );
+
+  createEffect(
+    on(
+      () => state.layers.length,
+      () => {
+        const idx = editingLayerIdx();
+        if (idx === null) {
+          return;
+        }
+        if (idx < state.layers.length) {
+          return;
+        }
+        setEditingLayerIdx(null);
+        setEditingLayerName("");
+      },
+    ),
+  );
+
   createEffect(() => {
     if (inspectorTab() !== "presets") return;
     void refreshPresetList();
@@ -1857,6 +1907,86 @@ export const Inspector: Component = () => {
       case "denoise":
         return <DenoiseSliders />;
     }
+  };
+
+  const commitSelectedLayerName = async () => {
+    const idx = state.selectedLayerIdx;
+    if (idx < 0) {
+      return;
+    }
+    const layer = selectedLayer();
+    if (!layer) {
+      throw new Error("cannot rename without a selected layer");
+    }
+    const nextName = layerNameDraft().trim();
+    const normalizedName = nextName.length > 0 ? nextName : null;
+    if ((layer.name ?? null) === normalizedName) {
+      setLayerNameDraft(normalizedName ?? "");
+      return;
+    }
+    await renameLayer(idx, normalizedName);
+    setLayerNameDraft(normalizedName ?? "");
+  };
+
+  const startInlineLayerRename = (idx: number) => {
+    const layer = state.layers[idx];
+    if (!layer) {
+      throw new Error("cannot rename a missing layer");
+    }
+    selectLayer(idx);
+    setEditingLayerIdx(idx);
+    setEditingLayerName(layer.name ?? "");
+  };
+
+  const cancelInlineLayerRename = () => {
+    setEditingLayerIdx(null);
+    setEditingLayerName("");
+  };
+
+  const commitInlineLayerRename = async () => {
+    const idx = editingLayerIdx();
+    if (idx === null) {
+      return;
+    }
+    const layer = state.layers[idx];
+    const nextName = editingLayerName().trim();
+    const normalizedName = nextName.length > 0 ? nextName : null;
+    cancelInlineLayerRename();
+    if (!layer) {
+      return;
+    }
+    if ((layer.name ?? null) === normalizedName) {
+      return;
+    }
+    await renameLayer(idx, normalizedName);
+  };
+
+  const LayerNameField: Component<{ class?: string }> = (props) => {
+    const layer = () => selectedLayer();
+    return (
+      <Show when={layer()}>
+        {(currentLayer) => (
+          <section class={`flex flex-col gap-2 ${props.class ?? ""}`}>
+            <SectionHeader title="Layer" detail={getLayerDisplayName(currentLayer())} />
+            <input
+              type="text"
+              value={layerNameDraft()}
+              placeholder={getLayerDefaultName(currentLayer().kind)}
+              class={INPUT_CLASS}
+              onInput={(event) => setLayerNameDraft(event.currentTarget.value)}
+              onBlur={() => void commitSelectedLayerName()}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") {
+                  return;
+                }
+                event.preventDefault();
+                event.currentTarget.blur();
+              }}
+            />
+          </section>
+        )}
+      </Show>
+    );
   };
 
   const CropPanel: Component = () => {
@@ -2135,18 +2265,13 @@ export const Inspector: Component = () => {
             <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
               +
             </span>
+            <span />
             <span>Add Adjustment</span>
             <span />
             <span />
           </Button>
           {[...state.layers].reverse().map((layer, reverseIdx) => {
             const realIdx = state.layers.length - 1 - reverseIdx;
-            const layerName =
-              layer.kind === "image"
-                ? "Image"
-                : layer.kind === "crop"
-                  ? "Crop"
-                  : "Adjustment";
             return (
               <>
                 <Show when={layer.kind === "image"}>
@@ -2159,6 +2284,7 @@ export const Inspector: Component = () => {
                     <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
                       +
                     </span>
+                    <span />
                     <span>Add Crop</span>
                     <span />
                     <span />
@@ -2200,14 +2326,59 @@ export const Inspector: Component = () => {
                   >
                     {layer.visible ? "●" : "○"}
                   </button>
-                  <Button
-                    type="button"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => selectLayer(realIdx)}
-                    class="min-w-0 truncate py-1 text-left text-[13px] font-medium focus-visible:outline-none"
+                  <span class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4">
+                    <LayerTypeIcon layer={layer} />
+                  </span>
+                  <Show
+                    when={editingLayerIdx() === realIdx}
+                    fallback={
+                      <Button
+                        type="button"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => selectLayer(realIdx)}
+                        onDblClick={(event) => {
+                          event.stopPropagation();
+                          startInlineLayerRename(realIdx);
+                        }}
+                        class="min-w-0 truncate py-1 text-left text-[13px] font-medium focus-visible:outline-none"
+                      >
+                        {getLayerDisplayName(layer)}
+                      </Button>
+                    }
                   >
-                    {layerName}
-                  </Button>
+                    <input
+                      ref={(input) => {
+                        queueMicrotask(() => {
+                          if (editingLayerIdx() !== realIdx) {
+                            return;
+                          }
+                          input.focus();
+                          input.select();
+                        });
+                      }}
+                      type="text"
+                      value={editingLayerName()}
+                      placeholder={getLayerDefaultName(layer.kind)}
+                      class="h-6 w-full rounded-sm border border-[var(--border-active)] bg-[var(--input-bg)] px-1.5 text-[13px] font-medium text-[var(--text)] outline-none"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onDblClick={(event) => event.stopPropagation()}
+                      onInput={(event) => setEditingLayerName(event.currentTarget.value)}
+                      onBlur={() => void commitInlineLayerRename()}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                          return;
+                        }
+                        if (event.key !== "Escape") {
+                          return;
+                        }
+                        event.preventDefault();
+                        cancelInlineLayerRename();
+                      }}
+                    />
+                  </Show>
                   <Show when={layer.kind !== "crop"}>
                     {layer.has_mask ? (
                       <Button
@@ -2279,57 +2450,132 @@ export const Inspector: Component = () => {
     </div>
   );
 
+  const DesktopSelectedLayerPanel: Component = () => (
+    <Show
+      when={state.selectedLayerIdx >= 0}
+      fallback={<EmptyState>Open an image and select a layer to edit.</EmptyState>}
+    >
+      <Show
+        when={selectedCropLayer()}
+        fallback={
+          <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
+            <div class="flex flex-col gap-3 pt-2">
+              <ControlSection title="Light">
+                <LightSliders />
+                <LevelSliders />
+                <CurvesEditor />
+              </ControlSection>
+              <ControlSection title="Color">
+                <SaturationSliders />
+                <WhiteBalanceSliders />
+              </ControlSection>
+              <ControlSection title="HSL Color Balance">
+                <HslSection />
+              </ControlSection>
+              <ControlSection title="Effects">
+                <GlowSlider />
+                <VignetteSlider />
+                <SharpenSlider />
+                <GrainSliders />
+              </ControlSection>
+              <ControlSection title="Denoise">
+                <DenoiseSliders />
+              </ControlSection>
+            </div>
+          </Show>
+        }
+      >
+        <div class="pt-2">
+          <CropPanel />
+        </div>
+      </Show>
+    </Show>
+  );
+
+  const MobileSelectedLayerPanel: Component = () => (
+    <Show
+      when={state.selectedLayerIdx >= 0}
+      fallback={<EmptyState>Open an image and select a layer to edit.</EmptyState>}
+    >
+      <div class="px-1 flex flex-col gap-3">
+        <LayerNameField />
+        <Show
+          when={selectedCropLayer()}
+          fallback={
+            <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
+              <div>{renderLayerBody()}</div>
+            </Show>
+          }
+        >
+          <CropPanel />
+        </Show>
+      </div>
+
+      <Show when={selectedAdjustmentLayer()}>
+        <div class="mt-3 flex items-center gap-1 overflow-x-auto border-t border-[var(--border)] pt-3">
+          {adjustmentLayers().map(({ idx }) => {
+            const focus = () =>
+              layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
+            const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
+            return (
+              <Button
+                type="button"
+                onClick={() => {
+                  selectLayer(idx);
+                  setIsDrawerOpen(true);
+                  setIsPickerOpen(false);
+                }}
+                class={`${MOBILE_LAYER_TAB_CLASS} ${
+                  isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
+                }`}
+              >
+                <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
+                <span>{focusLabels[focus()]}</span>
+              </Button>
+            );
+          })}
+
+          <div class="flex-1"></div>
+
+          <Button
+            type="button"
+            onClick={() => setIsPickerOpen((v) => !v)}
+            class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] ${
+              isPickerOpen() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
+            }`}
+          >
+            <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
+              +
+            </span>
+            <span>Add</span>
+          </Button>
+
+          <Show
+            when={
+              state.selectedLayerIdx >= 0 &&
+              state.layers[state.selectedLayerIdx]?.kind !== "image"
+            }
+          >
+            <Button
+              type="button"
+              onClick={() => void handleDeleteSelectedLayer()}
+              class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem]`}
+            >
+              <TrashIcon />
+              <span>Delete</span>
+            </Button>
+          </Show>
+        </div>
+      </Show>
+    </Show>
+  );
+
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
       <div class={`m-2 hidden h-[calc(100%-1rem)] lg:flex lg:flex-col ${PANEL_SHELL_CLASS}`}>
         <div class="media-scroll flex-1 pr-5 overflow-y-auto">
           <DesktopEditPanel />
-          {inspectorTab() === "presets" ? (
-            <PresetsPanel />
-          ) : (
-            <Show
-              when={selectedCropLayer()}
-              fallback={
-                <Show
-                  when={state.selectedLayerIdx >= 0}
-                  fallback={
-                    <EmptyState>Open an image and select a layer to edit.</EmptyState>
-                  }
-                >
-                  <Show
-                    when={selectedAdjustmentLayer()}
-                    fallback={<ImageInfoPanel />}
-                  >
-                    <div class="flex flex-col gap-3 pt-2">
-                      <ControlSection title="Light">
-                        <LightSliders />
-                        <LevelSliders />
-                        <CurvesEditor />
-                      </ControlSection>
-                      <ControlSection title="Color">
-                        <SaturationSliders />
-                        <WhiteBalanceSliders />
-                      </ControlSection>
-                      <ControlSection title="HSL Color Balance">
-                        <HslSection />
-                      </ControlSection>
-                      <ControlSection title="Effects">
-                        <GlowSlider />
-                        <VignetteSlider />
-                        <SharpenSlider />
-                        <GrainSliders />
-                      </ControlSection>
-                      <ControlSection title="Denoise">
-                        <DenoiseSliders />
-                      </ControlSection>
-                    </div>
-                  </Show>
-                </Show>
-              }
-            >
-              <CropPanel />
-            </Show>
-          )}
+          {inspectorTab() === "presets" ? <PresetsPanel /> : <DesktopSelectedLayerPanel />}
         </div>
       </div>
 
@@ -2347,84 +2593,7 @@ export const Inspector: Component = () => {
         </div>
 
         <div class="px-4 pb-2">
-          <Show
-            when={inspectorTab() === "presets"}
-            fallback={
-              <Show
-                when={selectedCropLayer()}
-                fallback={
-                  <Show
-                    when={state.selectedLayerIdx >= 0 && selectedAdjustmentLayer()}
-                    fallback={
-                      <EmptyState>Open an image and select a layer to edit.</EmptyState>
-                    }
-                  >
-                    <div class="px-1">{renderLayerBody()}</div>
-
-                    <div class="mt-3 flex items-center gap-1 overflow-x-auto border-t border-[var(--border)] pt-3">
-                      {adjustmentLayers().map(({ idx }) => {
-                        const focus = () =>
-                          layerFocusOverrides().get(idx) ??
-                          inferFocus(state.layers[idx]);
-                        const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
-                        return (
-                          <Button
-                            type="button"
-                            onClick={() => {
-                              selectLayer(idx);
-                              setIsDrawerOpen(true);
-                              setIsPickerOpen(false);
-                            }}
-                            class={`${MOBILE_LAYER_TAB_CLASS} ${
-                              isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
-                            }`}
-                          >
-                            <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
-                            <span>{focusLabels[focus()]}</span>
-                          </Button>
-                        );
-                      })}
-
-                      <div class="flex-1"></div>
-
-                      <Button
-                        type="button"
-                        onClick={() => setIsPickerOpen((v) => !v)}
-                        class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] ${
-                          isPickerOpen() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
-                        }`}
-                      >
-                        <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
-                          +
-                        </span>
-                        <span>Add</span>
-                      </Button>
-            
-                      <Show
-                        when={
-                          state.selectedLayerIdx >= 0 &&
-                          state.layers[state.selectedLayerIdx]?.kind !== "image"
-                        }
-                      >
-                        <Button
-                          type="button"
-                          onClick={() => void handleDeleteSelectedLayer()}
-                          class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem]`}
-                        >
-                          <TrashIcon />
-                          <span>Delete</span>
-                        </Button>
-                      </Show>
-                    </div>
-                  </Show>
-                }
-              >
-                <div class="px-1">
-                  <CropPanel />
-                </div>
-              </Show>
-            }
-          >
+          <Show when={inspectorTab() === "presets"} fallback={<MobileSelectedLayerPanel />}>
             <div class="px-1">
               <PresetsPanel />
             </div>

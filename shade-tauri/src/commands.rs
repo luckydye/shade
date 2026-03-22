@@ -2165,6 +2165,12 @@ pub struct LayerOpacityParams {
     pub opacity: f32,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenameLayerParams {
+    pub layer_idx: usize,
+    pub name: Option<String>,
+}
+
 #[tauri::command]
 pub async fn set_layer_opacity(
     params: LayerOpacityParams,
@@ -2176,6 +2182,27 @@ pub async fn set_layer_opacity(
             return Err("index out of bounds".into());
         }
         st.stack.layers[params.layer_idx].opacity = params.opacity.clamp(0.0, 1.0);
+        st.stack.generation += 1;
+    }
+    persist_current_edit_version(&state).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_layer(
+    params: RenameLayerParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        st.stack.layers[params.layer_idx].name = params
+            .name
+            .as_ref()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
         st.stack.generation += 1;
     }
     persist_current_edit_version(&state).await?;
@@ -2296,6 +2323,7 @@ impl From<&MaskParams> for MaskParamsInfo {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LayerEntryInfo {
     pub kind: String,
+    pub name: Option<String>,
     pub visible: bool,
     pub opacity: f32,
     pub blend_mode: String,
@@ -3025,6 +3053,7 @@ pub async fn get_layer_stack(
                 shade_core::Layer::Crop { .. } => "crop".into(),
                 shade_core::Layer::Adjustment { .. } => "adjustment".into(),
             },
+            name: l.name.clone(),
             visible: l.visible,
             opacity: l.opacity,
             blend_mode: format!("{:?}", l.blend_mode),

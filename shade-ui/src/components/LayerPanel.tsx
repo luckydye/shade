@@ -9,6 +9,7 @@ import {
   removeMask,
   moveLayer,
 } from "../store/editor";
+import { getLayerDisplayName } from "../store/editor-store";
 import { Button } from "./Button";
 
 type GradientKind = "linear" | "radial";
@@ -158,13 +159,7 @@ const LayerPanel: Component = () => {
                   >
                     {layer.visible ? "●" : "○"}
                   </Button>
-                  <span class="flex-1 truncate">
-                    {layer.kind === "image"
-                      ? "Image"
-                      : layer.kind === "crop"
-                        ? "Crop"
-                        : "Adjustment"}
-                  </span>
+                  <span class="flex-1 truncate">{getLayerDisplayName(layer)}</span>
                   <Show when={layer.has_mask}>
                     <Button
                       class="text-blue-400 text-[10px] hover:text-red-400 transition-colors"

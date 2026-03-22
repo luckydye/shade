@@ -65,6 +65,7 @@ pub fn run() {
             commands::move_layer,
             commands::set_layer_visible,
             commands::set_layer_opacity,
+            commands::rename_layer,
             commands::get_layer_stack,
             commands::list_pictures,
             commands::list_media_libraries,

@@ -116,6 +116,17 @@ impl WasmEngine {
         self.stack.generation += 1;
     }
 
+    pub fn rename_layer(&mut self, layer_idx: usize, name: Option<String>) {
+        let Some(layer) = self.stack.layers.get_mut(layer_idx) else {
+            panic!("layer index out of bounds");
+        };
+        layer.name = name
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.stack.generation += 1;
+    }
+
     pub fn apply_tone(&mut self, layer_idx: usize, params: ToneParams) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
             if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {

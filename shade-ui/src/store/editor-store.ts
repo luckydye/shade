@@ -5,6 +5,7 @@ import type { RenderedTile } from "../viewport/types";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop";
+  name?: string | null;
   visible: boolean;
   opacity: number;
   blend_mode?: string;
@@ -164,6 +165,24 @@ export function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number)
     }
   }
   return layers.length - 1;
+}
+
+export function getLayerDefaultName(kind: LayerInfo["kind"]) {
+  switch (kind) {
+    case "image":
+      return "Image";
+    case "crop":
+      return "Crop";
+    case "adjustment":
+      return "Adjustment";
+    default:
+      throw new Error(`unknown layer kind: ${String(kind)}`);
+  }
+}
+
+export function getLayerDisplayName(layer: Pick<LayerInfo, "kind" | "name">) {
+  const name = layer.name?.trim();
+  return name && name.length > 0 ? name : getLayerDefaultName(layer.kind);
 }
 
 export function clamp(value: number, min: number, max: number) {

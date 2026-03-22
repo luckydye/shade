@@ -38,6 +38,7 @@ export {
   selectLayer,
   setLayerOpacity,
   setLayerVisible,
+  renameLayer,
   removeMask,
   startCropMode,
   updateCropDraft,

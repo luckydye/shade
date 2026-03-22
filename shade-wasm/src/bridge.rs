@@ -329,6 +329,11 @@ pub fn delete_layer(layer_idx: usize) {
 }
 
 #[wasm_bindgen]
+pub fn rename_layer(layer_idx: usize, name: Option<String>) {
+    ENGINE.with(|e| e.borrow_mut().rename_layer(layer_idx, name));
+}
+
+#[wasm_bindgen]
 pub fn apply_crop(
     layer_idx: usize,
     crop_x: f32,
@@ -481,6 +486,7 @@ pub fn get_stack_json() -> String {
                         shade_core::Layer::Crop { .. } => "crop",
                         shade_core::Layer::Adjustment { .. } => "adjustment",
                     },
+                    "name": l.name.clone(),
                     "visible": l.visible,
                     "opacity": l.opacity,
                     "crop": match &l.layer {

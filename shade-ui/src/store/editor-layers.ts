@@ -114,6 +114,14 @@ export async function setLayerOpacity(idx: number, opacity: number) {
   await runLayerMutation(() => bridge.setLayerOpacity(idx, opacity));
 }
 
+export async function renameLayer(idx: number, name: string | null) {
+  if (idx < 0 || idx >= state.layers.length) {
+    throw new Error("layer index is out of bounds");
+  }
+  await bridge.renameLayer(idx, name);
+  await refreshLayerStack();
+}
+
 export async function deleteLayer(idx: number) {
   await bridge.deleteLayer(idx);
   await refreshLayerStack();

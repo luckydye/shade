@@ -279,6 +279,7 @@ export interface MaskParamsInfo {
 
 export interface LayerInfo {
   kind: string;
+  name?: string | null;
   visible: boolean;
   opacity: number;
   blend_mode?: string;
@@ -711,6 +712,22 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
   await workerCall(
     { type: "set_layer_opacity", layerIdx: idx, opacity },
     "layer_updated",
+  );
+}
+
+export async function renameLayer(
+  idx: number,
+  name: string | null,
+): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("rename_layer", { params: { layer_idx: idx, name } });
+    return;
+  }
+  await ensureWorkerReady();
+  await workerCall(
+    { type: "rename_layer", layerIdx: idx, name },
+    "layer_renamed",
   );
 }
 
