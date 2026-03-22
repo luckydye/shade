@@ -58,6 +58,7 @@ type LibraryEntry = MediaLibrary | PeerLibrary;
 
 type MediaItemMetadata = {
   hasSnapshots: boolean;
+  rating: number | null;
 };
 
 type MediaItem =
@@ -162,6 +163,19 @@ function normalizeModifiedAt(modifiedAt: number | null | undefined) {
     : null;
 }
 
+function normalizeRating(rating: number | null | undefined) {
+  return typeof rating === "number" &&
+    Number.isInteger(rating) &&
+    rating >= 1 &&
+    rating <= 5
+    ? rating
+    : null;
+}
+
+function ratingStars(rating: number) {
+  return `${"★".repeat(rating)}${"☆".repeat(5 - rating)}`;
+}
+
 function modificationMonthKey(modifiedAt: number | null | undefined) {
   const normalized = normalizeModifiedAt(modifiedAt);
   if (normalized === null) {
@@ -191,7 +205,10 @@ function localMediaItem(image: LibraryImage): MediaItem {
     name: image.name || pictureName(image.path),
     path: image.path,
     modifiedAt: normalizeModifiedAt(image.modified_at),
-    metadata: { hasSnapshots: image.metadata?.has_snapshots ?? false },
+    metadata: {
+      hasSnapshots: image.metadata?.has_snapshots ?? false,
+      rating: normalizeRating(image.metadata?.rating),
+    },
   };
 }
 
@@ -202,7 +219,7 @@ function peerMediaItem(image: PeerLibraryItem): MediaItem {
     name: image.name,
     peerId: image.peerId,
     modifiedAt: normalizeModifiedAt(image.modified_at),
-    metadata: { hasSnapshots: false },
+    metadata: { hasSnapshots: false, rating: null },
   };
 }
 
@@ -441,6 +458,14 @@ const MediaTile: Component<{
         {loadError() && (
           <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
             <span class="text-[11px] font-medium text-red-400">Thumbnail failed</span>
+          </div>
+        )}
+        {props.item.metadata.rating !== null && (
+          <div
+            class="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-amber-300 shadow-sm"
+            aria-label={`${props.item.metadata.rating} star rating`}
+          >
+            {ratingStars(props.item.metadata.rating)}
           </div>
         )}
         {props.item.metadata.hasSnapshots && (

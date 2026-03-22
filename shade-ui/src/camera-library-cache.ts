@@ -14,6 +14,7 @@ type CachedCameraItem = {
   contentKey: string;
   name: string;
   modified_at: number | null;
+  rating: number | null;
 };
 
 function cameraContentKey(path: string) {
@@ -34,6 +35,15 @@ function normalizeModifiedAt(modifiedAt: unknown) {
     : null;
 }
 
+function normalizeRating(rating: unknown) {
+  return typeof rating === "number" &&
+    Number.isInteger(rating) &&
+    rating >= 1 &&
+    rating <= 5
+    ? rating
+    : null;
+}
+
 function normalizeLibraryImage(image: LibraryImage): LibraryImage {
   return {
     path: image.path,
@@ -41,6 +51,10 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     modified_at: normalizeModifiedAt(
       (image as LibraryImage & { modified_at?: unknown }).modified_at,
     ),
+    metadata: {
+      has_snapshots: image.metadata?.has_snapshots ?? false,
+      rating: normalizeRating(image.metadata?.rating),
+    },
   };
 }
 
@@ -49,6 +63,7 @@ function toCachedCameraItem(image: LibraryImage): CachedCameraItem {
     contentKey: cameraContentKey(image.path),
     name: image.name,
     modified_at: normalizeModifiedAt(image.modified_at),
+    rating: normalizeRating(image.metadata?.rating),
   };
 }
 
@@ -57,6 +72,10 @@ function toLibraryImage(host: string, item: CachedCameraItem): LibraryImage {
     path: `ccapi://${host}${item.contentKey}`,
     name: item.name,
     modified_at: normalizeModifiedAt(item.modified_at),
+    metadata: {
+      has_snapshots: false,
+      rating: normalizeRating(item.rating),
+    },
   };
 }
 

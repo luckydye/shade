@@ -55,16 +55,16 @@ impl WasmEngine {
         height: u32,
     ) -> u64 {
         let mut linear_pixels = pixels
-                .chunks_exact(4)
-                .flat_map(|rgba| {
-                    [
-                        rgba[0] as f32 / 255.0,
-                        rgba[1] as f32 / 255.0,
-                        rgba[2] as f32 / 255.0,
-                        rgba[3] as f32 / 255.0,
-                    ]
-                })
-                .collect::<Vec<_>>();
+            .chunks_exact(4)
+            .flat_map(|rgba| {
+                [
+                    rgba[0] as f32 / 255.0,
+                    rgba[1] as f32 / 255.0,
+                    rgba[2] as f32 / 255.0,
+                    rgba[3] as f32 / 255.0,
+                ]
+            })
+            .collect::<Vec<_>>();
         to_linear_srgb_f32(&mut linear_pixels, &shade_core::ColorSpace::Srgb);
         let image = FloatImage {
             pixels: linear_pixels.into(),
@@ -413,7 +413,9 @@ mod tests {
             },
         );
 
-        let mask_id = engine.stack.layers[1].mask.expect("mask should be attached");
+        let mask_id = engine.stack.layers[1]
+            .mask
+            .expect("mask should be attached");
         let params = engine
             .stack
             .mask_params

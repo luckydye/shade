@@ -72,6 +72,7 @@ pub struct MediaLibrary {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct LibraryImageMetadata {
     pub has_snapshots: bool,
+    pub rating: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -913,9 +914,16 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             name: item.name,
             path: item.path,
             modified_at: item.modified_at,
-            metadata: Default::default(),
+            metadata: LibraryImageMetadata {
+                has_snapshots: false,
+                rating: item.rating,
+            },
         })
         .collect())
+}
+
+fn ccapi_rating(value: &str) -> Result<Option<u8>, String> {
+    shade_io::library_index::normalize_rating(value)
 }
 
 async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, String> {
@@ -924,20 +932,37 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
     let mut items = Vec::new();
     for storage in storage.storagelist {
         for file_path in api.files(&storage).await.map_err(|e| e.to_string())? {
-            let modified_at = tokio::time::timeout(
+            let info = match tokio::time::timeout(
                 std::time::Duration::from_secs(2),
                 api.info(&file_path),
             )
             .await
-            .ok()
-            .and_then(Result::ok)
-            .and_then(|info| chrono_like_timestamp_millis(&info.lastmodifieddate).ok())
-            .flatten();
+            {
+                Ok(result) => Some(result.map_err(|error| error.to_string())?),
+                Err(_) => {
+                    return Err(format!(
+                        "timed out loading CCAPI metadata for {file_path}"
+                    ))
+                }
+            };
+            let modified_at = info
+                .as_ref()
+                .map(|value| chrono_like_timestamp_millis(&value.lastmodifieddate))
+                .transpose()?
+                .flatten();
+            let rating = info
+                .as_ref()
+                .map(|value| ccapi_rating(&value.rating))
+                .transpose()?
+                .flatten();
             items.push(LibraryImage {
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
                 modified_at,
-                metadata: Default::default(),
+                metadata: LibraryImageMetadata {
+                    has_snapshots: false,
+                    rating,
+                },
             });
         }
     }
@@ -1014,7 +1039,10 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
         name: item.name,
         path: item.path,
         modified_at: item.modified_at,
-        metadata: Default::default(),
+        metadata: LibraryImageMetadata {
+            has_snapshots: false,
+            rating: item.rating,
+        },
     }
 }
 

@@ -1415,8 +1415,8 @@ mod tests {
         rgba_display_f32_to_u8, view_uv_mapping, FloatImage, PreviewCrop, Renderer,
     };
     use shade_core::{
-        AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, MaskData,
-        TextureId, VignetteParams,
+        AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, MaskData, TextureId,
+        VignetteParams,
     };
     use std::collections::HashMap;
 
@@ -1578,11 +1578,7 @@ mod tests {
                 FloatImage {
                     width: 1,
                     height: 2,
-                    pixels: vec![
-                        0.25, 0.25, 0.25, 1.0,
-                        0.25, 0.25, 0.25, 1.0,
-                    ]
-                    .into(),
+                    pixels: vec![0.25, 0.25, 0.25, 1.0, 0.25, 0.25, 0.25, 1.0].into(),
                 },
             );
             image_sources
@@ -1621,7 +1617,15 @@ mod tests {
         };
 
         let baseline_tex = renderer
-            .render_stack_preview_texture(&baseline_stack, &make_sources(), 1, 2, 1, 2, None)
+            .render_stack_preview_texture(
+                &baseline_stack,
+                &make_sources(),
+                1,
+                2,
+                1,
+                2,
+                None,
+            )
             .expect("baseline render");
         let baseline = renderer
             .readback_work_texture_to_f32(&baseline_tex, 1, 2)
@@ -1629,7 +1633,15 @@ mod tests {
             .expect("baseline readback");
 
         let unmasked_tex = renderer
-            .render_stack_preview_texture(&unmasked_stack, &make_sources(), 1, 2, 1, 2, None)
+            .render_stack_preview_texture(
+                &unmasked_stack,
+                &make_sources(),
+                1,
+                2,
+                1,
+                2,
+                None,
+            )
             .expect("unmasked render");
         let unmasked = renderer
             .readback_work_texture_to_f32(&unmasked_tex, 1, 2)
@@ -1637,7 +1649,15 @@ mod tests {
             .expect("unmasked readback");
 
         let masked_tex = renderer
-            .render_stack_preview_texture(&masked_stack, &make_sources(), 1, 2, 1, 2, None)
+            .render_stack_preview_texture(
+                &masked_stack,
+                &make_sources(),
+                1,
+                2,
+                1,
+                2,
+                None,
+            )
             .expect("masked render");
         let masked = renderer
             .readback_work_texture_to_f32(&masked_tex, 1, 2)

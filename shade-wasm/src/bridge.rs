@@ -335,33 +335,18 @@ pub fn rename_layer(layer_idx: usize, name: Option<String>) {
 }
 
 #[wasm_bindgen]
-pub fn apply_linear_gradient_mask(
-    layer_idx: usize,
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-) {
+pub fn apply_linear_gradient_mask(layer_idx: usize, x1: f32, y1: f32, x2: f32, y2: f32) {
     ENGINE.with(|e| {
-        e.borrow_mut().apply_gradient_mask(
-            layer_idx,
-            MaskParams::Linear { x1, y1, x2, y2 },
-        )
+        e.borrow_mut()
+            .apply_gradient_mask(layer_idx, MaskParams::Linear { x1, y1, x2, y2 })
     });
 }
 
 #[wasm_bindgen]
-pub fn apply_radial_gradient_mask(
-    layer_idx: usize,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-) {
+pub fn apply_radial_gradient_mask(layer_idx: usize, cx: f32, cy: f32, radius: f32) {
     ENGINE.with(|e| {
-        e.borrow_mut().apply_gradient_mask(
-            layer_idx,
-            MaskParams::Radial { cx, cy, radius },
-        )
+        e.borrow_mut()
+            .apply_gradient_mask(layer_idx, MaskParams::Radial { cx, cy, radius })
     });
 }
 

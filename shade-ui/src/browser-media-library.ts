@@ -224,7 +224,7 @@ function toLibraryImage(record: BrowserMediaItemRecord): LibraryImage {
     path: record.path,
     name: record.name,
     modified_at: record.modified_at,
-    metadata: { has_snapshots: false },
+    metadata: { has_snapshots: false, rating: null },
   };
 }
 

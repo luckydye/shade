@@ -25,6 +25,7 @@ type CachedLocalItem = {
   name: string;
   modified_at: number | null;
   has_snapshots: boolean;
+  rating: number | null;
 };
 
 const failedThumbnailLoads: CachedFailures = new Map();
@@ -33,6 +34,15 @@ const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
 function normalizeModifiedAt(modifiedAt: unknown) {
   return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
     ? modifiedAt
+    : null;
+}
+
+function normalizeRating(rating: unknown) {
+  return typeof rating === "number" &&
+    Number.isInteger(rating) &&
+    rating >= 1 &&
+    rating <= 5
+    ? rating
     : null;
 }
 
@@ -45,6 +55,7 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     ),
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
+      rating: normalizeRating(image.metadata?.rating),
     },
   };
 }
@@ -56,6 +67,7 @@ function toCachedLocalItem(libraryId: string, image: LibraryImage): CachedLocalI
     name: image.name,
     modified_at: normalizeModifiedAt(image.modified_at),
     has_snapshots: image.metadata?.has_snapshots ?? false,
+    rating: normalizeRating(image.metadata?.rating),
   };
 }
 
@@ -66,6 +78,7 @@ function toLibraryImage(item: CachedLocalItem): LibraryImage {
     modified_at: normalizeModifiedAt(item.modified_at),
     metadata: {
       has_snapshots: item.has_snapshots,
+      rating: normalizeRating(item.rating),
     },
   };
 }
