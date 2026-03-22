@@ -144,21 +144,29 @@ fn normalize_curve_points(points: &[CurveControlPoint]) -> Vec<CurveControlPoint
     let mut normalized: Vec<CurveControlPoint> = points
         .iter()
         .map(|point| CurveControlPoint {
-            x: clamp(point.x.round(), 1.0, 254.0),
+            x: clamp(point.x.round(), 0.0, 255.0),
             y: clamp(point.y, 0.0, 1.0),
         })
         .collect();
     normalized.sort_by(|a, b| a.x.total_cmp(&b.x));
     normalized.dedup_by(|a, b| a.x == b.x);
+    if normalized.first().map(|point| point.x) != Some(0.0) {
+        normalized.insert(0, CurveControlPoint { x: 0.0, y: 0.0 });
+    }
+    if normalized.last().map(|point| point.x) != Some(255.0) {
+        normalized.push(CurveControlPoint { x: 255.0, y: 1.0 });
+    }
     normalized
 }
 
 pub fn build_curve_lut_from_points(points: &[CurveControlPoint]) -> Vec<f32> {
-    let sorted = normalize_curve_points(points);
-    let mut anchors = Vec::with_capacity(sorted.len() + 2);
-    anchors.push(CurveControlPoint { x: 0.0, y: 0.0 });
-    anchors.extend(sorted);
-    anchors.push(CurveControlPoint { x: 255.0, y: 1.0 });
+    let anchors = normalize_curve_points(points);
+    assert!(anchors.len() >= 2, "curve requires explicit left and right endpoint clamps");
+    assert!(anchors[0].x == 0.0, "curve must include a left endpoint clamp at x=0");
+    assert!(
+        anchors[anchors.len() - 1].x == 255.0,
+        "curve must include a right endpoint clamp at x=255"
+    );
 
     let mut lut = vec![0.0; 256];
     let mut delta = vec![0.0; anchors.len() - 1];
@@ -937,5 +945,21 @@ mod tests {
         stack.set_mask(0, MaskData::new_full(10, 10));
         // set_mask (not set_mask_with_params) should not store params
         assert!(stack.get_mask_params(0).is_none());
+    }
+
+    #[test]
+    fn curve_lut_respects_endpoint_clamps() {
+        let lut = build_curve_lut_from_points(&[
+            CurveControlPoint { x: 0.0, y: 0.2 },
+            CurveControlPoint { x: 64.0, y: 0.25 },
+            CurveControlPoint { x: 128.0, y: 0.5 },
+            CurveControlPoint { x: 192.0, y: 0.75 },
+            CurveControlPoint { x: 255.0, y: 0.8 },
+        ]);
+        assert!((lut[0] - 0.2).abs() < 0.0001, "left clamp should drive lut[0]");
+        assert!(
+            (lut[255] - 0.8).abs() < 0.0001,
+            "right clamp should drive lut[255]"
+        );
     }
 }

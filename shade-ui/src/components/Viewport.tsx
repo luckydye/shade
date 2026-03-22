@@ -85,6 +85,10 @@ function rotatePoint(x: number, y: number, centerX: number, centerY: number, ang
   };
 }
 
+function isMissingArtboardError(error: unknown) {
+  return error instanceof Error && error.message === "artboard not found";
+}
+
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
@@ -201,6 +205,21 @@ export const Viewport: Component = () => {
     } finally {
       setIsSavingRating(false);
     }
+  }
+
+  function handleViewportArtboardActionError(error: unknown) {
+    if (isMissingArtboardError(error)) {
+      return;
+    }
+    setState("loadError", error instanceof Error ? error.message : String(error));
+  }
+
+  function requestArtboardSelection(artboardId: string) {
+    void selectArtboard(artboardId).catch(handleViewportArtboardActionError);
+  }
+
+  function requestArtboardClose(artboardId: string) {
+    void closeArtboard(artboardId).catch(handleViewportArtboardActionError);
   }
 
   // Build the camera for the current viewport state
@@ -1316,7 +1335,7 @@ export const Viewport: Component = () => {
         pressedClose?.kind === "close" &&
         releasedClose?.id === pressedClose.artboardId
       ) {
-        void closeArtboard(pressedClose.artboardId);
+        requestArtboardClose(pressedClose.artboardId);
       }
       return;
     }
@@ -1327,7 +1346,7 @@ export const Viewport: Component = () => {
       setPressedArtboardChrome(null);
       gesture = null;
       if (shouldSelect) {
-        void selectArtboard(artboardId);
+        requestArtboardSelection(artboardId);
       }
       if (
         stageRef &&
@@ -1414,7 +1433,7 @@ export const Viewport: Component = () => {
       void refreshPreview();
       gesture = null;
       if (tappedArtboardId && tappedArtboardId !== state.selectedArtboardId) {
-        void selectArtboard(tappedArtboardId);
+        requestArtboardSelection(tappedArtboardId);
       }
       return;
     }

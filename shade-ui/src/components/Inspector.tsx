@@ -249,6 +249,8 @@ const Slider: Component<SliderProps> = (props) => {
 };
 
 const CURVE_SAMPLE_INDICES = [64, 128, 192] as const;
+const CURVE_MIN_X = 0;
+const CURVE_MAX_X = 255;
 const IDENTITY_LUT = Array.from({ length: 256 }, (_, idx) => idx / 255);
 const DEFAULT_TONE = {
   exposure: 0,
@@ -308,15 +310,30 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function normalizePoints(points: readonly ControlPoint[]): ControlPoint[] {
-  return [...points]
+  const normalized = [...points]
     .map(normalizePoint)
     .sort((a, b) => a.x - b.x)
     .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
+  if (normalized[0]?.x !== CURVE_MIN_X) {
+    normalized.unshift({ x: CURVE_MIN_X, y: 0 });
+  }
+  if (normalized[normalized.length - 1]?.x !== CURVE_MAX_X) {
+    normalized.push({ x: CURVE_MAX_X, y: 1 });
+  }
+  return normalized;
 }
 
 function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
-  const sorted = normalizePoints(points);
-  const anchors = [{ x: 0, y: 0 }, ...sorted, { x: 255, y: 1 }];
+  const anchors = normalizePoints(points);
+  if (anchors.length < 2) {
+    throw new Error("curve requires explicit left and right endpoint clamps");
+  }
+  if (anchors[0]?.x !== CURVE_MIN_X) {
+    throw new Error("curve must include a left endpoint clamp at x=0");
+  }
+  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
+    throw new Error("curve must include a right endpoint clamp at x=255");
+  }
   const lut = new Array<number>(256);
   const delta = new Array<number>(anchors.length - 1);
   const tangent = new Array<number>(anchors.length);
@@ -371,10 +388,22 @@ function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
 }
 
 function normalizePoint(point: ControlPoint): ControlPoint {
+  const roundedX = Math.round(point.x);
+  return {
+    x: roundedX <= CURVE_MIN_X ? CURVE_MIN_X : roundedX >= CURVE_MAX_X ? CURVE_MAX_X : clamp(roundedX, 1, 254),
+    y: clamp(point.y, 0, 1),
+  };
+}
+
+function normalizeInteriorPoint(point: ControlPoint): ControlPoint {
   return {
     x: clamp(Math.round(point.x), 1, 254),
     y: clamp(point.y, 0, 1),
   };
+}
+
+function isEndpointPoint(point: ControlPoint) {
+  return point.x === CURVE_MIN_X || point.x === CURVE_MAX_X;
 }
 
 function curvePath(lut: readonly number[]) {
@@ -741,7 +770,7 @@ export const Inspector: Component = () => {
     return layer;
   };
   const defaultCurvePoints = () =>
-    CURVE_SAMPLE_INDICES.map((x) => ({ x, y: IDENTITY_LUT[x] }));
+    normalizePoints(CURVE_SAMPLE_INDICES.map((x) => ({ x, y: IDENTITY_LUT[x] })));
 
   const tone = () =>
     selectedAdjustmentLayer()?.adjustments?.tone ?? {
@@ -971,7 +1000,7 @@ export const Inspector: Component = () => {
             defaultCurvePoints();
           nextId = 0;
           setPts(
-            (points.length === 0 ? defaultCurvePoints() : points).map((point) => ({
+            normalizePoints(points.length === 0 ? defaultCurvePoints() : points).map((point) => ({
               ...point,
               id: nextId++,
             })),
@@ -1039,7 +1068,14 @@ export const Inspector: Component = () => {
       if (id === null) {
         return;
       }
-      const { x, y } = normalizePoint(svgCoords({ clientX, clientY }));
+      const current = pts().find((point) => point.id === id);
+      if (!current) {
+        throw new Error("dragged curve point not found");
+      }
+      const nextCoords = svgCoords({ clientX, clientY });
+      const { x, y } = isEndpointPoint(current)
+        ? { x: current.x, y: clamp(nextCoords.y, 0, 1) }
+        : normalizeInteriorPoint(nextCoords);
       const next = pts()
         .map((p) => (p.id === id ? { ...p, x, y } : p))
         .sort((a, b) => a.x - b.x);
@@ -1123,7 +1159,7 @@ export const Inspector: Component = () => {
     };
 
     const startNewPointDrag = (clientX: number, clientY: number) => {
-      const { x, y } = normalizePoint(svgCoords({ clientX, clientY }));
+      const { x, y } = normalizeInteriorPoint(svgCoords({ clientX, clientY }));
       const id = nextId++;
       const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
       setPts(next);
@@ -1133,9 +1169,13 @@ export const Inspector: Component = () => {
     };
 
     const startExistingPointDrag = (id: number) => {
+      const point = pts().find((candidate) => candidate.id === id);
+      if (!point) {
+        throw new Error("curve point not found");
+      }
       setHoveredId(id);
       const now = Date.now();
-      if (now - lastTapTime < 300 && lastTapId === id) {
+      if (now - lastTapTime < 300 && lastTapId === id && !isEndpointPoint(point)) {
         lastTapTime = 0;
         const next = pts().filter((p) => p.id !== id);
         setPts(next);
