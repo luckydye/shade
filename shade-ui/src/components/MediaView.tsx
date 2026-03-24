@@ -778,6 +778,8 @@ export const MediaView: Component = () => {
   // restored after column count changes (e.g. window resize or view switch).
   const [anchorItemId, setAnchorItemId] = createSignal<string | null>(null);
   const [anchorRowOffset, setAnchorRowOffset] = createSignal(0);
+  const [isScrolling, setIsScrolling] = createSignal(false);
+  let scrollLabelTimeout: ReturnType<typeof setTimeout> | undefined;
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
@@ -1099,6 +1101,36 @@ export const MediaView: Component = () => {
       return 0;
     }
     return totalHeight();
+  });
+
+  // Label shown in the scroll landmark tooltip — the month/year of the first
+  // visible date header at or above the current scroll position.
+  const scrollLabel = createMemo(() => {
+    const rows = stableGridRows();
+    const offsets = rowOffsets();
+    const top = scrollTop();
+    let label = "";
+    for (let i = 0; i < rows.length; i++) {
+      if (offsets[i] > top) break;
+      const row = rows[i];
+      if (row.kind === "date") {
+        label = formatModificationMonth(row.modifiedAt);
+      }
+    }
+    return label;
+  });
+
+  // Vertical position (px from top of scroll viewport) for the landmark tooltip,
+  // tracking the scrollbar thumb center.
+  const tooltipTop = createMemo(() => {
+    const total = totalHeight();
+    const viewport = viewportHeight();
+    const top = scrollTop();
+    if (total <= viewport || viewport <= 0) return viewport / 2;
+    const thumbHeight = Math.max(40, (viewport * viewport) / total);
+    const thumbRange = viewport - thumbHeight;
+    const scrollRange = total - viewport;
+    return Math.round((top / scrollRange) * thumbRange + thumbHeight / 2);
   });
 
   onMount(() => {
@@ -1620,8 +1652,8 @@ export const MediaView: Component = () => {
       : "mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0";
   const scrollClass = () =>
     isEditorStrip()
-      ? "media-scroll flex-1 overflow-y-auto px-2 py-3"
-      : "media-scroll flex-1 overflow-y-auto p-4 md:p-6";
+      ? "media-scroll h-full overflow-y-auto px-2 py-3"
+      : "media-scroll h-full overflow-y-auto p-4 md:p-6";
 
   return (
     <div
@@ -1886,15 +1918,19 @@ export const MediaView: Component = () => {
           </div>
         </div>
       </Show>
-      <div
-        ref={scrollRef!}
-        class={scrollClass()}
-        onScroll={(event) => {
-          const top = event.currentTarget.scrollTop;
-          setScrollTop(top);
-          updateScrollAnchor(top);
-        }}
-      >
+      <div class="relative flex-1 min-h-0">
+        <div
+          ref={scrollRef!}
+          class={scrollClass()}
+          onScroll={(event) => {
+            const top = event.currentTarget.scrollTop;
+            setScrollTop(top);
+            updateScrollAnchor(top);
+            setIsScrolling(true);
+            clearTimeout(scrollLabelTimeout);
+            scrollLabelTimeout = setTimeout(() => setIsScrolling(false), 1000);
+          }}
+        >
         <Show
           when={displayedItems().length > 0}
           fallback={
@@ -2033,6 +2069,15 @@ export const MediaView: Component = () => {
               </div>
             </div>
           </Show>
+        </Show>
+        </div>
+        <Show when={isScrolling() && scrollLabel()}>
+          <div
+            class="pointer-events-none absolute right-4 z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]"
+            style={{ top: `${tooltipTop()}px` }}
+          >
+            {scrollLabel()}
+          </div>
         </Show>
       </div>
 
