@@ -2,16 +2,28 @@ use anyhow::{anyhow, Context, Result};
 use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba};
 use ort::{session::Session, value::Tensor};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use tokenizers::{
     PaddingDirection, PaddingParams, PaddingStrategy, Tokenizer, TruncationParams,
 };
 
+pub mod photo_search;
+
+pub use photo_search::{
+    build_tag_vocabulary_entries, photo_search_animal_vocabulary,
+    photo_search_architecture_vocabulary, photo_search_food_vocabulary,
+    photo_search_light_vocabulary, photo_search_nature_vocabulary,
+    photo_search_object_vocabulary, photo_search_people_vocabulary,
+    photo_search_place_vocabulary, photo_search_style_vocabulary,
+    photo_search_travel_vocabulary, photo_search_vocabulary,
+    photo_search_vocabulary_categories, TagVocabularyCategory, TagVocabularySeed,
+};
+
 const DEFAULT_PROMPT_PREFIX: &str = "This is a photo of ";
 const DEFAULT_PROMPT_SUFFIX: &str = ".";
 const DEFAULT_TEXT_LENGTH: usize = 64;
-const DEFAULT_SCORE_THRESHOLD: f32 = 0.1;
+const DEFAULT_ACCEPTANCE_THRESHOLD: f32 = 0.1;
 const DEFAULT_MAX_TAGS: usize = 12;
 const DEFAULT_IMAGE_MEAN: [f32; 3] = [0.5, 0.5, 0.5];
 const DEFAULT_IMAGE_STD: [f32; 3] = [0.5, 0.5, 0.5];
@@ -64,6 +76,48 @@ pub struct TagResult {
     pub tags: Vec<TagSuggestion>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TagVocabularyEntry {
+    pub label: String,
+    pub variants: Vec<String>,
+}
+
+impl TagVocabularyEntry {
+    pub fn new(label: impl AsRef<str>) -> Result<Self> {
+        let label = normalize_candidate_label(label.as_ref());
+        if label.is_empty() {
+            return Err(anyhow!("tag vocabulary label cannot be empty"));
+        }
+        Ok(Self {
+            variants: build_default_candidate_variants(&label),
+            label,
+        })
+    }
+
+    pub fn with_variants(
+        label: impl AsRef<str>,
+        variants: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Result<Self> {
+        let label = normalize_candidate_label(label.as_ref());
+        if label.is_empty() {
+            return Err(anyhow!("tag vocabulary label cannot be empty"));
+        }
+        let mut normalized_variants = build_default_candidate_variants(&label)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        normalized_variants.extend(
+            variants
+                .into_iter()
+                .map(|variant| normalize_candidate_label(variant.as_ref()))
+                .filter(|variant| !variant.is_empty()),
+        );
+        Ok(Self {
+            label,
+            variants: normalized_variants.into_iter().collect(),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Siglip2TaggerConfig {
     pub model_dir: PathBuf,
@@ -72,7 +126,7 @@ pub struct Siglip2TaggerConfig {
     pub config_file: PathBuf,
     pub preprocessor_config_file: PathBuf,
     pub max_text_length: usize,
-    pub score_threshold: f32,
+    pub acceptance_threshold: f32,
     pub max_tags: usize,
     pub prompt_prefix: String,
     pub prompt_suffix: String,
@@ -88,7 +142,7 @@ impl Siglip2TaggerConfig {
             preprocessor_config_file: model_dir.join("preprocessor_config.json"),
             model_dir,
             max_text_length: DEFAULT_TEXT_LENGTH,
-            score_threshold: DEFAULT_SCORE_THRESHOLD,
+            acceptance_threshold: DEFAULT_ACCEPTANCE_THRESHOLD,
             max_tags: DEFAULT_MAX_TAGS,
             prompt_prefix: DEFAULT_PROMPT_PREFIX.to_string(),
             prompt_suffix: DEFAULT_PROMPT_SUFFIX.to_string(),
@@ -129,10 +183,10 @@ impl Siglip2TaggerConfig {
         if self.max_text_length == 0 {
             return Err(anyhow!("SigLIP2 max_text_length must be greater than zero"));
         }
-        if !(0.0..=1.0).contains(&self.score_threshold) {
+        if !(0.0..=1.0).contains(&self.acceptance_threshold) {
             return Err(anyhow!(
-                "SigLIP2 score_threshold must be in [0.0, 1.0], got {}",
-                self.score_threshold
+                "SigLIP2 acceptance_threshold must be in [0.0, 1.0], got {}",
+                self.acceptance_threshold
             ));
         }
         if self.max_tags == 0 {
@@ -199,10 +253,59 @@ impl Siglip2Tagger {
         image: &TagImage,
         candidate_labels: &[String],
     ) -> Result<TagResult> {
-        let candidate_labels = prepare_candidate_labels(candidate_labels)?;
-        let prompts = candidate_labels
+        let vocabulary = prepare_vocabulary_entries(candidate_labels)?;
+        self.tag_image_with_vocabulary(image, &vocabulary)
+    }
+
+    pub fn tag_image_with_vocabulary(
+        &mut self,
+        image: &TagImage,
+        vocabulary: &[TagVocabularyEntry],
+    ) -> Result<TagResult> {
+        let mut tags = self
+            .score_image_with_vocabulary(image, vocabulary)?
+            .into_iter()
+            .filter(|(_, score)| *score >= self.config.acceptance_threshold)
+            .map(|(label, score)| TagSuggestion { label, score })
+            .collect::<Vec<_>>();
+        tags.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| left.label.cmp(&right.label))
+        });
+        tags.truncate(self.config.max_tags);
+        Ok(TagResult {
+            model_id: self.model_id.clone(),
+            tags,
+        })
+    }
+
+    pub fn score_image_with_vocabulary(
+        &mut self,
+        image: &TagImage,
+        vocabulary: &[TagVocabularyEntry],
+    ) -> Result<Vec<(String, f32)>> {
+        let vocabulary = normalize_tag_vocabulary(vocabulary)?;
+        let prompt_labels = vocabulary
             .iter()
-            .map(|label| self.render_prompt(label))
+            .flat_map(|entry| {
+                entry
+                    .variants
+                    .iter()
+                    .map(|_| entry.label.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let prompts = vocabulary
+            .iter()
+            .flat_map(|entry| {
+                entry
+                    .variants
+                    .iter()
+                    .map(|variant| self.render_prompt(variant))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
         let text_inputs =
             tokenize_prompts(&self.tokenizer, &prompts, self.config.max_text_length)?;
@@ -219,30 +322,7 @@ impl Siglip2Tagger {
             .try_extract_tensor::<f32>()
             .context("SigLIP2 ONNX output `logits_per_image` is missing")?;
         let scores = logits.1.iter().copied().map(sigmoid).collect::<Vec<_>>();
-        if scores.len() != candidate_labels.len() {
-            return Err(anyhow!(
-                "SigLIP2 returned {} scores for {} candidate labels",
-                scores.len(),
-                candidate_labels.len()
-            ));
-        }
-        let mut tags = candidate_labels
-            .into_iter()
-            .zip(scores)
-            .filter(|(_, score)| *score >= self.config.score_threshold)
-            .map(|(label, score)| TagSuggestion { label, score })
-            .collect::<Vec<_>>();
-        tags.sort_by(|left, right| {
-            right
-                .score
-                .total_cmp(&left.score)
-                .then_with(|| left.label.cmp(&right.label))
-        });
-        tags.truncate(self.config.max_tags);
-        Ok(TagResult {
-            model_id: self.model_id.clone(),
-            tags,
-        })
+        aggregate_variant_scores(&prompt_labels, &scores)
     }
 
     pub fn render_prompt(&self, label: &str) -> String {
@@ -351,6 +431,15 @@ pub fn prepare_candidate_labels(candidate_labels: &[String]) -> Result<Vec<Strin
     Ok(labels)
 }
 
+pub fn prepare_vocabulary_entries(
+    candidate_labels: &[String],
+) -> Result<Vec<TagVocabularyEntry>> {
+    prepare_candidate_labels(candidate_labels)?
+        .into_iter()
+        .map(TagVocabularyEntry::new)
+        .collect()
+}
+
 pub fn normalize_candidate_label(label: &str) -> String {
     label
         .trim()
@@ -359,6 +448,83 @@ pub fn normalize_candidate_label(label: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
+}
+
+pub fn build_default_candidate_variants(label: &str) -> Vec<String> {
+    let label = normalize_candidate_label(label);
+    if label.is_empty() {
+        return Vec::new();
+    }
+    [
+        label.clone(),
+        format!("{} {}", english_indefinite_article(&label), label),
+        format!("the {label}"),
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect()
+}
+
+pub fn english_indefinite_article(label: &str) -> &'static str {
+    let Some(first_char) = label.chars().find(|char| char.is_ascii_alphanumeric()) else {
+        return "a";
+    };
+    if matches!(first_char.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u') {
+        return "an";
+    }
+    "a"
+}
+
+pub fn normalize_tag_vocabulary(
+    vocabulary: &[TagVocabularyEntry],
+) -> Result<Vec<TagVocabularyEntry>> {
+    let mut merged = BTreeMap::<String, BTreeSet<String>>::new();
+    for entry in vocabulary {
+        let normalized = TagVocabularyEntry::with_variants(&entry.label, &entry.variants)?;
+        merged
+            .entry(normalized.label)
+            .or_default()
+            .extend(normalized.variants);
+    }
+    if merged.is_empty() {
+        return Err(anyhow!("tag vocabulary cannot be empty"));
+    }
+    Ok(merged
+        .into_iter()
+        .map(|(label, variants)| TagVocabularyEntry {
+            label,
+            variants: variants.into_iter().collect(),
+        })
+        .collect())
+}
+
+pub fn aggregate_variant_scores(
+    prompt_labels: &[String],
+    scores: &[f32],
+) -> Result<Vec<(String, f32)>> {
+    if prompt_labels.len() != scores.len() {
+        return Err(anyhow!(
+            "SigLIP2 returned {} scores for {} prompt labels",
+            scores.len(),
+            prompt_labels.len()
+        ));
+    }
+    let mut aggregated = BTreeMap::<String, f32>::new();
+    for (label, score) in prompt_labels.iter().zip(scores.iter().copied()) {
+        aggregated
+            .entry(label.clone())
+            .and_modify(|current| *current = current.max(score))
+            .or_insert(score);
+    }
+    let mut aggregated = aggregated.into_iter().collect::<Vec<_>>();
+    aggregated.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    Ok(aggregated)
 }
 
 pub fn tokenize_prompts(
@@ -532,6 +698,64 @@ mod tests {
         assert!(error
             .to_string()
             .contains("at least one non-empty candidate label"));
+    }
+
+    #[test]
+    fn builds_default_variants() {
+        assert_eq!(
+            build_default_candidate_variants("ornate window"),
+            vec![
+                "an ornate window".to_string(),
+                "ornate window".to_string(),
+                "the ornate window".to_string()
+            ]
+        );
+        assert_eq!(
+            build_default_candidate_variants("interior"),
+            vec![
+                "an interior".to_string(),
+                "interior".to_string(),
+                "the interior".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn merges_vocabulary_variants_by_label() {
+        let vocabulary = normalize_tag_vocabulary(&[
+            TagVocabularyEntry::new("window").expect("entry"),
+            TagVocabularyEntry::with_variants(
+                "window",
+                ["stained glass window", "ornate window"],
+            )
+            .expect("entry"),
+        ])
+        .expect("vocabulary");
+        assert_eq!(vocabulary.len(), 1);
+        assert_eq!(vocabulary[0].label, "window");
+        assert!(vocabulary[0]
+            .variants
+            .contains(&"stained glass window".to_string()));
+        assert!(vocabulary[0]
+            .variants
+            .contains(&"ornate window".to_string()));
+    }
+
+    #[test]
+    fn aggregates_variant_scores_by_max_score() {
+        let aggregated = aggregate_variant_scores(
+            &[
+                "window".to_string(),
+                "window".to_string(),
+                "book".to_string(),
+            ],
+            &[0.2, 0.5, 0.3],
+        )
+        .expect("aggregated");
+        assert_eq!(
+            aggregated,
+            vec![("window".to_string(), 0.5), ("book".to_string(), 0.3)]
+        );
     }
 
     #[test]
