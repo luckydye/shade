@@ -29,6 +29,9 @@ ccapi = { path = "../ccapi" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 if-addrs = "0.13"
 
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+shade-tagging = { path = "../shade-tagging" }
+
 [lib]
 name = "shade_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

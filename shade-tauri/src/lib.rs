@@ -1,5 +1,6 @@
 mod commands;
 mod photos;
+mod tagging_worker;
 mod thumbnail_cache;
 
 use tauri::Manager;
@@ -17,7 +18,7 @@ pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
 pub struct S3LibraryScanService(pub std::sync::Arc<commands::S3LibraryScanState>);
 pub struct CameraDiscoveryService(pub std::sync::Arc<shade_io::CameraDiscoveryService>);
 pub struct CameraThumbnailService(pub std::sync::Arc<shade_io::CameraThumbnailService>);
-pub struct ThumbnailCacheDb(pub thumbnail_cache::ThumbnailCacheDb);
+pub struct ThumbnailCacheDb(pub std::sync::Arc<thumbnail_cache::ThumbnailCacheDb>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -41,10 +42,15 @@ pub fn run() {
         ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
-            let thumbnail_cache =
+            let thumbnail_cache = std::sync::Arc::new(
                 tauri::async_runtime::block_on(commands::open_thumbnail_cache_db())
-                    .map_err(|e| e.to_string())?;
-            app.manage(ThumbnailCacheDb(thumbnail_cache));
+                    .map_err(|e| e.to_string())?,
+            );
+            app.manage(ThumbnailCacheDb(thumbnail_cache.clone()));
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            app.manage(tagging_worker::spawn_thumbnail_tagging_worker(
+                thumbnail_cache.clone(),
+            )?);
             #[cfg(not(target_os = "ios"))]
             {
                 let handle = app.handle().clone();

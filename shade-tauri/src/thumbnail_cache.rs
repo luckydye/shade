@@ -3,6 +3,13 @@ use tokio::sync::Mutex;
 
 pub struct ThumbnailCacheDb(Mutex<libsql::Connection>);
 
+#[derive(Clone, Debug)]
+pub struct ThumbnailCacheEntry {
+    pub picture_id: String,
+    pub media_id: String,
+    pub data: Vec<u8>,
+}
+
 impl ThumbnailCacheDb {
     pub async fn open(path: &Path) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
@@ -16,12 +23,49 @@ impl ThumbnailCacheDb {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
                 picture_id TEXT PRIMARY KEY NOT NULL,
+                media_id TEXT,
                 data BLOB NOT NULL
             )",
             (),
         )
         .await
         .map_err(|e| e.to_string())?;
+        let mut columns = conn
+            .query("PRAGMA table_info(thumbnails)", ())
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut has_media_id = false;
+        while let Some(row) = columns.next().await.map_err(|e| e.to_string())? {
+            if row.get::<String>(1).map_err(|e| e.to_string())? == "media_id" {
+                has_media_id = true;
+                break;
+            }
+        }
+        if !has_media_id {
+            conn.execute("ALTER TABLE thumbnails ADD COLUMN media_id TEXT", ())
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        let mut rows = conn
+            .query(
+                "SELECT picture_id FROM thumbnails WHERE media_id IS NULL OR media_id = ''",
+                (),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut picture_ids = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+            picture_ids.push(row.get::<String>(0).map_err(|e| e.to_string())?);
+        }
+        for picture_id in picture_ids {
+            let media_id = thumbnail_media_id_from_cache_key(&picture_id);
+            conn.execute(
+                "UPDATE thumbnails SET media_id = ?2 WHERE picture_id = ?1",
+                libsql::params![picture_id, media_id],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
         Ok(Self(Mutex::new(conn)))
     }
 
@@ -40,15 +84,40 @@ impl ThumbnailCacheDb {
         }
     }
 
-    pub async fn put(&self, picture_id: &str, data: &[u8]) -> Result<(), String> {
+    pub async fn put(
+        &self,
+        picture_id: &str,
+        media_id: &str,
+        data: &[u8],
+    ) -> Result<(), String> {
         let conn = self.0.lock().await;
         conn.execute(
-            "INSERT OR REPLACE INTO thumbnails (picture_id, data) VALUES (?1, ?2)",
-            libsql::params![picture_id, data.to_vec()],
+            "INSERT OR REPLACE INTO thumbnails (picture_id, media_id, data) VALUES (?1, ?2, ?3)",
+            libsql::params![picture_id, media_id, data.to_vec()],
         )
         .await
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub async fn list_entries(&self) -> Result<Vec<ThumbnailCacheEntry>, String> {
+        let conn = self.0.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT picture_id, media_id, data FROM thumbnails ORDER BY picture_id ASC",
+                (),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut entries = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+            entries.push(ThumbnailCacheEntry {
+                picture_id: row.get::<String>(0).map_err(|e| e.to_string())?,
+                media_id: row.get::<String>(1).map_err(|e| e.to_string())?,
+                data: row.get::<Vec<u8>>(2).map_err(|e| e.to_string())?,
+            });
+        }
+        Ok(entries)
     }
 }
 
@@ -64,4 +133,37 @@ pub fn thumbnail_cache_key(picture_id: &str) -> String {
         }
     }
     picture_id.to_string()
+}
+
+pub fn thumbnail_media_id_from_cache_key(picture_id: &str) -> String {
+    let Some((media_id, revision)) = picture_id.rsplit_once('#') else {
+        return picture_id.to_string();
+    };
+    if revision.chars().all(|char| char.is_ascii_digit()) {
+        return media_id.to_string();
+    }
+    picture_id.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{thumbnail_cache_key, thumbnail_media_id_from_cache_key};
+
+    #[test]
+    fn keeps_non_revision_keys_unchanged() {
+        assert_eq!(
+            thumbnail_media_id_from_cache_key("s3://bucket/file.jpg"),
+            "s3://bucket/file.jpg"
+        );
+    }
+
+    #[test]
+    fn strips_revision_suffix_from_local_cache_key() {
+        let cache_key = "/tmp/example.jpg#123456789";
+        assert_eq!(
+            thumbnail_media_id_from_cache_key(cache_key),
+            "/tmp/example.jpg"
+        );
+        let _ = thumbnail_cache_key("/tmp/example.jpg");
+    }
 }

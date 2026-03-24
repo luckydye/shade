@@ -7802,6 +7802,7 @@ dependencies = [
  "shade-gpu",
  "shade-io",
  "shade-p2p",
+ "shade-tagging",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

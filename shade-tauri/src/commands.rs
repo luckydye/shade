@@ -403,7 +403,7 @@ fn restore_masks_from_params(
     }
 }
 
-async fn open_edits_db() -> Result<libsql::Connection, String> {
+pub async fn open_edits_db() -> Result<libsql::Connection, String> {
     let path = edits_db_path()?;
     let parent = path
         .parent()
@@ -567,7 +567,7 @@ async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), 
     Ok(())
 }
 
-async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
+pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
     let conn = open_edits_db().await?;
     conn.execute("BEGIN IMMEDIATE", ())
@@ -602,6 +602,18 @@ async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), Strin
             Err(error)
         }
     }
+}
+
+pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM media_tags WHERE media_id = ?1 LIMIT 1",
+            [media_id],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(rows.next().await.map_err(|error| error.to_string())?.is_some())
 }
 
 async fn load_latest_edit_version(
@@ -3241,7 +3253,16 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         },
     )
     .await?;
-    let _ = cache.0.put(&cache_key, &bytes).await;
+    cache.0.put(&cache_key, picture_id, &bytes).await?;
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    crate::tagging_worker::enqueue_thumbnail_for_tagging(
+        &app,
+        crate::thumbnail_cache::ThumbnailCacheEntry {
+            picture_id: cache_key,
+            media_id: picture_id.to_string(),
+            data: bytes.clone(),
+        },
+    )?;
     Ok(bytes)
 }
 
