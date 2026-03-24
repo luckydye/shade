@@ -759,6 +759,7 @@ export const MediaView: Component = () => {
   const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
   const [showS3Form, setShowS3Form] = createSignal(false);
   const [showLibraryActions, setShowLibraryActions] = createSignal(false);
+  const [showAddDropdown, setShowAddDropdown] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
   const [filenameFilter, setFilenameFilter] = createSignal("");
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
@@ -788,6 +789,7 @@ export const MediaView: Component = () => {
   let mediaShellRef: HTMLDivElement | undefined;
   let scrollRef!: HTMLDivElement;
   let libraryActionsRef: HTMLDivElement | undefined;
+  let addDropdownRef: HTMLDivElement | undefined;
 
   const discoveredPeerIds = createMemo(() =>
     p2pState.peers.map((peer) => peer.endpoint_id),
@@ -1149,21 +1151,21 @@ export const MediaView: Component = () => {
 
   onMount(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (!showLibraryActions()) {
-        return;
-      }
       const target = event.target;
       if (!(target instanceof Node)) {
         throw new Error("pointer event target must be a node");
       }
-      if (libraryActionsRef?.contains(target)) {
-        return;
+      if (showLibraryActions() && !libraryActionsRef?.contains(target)) {
+        setShowLibraryActions(false);
       }
-      setShowLibraryActions(false);
+      if (showAddDropdown() && !addDropdownRef?.contains(target)) {
+        setShowAddDropdown(false);
+      }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setShowLibraryActions(false);
+        setShowAddDropdown(false);
       }
     };
     document.addEventListener("pointerdown", handlePointerDown);
@@ -1734,25 +1736,56 @@ export const MediaView: Component = () => {
                   </Button>
                 )}
               </For>
-              <Button
-                type="button"
-                class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
-                disabled={isSubmitting()}
-                onClick={() => void handleAddLibrary()}
-                aria-label="Add library"
-              >
-                +
-              </Button>
-              <Show when={supportsS3Libraries()}>
+              <div class="relative flex items-center" ref={addDropdownRef}>
                 <Button
                   type="button"
-                  class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
+                  class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
                   disabled={isSubmitting()}
-                  onClick={() => setShowS3Form((current) => !current)}
+                  onClick={(event) => {
+                    if (event.metaKey) {
+                      setShowAddDropdown((current) => !current);
+                    } else {
+                      void handleAddLibrary();
+                    }
+                  }}
+                  aria-label="Add library"
                 >
-                  S3
+                  +
                 </Button>
-              </Show>
+                <Show when={showAddDropdown()}>
+                  <div
+                    role="menu"
+                    class="absolute left-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                  >
+                    <Button
+                      type="button"
+                      role="menuitem"
+                      class={MENU_ITEM_BUTTON_CLASS}
+                      disabled={isSubmitting()}
+                      onClick={() => {
+                        setShowAddDropdown(false);
+                        void handleAddLibrary();
+                      }}
+                    >
+                      Directory
+                    </Button>
+                    <Show when={supportsS3Libraries()}>
+                      <Button
+                        type="button"
+                        role="menuitem"
+                        class={MENU_ITEM_BUTTON_CLASS}
+                        disabled={isSubmitting()}
+                        onClick={() => {
+                          setShowAddDropdown(false);
+                          setShowS3Form((current) => !current);
+                        }}
+                      >
+                        S3
+                      </Button>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
             </div>
             <Show when={selectedLibrary()}>
               <label class="w-40 shrink-0 md:w-56">
