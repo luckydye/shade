@@ -189,6 +189,13 @@ fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
 
+fn texture_id_for_file_hash(file_hash: &str) -> Result<shade_core::TextureId, String> {
+    let prefix = file_hash
+        .get(..16)
+        .ok_or_else(|| format!("invalid file hash: {file_hash}"))?;
+    u64::from_str_radix(prefix, 16).map_err(|e| e.to_string())
+}
+
 fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
     let layers: Vec<_> = stack
         .layers
@@ -2106,7 +2113,7 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         width: opened.image.width,
         height: opened.image.height,
     };
-    let texture_id = 1;
+    let texture_id = texture_id_for_file_hash(&opened.file_hash)?;
     let canvas_width = image.width;
     let canvas_height = image.height;
     let stack =
