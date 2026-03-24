@@ -6,9 +6,11 @@ import {
   createSignal,
   For,
   JSX,
+  on,
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
@@ -772,6 +774,12 @@ export const MediaView: Component = () => {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
+  // Scroll anchor: track the first visible item so scroll position can be
+  // restored after column count changes (e.g. window resize or view switch).
+  const [anchorItemId, setAnchorItemId] = createSignal<string | null>(null);
+  const [anchorRowOffset, setAnchorRowOffset] = createSignal(0);
+  const [isScrolling, setIsScrolling] = createSignal(false);
+  let scrollLabelTimeout: ReturnType<typeof setTimeout> | undefined;
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
@@ -984,6 +992,59 @@ export const MediaView: Component = () => {
     }
     return offsets;
   });
+  // Update the scroll anchor from a raw scrollTop value.
+  // Finds the first visible items row and records its leading item ID
+  // plus how many pixels the viewport top is into that row.
+  const updateScrollAnchor = (top: number) => {
+    const rows = untrack(stableGridRows);
+    const offsets = untrack(rowOffsets);
+    const rowHeight = untrack(tileRowHeight);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const height = row.kind === "date" ? HEADER_ROW_HEIGHT : rowHeight;
+      if (offsets[i] + height > top) {
+        if (row.kind === "items") {
+          setAnchorItemId(row.ids[0]);
+          setAnchorRowOffset(top - offsets[i]);
+        } else {
+          // Date header is at the top — anchor to the next items row instead
+          for (let j = i + 1; j < rows.length; j++) {
+            const next = rows[j];
+            if (next.kind === "items") {
+              setAnchorItemId(next.ids[0]);
+              setAnchorRowOffset(0);
+              break;
+            }
+          }
+        }
+        break;
+      }
+    }
+  };
+
+  // When the column count changes (resize / view switch), restore the scroll
+  // position so the same media items remain visible.
+  createEffect(
+    on(columns, (_cols, prevCols) => {
+      if (prevCols === undefined) return; // skip initial evaluation
+      const anchor = untrack(anchorItemId);
+      if (!anchor) return;
+      const rows = untrack(stableGridRows);
+      const offsets = untrack(rowOffsets);
+      const rowHeight = untrack(tileRowHeight);
+      const offset = untrack(anchorRowOffset);
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.kind === "items" && row.ids.includes(anchor)) {
+          const newTop = offsets[i] + Math.min(offset, rowHeight - 1);
+          scrollRef.scrollTop = newTop;
+          setScrollTop(newTop);
+          break;
+        }
+      }
+    }),
+  );
+
   const totalHeight = createMemo(() => {
     const rows = stableGridRows();
     if (rows.length === 0) {
@@ -1040,6 +1101,28 @@ export const MediaView: Component = () => {
       return 0;
     }
     return totalHeight();
+  });
+
+  // Label shown in the scroll landmark tooltip — the month/year of the anchor item.
+  const scrollLabel = createMemo(() => {
+    const id = anchorItemId();
+    if (!id) return "";
+    const item = itemsById().get(id);
+    if (!item) return "";
+    return formatModificationMonth(item.modifiedAt);
+  });
+
+  // Vertical position (px from top of scroll viewport) for the landmark tooltip,
+  // tracking the scrollbar thumb center.
+  const tooltipTop = createMemo(() => {
+    const total = totalHeight();
+    const viewport = viewportHeight();
+    const top = scrollTop();
+    if (total <= viewport || viewport <= 0) return viewport / 2;
+    const thumbHeight = Math.max(40, (viewport * viewport) / total);
+    const thumbRange = viewport - thumbHeight;
+    const scrollRange = total - viewport;
+    return Math.round((top / scrollRange) * thumbRange + thumbHeight / 2);
   });
 
   onMount(() => {
@@ -1136,6 +1219,8 @@ export const MediaView: Component = () => {
   createEffect(() => {
     selectedLibraryId();
     setScrollTop(0);
+    setAnchorItemId(null);
+    setAnchorRowOffset(0);
     setSelectedMediaItemIds([]);
     setShowLibraryActions(false);
     if (scrollRef) {
@@ -1146,6 +1231,8 @@ export const MediaView: Component = () => {
   createEffect(() => {
     activeFilenameFilter();
     setScrollTop(0);
+    setAnchorItemId(null);
+    setAnchorRowOffset(0);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
@@ -1557,8 +1644,8 @@ export const MediaView: Component = () => {
       : "mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0";
   const scrollClass = () =>
     isEditorStrip()
-      ? "media-scroll flex-1 overflow-y-auto px-2 py-3"
-      : "media-scroll flex-1 overflow-y-auto p-4 md:p-6";
+      ? "media-scroll h-full overflow-y-auto px-2 py-3"
+      : "media-scroll h-full overflow-y-auto p-4 md:p-6";
 
   return (
     <div
@@ -1823,11 +1910,19 @@ export const MediaView: Component = () => {
           </div>
         </div>
       </Show>
-      <div
-        ref={scrollRef!}
-        class={scrollClass()}
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-      >
+      <div class="relative flex-1 min-h-0">
+        <div
+          ref={scrollRef!}
+          class={scrollClass()}
+          onScroll={(event) => {
+            const top = event.currentTarget.scrollTop;
+            setScrollTop(top);
+            updateScrollAnchor(top);
+            setIsScrolling(true);
+            clearTimeout(scrollLabelTimeout);
+            scrollLabelTimeout = setTimeout(() => setIsScrolling(false), 1000);
+          }}
+        >
         <Show
           when={displayedItems().length > 0}
           fallback={
@@ -1966,6 +2061,15 @@ export const MediaView: Component = () => {
               </div>
             </div>
           </Show>
+        </Show>
+        </div>
+        <Show when={isScrolling() && scrollLabel()}>
+          <div
+            class="pointer-events-none absolute right-4 z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]"
+            style={{ top: `${tooltipTop()}px` }}
+          >
+            {scrollLabel()}
+          </div>
         </Show>
       </div>
 
