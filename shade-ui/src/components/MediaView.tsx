@@ -1103,21 +1103,13 @@ export const MediaView: Component = () => {
     return totalHeight();
   });
 
-  // Label shown in the scroll landmark tooltip — the month/year of the first
-  // visible date header at or above the current scroll position.
+  // Label shown in the scroll landmark tooltip — the month/year of the anchor item.
   const scrollLabel = createMemo(() => {
-    const rows = stableGridRows();
-    const offsets = rowOffsets();
-    const top = scrollTop();
-    let label = "";
-    for (let i = 0; i < rows.length; i++) {
-      if (offsets[i] > top) break;
-      const row = rows[i];
-      if (row.kind === "date") {
-        label = formatModificationMonth(row.modifiedAt);
-      }
-    }
-    return label;
+    const id = anchorItemId();
+    if (!id) return "";
+    const item = itemsById().get(id);
+    if (!item) return "";
+    return formatModificationMonth(item.modifiedAt);
   });
 
   // Vertical position (px from top of scroll viewport) for the landmark tooltip,
