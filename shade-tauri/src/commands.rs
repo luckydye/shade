@@ -74,6 +74,7 @@ pub struct MediaLibrary {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct LibraryImageMetadata {
     pub has_snapshots: bool,
+    pub latest_snapshot_version: Option<i64>,
     pub rating: Option<u8>,
 }
 
@@ -395,6 +396,22 @@ async fn load_latest_edit_version(
     Ok(Some(PersistedEditVersion { version, data }))
 }
 
+async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT 1
+             FROM images i
+             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             WHERE i.source_name = ?1
+             LIMIT 1",
+            [source_name],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows.next().await.map_err(|e| e.to_string())?.is_some())
+}
+
 async fn persist_edit_version(
     file_hash: &str,
     source_name: Option<&str>,
@@ -496,6 +513,28 @@ fn restore_persisted_layers(
     );
     state.stack.generation += 1;
     Ok(())
+}
+
+fn build_persisted_layer_stack(
+    texture_id: shade_core::TextureId,
+    width: u32,
+    height: u32,
+    persisted: &PersistedEditVersion,
+) -> Result<LayerStack, String> {
+    ensure_non_image_layers(&persisted.data.layers)?;
+    let mut stack = LayerStack::new();
+    stack.add_image_layer(texture_id, width, height);
+    let base_idx = stack.layers.len();
+    stack.layers.extend(persisted.data.layers.clone());
+    restore_masks_from_params(
+        &mut stack,
+        base_idx,
+        &persisted.data.mask_params,
+        width,
+        height,
+    );
+    stack.generation += 1;
+    Ok(stack)
 }
 
 async fn persist_current_edit_version(
@@ -1102,6 +1141,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             modified_at: item.modified_at,
             metadata: LibraryImageMetadata {
                 has_snapshots: false,
+                latest_snapshot_version: None,
                 rating: item.rating,
             },
         })
@@ -1147,6 +1187,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                 modified_at,
                 metadata: LibraryImageMetadata {
                     has_snapshots: false,
+                    latest_snapshot_version: None,
                     rating,
                 },
             });
@@ -1227,6 +1268,7 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
         modified_at: item.modified_at,
         metadata: LibraryImageMetadata {
             has_snapshots: false,
+            latest_snapshot_version: None,
             rating: item.rating,
         },
     }
@@ -1386,6 +1428,15 @@ pub enum RenderJob {
     },
 }
 
+pub struct ThumbnailRenderJob {
+    stack: LayerStack,
+    sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+    canvas_width: u32,
+    canvas_height: u32,
+    request: PreviewRenderRequest,
+    response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+}
+
 fn cancelled_preview_response() -> Result<PreviewFrameResponse, String> {
     Ok(PreviewFrameResponse {
         pixels: Vec::new(),
@@ -1503,6 +1554,52 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
             }
         })
         .expect("failed to spawn render worker thread");
+    sender
+}
+
+pub fn spawn_thumbnail_render_worker() -> crossbeam_channel::Sender<ThumbnailRenderJob> {
+    let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailRenderJob>();
+    std::thread::Builder::new()
+        .name("shade-thumbnail-render".into())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to create thumbnail render runtime");
+            let renderer = runtime
+                .block_on(shade_gpu::Renderer::new())
+                .map_err(|e| e.to_string());
+            while let Ok(job) = receiver.recv() {
+                let result = match &renderer {
+                    Ok(renderer) => runtime
+                        .block_on(renderer.render_stack_preview(
+                            &job.stack,
+                            job.sources.as_ref(),
+                            job.canvas_width,
+                            job.canvas_height,
+                            job.request.target_width,
+                            job.request.target_height,
+                            job.request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                x: crop.x,
+                                y: crop.y,
+                                width: crop.width,
+                                height: crop.height,
+                            }),
+                        ))
+                        .map_err(|e| e.to_string())
+                        .and_then(|pixels| {
+                            encode_jpeg_thumbnail(
+                                pixels,
+                                job.request.target_width,
+                                job.request.target_height,
+                            )
+                        }),
+                    Err(error) => Err(error.clone()),
+                };
+                let _ = job.response.send(result);
+            }
+        })
+        .expect("failed to spawn thumbnail render worker thread");
     sender
 }
 
@@ -1935,6 +2032,100 @@ fn export_render_request(
         crop,
         ignore_crop_layers: None,
     })
+}
+
+fn thumbnail_render_request(
+    stack: &LayerStack,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<PreviewRenderRequest, String> {
+    let request = export_render_request(stack, canvas_width, canvas_height)?;
+    let longest_edge = request.target_width.max(request.target_height);
+    if longest_edge <= 320 {
+        return Ok(request);
+    }
+    Ok(PreviewRenderRequest {
+        target_width: std::cmp::max(
+            1,
+            ((request.target_width as f64 * 320.0) / longest_edge as f64).round() as u32,
+        ),
+        target_height: std::cmp::max(
+            1,
+            ((request.target_height as f64 * 320.0) / longest_edge as f64).round() as u32,
+        ),
+        crop: request.crop,
+        ignore_crop_layers: request.ignore_crop_layers,
+    })
+}
+
+fn encode_jpeg_thumbnail(
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let image = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or("failed to wrap rendered thumbnail pixels")?;
+    let mut jpeg = Vec::new();
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(jpeg)
+}
+
+async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    picture_id: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    if !has_snapshot_for_source(picture_id).await? {
+        return Ok(None);
+    }
+    let photo_app = app.clone();
+    let opened =
+        shade_io::open_image(
+            picture_id,
+            |host, file_path| async move {
+                load_camera_image_from_tauri(&host, &file_path).await
+            },
+            |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
+            move |photo_id| {
+                let app = photo_app.clone();
+                async move { load_photo_image_from_tauri(&app, &photo_id).await }
+            },
+        )
+        .await?;
+    let Some(persisted) = load_latest_edit_version(&opened.file_hash).await? else {
+        return Ok(None);
+    };
+    let mut linearized_pixels = opened.image.pixels.to_vec();
+    to_linear_srgb_f32(&mut linearized_pixels, &opened.info.color_space);
+    let image = FloatImage {
+        pixels: linearized_pixels.into(),
+        width: opened.image.width,
+        height: opened.image.height,
+    };
+    let texture_id = 1;
+    let canvas_width = image.width;
+    let canvas_height = image.height;
+    let stack =
+        build_persisted_layer_stack(texture_id, canvas_width, canvas_height, &persisted)?;
+    let request = thumbnail_render_request(&stack, canvas_width, canvas_height)?;
+    let sources = Arc::new(std::collections::HashMap::from([(texture_id, image)]));
+    let render_sender = app.state::<crate::ThumbnailService>().render_sender.clone();
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    render_sender
+        .send(ThumbnailRenderJob {
+            stack,
+            sources,
+            canvas_width,
+            canvas_height,
+            request,
+            response: response_tx,
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(Some(response_rx.await.map_err(|error| error.to_string())??))
 }
 
 /// Run the full GPU render pipeline and return raw RGBA8 pixels.
@@ -2651,7 +2842,10 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
-    let thumbnail_queue = app.state::<crate::ThumbnailService>().0.clone();
+    if let Some(bytes) = render_snapshot_thumbnail_bytes(&app, picture_id).await? {
+        return Ok(bytes);
+    }
+    let thumbnail_queue = app.state::<crate::ThumbnailService>().raw_queue.clone();
     shade_io::load_thumbnail_bytes(
         picture_id,
         thumbnail_queue.as_ref(),
@@ -2807,20 +3001,25 @@ async fn enrich_listing_metadata(
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
-            "SELECT DISTINCT i.source_name
+            "SELECT i.source_name, MAX(ev.version)
              FROM images i
              JOIN edit_versions ev ON ev.file_hash = i.file_hash
-             WHERE i.source_name IS NOT NULL",
+             WHERE i.source_name IS NOT NULL
+             GROUP BY i.source_name",
             (),
         )
         .await
         .map_err(|e| e.to_string())?;
-    let mut snapshot_paths = std::collections::HashSet::new();
+    let mut snapshot_versions = HashMap::new();
     while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-        snapshot_paths.insert(row.get::<String>(0).map_err(|e| e.to_string())?);
+        let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
+        let version = row.get::<i64>(1).map_err(|e| e.to_string())?;
+        snapshot_versions.insert(source_name, version);
     }
     for item in &mut listing.items {
-        item.metadata.has_snapshots = snapshot_paths.contains(&item.path);
+        item.metadata.latest_snapshot_version =
+            snapshot_versions.get(&item.path).copied();
+        item.metadata.has_snapshots = item.metadata.latest_snapshot_version.is_some();
     }
     Ok(())
 }

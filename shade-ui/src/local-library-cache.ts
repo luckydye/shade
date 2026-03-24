@@ -20,6 +20,7 @@ type CachedLocalItem = {
   name: string;
   modified_at: number | null;
   has_snapshots: boolean;
+  latest_snapshot_version: number | null;
   rating: number | null;
 };
 
@@ -41,6 +42,10 @@ function normalizeRating(rating: unknown) {
     : null;
 }
 
+function normalizeSnapshotVersion(version: unknown) {
+  return typeof version === "number" && Number.isInteger(version) ? version : null;
+}
+
 function normalizeLibraryImage(image: LibraryImage): LibraryImage {
   return {
     path: image.path,
@@ -50,6 +55,9 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     ),
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
+      latest_snapshot_version: normalizeSnapshotVersion(
+        image.metadata?.latest_snapshot_version,
+      ),
       rating: normalizeRating(image.metadata?.rating),
     },
   };
@@ -62,6 +70,9 @@ function toCachedLocalItem(libraryId: string, image: LibraryImage): CachedLocalI
     name: image.name,
     modified_at: normalizeModifiedAt(image.modified_at),
     has_snapshots: image.metadata?.has_snapshots ?? false,
+    latest_snapshot_version: normalizeSnapshotVersion(
+      image.metadata?.latest_snapshot_version,
+    ),
     rating: normalizeRating(image.metadata?.rating),
   };
 }
@@ -73,6 +84,7 @@ function toLibraryImage(item: CachedLocalItem): LibraryImage {
     modified_at: normalizeModifiedAt(item.modified_at),
     metadata: {
       has_snapshots: item.has_snapshots,
+      latest_snapshot_version: normalizeSnapshotVersion(item.latest_snapshot_version),
       rating: normalizeRating(item.rating),
     },
   };
@@ -195,16 +207,31 @@ async function saveLocalLibraryListing(
   });
 }
 
-async function getCachedThumbnail(path: string): Promise<Blob | null> {
+function thumbnailKey(path: string, latestSnapshotVersion: number | null) {
+  return `${path}::snapshot:${latestSnapshotVersion ?? 0}`;
+}
+
+async function getCachedThumbnail(
+  path: string,
+  latestSnapshotVersion: number | null,
+): Promise<Blob | null> {
   return withStores([THUMBNAILS_STORE], "readonly", async (stores) => {
-    const result = await requestToPromise(stores[THUMBNAILS_STORE].get(path));
+    const result = await requestToPromise(
+      stores[THUMBNAILS_STORE].get(thumbnailKey(path, latestSnapshotVersion)),
+    );
     return result instanceof Blob ? result : null;
   });
 }
 
-async function putCachedThumbnail(path: string, blob: Blob): Promise<void> {
+async function putCachedThumbnail(
+  path: string,
+  latestSnapshotVersion: number | null,
+  blob: Blob,
+): Promise<void> {
   await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
-    await requestToPromise(stores[THUMBNAILS_STORE].put(blob, path));
+    await requestToPromise(
+      stores[THUMBNAILS_STORE].put(blob, thumbnailKey(path, latestSnapshotVersion)),
+    );
   });
 }
 
@@ -219,13 +246,17 @@ async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
       if (!item) {
         continue;
       }
-      if (await getCachedThumbnail(item.path)) {
+      const latestSnapshotVersion = normalizeSnapshotVersion(
+        item.metadata?.latest_snapshot_version,
+      );
+      if (await getCachedThumbnail(item.path, latestSnapshotVersion)) {
         continue;
       }
       try {
         const bytes = await getThumbnailBytes(item.path);
         await putCachedThumbnail(
           item.path,
+          latestSnapshotVersion,
           new Blob([toBlobBuffer(bytes)], { type: "image/jpeg" }),
         );
       } catch {
@@ -271,21 +302,23 @@ export async function loadLocalLibraryItemsCachedOrRemote(
 
 export async function resolveLocalThumbnailSrc(
   path: string,
+  latestSnapshotVersion: number | null,
   signal: AbortSignal,
 ): Promise<string> {
   if (signal.aborted) {
     throw abortError();
   }
-  const cached = await getCachedThumbnail(path);
+  const key = thumbnailKey(path, latestSnapshotVersion);
+  const cached = await getCachedThumbnail(path, latestSnapshotVersion);
   if (cached) {
     return URL.createObjectURL(cached);
   }
-  const recentFailure = failedThumbnailLoads.get(path);
+  const recentFailure = failedThumbnailLoads.get(key);
   if (recentFailure && recentFailure.retryAt > Date.now()) {
     throw recentFailure.error;
   }
   const bytes = await getThumbnailBytes(path).catch((error) => {
-    failedThumbnailLoads.set(path, {
+    failedThumbnailLoads.set(key, {
       error,
       retryAt: Date.now() + FAILURE_COOLDOWN_MS,
     });
@@ -295,11 +328,15 @@ export async function resolveLocalThumbnailSrc(
     throw abortError();
   }
   const blob = new Blob([toBlobBuffer(bytes)], { type: "image/jpeg" });
-  await putCachedThumbnail(path, blob);
-  failedThumbnailLoads.delete(path);
+  await putCachedThumbnail(path, latestSnapshotVersion, blob);
+  failedThumbnailLoads.delete(key);
   return URL.createObjectURL(blob);
 }
 
 export function resetLocalThumbnailFailure(path: string) {
-  failedThumbnailLoads.delete(path);
+  for (const key of failedThumbnailLoads.keys()) {
+    if (key.startsWith(`${path}::snapshot:`)) {
+      failedThumbnailLoads.delete(key);
+    }
+  }
 }

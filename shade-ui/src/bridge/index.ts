@@ -198,6 +198,7 @@ export interface SharedPicture {
 
 export interface LibraryImageMetadata {
   has_snapshots: boolean;
+  latest_snapshot_version: number | null;
   rating: number | null;
 }
 

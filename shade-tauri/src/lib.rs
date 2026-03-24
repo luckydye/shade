@@ -7,9 +7,11 @@ pub struct P2pState(
     pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>,
 );
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
-pub struct ThumbnailService(
-    pub std::sync::Arc<shade_io::ThumbnailQueue<shade_io::ThumbnailResponseSender>>,
-);
+pub struct ThumbnailService {
+    pub raw_queue:
+        std::sync::Arc<shade_io::ThumbnailQueue<shade_io::ThumbnailResponseSender>>,
+    pub render_sender: crossbeam_channel::Sender<commands::ThumbnailRenderJob>,
+}
 pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
 pub struct CameraDiscoveryService(pub std::sync::Arc<shade_io::CameraDiscoveryService>);
 pub struct CameraThumbnailService(pub std::sync::Arc<shade_io::CameraThumbnailService>);
@@ -22,7 +24,10 @@ pub fn run() {
         .manage(P2pState(tokio::sync::RwLock::new(None)))
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RenderService(commands::spawn_render_worker()))
-        .manage(ThumbnailService(shade_io::spawn_thumbnail_workers()))
+        .manage(ThumbnailService {
+            raw_queue: shade_io::spawn_thumbnail_workers(),
+            render_sender: commands::spawn_thumbnail_render_worker(),
+        })
         .manage(LibraryScanService(shade_io::LibraryScanService::new()))
         .manage(CameraDiscoveryService(
             shade_io::CameraDiscoveryService::new(),
