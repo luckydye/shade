@@ -56,7 +56,9 @@ pub fn spawn_thumbnail_tagging_worker(
     if let Some(service) = THUMBNAIL_TAGGING_SERVICE.get() {
         return Ok(service.clone());
     }
+    let pid = std::process::id();
     let Some(lock_file) = try_acquire_thumbnail_tagging_lock()? else {
+        log::info!("thumbnail tagging worker passive pid={pid}");
         let service = ThumbnailTaggingService {
             sender: None,
             pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
@@ -74,6 +76,10 @@ pub fn spawn_thumbnail_tagging_worker(
     let startup_entries =
         tauri::async_runtime::block_on(thumbnail_cache.list_entries()).map_err(|e| e.to_string())?;
     let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailCacheEntry>();
+    log::info!(
+        "thumbnail tagging worker active pid={pid} startup_entries={}",
+        startup_entries.len()
+    );
     let service = ThumbnailTaggingService {
         sender: Some(sender),
         pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
@@ -122,7 +128,12 @@ pub fn process_thumbnail_tagging_entry(
     vocabulary: &[shade_tagging::TagVocabularyEntry],
     entry: ThumbnailCacheEntry,
 ) -> Result<(), String> {
+    log::info!("thumbnail tagging processing media_id={}", entry.media_id);
     if runtime.block_on(crate::commands::media_tags_exist(&entry.media_id))? {
+        log::info!(
+            "thumbnail tagging skipped existing tags media_id={}",
+            entry.media_id
+        );
         return Ok(());
     }
     let image = image::load_from_memory(&entry.data).map_err(|e| e.to_string())?;
@@ -133,16 +144,24 @@ pub fn process_thumbnail_tagging_entry(
         )
         .map_err(|e| e.to_string())?;
     if result.tags.is_empty() {
+        runtime.block_on(crate::commands::persist_media_tags_empty(&entry.media_id))?;
+        log::info!("thumbnail tagging no tags media_id={}", entry.media_id);
         return Ok(());
     }
+    let tags = result
+        .tags
+        .iter()
+        .map(|tag| tag.label.clone())
+        .collect::<Vec<_>>();
     runtime.block_on(crate::commands::persist_media_tags(
         &entry.media_id,
-        &result
-            .tags
-            .into_iter()
-            .map(|tag| tag.label)
-            .collect::<Vec<_>>(),
+        &tags,
     ))?;
+    log::info!(
+        "thumbnail tagging persisted media_id={} tags={}",
+        entry.media_id,
+        tags.join(",")
+    );
     Ok(())
 }
 

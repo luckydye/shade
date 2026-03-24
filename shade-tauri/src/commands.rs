@@ -541,6 +541,9 @@ async fn load_media_tags_map(
             continue;
         }
         let tag = row.get::<String>(1).map_err(|error| error.to_string())?;
+        if tag.is_empty() {
+            continue;
+        }
         tags.entry(media_id).or_default().push(tag);
     }
     Ok(tags)
@@ -587,6 +590,39 @@ pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), S
             .await
             .map_err(|error| error.to_string())?;
         }
+        Ok::<(), String>(())
+    }
+    .await;
+    match result {
+        Ok(()) => {
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", ()).await;
+            Err(error)
+        }
+    }
+}
+
+pub async fn persist_media_tags_empty(media_id: &str) -> Result<(), String> {
+    let conn = open_edits_db().await?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let result = async {
+        conn.execute("DELETE FROM media_tags WHERE media_id = ?1", [media_id])
+            .await
+            .map_err(|error| error.to_string())?;
+        conn.execute(
+            "INSERT INTO media_tags (media_id, tag, updated_at)
+             VALUES (?1, '', ?2)",
+            libsql::params![media_id, unix_timestamp_millis()?],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
         Ok::<(), String>(())
     }
     .await;
