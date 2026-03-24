@@ -95,10 +95,13 @@ pub fn spawn_thumbnail_tagging_worker(
                 .enable_all()
                 .build()
                 .expect("failed to create thumbnail tagging runtime");
-            let mut tagger = shade_tagging::Siglip2Tagger::new(
-                shade_tagging::Siglip2TaggerConfig::base_patch16_224(&model_dir),
-            )
-            .expect("failed to initialize SigLIP2 thumbnail tagging model");
+            let mut config =
+                shade_tagging::Siglip2TaggerConfig::base_patch16_224(&model_dir);
+            config.acceptance_threshold = 0.03;
+            log::info!("thumbnail tagging constructing tagger pid={pid}");
+            let mut tagger = shade_tagging::Siglip2Tagger::new(config)
+                .expect("failed to initialize SigLIP2 thumbnail tagging model");
+            log::info!("thumbnail tagging constructed tagger pid={pid}");
             while let Ok(entry) = receiver.recv() {
                 let media_id = entry.media_id.clone();
                 if let Err(error) =

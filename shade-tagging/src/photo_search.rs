@@ -26,49 +26,133 @@ pub fn photo_search_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
 }
 
 pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
-    let vocabulary = photo_search_vocabulary()?;
-    let labels = [
-        "person",
-        "portrait",
-        "group photo",
-        "family",
-        "child",
-        "baby",
-        "dog",
-        "cat",
-        "bird",
-        "wildlife",
-        "interior",
-        "exterior",
-        "office",
-        "library",
-        "church interior",
-        "chapel interior",
-        "landscape",
-        "beach",
-        "forest",
-        "mountain",
-        "sunset",
-        "snow scene",
-        "cityscape",
-        "street scene",
-        "window",
-        "stained glass window",
-        "table",
-        "desk",
-        "open book",
-        "notebook",
-        "car",
-        "bicycle",
-        "coffee",
-        "sunlight",
-        "black and white",
-        "vintage",
-    ];
-    Ok(vocabulary
-        .into_iter()
-        .filter(|entry| labels.contains(&entry.label.as_str()))
-        .collect())
+    build_tag_vocabulary_entries(&[
+        (
+            "person",
+            &[
+                "human",
+                "single person",
+                "photo of a person",
+                "person in the frame",
+            ],
+        ),
+        (
+            "portrait",
+            &[
+                "portrait photo",
+                "person portrait",
+                "portrait of a person",
+                "close portrait",
+            ],
+        ),
+        (
+            "group photo",
+            &[
+                "group portrait",
+                "people together",
+                "photo of a group",
+                "group of people",
+            ],
+        ),
+        ("family", &["family portrait", "family photo", "family group"]),
+        ("child", &["young child", "kid", "photo of a child", "child portrait"]),
+        ("baby", &["infant", "newborn", "photo of a baby", "baby portrait"]),
+        ("dog", &["pet dog", "canine", "photo of a dog", "dog portrait"]),
+        ("cat", &["pet cat", "feline", "photo of a cat", "cat portrait"]),
+        ("bird", &["flying bird", "photo of a bird", "bird photo"]),
+        ("wildlife", &["wild animal", "wildlife photo", "animal in nature"]),
+        (
+            "interior",
+            &[
+                "inside a building",
+                "indoor scene",
+                "interior photo",
+                "room interior",
+            ],
+        ),
+        (
+            "exterior",
+            &["outside a building", "outdoor scene", "exterior photo"],
+        ),
+        ("office", &["workspace interior", "office interior", "office room"]),
+        ("library", &["library interior", "reading room", "library room"]),
+        (
+            "church interior",
+            &["church inside", "inside a church", "church room"],
+        ),
+        (
+            "chapel interior",
+            &["chapel inside", "inside a chapel", "chapel room"],
+        ),
+        (
+            "landscape",
+            &[
+                "scenic landscape",
+                "wide landscape",
+                "landscape photo",
+                "outdoor landscape",
+            ],
+        ),
+        ("beach", &["sandy beach", "beach photo", "beach landscape"]),
+        ("forest", &["forest landscape", "woods", "forest photo", "trees in nature"]),
+        (
+            "mountain",
+            &["mountain landscape", "mountain photo", "mountain view"],
+        ),
+        (
+            "sunset",
+            &[
+                "evening sky",
+                "sunset sky",
+                "sunset landscape",
+                "sunset photo",
+            ],
+        ),
+        ("snow scene", &["snowy landscape", "winter scene", "snowy outdoor scene"]),
+        ("cityscape", &["urban skyline", "city view", "cityscape photo", "city scene"]),
+        (
+            "street scene",
+            &["city street", "urban street", "street photo", "street view"],
+        ),
+        ("window", &["large window", "photo of a window", "window in a room"]),
+        (
+            "stained glass window",
+            &[
+                "church window",
+                "ornate window",
+                "stained glass window",
+                "decorative stained glass window",
+            ],
+        ),
+        ("table", &["tabletop", "photo of a table", "table in a room"]),
+        ("desk", &["work desk", "desk photo", "writing desk"]),
+        (
+            "open book",
+            &[
+                "book on table",
+                "opened book",
+                "photo of an open book",
+                "open book on a table",
+            ],
+        ),
+        (
+            "notebook",
+            &[
+                "paper notebook",
+                "notebook on table",
+                "photo of a notebook",
+                "open notebook",
+            ],
+        ),
+        ("car", &["parked car", "photo of a car", "car on a street"]),
+        ("bicycle", &["bike", "photo of a bicycle", "bicycle on a street"]),
+        ("coffee", &["cup of coffee", "coffee photo", "coffee cup"]),
+        ("sunlight", &["bright sunlight", "sunlit scene", "sunny light"]),
+        ("reflection", &["reflective surface", "reflection in water", "reflected scene"]),
+        ("lamp", &["table lamp", "floor lamp", "lit lamp", "lamp in a room"]),
+        ("black and white", &["monochrome photo", "grayscale image", "black and white photo"]),
+        ("vintage", &["retro style", "old fashioned", "vintage photo", "retro photo"]),
+    ])
 }
 
 pub fn photo_search_vocabulary_categories() -> Result<Vec<TagVocabularyCategory>> {
@@ -354,5 +438,7 @@ mod tests {
             .any(|entry| entry.label == "stained glass window"));
         assert!(vocabulary.iter().any(|entry| entry.label == "open book"));
         assert!(vocabulary.iter().any(|entry| entry.label == "person"));
+        assert!(vocabulary.iter().any(|entry| entry.label == "lamp"));
+        assert!(vocabulary.iter().any(|entry| entry.label == "reflection"));
     }
 }
