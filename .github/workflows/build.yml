@@ -18,7 +18,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: macos-latest
-            target: universal-apple-darwin
+            target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
 
@@ -38,7 +38,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+          targets: ${{ matrix.target }}
 
       - uses: swatinem/rust-cache@v2
 
