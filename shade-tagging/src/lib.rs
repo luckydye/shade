@@ -11,7 +11,8 @@ use tokenizers::{
 pub mod photo_search;
 
 pub use photo_search::{
-    build_tag_vocabulary_entries, photo_search_animal_vocabulary,
+    build_tag_vocabulary_entries, photo_auto_tag_vocabulary,
+    photo_search_animal_vocabulary,
     photo_search_architecture_vocabulary, photo_search_food_vocabulary,
     photo_search_light_vocabulary, photo_search_nature_vocabulary,
     photo_search_object_vocabulary, photo_search_people_vocabulary,
@@ -25,6 +26,7 @@ const DEFAULT_PROMPT_SUFFIX: &str = ".";
 const DEFAULT_TEXT_LENGTH: usize = 64;
 const DEFAULT_ACCEPTANCE_THRESHOLD: f32 = 0.1;
 const DEFAULT_MAX_TAGS: usize = 12;
+const DEFAULT_PROMPT_BATCH_SIZE: usize = 16;
 const DEFAULT_IMAGE_MEAN: [f32; 3] = [0.5, 0.5, 0.5];
 const DEFAULT_IMAGE_STD: [f32; 3] = [0.5, 0.5, 0.5];
 
@@ -126,6 +128,7 @@ pub struct Siglip2TaggerConfig {
     pub config_file: PathBuf,
     pub preprocessor_config_file: PathBuf,
     pub max_text_length: usize,
+    pub prompt_batch_size: usize,
     pub acceptance_threshold: f32,
     pub max_tags: usize,
     pub prompt_prefix: String,
@@ -142,6 +145,7 @@ impl Siglip2TaggerConfig {
             preprocessor_config_file: model_dir.join("preprocessor_config.json"),
             model_dir,
             max_text_length: DEFAULT_TEXT_LENGTH,
+            prompt_batch_size: DEFAULT_PROMPT_BATCH_SIZE,
             acceptance_threshold: DEFAULT_ACCEPTANCE_THRESHOLD,
             max_tags: DEFAULT_MAX_TAGS,
             prompt_prefix: DEFAULT_PROMPT_PREFIX.to_string(),
@@ -182,6 +186,9 @@ impl Siglip2TaggerConfig {
         }
         if self.max_text_length == 0 {
             return Err(anyhow!("SigLIP2 max_text_length must be greater than zero"));
+        }
+        if self.prompt_batch_size == 0 {
+            return Err(anyhow!("SigLIP2 prompt_batch_size must be greater than zero"));
         }
         if !(0.0..=1.0).contains(&self.acceptance_threshold) {
             return Err(anyhow!(
@@ -287,42 +294,53 @@ impl Siglip2Tagger {
         vocabulary: &[TagVocabularyEntry],
     ) -> Result<Vec<(String, f32)>> {
         let vocabulary = normalize_tag_vocabulary(vocabulary)?;
-        let prompt_labels = vocabulary
-            .iter()
-            .flat_map(|entry| {
-                entry
-                    .variants
-                    .iter()
-                    .map(|_| entry.label.clone())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        let prompts = vocabulary
-            .iter()
-            .flat_map(|entry| {
-                entry
-                    .variants
-                    .iter()
-                    .map(|variant| self.render_prompt(variant))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        let text_inputs =
-            tokenize_prompts(&self.tokenizer, &prompts, self.config.max_text_length)?;
         let image_inputs = preprocess_image(image, self.image_size)?;
-        let outputs = self
-            .session
-            .run(build_model_inputs(
-                &self.session,
-                &text_inputs,
-                &image_inputs,
-            )?)
-            .context("SigLIP2 inference failed")?;
-        let logits = outputs["logits_per_image"]
-            .try_extract_tensor::<f32>()
-            .context("SigLIP2 ONNX output `logits_per_image` is missing")?;
-        let scores = logits.1.iter().copied().map(sigmoid).collect::<Vec<_>>();
-        aggregate_variant_scores(&prompt_labels, &scores)
+        let prompt_entries = flatten_vocabulary_prompts(
+            &vocabulary,
+            &self.config.prompt_prefix,
+            &self.config.prompt_suffix,
+        )?;
+        let mut aggregated = BTreeMap::<String, f32>::new();
+        for chunk in prompt_entries.chunks(self.config.prompt_batch_size) {
+            let prompt_labels = chunk
+                .iter()
+                .map(|entry| entry.label.clone())
+                .collect::<Vec<_>>();
+            let prompts = chunk
+                .iter()
+                .map(|entry| entry.prompt.clone())
+                .collect::<Vec<_>>();
+            let text_inputs =
+                tokenize_prompts(&self.tokenizer, &prompts, self.config.max_text_length)?;
+            let outputs = self
+                .session
+                .run(build_model_inputs(
+                    &self.session,
+                    &text_inputs,
+                    &image_inputs,
+                )?)
+                .context("SigLIP2 inference failed")?;
+            let logits = outputs["logits_per_image"]
+                .try_extract_tensor::<f32>()
+                .context("SigLIP2 ONNX output `logits_per_image` is missing")?;
+            for (label, score) in aggregate_variant_scores(
+                &prompt_labels,
+                &logits.1.iter().copied().map(sigmoid).collect::<Vec<_>>(),
+            )? {
+                aggregated
+                    .entry(label)
+                    .and_modify(|current| *current = current.max(score))
+                    .or_insert(score);
+            }
+        }
+        let mut aggregated = aggregated.into_iter().collect::<Vec<_>>();
+        aggregated.sort_by(|left, right| {
+            right
+                .1
+                .total_cmp(&left.1)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        Ok(aggregated)
     }
 
     pub fn render_prompt(&self, label: &str) -> String {
@@ -349,6 +367,12 @@ pub struct Siglip2ImageInputs {
     pub pixel_attention_mask: Vec<i64>,
     pub spatial_shapes: Vec<i64>,
     pub image_size: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Siglip2PromptEntry {
+    pub label: String,
+    pub prompt: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -525,6 +549,27 @@ pub fn aggregate_variant_scores(
             .then_with(|| left.0.cmp(&right.0))
     });
     Ok(aggregated)
+}
+
+pub fn flatten_vocabulary_prompts(
+    vocabulary: &[TagVocabularyEntry],
+    prompt_prefix: &str,
+    prompt_suffix: &str,
+) -> Result<Vec<Siglip2PromptEntry>> {
+    let vocabulary = normalize_tag_vocabulary(vocabulary)?;
+    Ok(vocabulary
+        .into_iter()
+        .flat_map(|entry| {
+            entry
+                .variants
+                .into_iter()
+                .map(|variant| Siglip2PromptEntry {
+                    label: entry.label.clone(),
+                    prompt: render_siglip2_prompt(prompt_prefix, prompt_suffix, &variant),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect())
 }
 
 pub fn tokenize_prompts(
@@ -756,6 +801,25 @@ mod tests {
             aggregated,
             vec![("window".to_string(), 0.5), ("book".to_string(), 0.3)]
         );
+    }
+
+    #[test]
+    fn flattens_vocabulary_into_prompt_entries() {
+        let prompts = flatten_vocabulary_prompts(
+            &[TagVocabularyEntry::with_variants(
+                "window",
+                ["stained glass window", "ornate window"],
+            )
+            .expect("entry")],
+            DEFAULT_PROMPT_PREFIX,
+            DEFAULT_PROMPT_SUFFIX,
+        )
+        .expect("prompts");
+        assert_eq!(prompts.len(), 5);
+        assert!(prompts.iter().any(|entry| entry.label == "window"));
+        assert!(prompts.iter().any(|entry| {
+            entry.prompt == "This is a photo of stained glass window."
+        }));
     }
 
     #[test]

@@ -3581,14 +3581,17 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             ));
         }
         if library_id.starts_with("s3:") {
-            return _app
+            _app
                 .state::<crate::S3LibraryScanService>()
                 .0
                 .refresh_library(
                     &library_index_db_path()?,
                     &resolve_s3_library_config(&library_id)?,
                 )
-                .await;
+                .await?;
+            crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app)
+                .await?;
+            return Ok(());
         }
         let db_path = library_index_db_path()?;
         let library_path =
@@ -3596,7 +3599,10 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
         _app.state::<crate::LibraryScanService>()
             .0
             .refresh_library(&db_path, &library_id, library_path)
-            .await
+            .await?;
+        crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app)
+            .await?;
+        Ok(())
     }
 }
 

@@ -4,17 +4,84 @@ use crate::thumbnail_cache::ThumbnailCacheEntry;
 use tauri::Manager;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub struct ThumbnailTaggingService(pub crossbeam_channel::Sender<ThumbnailCacheEntry>);
+#[derive(Clone)]
+pub struct ThumbnailTaggingService {
+    pub sender: Option<crossbeam_channel::Sender<ThumbnailCacheEntry>>,
+    pub pending_media_ids: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub _lock_file: std::sync::Arc<Option<std::fs::File>>,
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+impl ThumbnailTaggingService {
+    pub fn enqueue(&self, entry: ThumbnailCacheEntry) -> Result<(), String> {
+        let Some(sender) = &self.sender else {
+            return Ok(());
+        };
+        {
+            let mut pending = self
+                .pending_media_ids
+                .lock()
+                .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?;
+            if !pending.insert(entry.media_id.clone()) {
+                return Ok(());
+            }
+        }
+        if let Err(error) = sender.send(entry.clone()) {
+            self.pending_media_ids
+                .lock()
+                .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?
+                .remove(&entry.media_id);
+            return Err(error.to_string());
+        }
+        Ok(())
+    }
+
+    pub fn finish(&self, media_id: &str) -> Result<(), String> {
+        self.pending_media_ids
+            .lock()
+            .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?
+            .remove(media_id);
+        Ok(())
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+static THUMBNAIL_TAGGING_SERVICE: std::sync::OnceLock<ThumbnailTaggingService> =
+    std::sync::OnceLock::new();
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn spawn_thumbnail_tagging_worker(
     thumbnail_cache: std::sync::Arc<crate::thumbnail_cache::ThumbnailCacheDb>,
 ) -> Result<ThumbnailTaggingService, String> {
+    if let Some(service) = THUMBNAIL_TAGGING_SERVICE.get() {
+        return Ok(service.clone());
+    }
+    let Some(lock_file) = try_acquire_thumbnail_tagging_lock()? else {
+        let service = ThumbnailTaggingService {
+            sender: None,
+            pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
+            _lock_file: std::sync::Arc::new(None),
+        };
+        THUMBNAIL_TAGGING_SERVICE
+            .set(service.clone())
+            .map_err(|_| "thumbnail tagging worker already initialized".to_string())?;
+        return Ok(service);
+    };
     let model_dir = thumbnail_tagging_model_dir()?;
-    let vocabulary = shade_tagging::photo_search_vocabulary().map_err(|e| e.to_string())?;
+    let vocabulary = shade_tagging::photo_auto_tag_vocabulary().map_err(|e| e.to_string())?;
     let startup_entries =
         tauri::async_runtime::block_on(thumbnail_cache.list_entries()).map_err(|e| e.to_string())?;
     let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailCacheEntry>();
+    let service = ThumbnailTaggingService {
+        sender: Some(sender),
+        pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashSet::new(),
+        )),
+        _lock_file: std::sync::Arc::new(Some(lock_file)),
+    };
+    let worker_service = service.clone();
     std::thread::Builder::new()
         .name("shade-thumbnail-tagging".into())
         .spawn(move || {
@@ -26,17 +93,26 @@ pub fn spawn_thumbnail_tagging_worker(
                 shade_tagging::Siglip2TaggerConfig::base_patch16_224(&model_dir),
             )
             .expect("failed to initialize SigLIP2 thumbnail tagging model");
-            for entry in startup_entries {
-                process_thumbnail_tagging_entry(&runtime, &mut tagger, &vocabulary, entry)
-                    .expect("failed to process startup thumbnail tagging entry");
-            }
             while let Ok(entry) = receiver.recv() {
-                process_thumbnail_tagging_entry(&runtime, &mut tagger, &vocabulary, entry)
-                    .expect("failed to process thumbnail tagging entry");
+                let media_id = entry.media_id.clone();
+                if let Err(error) =
+                    process_thumbnail_tagging_entry(&runtime, &mut tagger, &vocabulary, entry)
+                {
+                    eprintln!("thumbnail tagging failed for {media_id}: {error}");
+                }
+                worker_service
+                    .finish(&media_id)
+                    .expect("failed to mark thumbnail tagging job as finished");
             }
         })
         .map_err(|e| e.to_string())?;
-    Ok(ThumbnailTaggingService(sender))
+    THUMBNAIL_TAGGING_SERVICE
+        .set(service.clone())
+        .map_err(|_| "thumbnail tagging worker already initialized".to_string())?;
+    for entry in startup_entries {
+        service.enqueue(entry)?;
+    }
+    Ok(service)
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -76,11 +152,18 @@ pub fn enqueue_thumbnail_for_tagging<R: tauri::Runtime>(
     entry: ThumbnailCacheEntry,
 ) -> Result<(), String> {
     app.state::<ThumbnailTaggingService>()
-        .0
-        .send(entry)
-        .map_err(|error: crossbeam_channel::SendError<ThumbnailCacheEntry>| {
-            error.to_string()
-        })
+        .enqueue(entry)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub async fn enqueue_existing_thumbnails_for_tagging<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let entries = app.state::<crate::ThumbnailCacheDb>().0.list_entries().await?;
+    for entry in entries {
+        enqueue_thumbnail_for_tagging(app, entry)?;
+    }
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -96,4 +179,43 @@ pub fn thumbnail_tagging_model_dir() -> Result<std::path::PathBuf, String> {
         ));
     }
     Ok(model_dir)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub fn try_acquire_thumbnail_tagging_lock() -> Result<Option<std::fs::File>, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    let config_dir = std::path::PathBuf::from(home).join(".config/shade");
+    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    let lock_path = config_dir.join("thumbnail-tagging.lock");
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(|e| e.to_string())?;
+    let status = unsafe { flock_nonblocking_exclusive(lock_file.as_raw_fd()) };
+    if status == 0 {
+        return Ok(Some(lock_file));
+    }
+    let error = std::io::Error::last_os_error();
+    let code = error.raw_os_error().unwrap_or_default();
+    if code == 35 || code == 11 {
+        return Ok(None);
+    }
+    Err(error.to_string())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use std::os::fd::AsRawFd;
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+unsafe fn flock_nonblocking_exclusive(fd: std::os::raw::c_int) -> std::os::raw::c_int {
+    unsafe extern "C" {
+        fn flock(fd: std::os::raw::c_int, operation: std::os::raw::c_int)
+            -> std::os::raw::c_int;
+    }
+    const LOCK_EX: std::os::raw::c_int = 2;
+    const LOCK_NB: std::os::raw::c_int = 4;
+    unsafe { flock(fd, LOCK_EX | LOCK_NB) }
 }

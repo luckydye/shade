@@ -25,6 +25,52 @@ pub fn photo_search_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
         .collect())
 }
 
+pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
+    let vocabulary = photo_search_vocabulary()?;
+    let labels = [
+        "person",
+        "portrait",
+        "group photo",
+        "family",
+        "child",
+        "baby",
+        "dog",
+        "cat",
+        "bird",
+        "wildlife",
+        "interior",
+        "exterior",
+        "office",
+        "library",
+        "church interior",
+        "chapel interior",
+        "landscape",
+        "beach",
+        "forest",
+        "mountain",
+        "sunset",
+        "snow scene",
+        "cityscape",
+        "street scene",
+        "window",
+        "stained glass window",
+        "table",
+        "desk",
+        "open book",
+        "notebook",
+        "car",
+        "bicycle",
+        "coffee",
+        "sunlight",
+        "black and white",
+        "vintage",
+    ];
+    Ok(vocabulary
+        .into_iter()
+        .filter(|entry| labels.contains(&entry.label.as_str()))
+        .collect())
+}
+
 pub fn photo_search_vocabulary_categories() -> Result<Vec<TagVocabularyCategory>> {
     Ok(vec![
         TagVocabularyCategory {
@@ -297,5 +343,16 @@ mod tests {
         assert_eq!(categories.len(), 10);
         assert!(categories.iter().any(|category| category.name == "objects"));
         assert!(categories.iter().any(|category| category.name == "light"));
+    }
+
+    #[test]
+    fn builds_auto_tag_vocabulary() {
+        let vocabulary = photo_auto_tag_vocabulary().expect("vocabulary");
+        assert!(vocabulary.len() >= 30);
+        assert!(vocabulary
+            .iter()
+            .any(|entry| entry.label == "stained glass window"));
+        assert!(vocabulary.iter().any(|entry| entry.label == "open book"));
+        assert!(vocabulary.iter().any(|entry| entry.label == "person"));
     }
 }
