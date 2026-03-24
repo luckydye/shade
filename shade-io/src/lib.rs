@@ -46,8 +46,10 @@ pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
     delete_persisted_library_index, has_persisted_library_index,
-    indexed_library_image_for_path, is_supported_library_image, library_index_db_path,
-    load_persisted_library_index, picture_display_name, replace_persisted_library_index,
+    has_persisted_library_index_by_root, indexed_library_image_for_path,
+    is_supported_library_image, library_index_db_path, load_persisted_library_index,
+    load_persisted_library_index_by_root, picture_display_name,
+    replace_persisted_library_index, replace_persisted_library_index_by_root,
     scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
     PersistedLibraryIndex,
 };
@@ -60,11 +62,11 @@ pub use library_scan_service::{
 pub use library_source::{
     camera_library_id, delete_s3_object, display_s3_library_name,
     format_s3_library_detail, get_s3_object_bytes, library_config_id, list_s3_objects,
-    local_library_id, media_path_for_s3_object, normalize_s3_library_input,
-    parse_s3_media_path, peer_library_id, put_s3_object_bytes,
-    resolve_s3_source_id_from_library_id, s3_library_id, AddS3LibraryParams,
-    CameraLibraryConfig, LibraryConfig, LocalLibraryConfig, PeerLibraryConfig,
-    S3LibraryConfig, S3ObjectEntry,
+    list_s3_objects_page, local_library_id, media_path_for_s3_object,
+    normalize_s3_library_input, parse_s3_media_path, peer_library_id,
+    put_s3_object_bytes, resolve_s3_source_id_from_library_id, s3_library_id,
+    AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LocalLibraryConfig,
+    PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry, S3ObjectListPage,
 };
 #[cfg(feature = "native")]
 pub use thumbnail_loader::{

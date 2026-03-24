@@ -6,9 +6,11 @@ use shade_core::{
 };
 use shade_io::{
     delete_persisted_library_index, has_persisted_library_index,
-    is_supported_library_image, library_index_db_path as shared_library_index_db_path,
-    load_image_bytes, load_image_bytes_f32_with_info, picture_display_name,
-    scan_directory_images, to_linear_srgb_f32, SourceImageInfo,
+    has_persisted_library_index_by_root, is_supported_library_image,
+    library_index_db_path as shared_library_index_db_path, load_image_bytes,
+    load_image_bytes_f32_with_info, picture_display_name,
+    replace_persisted_library_index_by_root, scan_directory_images, to_linear_srgb_f32,
+    SourceImageInfo,
 };
 use std::collections::HashMap;
 use std::io::Write;
@@ -95,6 +97,132 @@ pub struct LibraryImageListing {
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 const SUPERSEDED_IMAGE_LOAD_ERROR: &str = "image load superseded by newer request";
+
+pub struct S3LibraryScanState {
+    pub scans: Mutex<HashMap<String, Arc<Mutex<shade_io::LibraryScanSnapshot>>>>,
+}
+
+impl S3LibraryScanState {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            scans: Mutex::new(HashMap::new()),
+        })
+    }
+
+    pub async fn ensure_snapshot_for_library(
+        &self,
+        db_path: &Path,
+        config: &shade_io::S3LibraryConfig,
+    ) -> Result<(Arc<Mutex<shade_io::LibraryScanSnapshot>>, bool), String> {
+        let library_id = s3_library_id(&config.id);
+        if let Some(snapshot) = self
+            .scans
+            .lock()
+            .map_err(|_| "S3 library scan lock poisoned".to_string())?
+            .get(&library_id)
+            .cloned()
+        {
+            return Ok((snapshot, false));
+        }
+        let persisted = shade_io::load_persisted_library_index_by_root(
+            db_path,
+            &library_id,
+            &shade_io::format_s3_library_detail(config),
+        )
+        .await?;
+        let should_scan = persisted.is_none();
+        let completed_at = persisted.as_ref().map(|listing| listing.indexed_at);
+        let snapshot = Arc::new(Mutex::new(shade_io::LibraryScanSnapshot {
+            items: persisted.map(|listing| listing.items).unwrap_or_default(),
+            is_scanning: false,
+            is_complete: !should_scan,
+            error: None,
+            completed_at,
+        }));
+        let snapshot = {
+            let mut scans = self
+                .scans
+                .lock()
+                .map_err(|_| "S3 library scan lock poisoned".to_string())?;
+            scans
+                .entry(library_id)
+                .or_insert_with(|| snapshot.clone())
+                .clone()
+        };
+        Ok((snapshot, should_scan))
+    }
+
+    pub async fn snapshot_for_library(
+        self: &Arc<Self>,
+        db_path: &Path,
+        config: &shade_io::S3LibraryConfig,
+    ) -> Result<shade_io::LibraryScanSnapshot, String> {
+        let (snapshot, should_scan) =
+            self.ensure_snapshot_for_library(db_path, config).await?;
+        if should_scan {
+            start_s3_library_scan(
+                snapshot.clone(),
+                db_path.to_path_buf(),
+                config.clone(),
+                true,
+            )?;
+        }
+        let snapshot = snapshot
+            .lock()
+            .map_err(|_| "S3 library scan snapshot lock poisoned".to_string())?
+            .clone();
+        if let Some(error) = &snapshot.error {
+            return Err(error.clone());
+        }
+        Ok(snapshot)
+    }
+
+    pub async fn request_refresh(
+        self: &Arc<Self>,
+        db_path: &Path,
+        config: &shade_io::S3LibraryConfig,
+    ) -> Result<bool, String> {
+        let (snapshot, _) = self.ensure_snapshot_for_library(db_path, config).await?;
+        let publish_progress = {
+            let guard = snapshot
+                .lock()
+                .map_err(|_| "S3 library scan snapshot lock poisoned".to_string())?;
+            if guard.is_scanning {
+                return Ok(false);
+            }
+            guard.completed_at.is_none() && guard.items.is_empty()
+        };
+        start_s3_library_scan(
+            snapshot,
+            db_path.to_path_buf(),
+            config.clone(),
+            publish_progress,
+        )?;
+        Ok(true)
+    }
+
+    pub async fn refresh_library(
+        self: &Arc<Self>,
+        db_path: &Path,
+        config: &shade_io::S3LibraryConfig,
+    ) -> Result<(), String> {
+        if self.request_refresh(db_path, config).await? {
+            return Ok(());
+        }
+        Err(format!(
+            "library index refresh already running: {}",
+            s3_library_id(&config.id)
+        ))
+    }
+
+    pub fn remove_library(&self, library_id: &str) -> Result<(), String> {
+        self.scans
+            .lock()
+            .map_err(|_| "S3 library scan lock poisoned".to_string())?
+            .remove(library_id);
+        Ok(())
+    }
+}
 
 pub fn init_app_paths<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -183,6 +311,14 @@ fn edits_db_path() -> Result<PathBuf, String> {
 
 fn library_index_db_path() -> Result<PathBuf, String> {
     Ok(shared_library_index_db_path(&app_config_dir()?))
+}
+
+fn thumbnail_cache_db_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("thumbnails.db"))
+}
+
+pub async fn open_thumbnail_cache_db() -> Result<crate::thumbnail_cache::ThumbnailCacheDb, String> {
+    crate::thumbnail_cache::ThumbnailCacheDb::open(&thumbnail_cache_db_path()?).await
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
@@ -1094,6 +1230,120 @@ async fn refresh_desktop_local_library<R: tauri::Runtime>(
         .await
 }
 
+fn start_s3_library_scan(
+    snapshot: Arc<Mutex<shade_io::LibraryScanSnapshot>>,
+    db_path: PathBuf,
+    config: shade_io::S3LibraryConfig,
+    publish_progress: bool,
+) -> Result<(), String> {
+    let library_id = s3_library_id(&config.id);
+    let root = shade_io::format_s3_library_detail(&config);
+    {
+        let mut guard = snapshot
+            .lock()
+            .map_err(|_| "S3 library scan snapshot lock poisoned".to_string())?;
+        if guard.is_scanning {
+            return Err(format!(
+                "library index refresh already running: {library_id}"
+            ));
+        }
+        guard.is_scanning = true;
+        guard.is_complete = false;
+        guard.error = None;
+        if publish_progress {
+            guard.items.clear();
+            guard.completed_at = None;
+        }
+    }
+    std::thread::Builder::new()
+        .name("shade-s3-library-scan".into())
+        .spawn(move || {
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())
+                .and_then(|runtime| {
+                    runtime.block_on(async {
+                        let items = scan_s3_library_into_snapshot(
+                            &config,
+                            &snapshot,
+                            publish_progress,
+                        )
+                        .await?;
+                        let indexed_at = replace_persisted_library_index_by_root(
+                            &db_path,
+                            &library_id,
+                            &root,
+                            &items,
+                        )
+                        .await?;
+                        Ok::<(Vec<shade_io::IndexedLibraryImage>, u64), String>((
+                            items, indexed_at,
+                        ))
+                    })
+                });
+            let mut guard = snapshot
+                .lock()
+                .expect("S3 library scan snapshot lock poisoned");
+            match result {
+                Ok((items, indexed_at)) => {
+                    if !publish_progress {
+                        guard.items = items;
+                    }
+                    guard.completed_at = Some(indexed_at);
+                }
+                Err(error) => {
+                    guard.error = Some(error);
+                }
+            }
+            guard.is_scanning = false;
+            guard.is_complete = true;
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+async fn scan_s3_library_into_snapshot(
+    config: &shade_io::S3LibraryConfig,
+    snapshot: &Arc<Mutex<shade_io::LibraryScanSnapshot>>,
+    publish_progress: bool,
+) -> Result<Vec<shade_io::IndexedLibraryImage>, String> {
+    let mut continuation_token: Option<String> = None;
+    let mut batch = Vec::new();
+    let mut items = Vec::new();
+    loop {
+        let page =
+            shade_io::list_s3_objects_page(config, continuation_token.as_deref()).await?;
+        for object in page.objects {
+            if !is_supported_library_image(Path::new(&object.key)) {
+                continue;
+            }
+            let item = shade_io::IndexedLibraryImage {
+                name: picture_display_name(&object.key),
+                path: shade_io::media_path_for_s3_object(&config.id, &object.key),
+                modified_at: object.modified_at,
+                rating: None,
+            };
+            items.push(item.clone());
+            if publish_progress {
+                batch.push(item);
+            }
+        }
+        if publish_progress && batch.len() >= 64 {
+            shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
+        }
+        continuation_token = page.next_continuation_token;
+        if continuation_token.is_none() {
+            break;
+        }
+    }
+    if publish_progress {
+        shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
+    }
+    shade_io::sort_indexed_library_items(&mut items);
+    Ok(items)
+}
+
 pub fn prime_missing_library_indexes<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<(), String> {
@@ -1107,6 +1357,7 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
     {
         let db_path = library_index_db_path()?;
         let library_scan_service = app.state::<crate::LibraryScanService>().0.clone();
+        let s3_scan_service = app.state::<crate::S3LibraryScanService>().0.clone();
         for (library_id, root) in desktop_local_library_roots()? {
             if !local_library_is_available(&root) {
                 continue;
@@ -1124,6 +1375,21 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
                 &library_id,
                 root,
             ))?;
+        }
+        for library in load_app_config()?.libraries {
+            let shade_io::LibraryConfig::S3(config) = library else {
+                continue;
+            };
+            if tauri::async_runtime::block_on(has_persisted_library_index_by_root(
+                &db_path,
+                &s3_library_id(&config.id),
+                &shade_io::format_s3_library_detail(&config),
+            ))? {
+                continue;
+            }
+            tauri::async_runtime::block_on(
+                s3_scan_service.refresh_library(&db_path, &config),
+            )?;
         }
         Ok(())
     }
@@ -1231,24 +1497,22 @@ fn resolve_s3_library_for_media_path(
     ))
 }
 
-async fn list_s3_library_images(
+async fn list_s3_library_images<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     config: &shade_io::S3LibraryConfig,
 ) -> Result<LibraryImageListing, String> {
-    let mut items = shade_io::list_s3_objects(config)
-        .await?
-        .into_iter()
-        .filter(|object| is_supported_library_image(std::path::Path::new(&object.key)))
-        .map(|object| LibraryImage {
-            name: picture_display_name(&object.key),
-            path: shade_io::media_path_for_s3_object(&config.id, &object.key),
-            modified_at: object.modified_at,
-            metadata: Default::default(),
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    let snapshot = app
+        .state::<crate::S3LibraryScanService>()
+        .0
+        .snapshot_for_library(&library_index_db_path()?, config)
+        .await?;
     Ok(LibraryImageListing {
-        items,
-        is_complete: true,
+        items: snapshot
+            .items
+            .into_iter()
+            .map(local_library_image)
+            .collect(),
+        is_complete: snapshot.is_complete,
     })
 }
 
@@ -2852,8 +3116,13 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     if let Some(bytes) = render_snapshot_thumbnail_bytes(&app, picture_id).await? {
         return Ok(bytes);
     }
+    let cache = app.state::<crate::ThumbnailCacheDb>();
+    let cache_key = crate::thumbnail_cache::thumbnail_cache_key(picture_id);
+    if let Ok(Some(cached)) = cache.0.get(&cache_key).await {
+        return Ok(cached);
+    }
     let thumbnail_queue = app.state::<crate::ThumbnailService>().raw_queue.clone();
-    shade_io::load_thumbnail_bytes(
+    let bytes = shade_io::load_thumbnail_bytes(
         picture_id,
         thumbnail_queue.as_ref(),
         {
@@ -2872,7 +3141,9 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
             }
         },
     )
-    .await
+    .await?;
+    let _ = cache.0.put(&cache_key, &bytes).await;
+    Ok(bytes)
 }
 
 pub async fn load_picture_bytes<R: tauri::Runtime>(
@@ -3127,8 +3398,11 @@ async fn build_library_listing<R: tauri::Runtime>(
                 .await;
         }
         if library_id.starts_with("s3:") {
-            return list_s3_library_images(&resolve_s3_library_config(&library_id)?)
-                .await;
+            return list_s3_library_images(
+                _app,
+                &resolve_s3_library_config(&library_id)?,
+            )
+            .await;
         }
         let db_path = library_index_db_path()?;
         let library_path =
@@ -3168,6 +3442,16 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             return Err(format!(
                 "library indexing is not supported for camera libraries: {library_id}"
             ));
+        }
+        if library_id.starts_with("s3:") {
+            return _app
+                .state::<crate::S3LibraryScanService>()
+                .0
+                .refresh_library(
+                    &library_index_db_path()?,
+                    &resolve_s3_library_config(&library_id)?,
+                )
+                .await;
         }
         let db_path = library_index_db_path()?;
         let library_path =
@@ -3213,7 +3497,8 @@ pub async fn add_media_library<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-pub async fn add_s3_media_library(
+pub async fn add_s3_media_library<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
     params: shade_io::AddS3LibraryParams,
 ) -> Result<MediaLibrary, String> {
     let library = shade_io::normalize_s3_library_input(params)?;
@@ -3223,6 +3508,13 @@ pub async fn add_s3_media_library(
         shade_io::LibraryConfig::S3(library.clone()),
     );
     save_app_config(&config)?;
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        _app.state::<crate::S3LibraryScanService>()
+            .0
+            .refresh_library(&library_index_db_path()?, &library)
+            .await?;
+    }
     Ok(library_for_s3(&library))
 }
 
@@ -3382,9 +3674,19 @@ pub async fn remove_media_library<R: tauri::Runtime>(
     save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        if matches!(removed, shade_io::LibraryConfig::Local(_)) {
+        if matches!(
+            removed,
+            shade_io::LibraryConfig::Local(_) | shade_io::LibraryConfig::S3(_)
+        ) {
             delete_persisted_library_index(&library_index_db_path()?, &id).await?;
+        }
+        if matches!(removed, shade_io::LibraryConfig::Local(_)) {
             _app.state::<crate::LibraryScanService>()
+                .0
+                .remove_library(&id)?;
+        }
+        if matches!(removed, shade_io::LibraryConfig::S3(_)) {
+            _app.state::<crate::S3LibraryScanService>()
                 .0
                 .remove_library(&id)?;
         }

@@ -68,6 +68,12 @@ pub struct S3ObjectEntry {
     pub modified_at: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+pub struct S3ObjectListPage {
+    pub objects: Vec<S3ObjectEntry>,
+    pub next_continuation_token: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct ListBucketResult {
@@ -192,57 +198,68 @@ pub fn normalize_s3_library_input(
 pub async fn list_s3_objects(
     config: &S3LibraryConfig,
 ) -> Result<Vec<S3ObjectEntry>, String> {
-    let client = http_client()?;
     let mut continuation_token: Option<String> = None;
     let mut objects = Vec::new();
     loop {
-        let mut query = vec![
-            ("list-type", "2".to_string()),
-            ("max-keys", "1000".to_string()),
-        ];
-        if let Some(prefix) = config.prefix.as_ref() {
-            query.push(("prefix", prefix.clone()));
-        }
-        if let Some(token) = continuation_token.as_ref() {
-            query.push(("continuation-token", token.clone()));
-        }
-        let request = signed_request("GET", config, None, &query, EMPTY_SHA256_HEX)?;
-        let response = client
-            .get(&request.url)
-            .header("authorization", request.authorization)
-            .header("x-amz-content-sha256", request.content_sha256)
-            .header("x-amz-date", request.amz_date)
-            .send()
-            .await
-            .map_err(|error| {
-                format!("S3 request failed for {}: {}", config.endpoint, error)
-            })?;
-        let response = response.error_for_status().map_err(|error| {
-            format!(
-                "S3 list request failed for bucket {} at {}: {}",
-                config.bucket, config.endpoint, error
-            )
-        })?;
-        let payload = response.text().await.map_err(|error| error.to_string())?;
-        let listing: ListBucketResult = from_str(&payload)
-            .map_err(|error| format!("invalid S3 list response: {error}"))?;
-        for item in listing.contents {
-            objects.push(S3ObjectEntry {
-                key: item.key,
-                modified_at: parse_last_modified(item.last_modified.as_deref())?,
-            });
-        }
-        if !listing.is_truncated {
+        let page = list_s3_objects_page(config, continuation_token.as_deref()).await?;
+        objects.extend(page.objects);
+        if page.next_continuation_token.is_none() {
             break;
         }
-        continuation_token = listing.next_continuation_token;
-        if continuation_token.is_none() {
-            return Err(
-                "S3 listing was truncated without a continuation token".to_string()
-            );
-        }
+        continuation_token = page.next_continuation_token;
     }
     Ok(objects)
+}
+
+pub async fn list_s3_objects_page(
+    config: &S3LibraryConfig,
+    continuation_token: Option<&str>,
+) -> Result<S3ObjectListPage, String> {
+    let client = http_client()?;
+    let mut query = vec![
+        ("list-type", "2".to_string()),
+        ("max-keys", "1000".to_string()),
+    ];
+    if let Some(prefix) = config.prefix.as_ref() {
+        query.push(("prefix", prefix.clone()));
+    }
+    if let Some(token) = continuation_token {
+        query.push(("continuation-token", token.to_string()));
+    }
+    let request = signed_request("GET", config, None, &query, EMPTY_SHA256_HEX)?;
+    let response = client
+        .get(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date)
+        .send()
+        .await
+        .map_err(|error| {
+            format!("S3 request failed for {}: {}", config.endpoint, error)
+        })?;
+    let response = response.error_for_status().map_err(|error| {
+        format!(
+            "S3 list request failed for bucket {} at {}: {}",
+            config.bucket, config.endpoint, error
+        )
+    })?;
+    let payload = response.text().await.map_err(|error| error.to_string())?;
+    let listing: ListBucketResult = from_str(&payload)
+        .map_err(|error| format!("invalid S3 list response: {error}"))?;
+    let mut objects = Vec::with_capacity(listing.contents.len());
+    for item in listing.contents {
+        objects.push(S3ObjectEntry {
+            key: item.key,
+            modified_at: parse_last_modified(item.last_modified.as_deref())?,
+        });
+    }
+    if listing.is_truncated && listing.next_continuation_token.is_none() {
+        return Err("S3 listing was truncated without a continuation token".to_string());
+    }
+    Ok(S3ObjectListPage {
+        objects,
+        next_continuation_token: listing.next_continuation_token,
+    })
 }
 
 pub async fn get_s3_object_bytes(

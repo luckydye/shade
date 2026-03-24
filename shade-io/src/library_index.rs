@@ -30,6 +30,14 @@ fn library_index_root_path(root_path: &Path) -> Result<String, String> {
         .ok_or_else(|| format!("non-utf8 path: {}", root_path.display()))
 }
 
+pub fn library_index_root_key(root: &str) -> Result<String, String> {
+    let trimmed = root.trim();
+    if trimmed.is_empty() {
+        return Err("library index root cannot be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn library_index_db_parent(db_path: &Path) -> Result<&Path, String> {
     db_path
         .parent()
@@ -315,14 +323,27 @@ pub async fn load_persisted_library_index(
     library_id: &str,
     root_path: &Path,
 ) -> Result<Option<PersistedLibraryIndex>, String> {
+    load_persisted_library_index_by_root(
+        db_path,
+        library_id,
+        &library_index_root_path(root_path)?,
+    )
+    .await
+}
+
+pub async fn load_persisted_library_index_by_root(
+    db_path: &Path,
+    library_id: &str,
+    root: &str,
+) -> Result<Option<PersistedLibraryIndex>, String> {
     let conn = open_library_index_db(db_path).await?;
-    let root_path = library_index_root_path(root_path)?;
+    let root = library_index_root_key(root)?;
     let mut metadata_rows = conn
         .query(
             "SELECT indexed_at
              FROM library_indexes
              WHERE library_id = ?1 AND root_path = ?2",
-            libsql::params![library_id, root_path],
+            libsql::params![library_id, root],
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -378,15 +399,28 @@ pub async fn has_persisted_library_index(
     library_id: &str,
     root_path: &Path,
 ) -> Result<bool, String> {
+    has_persisted_library_index_by_root(
+        db_path,
+        library_id,
+        &library_index_root_path(root_path)?,
+    )
+    .await
+}
+
+pub async fn has_persisted_library_index_by_root(
+    db_path: &Path,
+    library_id: &str,
+    root: &str,
+) -> Result<bool, String> {
     let conn = open_library_index_db(db_path).await?;
-    let root_path = library_index_root_path(root_path)?;
+    let root = library_index_root_key(root)?;
     let mut rows = conn
         .query(
             "SELECT 1
              FROM library_indexes
              WHERE library_id = ?1 AND root_path = ?2
              LIMIT 1",
-            libsql::params![library_id, root_path],
+            libsql::params![library_id, root],
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -403,10 +437,25 @@ pub async fn replace_persisted_library_index(
     root_path: &Path,
     items: &[IndexedLibraryImage],
 ) -> Result<u64, String> {
+    replace_persisted_library_index_by_root(
+        db_path,
+        library_id,
+        &library_index_root_path(root_path)?,
+        items,
+    )
+    .await
+}
+
+pub async fn replace_persisted_library_index_by_root(
+    db_path: &Path,
+    library_id: &str,
+    root: &str,
+    items: &[IndexedLibraryImage],
+) -> Result<u64, String> {
     let conn = open_library_index_db(db_path).await?;
     let indexed_at_u64 = system_time_millis(std::time::SystemTime::now())?;
     let indexed_at = i64::try_from(indexed_at_u64).map_err(|error| error.to_string())?;
-    let root_path = library_index_root_path(root_path)?;
+    let root = library_index_root_key(root)?;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
@@ -416,7 +465,7 @@ pub async fn replace_persisted_library_index(
              VALUES (?1, ?2, ?3)
              ON CONFLICT(library_id)
              DO UPDATE SET root_path = excluded.root_path, indexed_at = excluded.indexed_at",
-            libsql::params![library_id, root_path, indexed_at],
+            libsql::params![library_id, root, indexed_at],
         )
         .await
         .map_err(|error| error.to_string())?;

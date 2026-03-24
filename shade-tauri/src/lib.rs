@@ -1,5 +1,6 @@
 mod commands;
 mod photos;
+mod thumbnail_cache;
 
 use tauri::Manager;
 
@@ -13,8 +14,10 @@ pub struct ThumbnailService {
     pub render_sender: crossbeam_channel::Sender<commands::ThumbnailRenderJob>,
 }
 pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
+pub struct S3LibraryScanService(pub std::sync::Arc<commands::S3LibraryScanState>);
 pub struct CameraDiscoveryService(pub std::sync::Arc<shade_io::CameraDiscoveryService>);
 pub struct CameraThumbnailService(pub std::sync::Arc<shade_io::CameraThumbnailService>);
+pub struct ThumbnailCacheDb(pub thumbnail_cache::ThumbnailCacheDb);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -29,6 +32,7 @@ pub fn run() {
             render_sender: commands::spawn_thumbnail_render_worker(),
         })
         .manage(LibraryScanService(shade_io::LibraryScanService::new()))
+        .manage(S3LibraryScanService(commands::S3LibraryScanState::new()))
         .manage(CameraDiscoveryService(
             shade_io::CameraDiscoveryService::new(),
         ))
@@ -37,6 +41,11 @@ pub fn run() {
         ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
+            let thumbnail_cache = tauri::async_runtime::block_on(
+                commands::open_thumbnail_cache_db(),
+            )
+            .map_err(|e| e.to_string())?;
+            app.manage(ThumbnailCacheDb(thumbnail_cache));
             #[cfg(not(target_os = "ios"))]
             {
                 let handle = app.handle().clone();
