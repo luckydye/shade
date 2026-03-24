@@ -27,5 +27,8 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+    rollupOptions: {
+      external: [/shade_wasm/],
+    },
   },
 });
