@@ -11,7 +11,7 @@ use tokenizers::{
 const DEFAULT_PROMPT_PREFIX: &str = "This is a photo of ";
 const DEFAULT_PROMPT_SUFFIX: &str = ".";
 const DEFAULT_TEXT_LENGTH: usize = 64;
-const DEFAULT_SCORE_THRESHOLD: f32 = 0.25;
+const DEFAULT_SCORE_THRESHOLD: f32 = 0.1;
 const DEFAULT_MAX_TAGS: usize = 12;
 const DEFAULT_IMAGE_MEAN: [f32; 3] = [0.5, 0.5, 0.5];
 const DEFAULT_IMAGE_STD: [f32; 3] = [0.5, 0.5, 0.5];
@@ -338,9 +338,8 @@ impl Siglip2ModelInfo {
 pub fn prepare_candidate_labels(candidate_labels: &[String]) -> Result<Vec<String>> {
     let labels = candidate_labels
         .iter()
-        .map(|label| label.trim())
+        .map(|label| normalize_candidate_label(label))
         .filter(|label| !label.is_empty())
-        .map(str::to_string)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -350,6 +349,16 @@ pub fn prepare_candidate_labels(candidate_labels: &[String]) -> Result<Vec<Strin
         ));
     }
     Ok(labels)
+}
+
+pub fn normalize_candidate_label(label: &str) -> String {
+    label
+        .trim()
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 pub fn tokenize_prompts(
@@ -506,13 +515,13 @@ mod tests {
         let labels = prepare_candidate_labels(&[
             " portrait ".to_string(),
             "".to_string(),
-            "landscape".to_string(),
+            "Land_scape".to_string(),
             "portrait".to_string(),
         ])
         .expect("labels");
         assert_eq!(
             labels,
-            vec!["landscape".to_string(), "portrait".to_string()]
+            vec!["land scape".to_string(), "portrait".to_string()]
         );
     }
 
