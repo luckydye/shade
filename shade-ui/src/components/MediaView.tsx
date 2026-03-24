@@ -287,6 +287,17 @@ function pictureName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
+function normalizeFilenameFilter(value: string) {
+  return value.trim().toLocaleLowerCase();
+}
+
+function filterMediaItemsByFilename(items: MediaItem[], filter: string) {
+  if (filter === "") {
+    return items;
+  }
+  return items.filter((item) => item.name.toLocaleLowerCase().includes(filter));
+}
+
 function normalizeModifiedAt(modifiedAt: number | null | undefined) {
   return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
     ? modifiedAt
@@ -734,6 +745,7 @@ export const MediaView: Component = () => {
   const [showS3Form, setShowS3Form] = createSignal(false);
   const [showLibraryActions, setShowLibraryActions] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
+  const [filenameFilter, setFilenameFilter] = createSignal("");
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
     name: "",
     endpoint: "",
@@ -801,13 +813,19 @@ export const MediaView: Component = () => {
     state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,
   );
   const selectedMediaItemIdSet = createMemo(() => new Set(selectedMediaItemIds()));
-  const displayedItems = createMemo(() => {
+  const availableItems = createMemo(() => {
     const current = items();
     if (current?.libraryId === selectedLibraryId()) {
       return current.items;
     }
     return cachedLibraryItems() ?? [];
   });
+  const activeFilenameFilter = createMemo(() =>
+    state.currentView === "editor" ? "" : normalizeFilenameFilter(filenameFilter()),
+  );
+  const displayedItems = createMemo(() =>
+    filterMediaItemsByFilename(availableItems(), activeFilenameFilter()),
+  );
   const itemsById = createMemo(
     () => new Map(displayedItems().map((item) => [mediaItemKey(item), item])),
   );
@@ -1107,6 +1125,14 @@ export const MediaView: Component = () => {
     setScrollTop(0);
     setSelectedMediaItemIds([]);
     setShowLibraryActions(false);
+    if (scrollRef) {
+      scrollRef.scrollTop = 0;
+    }
+  });
+
+  createEffect(() => {
+    activeFilenameFilter();
+    setScrollTop(0);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
@@ -1554,80 +1580,92 @@ export const MediaView: Component = () => {
         <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}>
           <div class="flex w-full items-center gap-3">
             <div class="flex flex-1 gap-2 overflow-x-auto">
-                <For each={libraryEntries()}>
-                  {(library) =>
-                    (() => {
-                      const offline = isLibraryOffline(library, onlinePeerIds());
-                      const refreshing = isLocalLibraryRefreshing(library);
-                      return (
-                        <Button
-                          type="button"
-                          onClick={() => setSelectedLibraryId(library.id)}
-                          class={`${LIBRARY_TAB_BASE_CLASS} ${
-                            selectedLibraryId() === library.id
-                              ? offline
-                                ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
-                                : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
-                              : offline
-                                ? "border-dashed border-amber-500/25 bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
-                                : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
-                          }`}
-                        >
-                          <span class="flex items-center gap-2">
-                            {(isPeerLibrary(library) ||
-                              isCameraLibrary(library) ||
-                              isS3Library(library) ||
-                              refreshing ||
-                              offline) && (
-                              <span
-                                class={`h-1.5 w-1.5 rounded-full ${
-                                  refreshing
-                                    ? "animate-pulse bg-sky-400"
-                                    : offline
-                                      ? "bg-amber-400"
-                                      : "bg-emerald-400"
-                                }`}
-                              />
-                            )}
-                            <span>{library.name}</span>
-                          </span>
-                        </Button>
-                      );
-                    })()
-                  }
-                </For>
-                <For each={suggestedPeers()}>
-                  {(peer) => (
-                    <Button
-                      type="button"
-                      class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
-                      disabled={isSubmitting()}
-                      onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
-                    >
-                      {`Peer ${peer.endpoint_id.slice(0, 8)}`}
-                    </Button>
-                  )}
-                </For>
-                <Button
-                  type="button"
-                  class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
-                  disabled={isSubmitting()}
-                  onClick={() => void handleAddLibrary()}
-                  aria-label="Add library"
-                >
-                  +
-                </Button>
-                <Show when={supportsS3Libraries()}>
+              <For each={libraryEntries()}>
+                {(library) =>
+                  (() => {
+                    const offline = isLibraryOffline(library, onlinePeerIds());
+                    const refreshing = isLocalLibraryRefreshing(library);
+                    return (
+                      <Button
+                        type="button"
+                        onClick={() => setSelectedLibraryId(library.id)}
+                        class={`${LIBRARY_TAB_BASE_CLASS} ${
+                          selectedLibraryId() === library.id
+                            ? offline
+                              ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
+                              : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+                            : offline
+                              ? "border-dashed border-amber-500/25 bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
+                              : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
+                        }`}
+                      >
+                        <span class="flex items-center gap-2">
+                          {(isPeerLibrary(library) ||
+                            isCameraLibrary(library) ||
+                            isS3Library(library) ||
+                            refreshing ||
+                            offline) && (
+                            <span
+                              class={`h-1.5 w-1.5 rounded-full ${
+                                refreshing
+                                  ? "animate-pulse bg-sky-400"
+                                  : offline
+                                    ? "bg-amber-400"
+                                    : "bg-emerald-400"
+                              }`}
+                            />
+                          )}
+                          <span>{library.name}</span>
+                        </span>
+                      </Button>
+                    );
+                  })()
+                }
+              </For>
+              <For each={suggestedPeers()}>
+                {(peer) => (
                   <Button
                     type="button"
                     class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
                     disabled={isSubmitting()}
-                    onClick={() => setShowS3Form((current) => !current)}
+                    onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
-                    S3
+                    {`Peer ${peer.endpoint_id.slice(0, 8)}`}
                   </Button>
-                </Show>
+                )}
+              </For>
+              <Button
+                type="button"
+                class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
+                disabled={isSubmitting()}
+                onClick={() => void handleAddLibrary()}
+                aria-label="Add library"
+              >
+                +
+              </Button>
+              <Show when={supportsS3Libraries()}>
+                <Button
+                  type="button"
+                  class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
+                  disabled={isSubmitting()}
+                  onClick={() => setShowS3Form((current) => !current)}
+                >
+                  S3
+                </Button>
+              </Show>
             </div>
+            <Show when={selectedLibrary()}>
+              <label class="w-40 shrink-0 md:w-56">
+                <input
+                  type="text"
+                  value={filenameFilter()}
+                  onInput={(event) => setFilenameFilter(event.currentTarget.value)}
+                  class={INPUT_CLASS}
+                  placeholder="Filter filenames"
+                  aria-label="Filter filenames"
+                />
+              </label>
+            </Show>
             <div class="relative flex items-center" ref={libraryActionsRef}>
               <Button
                 type="button"
@@ -1824,6 +1862,8 @@ export const MediaView: Component = () => {
               >
                 {items.loading || !isLibraryScanComplete()
                   ? "Loading…"
+                  : activeFilenameFilter()
+                    ? `No filenames match "${filenameFilter().trim()}".`
                   : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
               </div>
             </Show>
@@ -1965,7 +2005,7 @@ export const MediaView: Component = () => {
             {!selectedLibraryIsRefreshing() &&
               !selectedLibraryIsOffline() &&
               !isLibraryScanComplete() &&
-              ` • indexing ${displayedItems().length} images`}
+              ` • indexing ${availableItems().length} images`}
           </p>
         </Show>
       </div>
