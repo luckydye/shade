@@ -352,6 +352,7 @@ pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(),
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
+        .http1_only()
         .build()
         .map_err(|error| error.to_string())
 }
