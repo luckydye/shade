@@ -6,9 +6,11 @@ import {
   createSignal,
   For,
   JSX,
+  on,
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
@@ -772,6 +774,10 @@ export const MediaView: Component = () => {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
+  // Scroll anchor: track the first visible item so scroll position can be
+  // restored after column count changes (e.g. window resize or view switch).
+  const [anchorItemId, setAnchorItemId] = createSignal<string | null>(null);
+  const [anchorRowOffset, setAnchorRowOffset] = createSignal(0);
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
@@ -984,6 +990,59 @@ export const MediaView: Component = () => {
     }
     return offsets;
   });
+  // Update the scroll anchor from a raw scrollTop value.
+  // Finds the first visible items row and records its leading item ID
+  // plus how many pixels the viewport top is into that row.
+  const updateScrollAnchor = (top: number) => {
+    const rows = untrack(stableGridRows);
+    const offsets = untrack(rowOffsets);
+    const rowHeight = untrack(tileRowHeight);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const height = row.kind === "date" ? HEADER_ROW_HEIGHT : rowHeight;
+      if (offsets[i] + height > top) {
+        if (row.kind === "items") {
+          setAnchorItemId(row.ids[0]);
+          setAnchorRowOffset(top - offsets[i]);
+        } else {
+          // Date header is at the top — anchor to the next items row instead
+          for (let j = i + 1; j < rows.length; j++) {
+            const next = rows[j];
+            if (next.kind === "items") {
+              setAnchorItemId(next.ids[0]);
+              setAnchorRowOffset(0);
+              break;
+            }
+          }
+        }
+        break;
+      }
+    }
+  };
+
+  // When the column count changes (resize / view switch), restore the scroll
+  // position so the same media items remain visible.
+  createEffect(
+    on(columns, (_cols, prevCols) => {
+      if (prevCols === undefined) return; // skip initial evaluation
+      const anchor = untrack(anchorItemId);
+      if (!anchor) return;
+      const rows = untrack(stableGridRows);
+      const offsets = untrack(rowOffsets);
+      const rowHeight = untrack(tileRowHeight);
+      const offset = untrack(anchorRowOffset);
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.kind === "items" && row.ids.includes(anchor)) {
+          const newTop = offsets[i] + Math.min(offset, rowHeight - 1);
+          scrollRef.scrollTop = newTop;
+          setScrollTop(newTop);
+          break;
+        }
+      }
+    }),
+  );
+
   const totalHeight = createMemo(() => {
     const rows = stableGridRows();
     if (rows.length === 0) {
@@ -1136,6 +1195,8 @@ export const MediaView: Component = () => {
   createEffect(() => {
     selectedLibraryId();
     setScrollTop(0);
+    setAnchorItemId(null);
+    setAnchorRowOffset(0);
     setSelectedMediaItemIds([]);
     setShowLibraryActions(false);
     if (scrollRef) {
@@ -1146,6 +1207,8 @@ export const MediaView: Component = () => {
   createEffect(() => {
     activeFilenameFilter();
     setScrollTop(0);
+    setAnchorItemId(null);
+    setAnchorRowOffset(0);
     if (scrollRef) {
       scrollRef.scrollTop = 0;
     }
@@ -1826,7 +1889,11 @@ export const MediaView: Component = () => {
       <div
         ref={scrollRef!}
         class={scrollClass()}
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        onScroll={(event) => {
+          const top = event.currentTarget.scrollTop;
+          setScrollTop(top);
+          updateScrollAnchor(top);
+        }}
       >
         <Show
           when={displayedItems().length > 0}
