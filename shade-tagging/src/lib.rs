@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgba};
-use ort::{session::Session, value::Tensor};
+use ort::{execution_providers::CUDAExecutionProvider, session::Session, value::Tensor};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -239,6 +239,8 @@ impl Siglip2Tagger {
             .map_err(|error| anyhow!("failed to configure SigLIP2 tokenizer: {error}"))?;
         let session = Session::builder()
             .context("failed to create ONNX Runtime session builder")?
+            .with_execution_providers([CUDAExecutionProvider::default().build()])
+            .context("failed to configure ONNX Runtime execution providers")?
             .commit_from_file(&config.model_file)
             .with_context(|| {
                 format!(
