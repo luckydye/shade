@@ -199,6 +199,7 @@ export interface LibraryImageMetadata {
   has_snapshots: boolean;
   latest_snapshot_version: number | null;
   rating: number | null;
+  tags: string[];
 }
 
 export interface LibraryImage {

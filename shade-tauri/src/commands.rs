@@ -78,6 +78,8 @@ pub struct LibraryImageMetadata {
     pub has_snapshots: bool,
     pub latest_snapshot_version: Option<i64>,
     pub rating: Option<u8>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -317,7 +319,8 @@ fn thumbnail_cache_db_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("thumbnails.db"))
 }
 
-pub async fn open_thumbnail_cache_db() -> Result<crate::thumbnail_cache::ThumbnailCacheDb, String> {
+pub async fn open_thumbnail_cache_db(
+) -> Result<crate::thumbnail_cache::ThumbnailCacheDb, String> {
     crate::thumbnail_cache::ThumbnailCacheDb::open(&thumbnail_cache_db_path()?).await
 }
 
@@ -445,6 +448,17 @@ async fn open_edits_db() -> Result<libsql::Connection, String> {
     )
     .await
     .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS media_tags (
+            media_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (media_id, tag)
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(conn)
 }
 
@@ -461,6 +475,18 @@ fn validate_media_rating(rating: Option<u8>) -> Result<Option<u8>, String> {
         Some(value) => Err(format!("rating out of range: {value}")),
         None => Ok(None),
     }
+}
+
+fn normalize_media_tags(tags: &[String]) -> Vec<String> {
+    let mut normalized = tags
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
 }
 
 async fn load_media_ratings_map(
@@ -493,6 +519,33 @@ async fn load_media_ratings_map(
     Ok(ratings)
 }
 
+async fn load_media_tags_map(
+    media_ids: &[String],
+) -> Result<HashMap<String, Vec<String>>, String> {
+    if media_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let requested_ids = media_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query("SELECT media_id, tag FROM media_tags ORDER BY tag ASC", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut tags = HashMap::<String, Vec<String>>::new();
+    while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
+        let media_id = row.get::<String>(0).map_err(|error| error.to_string())?;
+        if !requested_ids.contains(&media_id) {
+            continue;
+        }
+        let tag = row.get::<String>(1).map_err(|error| error.to_string())?;
+        tags.entry(media_id).or_default().push(tag);
+    }
+    Ok(tags)
+}
+
 async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
     let conn = open_edits_db().await?;
@@ -512,6 +565,43 @@ async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), 
         .await
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
+    let normalized = normalize_media_tags(tags);
+    let conn = open_edits_db().await?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let result = async {
+        conn.execute("DELETE FROM media_tags WHERE media_id = ?1", [media_id])
+            .await
+            .map_err(|error| error.to_string())?;
+        let updated_at = unix_timestamp_millis()?;
+        for tag in normalized {
+            conn.execute(
+                "INSERT INTO media_tags (media_id, tag, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                libsql::params![media_id, tag, updated_at],
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+        Ok::<(), String>(())
+    }
+    .await;
+    match result {
+        Ok(()) => {
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", ()).await;
+            Err(error)
+        }
+    }
 }
 
 async fn load_latest_edit_version(
@@ -818,6 +908,12 @@ pub struct SnapshotInfo {
 pub struct MediaRatingParams {
     pub media_id: String,
     pub rating: Option<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MediaTagsParams {
+    pub media_id: String,
+    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1416,6 +1512,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
                 has_snapshots: false,
                 latest_snapshot_version: None,
                 rating: item.rating,
+                tags: Vec::new(),
             },
         })
         .collect())
@@ -1462,6 +1559,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                     has_snapshots: false,
                     latest_snapshot_version: None,
                     rating,
+                    tags: Vec::new(),
                 },
             });
         }
@@ -1541,6 +1639,7 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
             has_snapshots: false,
             latest_snapshot_version: None,
             rating: item.rating,
+            tags: Vec::new(),
         },
     }
 }
@@ -3294,10 +3393,19 @@ async fn enrich_listing_metadata(
         let version = row.get::<i64>(1).map_err(|e| e.to_string())?;
         snapshot_versions.insert(source_name, version);
     }
+    let tags = load_media_tags_map(
+        &listing
+            .items
+            .iter()
+            .map(|item| item.path.clone())
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     for item in &mut listing.items {
         item.metadata.latest_snapshot_version =
             snapshot_versions.get(&item.path).copied();
         item.metadata.has_snapshots = item.metadata.latest_snapshot_version.is_some();
+        item.metadata.tags = tags.get(&item.path).cloned().unwrap_or_default();
     }
     Ok(())
 }
@@ -3325,6 +3433,14 @@ pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
         return Err("media id cannot be empty".to_string());
     }
     persist_media_rating(&params.media_id, params.rating).await
+}
+
+#[tauri::command]
+pub async fn set_media_tags(params: MediaTagsParams) -> Result<(), String> {
+    if params.media_id.trim().is_empty() {
+        return Err("media id cannot be empty".to_string());
+    }
+    persist_media_tags(&params.media_id, &params.tags).await
 }
 
 async fn build_library_listing<R: tauri::Runtime>(
@@ -4148,7 +4264,7 @@ fn normalize_crop_rect(
 
 #[cfg(test)]
 mod tests {
-    use super::export_render_request;
+    use super::{export_render_request, normalize_media_tags};
     use shade_core::{CropRect, LayerStack};
 
     #[test]
@@ -4179,5 +4295,18 @@ mod tests {
         assert_eq!(crop.y, 20.0);
         assert_eq!(crop.width, 123.0);
         assert_eq!(crop.height, 77.0);
+    }
+
+    #[test]
+    fn normalizes_media_tags() {
+        assert_eq!(
+            normalize_media_tags(&[
+                " portrait ".to_string(),
+                "".to_string(),
+                "portrait".to_string(),
+                "client".to_string(),
+            ]),
+            vec!["client".to_string(), "portrait".to_string()]
+        );
     }
 }

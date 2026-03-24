@@ -18,6 +18,7 @@ type CachedCameraItem = {
   has_snapshots: boolean;
   latest_snapshot_version: number | null;
   rating: number | null;
+  tags: string[];
 };
 
 function cameraContentKey(path: string) {
@@ -47,6 +48,12 @@ function normalizeRating(rating: unknown) {
     : null;
 }
 
+function normalizeTags(tags: unknown) {
+  return Array.isArray(tags)
+    ? tags.filter((tag): tag is string => typeof tag === "string" && tag.trim() !== "")
+    : [];
+}
+
 function normalizeSnapshotVersion(version: unknown) {
   return typeof version === "number" && Number.isInteger(version) ? version : null;
 }
@@ -64,6 +71,7 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
         image.metadata?.latest_snapshot_version,
       ),
       rating: normalizeRating(image.metadata?.rating),
+      tags: normalizeTags(image.metadata?.tags),
     },
   };
 }
@@ -78,6 +86,7 @@ function toCachedCameraItem(image: LibraryImage): CachedCameraItem {
       image.metadata?.latest_snapshot_version,
     ),
     rating: normalizeRating(image.metadata?.rating),
+    tags: normalizeTags(image.metadata?.tags),
   };
 }
 
@@ -90,6 +99,7 @@ function toLibraryImage(host: string, item: CachedCameraItem): LibraryImage {
       has_snapshots: item.has_snapshots,
       latest_snapshot_version: normalizeSnapshotVersion(item.latest_snapshot_version),
       rating: normalizeRating(item.rating),
+      tags: normalizeTags(item.tags),
     },
   };
 }

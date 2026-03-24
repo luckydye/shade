@@ -233,6 +233,7 @@ function toLibraryImage(record: BrowserMediaItemRecord): LibraryImage {
       has_snapshots: false,
       latest_snapshot_version: null,
       rating: null,
+      tags: [],
     },
   };
 }

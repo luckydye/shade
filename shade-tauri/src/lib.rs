@@ -41,10 +41,9 @@ pub fn run() {
         ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
-            let thumbnail_cache = tauri::async_runtime::block_on(
-                commands::open_thumbnail_cache_db(),
-            )
-            .map_err(|e| e.to_string())?;
+            let thumbnail_cache =
+                tauri::async_runtime::block_on(commands::open_thumbnail_cache_db())
+                    .map_err(|e| e.to_string())?;
             app.manage(ThumbnailCacheDb(thumbnail_cache));
             #[cfg(not(target_os = "ios"))]
             {
@@ -99,6 +98,7 @@ pub fn run() {
             commands::list_snapshots,
             commands::load_snapshot,
             commands::set_media_rating,
+            commands::set_media_tags,
             commands::get_thumbnail,
             commands::get_local_peer_discovery_snapshot,
             commands::list_peer_pictures,

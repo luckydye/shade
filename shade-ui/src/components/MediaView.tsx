@@ -67,6 +67,7 @@ type MediaItemMetadata = {
   latestSnapshotVersion: number | null;
   baseRating: number | null;
   rating: number | null;
+  tags: string[];
 };
 
 type MediaItem =
@@ -295,7 +296,11 @@ function filterMediaItemsByFilename(items: MediaItem[], filter: string) {
   if (filter === "") {
     return items;
   }
-  return items.filter((item) => item.name.toLocaleLowerCase().includes(filter));
+  return items.filter(
+    (item) =>
+      item.name.toLocaleLowerCase().includes(filter) ||
+      item.metadata.tags.some((tag) => tag.toLocaleLowerCase().includes(filter)),
+  );
 }
 
 function normalizeModifiedAt(modifiedAt: number | null | undefined) {
@@ -311,6 +316,12 @@ function normalizeRating(rating: number | null | undefined) {
     rating <= 5
     ? rating
     : null;
+}
+
+function normalizeTags(tags: string[] | null | undefined) {
+  return Array.isArray(tags)
+    ? tags.filter((tag) => typeof tag === "string" && tag.trim() !== "")
+    : [];
 }
 
 function mediaRatingId(item: MediaItem) {
@@ -372,6 +383,7 @@ function localMediaItem(image: LibraryImage): MediaItem {
       latestSnapshotVersion: image.metadata?.latest_snapshot_version ?? null,
       baseRating: normalizeRating(image.metadata?.rating),
       rating: normalizeRating(image.metadata?.rating),
+      tags: normalizeTags(image.metadata?.tags),
     },
   };
 }
@@ -388,6 +400,7 @@ function peerMediaItem(image: PeerLibraryItem): MediaItem {
       latestSnapshotVersion: null,
       baseRating: null,
       rating: null,
+      tags: [],
     },
   };
 }
@@ -1661,8 +1674,8 @@ export const MediaView: Component = () => {
                   value={filenameFilter()}
                   onInput={(event) => setFilenameFilter(event.currentTarget.value)}
                   class={INPUT_CLASS}
-                  placeholder="Filter filenames"
-                  aria-label="Filter filenames"
+                  placeholder="Search names or tags"
+                  aria-label="Search names or tags"
                 />
               </label>
             </Show>
@@ -1863,7 +1876,7 @@ export const MediaView: Component = () => {
                 {items.loading || !isLibraryScanComplete()
                   ? "Loading…"
                   : activeFilenameFilter()
-                    ? `No filenames match "${filenameFilter().trim()}".`
+                    ? `No media match "${filenameFilter().trim()}".`
                   : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
               </div>
             </Show>
