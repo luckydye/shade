@@ -1,8 +1,5 @@
-import {
-  getPeerThumbnailBytes,
-  listPeerPictures,
-  type SharedPicture,
-} from "./bridge/index";
+import { getThumbnailBackend } from "./bridge/thumbnail-backend";
+import { listPeerPictures, type SharedPicture } from "./bridge/index";
 
 const DB_NAME = "shade-peer-cache";
 const DB_VERSION = 2;
@@ -277,7 +274,7 @@ async function warmPeerLibraryThumbnails(peerId: string, pictures: SharedPicture
         continue;
       }
       try {
-        const bytes = await getPeerThumbnailBytes(peerId, picture.id);
+        const bytes = await getThumbnailBackend().getPeerThumbnailBytes(peerId,picture.id);
         await putCachedThumbnail(
           peerId,
           picture.id,
@@ -352,7 +349,7 @@ export async function resolvePeerThumbnailSrc(
   if (cached) {
     return URL.createObjectURL(cached);
   }
-  const bytes = await getPeerThumbnailBytes(peerId, pictureId);
+  const bytes = await getThumbnailBackend().getPeerThumbnailBytes(peerId,pictureId);
   if (signal.aborted) {
     throw abortError();
   }

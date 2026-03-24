@@ -1,5 +1,5 @@
+import { getThumbnailBackend } from "./bridge/thumbnail-backend";
 import {
-  getThumbnailBytes,
   isTauriRuntime,
   listLibraryImages,
   type LibraryImage,
@@ -253,7 +253,7 @@ async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
         continue;
       }
       try {
-        const bytes = await getThumbnailBytes(item.path);
+        const bytes = await getThumbnailBackend().getThumbnailBytes(item.path);
         await putCachedThumbnail(
           item.path,
           latestSnapshotVersion,
@@ -317,7 +317,7 @@ export async function resolveLocalThumbnailSrc(
   if (recentFailure && recentFailure.retryAt > Date.now()) {
     throw recentFailure.error;
   }
-  const bytes = await getThumbnailBytes(path).catch((error) => {
+  const bytes = await getThumbnailBackend().getThumbnailBytes(path).catch((error) => {
     failedThumbnailLoads.set(key, {
       error,
       retryAt: Date.now() + FAILURE_COOLDOWN_MS,

@@ -5,7 +5,6 @@
 
 import {
   addBrowserMediaLibrary,
-  getBrowserMountedThumbnailBytes,
   isBrowserMountedLibrary,
   isBrowserMountedPath,
   listBrowserLibraryImages,
@@ -545,19 +544,8 @@ export async function getPeerThumbnailBytes(
   peer_endpoint_id: string,
   picture_id: string,
 ): Promise<Uint8Array> {
-  if (!(await isTauriRuntime())) {
-    return new Uint8Array();
-  }
-  const inv = await getTauriInvoke();
-  const result = (await inv("get_peer_thumbnail", {
-    peerEndpointId: peer_endpoint_id,
-    pictureId: picture_id,
-  })) as number[] | Uint8Array | ArrayBuffer;
-  return result instanceof Uint8Array
-    ? result
-    : result instanceof ArrayBuffer
-      ? new Uint8Array(result)
-      : Uint8Array.from(result as number[]);
+  const { getThumbnailBackend } = await import("./thumbnail-backend");
+  return getThumbnailBackend().getPeerThumbnailBytes(peer_endpoint_id, picture_id);
 }
 
 export async function getPeerThumbnail(
@@ -768,25 +756,8 @@ export async function moveLayer(fromIdx: number, toIdx: number): Promise<number>
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
 export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const result = (await inv("get_thumbnail", { path })) as
-      | number[]
-      | Uint8Array
-      | ArrayBuffer;
-    const bytes =
-      result instanceof Uint8Array
-        ? result
-        : result instanceof ArrayBuffer
-          ? new Uint8Array(result)
-          : Uint8Array.from(result as number[]);
-    return Uint8Array.from(bytes);
-  }
-  if (await isBrowserMountedPath(path)) {
-    return getBrowserMountedThumbnailBytes(path);
-  }
-  const response = await fetch(path);
-  return new Uint8Array(await response.arrayBuffer());
+  const { getThumbnailBackend } = await import("./thumbnail-backend");
+  return getThumbnailBackend().getThumbnailBytes(path);
 }
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */

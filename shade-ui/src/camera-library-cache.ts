@@ -1,4 +1,5 @@
-import { getThumbnailBytes, listLibraryImages, type LibraryImage } from "./bridge/index";
+import { getThumbnailBackend } from "./bridge/thumbnail-backend";
+import { listLibraryImages, type LibraryImage } from "./bridge/index";
 
 const DB_NAME = "shade-camera-cache";
 const DB_VERSION = 2;
@@ -233,7 +234,7 @@ async function warmCameraLibraryThumbnails(items: LibraryImage[]) {
         continue;
       }
       try {
-        const bytes = await getThumbnailBytes(item.path);
+        const bytes = await getThumbnailBackend().getThumbnailBytes(item.path);
         await putCachedThumbnail(
           item.path,
           latestSnapshotVersion,
@@ -286,7 +287,7 @@ export async function resolveCameraThumbnailSrc(
   if (recentFailure && recentFailure.retryAt > Date.now()) {
     throw recentFailure.error;
   }
-  const bytes = await getThumbnailBytes(path).catch((error) => {
+  const bytes = await getThumbnailBackend().getThumbnailBytes(path).catch((error) => {
     failedThumbnailLoads.set(failureKey, {
       error,
       retryAt: Date.now() + FAILURE_COOLDOWN_MS,
