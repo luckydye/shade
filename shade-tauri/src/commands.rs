@@ -280,6 +280,13 @@ fn presets_dir_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("presets"))
 }
 
+fn home_dir() -> Result<PathBuf, String> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .map_err(|_| "Could not determine home directory".to_string())
+}
+
 fn app_config_dir() -> Result<PathBuf, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -291,8 +298,8 @@ fn app_config_dir() -> Result<PathBuf, String> {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-        Ok(PathBuf::from(home).join(".config/shade"))
+        let home = home_dir()?;
+        Ok(home.join(".config/shade"))
     }
 }
 
@@ -955,8 +962,7 @@ fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
 }
 
 fn default_pictures_dir() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-    Ok(PathBuf::from(home).join("Pictures"))
+    Ok(home_dir()?.join("Pictures"))
 }
 
 fn custom_library_id(path: &Path) -> String {
