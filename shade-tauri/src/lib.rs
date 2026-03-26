@@ -8,6 +8,9 @@ use tauri::Manager;
 pub struct P2pState(
     pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>,
 );
+pub struct AwarenessStateHandle(
+    pub std::sync::Arc<tokio::sync::Mutex<shade_p2p::AwarenessState>>,
+);
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
 pub struct ThumbnailService {
     pub raw_queue:
@@ -55,10 +58,14 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 let secret_key = commands::load_p2p_secret_key()?;
+                let awareness = std::sync::Arc::new(tokio::sync::Mutex::new(
+                    shade_p2p::AwarenessState::default(),
+                ));
+                app.manage(AwarenessStateHandle(awareness.clone()));
                 let p2p = std::sync::Arc::new(
                     tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
                         secret_key,
-                        std::sync::Arc::new(commands::AppMediaProvider::new(handle)),
+                        std::sync::Arc::new(commands::AppPeerProvider::new(handle, awareness)),
                     ))
                     .map_err(|error| error.to_string())?,
                 );
@@ -66,6 +73,13 @@ pub fn run() {
                 tauri::async_runtime::block_on(async {
                     *app.state::<P2pState>().0.write().await = Some(p2p);
                 });
+            }
+            #[cfg(target_os = "ios")]
+            {
+                let awareness = std::sync::Arc::new(tokio::sync::Mutex::new(
+                    shade_p2p::AwarenessState::default(),
+                ));
+                app.manage(AwarenessStateHandle(awareness));
             }
             commands::spawn_camera_discovery(app.handle().clone());
             commands::prime_missing_library_indexes(&app.handle().clone())?;
@@ -111,6 +125,10 @@ pub fn run() {
             commands::get_peer_thumbnail,
             commands::get_peer_image_bytes,
             commands::open_peer_image,
+            commands::set_local_awareness,
+            commands::get_peer_awareness,
+            commands::sync_peer_snapshots,
+            commands::apply_peer_metadata,
             commands::apply_gradient_mask,
             commands::remove_mask,
         ])

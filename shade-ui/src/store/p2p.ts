@@ -5,6 +5,7 @@ import {
   type LocalPeerDiscoverySnapshot,
   type SharedPicture,
 } from "../bridge/index";
+import { fetchPeerAwareness } from "./sync";
 
 interface P2pState extends LocalPeerDiscoverySnapshot {
   isLoading: boolean;
@@ -38,10 +39,17 @@ export async function refreshP2pState() {
     setState("isLoading", true);
     try {
       const snapshot = await getLocalPeerDiscoverySnapshot();
+      const previousPeerIds = new Set(state.peers.map((p) => p.endpoint_id));
       setState({
         ...snapshot,
         isLoading: false,
       });
+      // Fetch awareness for newly discovered peers.
+      for (const peer of snapshot.peers) {
+        if (!previousPeerIds.has(peer.endpoint_id)) {
+          void fetchPeerAwareness(peer.endpoint_id).catch(() => {});
+        }
+      }
     } catch (error) {
       setState("isLoading", false);
       throw error;

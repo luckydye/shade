@@ -231,7 +231,7 @@ function toLibraryImage(record: BrowserMediaItemRecord): LibraryImage {
     modified_at: record.modified_at,
     metadata: {
       has_snapshots: false,
-      latest_snapshot_version: null,
+      latest_snapshot_id: null,
       rating: null,
       tags: [],
     },

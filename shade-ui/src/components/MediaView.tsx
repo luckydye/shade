@@ -66,7 +66,7 @@ type LibraryEntry = MediaLibrary | PeerLibrary;
 
 type MediaItemMetadata = {
   hasSnapshots: boolean;
-  latestSnapshotVersion: number | null;
+  latestSnapshotId: string | null;
   baseRating: number | null;
   rating: number | null;
   tags: string[];
@@ -388,7 +388,7 @@ function localMediaItem(image: LibraryImage): MediaItem {
     modifiedAt: normalizeModifiedAt(image.modified_at),
     metadata: {
       hasSnapshots: image.metadata?.has_snapshots ?? false,
-      latestSnapshotVersion: image.metadata?.latest_snapshot_version ?? null,
+      latestSnapshotId: image.metadata?.latest_snapshot_id ?? null,
       baseRating: normalizeRating(image.metadata?.rating),
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
@@ -405,7 +405,7 @@ function peerMediaItem(image: PeerLibraryItem): MediaItem {
     modifiedAt: normalizeModifiedAt(image.modified_at),
     metadata: {
       hasSnapshots: false,
-      latestSnapshotVersion: null,
+      latestSnapshotId: null,
       baseRating: null,
       rating: null,
       tags: [],
@@ -489,13 +489,13 @@ async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string
   if (item.path.startsWith("ccapi://")) {
     return resolveCameraThumbnailSrc(
       item.path,
-      item.metadata.latestSnapshotVersion,
+      item.metadata.latestSnapshotId,
       signal,
     );
   }
   return resolveLocalThumbnailSrc(
     item.path,
-    item.metadata.latestSnapshotVersion,
+    item.metadata.latestSnapshotId,
     signal,
   );
 }
