@@ -1,10 +1,10 @@
 import { createStore } from "solid-js/store";
 import {
   getLocalPeerDiscoverySnapshot,
-  listPeerPictures,
   type LocalPeerDiscoverySnapshot,
   type SharedPicture,
 } from "../bridge/index";
+import { getCachedPeerLibraryItems } from "../peer-library-cache";
 import { fetchPeerAwareness } from "./sync";
 
 interface P2pState extends LocalPeerDiscoverySnapshot {
@@ -99,7 +99,13 @@ export async function selectPeer(peerId: string) {
     peerBrowserError: "",
   });
   try {
-    const remotePictures = await listPeerPictures(peerId);
+    const remotePictures = (await getCachedPeerLibraryItems(peerId)).map(
+      (picture) => ({
+        id: picture.id,
+        name: picture.name,
+        modified_at: picture.modified_at,
+      }),
+    );
     if (state.selectedPeerId !== peerId) {
       return;
     }

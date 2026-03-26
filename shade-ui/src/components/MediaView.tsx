@@ -18,6 +18,7 @@ import { MediaRating } from "./MediaRating";
 import {
   addS3MediaLibrary,
   addMediaLibrary,
+  pairPeerDevice,
   isTauriRuntime,
   listMediaRatings,
   pickDirectory,
@@ -1375,6 +1376,7 @@ export const MediaView: Component = () => {
     setIsSubmitting(true);
     setError(null);
     try {
+      await pairPeerDevice(peerId);
       const nextLibrary = await addPeerLibrary(peerId);
       setPeerLibraries((current) => {
         const libraries = current ?? [];

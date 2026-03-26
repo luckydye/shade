@@ -496,3 +496,96 @@ impl ProtocolHandler for ShadeProtocol {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tokio::time::{sleep, timeout, Duration};
+
+    static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(1);
+
+    struct TestPeerProvider {
+        id: u64,
+    }
+
+    impl TestPeerProvider {
+        fn new() -> Self {
+            Self {
+                id: NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl PeerProvider for TestPeerProvider {
+        async fn authorize_peer(&self, _peer_endpoint_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_pictures(&self) -> Result<Vec<SharedPicture>> {
+            let _ = self.id;
+            Ok(Vec::new())
+        }
+
+        async fn get_thumbnail(&self, _picture_id: &str) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_image_bytes(&self, _picture_id: &str) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_awareness(&self) -> Result<AwarenessState> {
+            Ok(AwarenessState::default())
+        }
+
+        async fn list_snapshots(&self, _file_hash: &str) -> Result<Vec<SyncSnapshotInfo>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_snapshot_data(&self, _id: &str) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_metadata(&self, _file_hashes: &[String]) -> Result<Vec<PictureMetadata>> {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn wait_for_peer(
+        discovery: &LocalPeerDiscovery,
+        expected_peer_id: &str,
+    ) -> Result<()> {
+        timeout(Duration::from_secs(15), async {
+            loop {
+                let snapshot = discovery.snapshot().await;
+                if snapshot
+                    .peers
+                    .iter()
+                    .any(|peer| peer.endpoint_id == expected_peer_id)
+                {
+                    return Ok(());
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for peer discovery"))?
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn two_local_instances_discover_each_other() -> Result<()> {
+        let a = LocalPeerDiscovery::bind(None, Arc::new(TestPeerProvider::new())).await?;
+        let b = LocalPeerDiscovery::bind(None, Arc::new(TestPeerProvider::new())).await?;
+
+        let a_id = a.snapshot().await.local_endpoint_id;
+        let b_id = b.snapshot().await.local_endpoint_id;
+        assert_ne!(a_id, b_id);
+
+        wait_for_peer(&a, &b_id).await?;
+        wait_for_peer(&b, &a_id).await?;
+
+        Ok(())
+    }
+}

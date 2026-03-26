@@ -529,6 +529,16 @@ export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscover
   return inv("get_local_peer_discovery_snapshot") as Promise<LocalPeerDiscoverySnapshot>;
 }
 
+export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    return;
+  }
+  const inv = await getTauriInvoke();
+  await inv("pair_peer_device", {
+    peerEndpointId: peer_endpoint_id,
+  });
+}
+
 export async function listPeerPictures(
   peer_endpoint_id: string,
 ): Promise<SharedPicture[]> {

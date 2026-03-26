@@ -2169,6 +2169,37 @@ pub async fn get_local_peer_discovery_snapshot(
 }
 
 #[tauri::command]
+pub async fn pair_peer_device<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    peer_endpoint_id: String,
+    pairing_lock: tauri::State<'_, crate::PeerPairingState>,
+) -> Result<(), String> {
+    if is_peer_paired(&peer_endpoint_id).map_err(|error| error.to_string())? {
+        return Ok(());
+    }
+    let _guard = pairing_lock.0.lock().await;
+    if is_peer_paired(&peer_endpoint_id).map_err(|error| error.to_string())? {
+        return Ok(());
+    }
+    let peer_endpoint_id_for_prompt = peer_endpoint_id.clone();
+    let allow = tokio::task::spawn_blocking(move || -> bool {
+        app.dialog()
+            .message(format!(
+                "Pair peer {peer_endpoint_id_for_prompt} with this device?"
+            ))
+            .buttons(MessageDialogButtons::OkCancelCustom("Pair".into(), "Deny".into()))
+            .blocking_show()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    if !allow {
+        return Err("peer pairing denied".to_string());
+    }
+    pair_peer(&peer_endpoint_id).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn list_peer_pictures(
     peer_endpoint_id: String,
     p2p: tauri::State<'_, crate::P2pState>,
@@ -4334,10 +4365,11 @@ impl<R: tauri::Runtime> AppPeerProvider<R> {
     pub fn new(
         app: tauri::AppHandle<R>,
         awareness: Arc<tokio::sync::Mutex<shade_p2p::AwarenessState>>,
+        prompt_lock: Arc<TokioMutex<()>>,
     ) -> Self {
         Self {
             app,
-            prompt_lock: Arc::new(TokioMutex::new(())),
+            prompt_lock,
             awareness,
         }
     }

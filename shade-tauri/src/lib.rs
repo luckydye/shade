@@ -11,6 +11,7 @@ pub struct P2pState(
 pub struct AwarenessStateHandle(
     pub std::sync::Arc<tokio::sync::Mutex<shade_p2p::AwarenessState>>,
 );
+pub struct PeerPairingState(pub std::sync::Arc<tokio::sync::Mutex<()>>);
 pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
 pub struct ThumbnailService {
     pub raw_queue:
@@ -54,6 +55,8 @@ pub fn run() {
             app.manage(tagging_worker::spawn_thumbnail_tagging_worker(
                 thumbnail_cache.clone(),
             )?);
+            let pairing_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+            app.manage(PeerPairingState(pairing_lock.clone()));
             #[cfg(not(target_os = "ios"))]
             {
                 let handle = app.handle().clone();
@@ -65,7 +68,11 @@ pub fn run() {
                 let p2p = std::sync::Arc::new(
                     tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
                         secret_key,
-                        std::sync::Arc::new(commands::AppPeerProvider::new(handle, awareness)),
+                        std::sync::Arc::new(commands::AppPeerProvider::new(
+                            handle,
+                            awareness,
+                            pairing_lock,
+                        )),
                     ))
                     .map_err(|error| error.to_string())?,
                 );
@@ -121,6 +128,7 @@ pub fn run() {
             commands::set_media_tags,
             commands::get_thumbnail,
             commands::get_local_peer_discovery_snapshot,
+            commands::pair_peer_device,
             commands::list_peer_pictures,
             commands::get_peer_thumbnail,
             commands::get_peer_image_bytes,
