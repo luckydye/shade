@@ -214,7 +214,25 @@ pub fn thumbnail_tagging_model_dir() -> Result<std::path::PathBuf, String> {
     Ok(model_dir)
 }
 
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(target_os = "windows")]
+pub fn try_acquire_thumbnail_tagging_lock() -> Result<Option<std::fs::File>, String> {
+    let config_dir = std::path::PathBuf::from(
+        std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?,
+    )
+    .join("shade");
+    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    let lock_path = config_dir.join("thumbnail-tagging.lock");
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(lock_file))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))]
 pub fn try_acquire_thumbnail_tagging_lock() -> Result<Option<std::fs::File>, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
     let config_dir = std::path::PathBuf::from(home).join(".config/shade");
@@ -239,10 +257,10 @@ pub fn try_acquire_thumbnail_tagging_lock() -> Result<Option<std::fs::File>, Str
     Err(error.to_string())
 }
 
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))]
 use std::os::fd::AsRawFd;
 
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))]
 unsafe fn flock_nonblocking_exclusive(fd: std::os::raw::c_int) -> std::os::raw::c_int {
     unsafe extern "C" {
         fn flock(fd: std::os::raw::c_int, operation: std::os::raw::c_int)
