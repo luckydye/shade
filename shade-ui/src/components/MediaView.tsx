@@ -116,7 +116,6 @@ type UploadDragFeedback = {
   itemCount: number | null;
 };
 
-const TILE_MIN_WIDTH = 160;
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
 const HEADER_ROW_HEIGHT = 32;
@@ -1181,14 +1180,20 @@ export const MediaView: Component = () => {
     }
     return Math.round((progress.completedFiles / progress.totalFiles) * 100);
   });
+  const tileMinWidth = createMemo(() => {
+    if (viewportWidth() < 640) {
+      return 100;
+    }
+    return 160;
+  });
   const columns = createMemo(() =>
-    Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (TILE_MIN_WIDTH + GRID_GAP))),
+    Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (tileMinWidth() + GRID_GAP))),
   );
   const tileWidth = createMemo(() => {
     const width = viewportWidth();
     const columnCount = columns();
     if (width <= 0) {
-      return TILE_MIN_WIDTH;
+      return tileMinWidth();
     }
     return (width - GRID_GAP * (columnCount - 1)) / columnCount;
   });
@@ -1928,7 +1933,7 @@ export const MediaView: Component = () => {
       ref={mediaShellRef}
       tabIndex={-1}
       aria-label="Media view"
-      class={`${shellClass()} relative`}
+      class={`${shellClass()} outline-none relative`}
       onDragEnter={handleUploadDragEnter}
       onDragOver={handleUploadDragOver}
       onDragLeave={handleUploadDragLeave}
@@ -1960,7 +1965,7 @@ export const MediaView: Component = () => {
           <div class="flex w-full flex-wrap items-center gap-3">
             <div
               ref={libraryTabsRef}
-              class="relative grid min-w-0 flex-1 grid-cols-3 gap-2 md:flex md:overflow-x-auto"
+              class="relative min-w-full md:min-w-0 gap-2 flex flex-1 overflow-x-auto"
             >
               <div
                 aria-hidden="true"
@@ -1990,9 +1995,9 @@ export const MediaView: Component = () => {
                       onPointerMove={pinned ? undefined : handleLibraryPointerMove}
                       onPointerUp={pinned ? undefined : handleLibraryPointerUp}
                       onPointerCancel={pinned ? undefined : handleLibraryPointerCancel}
-                      class={`${LIBRARY_TAB_BASE_CLASS} w-full ${
+                      class={`${LIBRARY_TAB_BASE_CLASS} ${
                         pinned ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-                      } md:w-auto ${
+                      } ${
                         selectedLibraryId() === library.id
                           ? offline
                             ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
@@ -2099,61 +2104,63 @@ export const MediaView: Component = () => {
                 </div>
               </Portal>
             </Show>
-            <Show when={selectedLibrary()}>
-              <label class="basis-full md:basis-auto md:w-56">
-                <input
-                  type="text"
-                  value={filenameFilter()}
-                  onInput={(event) => setFilenameFilter(event.currentTarget.value)}
-                  class={INPUT_CLASS}
-                  placeholder="Search names or tags"
-                  aria-label="Search names or tags"
-                />
-              </label>
-            </Show>
-            <div class="relative flex items-center" ref={libraryActionsRef}>
-              <Button
-                type="button"
-                class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
-                disabled={isSubmitting() || !selectedLibrary()}
-                aria-label="Library actions"
-                aria-haspopup="menu"
-                aria-expanded={showLibraryActions() ? "true" : "false"}
-                onClick={() => setShowLibraryActions((current) => !current)}
-              >
-                •••
-              </Button>
-              <Show when={showLibraryActions()}>
-                <div
-                  role="menu"
-                  class="absolute right-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                >
-                  <Button
-                    type="button"
-                    role="menuitem"
-                    class={MENU_ITEM_BUTTON_CLASS}
-                    disabled={!canRefreshSelectedLibrary() || isSubmitting()}
-                    onClick={() => {
-                      setShowLibraryActions(false);
-                      void handleRefreshLibrary();
-                    }}
-                  >
-                    Refresh
-                  </Button>
-                  <Button
-                    type="button"
-                    role="menuitem"
-                    class={MENU_DANGER_ITEM_BUTTON_CLASS}
-                    disabled={!selectedLibrary()?.removable || isSubmitting()}
-                    onClick={() => {
-                      setShowLibraryActions(false);
-                      void handleRemoveLibrary();
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </div>
+            <div class="flex gap-3 w-full md:w-auto">
+              <Show when={selectedLibrary()}>
+                <label class="w-full md:w-56">
+                  <input
+                    type="text"
+                    value={filenameFilter()}
+                    onInput={(event) => setFilenameFilter(event.currentTarget.value)}
+                    class={INPUT_CLASS}
+                    placeholder="Search names or tags"
+                    aria-label="Search names or tags"
+                  />
+                </label>
               </Show>
+              <div class="relative flex items-center" ref={libraryActionsRef}>
+                <Button
+                  type="button"
+                  class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
+                  disabled={isSubmitting() || !selectedLibrary()}
+                  aria-label="Library actions"
+                  aria-haspopup="menu"
+                  aria-expanded={showLibraryActions() ? "true" : "false"}
+                  onClick={() => setShowLibraryActions((current) => !current)}
+                >
+                  •••
+                </Button>
+                <Show when={showLibraryActions()}>
+                  <div
+                    role="menu"
+                    class="absolute right-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                  >
+                    <Button
+                      type="button"
+                      role="menuitem"
+                      class={MENU_ITEM_BUTTON_CLASS}
+                      disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+                      onClick={() => {
+                        setShowLibraryActions(false);
+                        void handleRefreshLibrary();
+                      }}
+                    >
+                      Refresh
+                    </Button>
+                    <Button
+                      type="button"
+                      role="menuitem"
+                      class={MENU_DANGER_ITEM_BUTTON_CLASS}
+                      disabled={!selectedLibrary()?.removable || isSubmitting()}
+                      onClick={() => {
+                        setShowLibraryActions(false);
+                        void handleRemoveLibrary();
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </Show>
+              </div>
             </div>
             <Show when={showS3Form()}>
               <div class="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 md:grid-cols-3">
