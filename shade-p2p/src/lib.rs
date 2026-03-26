@@ -132,12 +132,12 @@ impl LocalPeerDiscovery {
         if let Some(secret_key) = secret_key {
             builder = builder.secret_key(secret_key);
         }
+        builder = builder.user_data_for_address_lookup(UserData::try_from(
+            SHADE_P2P_DISCOVERY_TAG.to_owned(),
+        )?);
         let endpoint = builder.bind().await?;
         let mdns = MdnsAddressLookup::builder().build(endpoint.id())?;
         endpoint.address_lookup().add(mdns.clone());
-        endpoint.set_user_data_for_address_lookup(Some(UserData::try_from(
-            SHADE_P2P_DISCOVERY_TAG.to_owned(),
-        )?));
         let router = Router::builder(endpoint.clone())
             .accept(
                 SHADE_P2P_ALPN,
