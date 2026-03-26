@@ -647,6 +647,19 @@ pub async fn persist_media_tags_empty(media_id: &str) -> Result<(), String> {
     }
 }
 
+pub async fn max_media_tag_updated_at() -> Result<i64, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query("SELECT MAX(updated_at) FROM media_tags", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let max = match rows.next().await.map_err(|error| error.to_string())? {
+        Some(row) => row.get::<Option<i64>>(0).map_err(|e| e.to_string())?.unwrap_or(0),
+        None => 0,
+    };
+    Ok(max)
+}
+
 pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
     let conn = open_edits_db().await?;
     let mut rows = conn

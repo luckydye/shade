@@ -73,8 +73,14 @@ pub fn spawn_thumbnail_tagging_worker(
     };
     let model_dir = thumbnail_tagging_model_dir()?;
     let vocabulary = shade_tagging::photo_auto_tag_vocabulary().map_err(|e| e.to_string())?;
-    let startup_entries =
-        tauri::async_runtime::block_on(thumbnail_cache.list_entries()).map_err(|e| e.to_string())?;
+    let last_tagged_at = tauri::async_runtime::block_on(
+        crate::commands::max_media_tag_updated_at(),
+    )
+    .map_err(|e| e.to_string())?;
+    let startup_entries = tauri::async_runtime::block_on(
+        thumbnail_cache.list_entries_after(last_tagged_at),
+    )
+    .map_err(|e| e.to_string())?;
     let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailCacheEntry>();
     log::info!(
         "thumbnail tagging worker active pid={pid} startup_entries={}",
@@ -181,7 +187,12 @@ pub fn enqueue_thumbnail_for_tagging<R: tauri::Runtime>(
 pub async fn enqueue_existing_thumbnails_for_tagging<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    let entries = app.state::<crate::ThumbnailCacheDb>().0.list_entries().await?;
+    let last_tagged_at = crate::commands::max_media_tag_updated_at().await?;
+    let entries = app
+        .state::<crate::ThumbnailCacheDb>()
+        .0
+        .list_entries_after(last_tagged_at)
+        .await?;
     for entry in entries {
         enqueue_thumbnail_for_tagging(app, entry)?;
     }

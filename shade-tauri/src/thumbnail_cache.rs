@@ -35,16 +35,26 @@ impl ThumbnailCacheDb {
             .await
             .map_err(|e| e.to_string())?;
         let mut has_media_id = false;
+        let mut has_created_at = false;
         while let Some(row) = columns.next().await.map_err(|e| e.to_string())? {
-            if row.get::<String>(1).map_err(|e| e.to_string())? == "media_id" {
-                has_media_id = true;
-                break;
+            match row.get::<String>(1).map_err(|e| e.to_string())?.as_str() {
+                "media_id" => has_media_id = true,
+                "created_at" => has_created_at = true,
+                _ => {}
             }
         }
         if !has_media_id {
             conn.execute("ALTER TABLE thumbnails ADD COLUMN media_id TEXT", ())
                 .await
                 .map_err(|e| e.to_string())?;
+        }
+        if !has_created_at {
+            conn.execute(
+                "ALTER TABLE thumbnails ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0",
+                (),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
         }
         let mut rows = conn
             .query(
@@ -90,22 +100,26 @@ impl ThumbnailCacheDb {
         media_id: &str,
         data: &[u8],
     ) -> Result<(), String> {
+        let created_at = current_millis()?;
         let conn = self.0.lock().await;
         conn.execute(
-            "INSERT OR REPLACE INTO thumbnails (picture_id, media_id, data) VALUES (?1, ?2, ?3)",
-            libsql::params![picture_id, media_id, data.to_vec()],
+            "INSERT OR REPLACE INTO thumbnails (picture_id, media_id, data, created_at) VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![picture_id, media_id, data.to_vec(), created_at],
         )
         .await
         .map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub async fn list_entries(&self) -> Result<Vec<ThumbnailCacheEntry>, String> {
+    pub async fn list_entries_after(
+        &self,
+        since_millis: i64,
+    ) -> Result<Vec<ThumbnailCacheEntry>, String> {
         let conn = self.0.lock().await;
         let mut rows = conn
             .query(
-                "SELECT picture_id, media_id, data FROM thumbnails ORDER BY picture_id ASC",
-                (),
+                "SELECT picture_id, media_id, data FROM thumbnails WHERE created_at > ?1 ORDER BY created_at ASC",
+                [since_millis],
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -119,6 +133,13 @@ impl ThumbnailCacheDb {
         }
         Ok(entries)
     }
+}
+
+fn current_millis() -> Result<i64, String> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .map_err(|e| e.to_string())
 }
 
 /// For local file paths, appends the file's modified-at timestamp so that

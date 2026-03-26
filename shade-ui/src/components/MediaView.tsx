@@ -290,18 +290,24 @@ function pictureName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
-function normalizeFilenameFilter(value: string) {
-  return value.trim().toLocaleLowerCase();
+function normalizeFilenameFilter(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim().toLocaleLowerCase())
+    .filter((part) => part !== "");
 }
 
-function filterMediaItemsByFilename(items: MediaItem[], filter: string) {
-  if (filter === "") {
+function filterMediaItemsByFilename(items: MediaItem[], filters: string[]) {
+  if (filters.length === 0) {
     return items;
   }
-  return items.filter(
-    (item) =>
-      item.name.toLocaleLowerCase().includes(filter) ||
-      item.metadata.tags.some((tag) => tag.toLocaleLowerCase().includes(filter)),
+  const nameLower = (item: MediaItem) => item.name.toLocaleLowerCase();
+  return items.filter((item) =>
+    filters.every(
+      (filter) =>
+        nameLower(item).includes(filter) ||
+        item.metadata.tags.some((tag) => tag.toLocaleLowerCase().includes(filter)),
+    ),
   );
 }
 
@@ -844,7 +850,7 @@ export const MediaView: Component = () => {
     return cachedLibraryItems() ?? [];
   });
   const activeFilenameFilter = createMemo(() =>
-    state.currentView === "editor" ? "" : normalizeFilenameFilter(filenameFilter()),
+    state.currentView === "editor" ? [] : normalizeFilenameFilter(filenameFilter()),
   );
   const displayedItems = createMemo(() =>
     filterMediaItemsByFilename(availableItems(), activeFilenameFilter()),
@@ -2003,7 +2009,7 @@ export const MediaView: Component = () => {
               >
                 {items.loading || !isLibraryScanComplete()
                   ? "Loading…"
-                  : activeFilenameFilter()
+                  : activeFilenameFilter().length > 0
                     ? `No media match "${filenameFilter().trim()}".`
                   : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
               </div>
