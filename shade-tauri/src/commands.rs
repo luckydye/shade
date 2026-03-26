@@ -276,6 +276,92 @@ async fn require_p2p(
         .ok_or_else(|| "p2p is unavailable on this platform".to_string())
 }
 
+async fn sync_peer_snapshots_for_file_hash(
+    peer_endpoint_id: &str,
+    file_hash: &str,
+    p2p: &std::sync::Arc<shade_p2p::LocalPeerDiscovery>,
+) -> Result<Vec<String>, String> {
+    let peer_snapshots = p2p
+        .list_peer_snapshots(peer_endpoint_id, file_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    if peer_snapshots.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT id FROM edit_versions WHERE file_hash = ?1",
+            [file_hash],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut local_ids = std::collections::HashSet::new();
+    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+        if let Ok(id) = row.get::<String>(0) {
+            local_ids.insert(id);
+        }
+    }
+
+    let mut synced_ids = Vec::new();
+    for snap in peer_snapshots {
+        if local_ids.contains(&snap.id) {
+            continue;
+        }
+        let data_bytes = match p2p.get_peer_snapshot_data(peer_endpoint_id, &snap.id).await {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("failed to fetch snapshot {} from peer: {}", snap.id, e);
+                continue;
+            }
+        };
+        let layers_json = match String::from_utf8(data_bytes) {
+            Ok(j) => j,
+            Err(e) => {
+                log::warn!("invalid UTF-8 in snapshot {} from peer: {}", snap.id, e);
+                continue;
+            }
+        };
+        let data: PersistedLayerData = match serde_json::from_str(&layers_json) {
+            Ok(d) => d,
+            Err(e) => {
+                log::warn!("invalid JSON in snapshot {} from peer: {}", snap.id, e);
+                continue;
+            }
+        };
+        if let Err(e) = persist_snapshot(
+            file_hash,
+            None,
+            Some(&snap.id),
+            Some(peer_endpoint_id),
+            &data,
+        )
+        .await
+        {
+            log::warn!("failed to insert snapshot {} from peer: {}", snap.id, e);
+            continue;
+        }
+        synced_ids.push(snap.id);
+    }
+
+    Ok(synced_ids)
+}
+
+async fn sync_snapshots_from_all_peers_for_file_hash(
+    p2p: &std::sync::Arc<shade_p2p::LocalPeerDiscovery>,
+    file_hash: &str,
+) -> Result<Vec<String>, String> {
+    let snapshot = p2p.snapshot().await;
+    let mut synced_ids = Vec::new();
+    for peer in snapshot.peers {
+        synced_ids.extend(
+            sync_peer_snapshots_for_file_hash(&peer.endpoint_id, file_hash, p2p).await?,
+        );
+    }
+    Ok(synced_ids)
+}
+
 fn presets_dir_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("presets"))
 }
@@ -2281,76 +2367,9 @@ pub async fn sync_peer_snapshots(
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<SyncPeerSnapshotsResult, String> {
     let p2p = require_p2p(&p2p).await?;
-
-    // Fetch peer's snapshot list for this file_hash.
-    let peer_snapshots = p2p
-        .list_peer_snapshots(&peer_endpoint_id, &file_hash)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if peer_snapshots.is_empty() {
-        return Ok(SyncPeerSnapshotsResult { synced_ids: Vec::new() });
-    }
-
-    // Load local snapshot IDs.
-    let conn = open_edits_db().await?;
-    let mut rows = conn
-        .query(
-            "SELECT id FROM edit_versions WHERE file_hash = ?1",
-            [file_hash.as_str()],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut local_ids = std::collections::HashSet::new();
-    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-        if let Ok(id) = row.get::<String>(0) {
-            local_ids.insert(id);
-        }
-    }
-
-    // Download and insert missing snapshots.
-    let mut synced_ids = Vec::new();
-    for snap in peer_snapshots {
-        if local_ids.contains(&snap.id) {
-            continue;
-        }
-        let data_bytes = match p2p.get_peer_snapshot_data(&peer_endpoint_id, &snap.id).await {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!("failed to fetch snapshot {} from peer: {}", snap.id, e);
-                continue;
-            }
-        };
-        let layers_json = match String::from_utf8(data_bytes) {
-            Ok(j) => j,
-            Err(e) => {
-                log::warn!("invalid UTF-8 in snapshot {} from peer: {}", snap.id, e);
-                continue;
-            }
-        };
-        let data: PersistedLayerData = match serde_json::from_str(&layers_json) {
-            Ok(d) => d,
-            Err(e) => {
-                log::warn!("invalid JSON in snapshot {} from peer: {}", snap.id, e);
-                continue;
-            }
-        };
-        if let Err(e) = persist_snapshot(
-            &file_hash,
-            None,
-            Some(&snap.id),
-            Some(&peer_endpoint_id),
-            &data,
-        )
-        .await
-        {
-            log::warn!("failed to insert snapshot {} from peer: {}", snap.id, e);
-            continue;
-        }
-        synced_ids.push(snap.id);
-    }
-
-    Ok(SyncPeerSnapshotsResult { synced_ids })
+    Ok(SyncPeerSnapshotsResult {
+        synced_ids: sync_peer_snapshots_for_file_hash(&peer_endpoint_id, &file_hash, &p2p).await?,
+    })
 }
 
 /// Fetch metadata from a peer for the given file hashes and apply it locally
@@ -2494,6 +2513,8 @@ pub async fn open_peer_image(
         .await
         .map_err(|error| error.to_string())?;
     let file_hash = hash_bytes(&bytes);
+    let peer = require_p2p(&p2p).await?;
+    let _ = sync_peer_snapshots_for_file_hash(&peer_endpoint_id, &file_hash, &peer).await;
     let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let response = {
@@ -2519,6 +2540,7 @@ pub async fn open_peer_image(
 pub async fn open_image<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     path: String,
+    p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
     let open_request_id = {
@@ -2540,6 +2562,9 @@ pub async fn open_image<R: tauri::Runtime>(
         )
         .await?;
     let file_hash = opened.file_hash;
+    if let Some(peer) = p2p.0.read().await.clone() {
+        let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
+    }
     let persisted = load_latest_edit_version(&file_hash).await?;
     let response = {
         let mut st = lock_editor_state(&state)?;
@@ -2563,6 +2588,7 @@ pub async fn open_image<R: tauri::Runtime>(
 pub async fn open_image_encoded_bytes(
     bytes: Vec<u8>,
     file_name: Option<String>,
+    p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
     let open_request_id = {
@@ -2570,6 +2596,9 @@ pub async fn open_image_encoded_bytes(
         st.begin_open_request()
     };
     let file_hash = hash_bytes(&bytes);
+    if let Some(peer) = p2p.0.read().await.clone() {
+        let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
+    }
     let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let response = {
@@ -2600,6 +2629,7 @@ pub async fn open_image_bytes(
     pixels: Vec<u8>,
     width: u32,
     height: u32,
+    p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerInfoResponse, String> {
     let open_request_id = {
@@ -2614,6 +2644,9 @@ pub async fn open_image_bytes(
         ));
     }
     let file_hash = hash_bytes(&pixels);
+    if let Some(peer) = p2p.0.read().await.clone() {
+        let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
+    }
     let persisted = load_latest_edit_version(&file_hash).await?;
     let response = {
         let mut st = lock_editor_state(&state)?;

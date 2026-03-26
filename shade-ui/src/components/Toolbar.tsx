@@ -128,7 +128,7 @@ export const Toolbar: Component = () => {
   return (
     <header
       data-tauri-drag-region
-      class="absolute top-0 z-50 grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-3 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-[18px] lg:static lg:grid-cols-[56px_minmax(0,1fr)_auto] lg:pt-2"
+      class="absolute top-0 z-50 grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-3 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-[18px] md:static md:grid-cols-[56px_minmax(0,1fr)_auto] md:pt-2"
     >
       <div class="flex h-8 items-center">
         <Show when={hasImage() && state.currentView === "editor"}>

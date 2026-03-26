@@ -7,7 +7,8 @@ use tauri::Manager;
 #[derive(Clone)]
 pub struct ThumbnailTaggingService {
     pub sender: Option<crossbeam_channel::Sender<ThumbnailCacheEntry>>,
-    pub pending_media_ids: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub pending_media_ids:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub _lock_file: std::sync::Arc<Option<std::fs::File>>,
 }
 
@@ -71,12 +72,30 @@ pub fn spawn_thumbnail_tagging_worker(
             .map_err(|_| "thumbnail tagging worker already initialized".to_string())?;
         return Ok(service);
     };
-    let model_dir = thumbnail_tagging_model_dir()?;
-    let vocabulary = shade_tagging::photo_auto_tag_vocabulary().map_err(|e| e.to_string())?;
-    let last_tagged_at = tauri::async_runtime::block_on(
-        crate::commands::max_media_tag_updated_at(),
-    )
-    .map_err(|e| e.to_string())?;
+    let model_dir = match thumbnail_tagging_model_dir() {
+        Ok(model_dir) => model_dir,
+        Err(error) => {
+            log::warn!("thumbnail tagging disabled pid={pid}: {error}");
+            let service = ThumbnailTaggingService {
+                sender: None,
+                pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
+                    std::collections::HashSet::new(),
+                )),
+                _lock_file: std::sync::Arc::new(None),
+            };
+            THUMBNAIL_TAGGING_SERVICE
+                .set(service.clone())
+                .map_err(|_| {
+                    "thumbnail tagging worker already initialized".to_string()
+                })?;
+            return Ok(service);
+        }
+    };
+    let vocabulary =
+        shade_tagging::photo_auto_tag_vocabulary().map_err(|e| e.to_string())?;
+    let last_tagged_at =
+        tauri::async_runtime::block_on(crate::commands::max_media_tag_updated_at())
+            .map_err(|e| e.to_string())?;
     let startup_entries = tauri::async_runtime::block_on(
         thumbnail_cache.list_entries_after(last_tagged_at),
     )
@@ -105,8 +124,15 @@ pub fn spawn_thumbnail_tagging_worker(
                 shade_tagging::Siglip2TaggerConfig::base_patch16_224(&model_dir);
             config.acceptance_threshold = 0.03;
             log::info!("thumbnail tagging constructing tagger pid={pid}");
-            let mut tagger = shade_tagging::Siglip2Tagger::new(config)
-                .expect("failed to initialize SigLIP2 thumbnail tagging model");
+            let mut tagger = match shade_tagging::Siglip2Tagger::new(config) {
+                Ok(tagger) => tagger,
+                Err(error) => {
+                    log::error!(
+                        "failed to initialize SigLIP2 thumbnail tagging model pid={pid}: {error}"
+                    );
+                    return;
+                }
+            };
             log::info!("thumbnail tagging constructed tagger pid={pid}");
             while let Ok(entry) = receiver.recv() {
                 let media_id = entry.media_id.clone();
@@ -162,10 +188,7 @@ pub fn process_thumbnail_tagging_entry(
         .iter()
         .map(|tag| tag.label.clone())
         .collect::<Vec<_>>();
-    runtime.block_on(crate::commands::persist_media_tags(
-        &entry.media_id,
-        &tags,
-    ))?;
+    runtime.block_on(crate::commands::persist_media_tags(&entry.media_id, &tags))?;
     log::info!(
         "thumbnail tagging persisted media_id={} tags={}",
         entry.media_id,
@@ -179,8 +202,7 @@ pub fn enqueue_thumbnail_for_tagging<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     entry: ThumbnailCacheEntry,
 ) -> Result<(), String> {
-    app.state::<ThumbnailTaggingService>()
-        .enqueue(entry)
+    app.state::<ThumbnailTaggingService>().enqueue(entry)
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -263,8 +285,10 @@ use std::os::fd::AsRawFd;
 #[cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))]
 unsafe fn flock_nonblocking_exclusive(fd: std::os::raw::c_int) -> std::os::raw::c_int {
     unsafe extern "C" {
-        fn flock(fd: std::os::raw::c_int, operation: std::os::raw::c_int)
-            -> std::os::raw::c_int;
+        fn flock(
+            fd: std::os::raw::c_int,
+            operation: std::os::raw::c_int,
+        ) -> std::os::raw::c_int;
     }
     const LOCK_EX: std::os::raw::c_int = 2;
     const LOCK_NB: std::os::raw::c_int = 4;

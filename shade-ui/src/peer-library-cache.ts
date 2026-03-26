@@ -142,13 +142,23 @@ function toPeerLibraryItems(
   peerId: string,
   pictures: SharedPicture[],
 ): PeerLibraryItem[] {
-  return pictures.map((picture) => ({
-    kind: "peer",
-    id: picture.id,
-    name: picture.name,
-    peerId,
-    modified_at: normalizeModifiedAt(picture.modified_at),
-  }));
+  return pictures
+    .map((picture) => ({
+      kind: "peer",
+      id: picture.id,
+      name: picture.name,
+      peerId,
+      modified_at: normalizeModifiedAt(picture.modified_at),
+    }))
+    .sort((left, right) => {
+      const leftModifiedAt = left.modified_at ?? 0;
+      const rightModifiedAt = right.modified_at ?? 0;
+      return (
+        rightModifiedAt - leftModifiedAt ||
+        left.name.localeCompare(right.name) ||
+        left.id.localeCompare(right.id)
+      );
+    });
 }
 
 async function loadPeerLibraryIds() {

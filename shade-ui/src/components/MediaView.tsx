@@ -1705,8 +1705,8 @@ export const MediaView: Component = () => {
       </Show>
       <Show when={!isEditorStrip()}>
         <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}>
-          <div class="flex w-full items-center gap-3">
-            <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto">
+          <div class="flex w-full flex-wrap items-center gap-3">
+            <div class="grid min-w-0 flex-1 grid-cols-3 gap-2 md:flex md:overflow-x-auto">
               <For each={libraryEntries()}>
                 {(library) =>
                   (() => {
@@ -1716,7 +1716,7 @@ export const MediaView: Component = () => {
                       <Button
                         type="button"
                         onClick={() => setSelectedLibraryId(library.id)}
-                        class={`${LIBRARY_TAB_BASE_CLASS} ${
+                        class={`${LIBRARY_TAB_BASE_CLASS} w-full md:w-auto ${
                           selectedLibraryId() === library.id
                             ? offline
                               ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
@@ -1753,7 +1753,7 @@ export const MediaView: Component = () => {
                 {(peer) => (
                   <Button
                     type="button"
-                    class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
+                    class={`${LIBRARY_TAB_BASE_CLASS} w-full border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] md:w-auto`}
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
@@ -1764,7 +1764,7 @@ export const MediaView: Component = () => {
               <div class="relative flex shrink-0 items-center" ref={addDropdownRef}>
                 <Button
                   type="button"
-                  class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
+                  class={`${LIBRARY_TAB_BASE_CLASS} w-full border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] md:w-auto`}
                   disabled={isSubmitting()}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -1825,7 +1825,7 @@ export const MediaView: Component = () => {
               </Portal>
             </Show>
             <Show when={selectedLibrary()}>
-              <label class="w-40 shrink-0 md:w-56">
+              <label class="basis-full md:basis-auto md:w-56">
                 <input
                   type="text"
                   value={filenameFilter()}
