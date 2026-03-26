@@ -12,6 +12,7 @@ import {
   Show,
   untrack,
 } from "solid-js";
+import { Portal } from "solid-js/web";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import {
@@ -799,6 +800,11 @@ export const MediaView: Component = () => {
   let scrollRef!: HTMLDivElement;
   let libraryActionsRef: HTMLDivElement | undefined;
   let addDropdownRef: HTMLDivElement | undefined;
+  let addDropdownMenuRef: HTMLDivElement | undefined;
+  const [addDropdownPosition, setAddDropdownPosition] = createSignal<{
+    left: number;
+    top: number;
+  } | null>(null);
 
   const discoveredPeerIds = createMemo(() =>
     p2pState.peers.map((peer) => peer.endpoint_id),
@@ -1171,7 +1177,11 @@ export const MediaView: Component = () => {
       if (showLibraryActions() && !libraryActionsRef?.contains(target)) {
         setShowLibraryActions(false);
       }
-      if (showAddDropdown() && !addDropdownRef?.contains(target)) {
+      if (
+        showAddDropdown() &&
+        !addDropdownRef?.contains(target) &&
+        !addDropdownMenuRef?.contains(target)
+      ) {
         setShowAddDropdown(false);
       }
     };
@@ -1694,7 +1704,7 @@ export const MediaView: Component = () => {
       <Show when={!isEditorStrip()}>
         <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}>
           <div class="flex w-full items-center gap-3">
-            <div class="flex flex-1 gap-2 overflow-x-auto">
+            <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto">
               <For each={libraryEntries()}>
                 {(library) =>
                   (() => {
@@ -1749,27 +1759,53 @@ export const MediaView: Component = () => {
                   </Button>
                 )}
               </For>
-              <div class="relative flex items-center" ref={addDropdownRef}>
+              <div class="relative flex shrink-0 items-center" ref={addDropdownRef}>
                 <Button
                   type="button"
                   class={`${LIBRARY_TAB_BASE_CLASS} border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)]`}
                   disabled={isSubmitting()}
-                  onClick={(event) => {
-                    if (event.metaKey) {
-                      setShowAddDropdown((current) => !current);
-                    } else {
-                      void handleAddLibrary();
-                    }
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setAddDropdownPosition({
+                      left: rect.left,
+                      top: rect.bottom,
+                    });
+                    setShowAddDropdown((current) => !current);
+                  }}
+                  onClick={() => {
+                    void handleAddLibrary();
                   }}
                   aria-label="Add library"
                 >
                   +
                 </Button>
-                <Show when={showAddDropdown()}>
-                  <div
-                    role="menu"
-                    class="absolute left-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+              </div>
+            </div>
+            <Show when={showAddDropdown() && addDropdownPosition()}>
+              <Portal>
+                <div
+                  ref={addDropdownMenuRef}
+                  role="menu"
+                  class="fixed z-50 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                  style={{
+                    left: `${addDropdownPosition()!.left}px`,
+                    top: `${addDropdownPosition()!.top + 8}px`,
+                  }}
+                >
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    class={MENU_ITEM_BUTTON_CLASS}
+                    disabled={isSubmitting()}
+                    onClick={() => {
+                      setShowAddDropdown(false);
+                      void handleAddLibrary();
+                    }}
                   >
+                    Directory
+                  </Button>
+                  <Show when={supportsS3Libraries()}>
                     <Button
                       type="button"
                       role="menuitem"
@@ -1777,29 +1813,15 @@ export const MediaView: Component = () => {
                       disabled={isSubmitting()}
                       onClick={() => {
                         setShowAddDropdown(false);
-                        void handleAddLibrary();
+                        setShowS3Form((current) => !current);
                       }}
                     >
-                      Directory
+                      S3
                     </Button>
-                    <Show when={supportsS3Libraries()}>
-                      <Button
-                        type="button"
-                        role="menuitem"
-                        class={MENU_ITEM_BUTTON_CLASS}
-                        disabled={isSubmitting()}
-                        onClick={() => {
-                          setShowAddDropdown(false);
-                          setShowS3Form((current) => !current);
-                        }}
-                      >
-                        S3
-                      </Button>
-                    </Show>
-                  </div>
-                </Show>
-              </div>
-            </div>
+                  </Show>
+                </div>
+              </Portal>
+            </Show>
             <Show when={selectedLibrary()}>
               <label class="w-40 shrink-0 md:w-56">
                 <input
