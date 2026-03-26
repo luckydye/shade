@@ -23,5 +23,6 @@ export async function initSchema(): Promise<void> {
             content_type TEXT NOT NULL,
             size INTEGER NOT NULL
         );
+        ALTER TABLE releases ADD COLUMN IF NOT EXISTS prerelease INTEGER NOT NULL DEFAULT 0;
     `);
 }
