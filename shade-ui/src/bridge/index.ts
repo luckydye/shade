@@ -197,7 +197,7 @@ export interface SharedPicture {
 
 export interface LibraryImageMetadata {
   has_snapshots: boolean;
-  latest_snapshot_version: number | null;
+  latest_snapshot_id: string | null;
   rating: number | null;
   tags: string[];
 }
@@ -802,13 +802,15 @@ export interface PresetInfo {
 }
 
 export interface EditSnapshotInfo {
-  version: number;
+  id: string;
 }
 
 export interface SnapshotInfo {
-  version: number;
+  id: string;
+  display_index: number;
   created_at: number;
   is_current: boolean;
+  peer_origin: string | null;
 }
 
 export interface MediaRatingParams {
@@ -985,10 +987,10 @@ export async function setMediaRating(params: MediaRatingParams): Promise<void> {
   throw new Error("setMediaRating is only implemented for Tauri");
 }
 
-export async function loadSnapshot(version: number): Promise<void> {
+export async function loadSnapshot(id: string): Promise<void> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    await inv("load_snapshot", { params: { version } });
+    await inv("load_snapshot", { params: { id } });
     return;
   }
   throw new Error("loadSnapshot is only implemented for Tauri");

@@ -20,7 +20,7 @@ type CachedLocalItem = {
   name: string;
   modified_at: number | null;
   has_snapshots: boolean;
-  latest_snapshot_version: number | null;
+  latest_snapshot_id: string | null;
   rating: number | null;
   tags: string[];
 };
@@ -50,7 +50,7 @@ function normalizeTags(tags: unknown) {
 }
 
 function normalizeSnapshotVersion(version: unknown) {
-  return typeof version === "number" && Number.isInteger(version) ? version : null;
+  return typeof version === "string" && version.length > 0 ? version : null;
 }
 
 function normalizeLibraryImage(image: LibraryImage): LibraryImage {
@@ -62,8 +62,8 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     ),
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
-      latest_snapshot_version: normalizeSnapshotVersion(
-        image.metadata?.latest_snapshot_version,
+      latest_snapshot_id: normalizeSnapshotVersion(
+        image.metadata?.latest_snapshot_id,
       ),
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
@@ -78,8 +78,8 @@ function toCachedLocalItem(libraryId: string, image: LibraryImage): CachedLocalI
     name: image.name,
     modified_at: normalizeModifiedAt(image.modified_at),
     has_snapshots: image.metadata?.has_snapshots ?? false,
-    latest_snapshot_version: normalizeSnapshotVersion(
-      image.metadata?.latest_snapshot_version,
+    latest_snapshot_id: normalizeSnapshotVersion(
+      image.metadata?.latest_snapshot_id,
     ),
     rating: normalizeRating(image.metadata?.rating),
     tags: normalizeTags(image.metadata?.tags),
@@ -93,7 +93,7 @@ function toLibraryImage(item: CachedLocalItem): LibraryImage {
     modified_at: normalizeModifiedAt(item.modified_at),
     metadata: {
       has_snapshots: item.has_snapshots,
-      latest_snapshot_version: normalizeSnapshotVersion(item.latest_snapshot_version),
+      latest_snapshot_id: normalizeSnapshotVersion(item.latest_snapshot_id),
       rating: normalizeRating(item.rating),
       tags: normalizeTags(item.tags),
     },
@@ -217,17 +217,17 @@ async function saveLocalLibraryListing(
   });
 }
 
-function thumbnailKey(path: string, latestSnapshotVersion: number | null) {
-  return `${path}::snapshot:${latestSnapshotVersion ?? 0}`;
+function thumbnailKey(path: string, latestSnapshotId: string | null) {
+  return `${path}::snapshot:${latestSnapshotId ?? "none"}`;
 }
 
 async function getCachedThumbnail(
   path: string,
-  latestSnapshotVersion: number | null,
+  latestSnapshotId: string | null,
 ): Promise<Blob | null> {
   return withStores([THUMBNAILS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(
-      stores[THUMBNAILS_STORE].get(thumbnailKey(path, latestSnapshotVersion)),
+      stores[THUMBNAILS_STORE].get(thumbnailKey(path, latestSnapshotId)),
     );
     return result instanceof Blob ? result : null;
   });
@@ -235,12 +235,12 @@ async function getCachedThumbnail(
 
 async function putCachedThumbnail(
   path: string,
-  latestSnapshotVersion: number | null,
+  latestSnapshotId: string | null,
   blob: Blob,
 ): Promise<void> {
   await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
     await requestToPromise(
-      stores[THUMBNAILS_STORE].put(blob, thumbnailKey(path, latestSnapshotVersion)),
+      stores[THUMBNAILS_STORE].put(blob, thumbnailKey(path, latestSnapshotId)),
     );
   });
 }
@@ -256,17 +256,17 @@ async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
       if (!item) {
         continue;
       }
-      const latestSnapshotVersion = normalizeSnapshotVersion(
-        item.metadata?.latest_snapshot_version,
+      const latestSnapshotId = normalizeSnapshotVersion(
+        item.metadata?.latest_snapshot_id,
       );
-      if (await getCachedThumbnail(item.path, latestSnapshotVersion)) {
+      if (await getCachedThumbnail(item.path, latestSnapshotId)) {
         continue;
       }
       try {
         const bytes = await getThumbnailBackend().getThumbnailBytes(item.path);
         await putCachedThumbnail(
           item.path,
-          latestSnapshotVersion,
+          latestSnapshotId,
           new Blob([toBlobBuffer(bytes)], { type: "image/jpeg" }),
         );
       } catch {
@@ -312,14 +312,14 @@ export async function loadLocalLibraryItemsCachedOrRemote(
 
 export async function resolveLocalThumbnailSrc(
   path: string,
-  latestSnapshotVersion: number | null,
+  latestSnapshotId: string | null,
   signal: AbortSignal,
 ): Promise<string> {
   if (signal.aborted) {
     throw abortError();
   }
-  const key = thumbnailKey(path, latestSnapshotVersion);
-  const cached = await getCachedThumbnail(path, latestSnapshotVersion);
+  const key = thumbnailKey(path, latestSnapshotId);
+  const cached = await getCachedThumbnail(path, latestSnapshotId);
   if (cached) {
     return URL.createObjectURL(cached);
   }
@@ -338,7 +338,7 @@ export async function resolveLocalThumbnailSrc(
     throw abortError();
   }
   const blob = new Blob([toBlobBuffer(bytes)], { type: "image/jpeg" });
-  await putCachedThumbnail(path, latestSnapshotVersion, blob);
+  await putCachedThumbnail(path, latestSnapshotId, blob);
   failedThumbnailLoads.delete(key);
   return URL.createObjectURL(blob);
 }

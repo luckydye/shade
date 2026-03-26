@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
+uuid = { workspace = true }
 async-trait = "0.1"
 iroh = { version = "0.96.1", features = ["address-lookup-mdns"] }
 iroh-blobs = "0.98.0"

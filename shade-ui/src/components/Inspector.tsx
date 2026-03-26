@@ -1926,11 +1926,11 @@ export const Inspector: Component = () => {
     }
   };
 
-  const handleLoadSnapshot = async (version: number) => {
+  const handleLoadSnapshot = async (id: string) => {
     setIsPresetBusy(true);
     try {
-      await loadSnapshot(version);
-      setPresetStatus(`Loaded snapshot ${version}`);
+      await loadSnapshot(id);
+      setPresetStatus(`Loaded snapshot`);
       await refreshPresetList();
     } catch (error) {
       setPresetStatus(error instanceof Error ? error.message : String(error));
@@ -1942,8 +1942,8 @@ export const Inspector: Component = () => {
   const handleSaveSnapshot = async () => {
     setIsPresetBusy(true);
     try {
-      const snapshot = await saveSnapshot();
-      setPresetStatus(`Saved snapshot ${snapshot.version}`);
+      await saveSnapshot();
+      setPresetStatus(`Saved snapshot`);
       await refreshPresetList();
     } catch (error) {
       setPresetStatus(error instanceof Error ? error.message : String(error));
@@ -2271,7 +2271,7 @@ export const Inspector: Component = () => {
               <div class="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_72px] items-center gap-2 rounded-md bg-[var(--surface-subtle)] px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
                 <div class="min-w-0">
                   <div class="truncate text-[13px] font-medium text-[var(--text-strong)]">
-                    {`Version ${snapshot.version}`}
+                    {`Version ${snapshot.display_index}`}
                   </div>
                   <div class="text-[11px] text-[var(--text-faint)]">
                     {formatSnapshotDate(snapshot.created_at)}
@@ -2285,7 +2285,7 @@ export const Inspector: Component = () => {
                 <Button
                   type="button"
                   disabled={isPresetBusy() || state.canvasWidth <= 0 || snapshot.is_current}
-                  onClick={() => void handleLoadSnapshot(snapshot.version)}
+                  onClick={() => void handleLoadSnapshot(snapshot.id)}
                   class={SECONDARY_BUTTON_CLASS}
                 >
                   Load

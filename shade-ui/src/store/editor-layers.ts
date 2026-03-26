@@ -413,8 +413,8 @@ export async function saveSnapshot() {
   return bridge.saveSnapshot();
 }
 
-export async function loadSnapshot(version: number) {
-  await bridge.loadSnapshot(version);
+export async function loadSnapshot(id: string) {
+  await bridge.loadSnapshot(id);
   await refreshLayerStack();
   await refreshPreview();
 }

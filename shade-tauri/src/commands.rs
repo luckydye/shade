@@ -56,7 +56,7 @@ pub struct EditorState {
     pub source_bit_depth: String,
     pub current_image_hash: Option<String>,
     pub current_image_source: Option<String>,
-    pub current_edit_version: Option<i64>,
+    pub current_snapshot_id: Option<String>,
     pub next_open_request_id: u64,
     pub active_open_request_id: u64,
 }
@@ -76,7 +76,7 @@ pub struct MediaLibrary {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct LibraryImageMetadata {
     pub has_snapshots: bool,
-    pub latest_snapshot_version: Option<i64>,
+    pub latest_snapshot_id: Option<String>,
     pub rating: Option<u8>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -431,20 +431,54 @@ pub async fn open_edits_db() -> Result<libsql::Connection, String> {
     )
     .await
     .map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS edit_versions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_hash TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            created_at INTEGER NOT NULL,
-            layers_json TEXT NOT NULL,
-            FOREIGN KEY (file_hash) REFERENCES images(file_hash),
-            UNIQUE(file_hash, version)
-        )",
-        (),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    // Migrate from old integer-version schema to UUID-based schema if needed.
+    let needs_migration = {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM pragma_table_info('edit_versions') WHERE name = 'version'",
+                (),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let row = rows.next().await.map_err(|e| e.to_string())?;
+        row.map(|r| r.get::<i64>(0).unwrap_or(0) > 0)
+            .unwrap_or(false)
+    };
+    if needs_migration {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE edit_versions RENAME TO edit_versions_old;
+             CREATE TABLE edit_versions (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 file_hash TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 layers_json TEXT NOT NULL,
+                 peer_origin TEXT,
+                 FOREIGN KEY (file_hash) REFERENCES images(file_hash)
+             );
+             INSERT INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
+                 SELECT lower(hex(randomblob(16))), file_hash, created_at, layers_json, NULL
+                 FROM edit_versions_old;
+             DROP TABLE edit_versions_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS edit_versions (
+                id TEXT PRIMARY KEY NOT NULL,
+                file_hash TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                layers_json TEXT NOT NULL,
+                peer_origin TEXT,
+                FOREIGN KEY (file_hash) REFERENCES images(file_hash)
+            )",
+            (),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     conn.execute(
         "CREATE TABLE IF NOT EXISTS media_ratings (
             media_id TEXT PRIMARY KEY NOT NULL,
@@ -678,10 +712,10 @@ async fn load_latest_edit_version(
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
-            "SELECT version, layers_json
+            "SELECT id, layers_json
              FROM edit_versions
              WHERE file_hash = ?1
-             ORDER BY version DESC
+             ORDER BY created_at DESC
              LIMIT 1",
             [file_hash],
         )
@@ -690,11 +724,11 @@ async fn load_latest_edit_version(
     let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
         return Ok(None);
     };
-    let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
+    let id = row.get::<String>(0).map_err(|e| e.to_string())?;
     let layers_json = row.get::<String>(1).map_err(|e| e.to_string())?;
     let data = parse_layer_data(&layers_json)?;
     ensure_non_image_layers(&data.layers)?;
-    Ok(Some(PersistedEditVersion { version, data }))
+    Ok(Some(PersistedEditVersion { id, data }))
 }
 
 async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
@@ -713,12 +747,16 @@ async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
     Ok(rows.next().await.map_err(|e| e.to_string())?.is_some())
 }
 
-async fn persist_edit_version(
+/// Persists a snapshot and returns its UUID id.
+/// If `id` is given (e.g. when inserting a synced peer snapshot), that id is used;
+/// otherwise a new UUID v4 is generated.
+async fn persist_snapshot(
     file_hash: &str,
     source_name: Option<&str>,
-    version: Option<i64>,
+    id: Option<&str>,
+    peer_origin: Option<&str>,
     data: &PersistedLayerData,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     ensure_non_image_layers(&data.layers)?;
     let conn = open_edits_db().await?;
     let now = unix_timestamp_millis()?;
@@ -730,51 +768,23 @@ async fn persist_edit_version(
     )
     .await
     .map_err(|e| e.to_string())?;
-    let version = if let Some(version) = version {
-        conn.execute(
-            "INSERT INTO edit_versions (file_hash, version, created_at, layers_json)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(file_hash, version)
-             DO UPDATE SET created_at = excluded.created_at, layers_json = excluded.layers_json",
-            libsql::params![
-                file_hash,
-                version,
-                now,
-                serde_json::to_string(data).map_err(|e| e.to_string())?
-            ],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        version
-    } else {
-        let mut rows = conn
-            .query(
-                "SELECT COALESCE(MAX(version), 0) + 1
-                 FROM edit_versions
-                 WHERE file_hash = ?1",
-                [file_hash],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
-            return Err("failed to compute next edit version".into());
-        };
-        let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
-        conn.execute(
-            "INSERT INTO edit_versions (file_hash, version, created_at, layers_json)
-             VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![
-                file_hash,
-                version,
-                now,
-                serde_json::to_string(data).map_err(|e| e.to_string())?
-            ],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        version
-    };
-    Ok(version)
+    let snapshot_id = id
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    conn.execute(
+        "INSERT OR IGNORE INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        libsql::params![
+            snapshot_id,
+            file_hash,
+            now,
+            serde_json::to_string(data).map_err(|e| e.to_string())?,
+            peer_origin,
+        ],
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(snapshot_id)
 }
 
 fn restore_persisted_layers(
@@ -785,7 +795,7 @@ fn restore_persisted_layers(
 ) -> Result<(), String> {
     state.current_image_hash = Some(file_hash);
     state.current_image_source = source_name;
-    state.current_edit_version = persisted.as_ref().map(|version| version.version);
+    state.current_snapshot_id = persisted.as_ref().map(|v| v.id.clone());
     let Some(persisted) = persisted else {
         return Ok(());
     };
@@ -838,10 +848,12 @@ fn build_persisted_layer_stack(
     Ok(stack)
 }
 
+/// Persists the current edit state. If there is already a current snapshot id,
+/// it updates that snapshot in place (upsert). Otherwise creates a new UUID snapshot.
 async fn persist_current_edit_version(
     state: &tauri::State<'_, Mutex<EditorState>>,
-) -> Result<i64, String> {
-    let (file_hash, source_name, data, current_version) = {
+) -> Result<String, String> {
+    let (file_hash, source_name, data, current_snapshot_id) = {
         let st = lock_editor_state(state)?;
         let file_hash = st.current_image_hash.clone().ok_or_else(|| {
             "cannot persist edits without a loaded image hash".to_string()
@@ -850,20 +862,34 @@ async fn persist_current_edit_version(
             file_hash,
             st.current_image_source.clone(),
             non_image_layer_data(&st.stack),
-            st.current_edit_version,
+            st.current_snapshot_id.clone(),
         )
     };
-    let version =
-        persist_edit_version(&file_hash, source_name.as_deref(), current_version, &data)
-            .await?;
+    let id = if let Some(existing_id) = current_snapshot_id {
+        // Update the existing snapshot in place.
+        ensure_non_image_layers(&data.layers)?;
+        let conn = open_edits_db().await?;
+        conn.execute(
+            "UPDATE edit_versions SET layers_json = ?1 WHERE id = ?2",
+            libsql::params![
+                serde_json::to_string(&data).map_err(|e| e.to_string())?,
+                existing_id,
+            ],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        existing_id
+    } else {
+        persist_snapshot(&file_hash, source_name.as_deref(), None, None, &data).await?
+    };
     let mut st = lock_editor_state(state)?;
-    st.current_edit_version = Some(version);
-    Ok(version)
+    st.current_snapshot_id = Some(id.clone());
+    Ok(id)
 }
 
-async fn save_snapshot_version(
+async fn save_new_snapshot(
     state: &tauri::State<'_, Mutex<EditorState>>,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     let (file_hash, source_name, data) = {
         let st = lock_editor_state(state)?;
         let file_hash = st.current_image_hash.clone().ok_or_else(|| {
@@ -875,63 +901,71 @@ async fn save_snapshot_version(
             non_image_layer_data(&st.stack),
         )
     };
-    let version =
-        persist_edit_version(&file_hash, source_name.as_deref(), None, &data).await?;
+    let id = persist_snapshot(&file_hash, source_name.as_deref(), None, None, &data).await?;
     let mut st = lock_editor_state(state)?;
-    st.current_edit_version = Some(version);
-    Ok(version)
+    st.current_snapshot_id = Some(id.clone());
+    Ok(id)
 }
 
-async fn list_snapshot_versions(
+async fn list_snapshots_for_file(
     file_hash: &str,
-    current_version: Option<i64>,
+    current_snapshot_id: Option<&str>,
 ) -> Result<Vec<SnapshotInfo>, String> {
     let conn = open_edits_db().await?;
+    // ROW_NUMBER ordered by created_at gives a stable display index.
     let mut rows = conn
         .query(
-            "SELECT version, created_at
+            "SELECT id, created_at, peer_origin,
+                    ROW_NUMBER() OVER (ORDER BY created_at) AS display_index
              FROM edit_versions
              WHERE file_hash = ?1
-             ORDER BY version DESC",
+             ORDER BY created_at DESC",
             [file_hash],
         )
         .await
         .map_err(|e| e.to_string())?;
     let mut snapshots = Vec::new();
     while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-        let version = row.get::<i64>(0).map_err(|e| e.to_string())?;
+        let id = row.get::<String>(0).map_err(|e| e.to_string())?;
         let created_at = row.get::<i64>(1).map_err(|e| e.to_string())?;
+        let peer_origin = row.get::<Option<String>>(2).map_err(|e| e.to_string())?;
+        let display_index = row.get::<i64>(3).map_err(|e| e.to_string())?;
         snapshots.push(SnapshotInfo {
-            version,
+            is_current: current_snapshot_id == Some(id.as_str()),
+            id,
+            display_index,
             created_at,
-            is_current: current_version == Some(version),
+            peer_origin,
         });
     }
     Ok(snapshots)
 }
 
-async fn load_snapshot_version(
+async fn load_snapshot_by_id(
     file_hash: &str,
-    version: i64,
+    id: &str,
 ) -> Result<PersistedEditVersion, String> {
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
             "SELECT layers_json
              FROM edit_versions
-             WHERE file_hash = ?1 AND version = ?2
+             WHERE file_hash = ?1 AND id = ?2
              LIMIT 1",
-            libsql::params![file_hash, version],
+            libsql::params![file_hash, id],
         )
         .await
         .map_err(|e| e.to_string())?;
     let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
-        return Err(format!("unknown snapshot version: {version}"));
+        return Err(format!("unknown snapshot id: {id}"));
     };
     let layers_json = row.get::<String>(0).map_err(|e| e.to_string())?;
     let data = parse_layer_data(&layers_json)?;
     ensure_non_image_layers(&data.layers)?;
-    Ok(PersistedEditVersion { version, data })
+    Ok(PersistedEditVersion {
+        id: id.to_owned(),
+        data,
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -951,7 +985,7 @@ struct PresetFile {
 
 #[derive(Debug)]
 struct PersistedEditVersion {
-    version: i64,
+    id: String,
     data: PersistedLayerData,
 }
 
@@ -962,14 +996,16 @@ pub struct PresetInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EditSnapshotInfo {
-    pub version: i64,
+    pub id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SnapshotInfo {
-    pub version: i64,
+    pub id: String,
+    pub display_index: i64,
     pub created_at: i64,
     pub is_current: bool,
+    pub peer_origin: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -986,7 +1022,7 @@ pub struct MediaTagsParams {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LoadSnapshotParams {
-    pub version: i64,
+    pub id: String,
 }
 
 fn load_app_config() -> Result<shade_io::AppConfig, String> {
@@ -1577,7 +1613,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             modified_at: item.modified_at,
             metadata: LibraryImageMetadata {
                 has_snapshots: false,
-                latest_snapshot_version: None,
+                latest_snapshot_id: None,
                 rating: item.rating,
                 tags: Vec::new(),
             },
@@ -1624,7 +1660,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                 modified_at,
                 metadata: LibraryImageMetadata {
                     has_snapshots: false,
-                    latest_snapshot_version: None,
+                    latest_snapshot_id: None,
                     rating,
                     tags: Vec::new(),
                 },
@@ -1704,7 +1740,7 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
         modified_at: item.modified_at,
         metadata: LibraryImageMetadata {
             has_snapshots: false,
-            latest_snapshot_version: None,
+            latest_snapshot_id: None,
             rating: item.rating,
             tags: Vec::new(),
         },
@@ -2051,7 +2087,7 @@ impl Default for EditorState {
             source_bit_depth: "Unknown".into(),
             current_image_hash: None,
             current_image_source: None,
-            current_edit_version: None,
+            current_snapshot_id: None,
             next_open_request_id: 0,
             active_open_request_id: 0,
         }
@@ -2095,7 +2131,7 @@ impl EditorState {
         self.source_bit_depth = source_bit_depth.clone();
         self.current_image_hash = None;
         self.current_image_source = None;
-        self.current_edit_version = None;
+        self.current_snapshot_id = None;
         self.stack.add_image_layer(texture_id, width, height);
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
@@ -2168,6 +2204,107 @@ pub async fn get_peer_image_bytes(
         .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+/// Update local awareness state (what image we are currently editing).
+#[tauri::command]
+pub async fn set_local_awareness(
+    file_hash: Option<String>,
+    snapshot_id: Option<String>,
+    awareness: tauri::State<'_, crate::AwarenessStateHandle>,
+) -> Result<(), String> {
+    let mut state = awareness.0.lock().await;
+    state.active_file_hash = file_hash;
+    state.active_snapshot_id = snapshot_id;
+    Ok(())
+}
+
+/// Get the current awareness state of a connected peer.
+#[tauri::command]
+pub async fn get_peer_awareness(
+    peer_endpoint_id: String,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<shade_p2p::AwarenessState, String> {
+    require_p2p(&p2p)
+        .await?
+        .get_peer_awareness(&peer_endpoint_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize, Debug)]
+pub struct SyncPeerSnapshotsResult {
+    pub synced_ids: Vec<String>,
+}
+
+/// Pull snapshots from a peer for the given file_hash that we don't have locally.
+/// Returns the list of newly inserted snapshot IDs.
+#[tauri::command]
+pub async fn sync_peer_snapshots(
+    peer_endpoint_id: String,
+    file_hash: String,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<SyncPeerSnapshotsResult, String> {
+    let p2p = require_p2p(&p2p).await?;
+
+    // Fetch peer's snapshot list for this file_hash.
+    let peer_snapshots = p2p
+        .list_peer_snapshots(&peer_endpoint_id, &file_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if peer_snapshots.is_empty() {
+        return Ok(SyncPeerSnapshotsResult { synced_ids: Vec::new() });
+    }
+
+    // Load local snapshot IDs.
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT id FROM edit_versions WHERE file_hash = ?1",
+            [file_hash.as_str()],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut local_ids = std::collections::HashSet::new();
+    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+        if let Ok(id) = row.get::<String>(0) {
+            local_ids.insert(id);
+        }
+    }
+
+    // Download and insert missing snapshots.
+    let mut synced_ids = Vec::new();
+    for snap in peer_snapshots {
+        if local_ids.contains(&snap.id) {
+            continue;
+        }
+        let data_bytes = match p2p.get_peer_snapshot_data(&peer_endpoint_id, &snap.id).await {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("failed to fetch snapshot {} from peer: {}", snap.id, e);
+                continue;
+            }
+        };
+        let layers_json = String::from_utf8(data_bytes).map_err(|e| e.to_string())?;
+        let data: PersistedLayerData =
+            serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+        if let Err(e) = persist_snapshot(
+            &file_hash,
+            None,
+            Some(&snap.id),
+            Some(&peer_endpoint_id),
+            &data,
+        )
+        .await
+        {
+            log::warn!("failed to insert snapshot {} from peer: {}", snap.id, e);
+            continue;
+        }
+        synced_ids.push(snap.id);
+    }
+
+    Ok(SyncPeerSnapshotsResult { synced_ids })
 }
 
 #[tauri::command]
@@ -3454,20 +3591,24 @@ async fn enrich_listing_metadata(
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
-            "SELECT i.source_name, MAX(ev.version)
+            "SELECT i.source_name, ev.id
              FROM images i
              JOIN edit_versions ev ON ev.file_hash = i.file_hash
              WHERE i.source_name IS NOT NULL
-             GROUP BY i.source_name",
+             AND ev.created_at = (
+                 SELECT MAX(ev2.created_at)
+                 FROM edit_versions ev2
+                 WHERE ev2.file_hash = i.file_hash
+             )",
             (),
         )
         .await
         .map_err(|e| e.to_string())?;
-    let mut snapshot_versions = HashMap::new();
+    let mut snapshot_ids: HashMap<String, String> = HashMap::new();
     while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
         let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
-        let version = row.get::<i64>(1).map_err(|e| e.to_string())?;
-        snapshot_versions.insert(source_name, version);
+        let id = row.get::<String>(1).map_err(|e| e.to_string())?;
+        snapshot_ids.insert(source_name, id);
     }
     let tags = load_media_tags_map(
         &listing
@@ -3478,9 +3619,8 @@ async fn enrich_listing_metadata(
     )
     .await?;
     for item in &mut listing.items {
-        item.metadata.latest_snapshot_version =
-            snapshot_versions.get(&item.path).copied();
-        item.metadata.has_snapshots = item.metadata.latest_snapshot_version.is_some();
+        item.metadata.latest_snapshot_id = snapshot_ids.get(&item.path).cloned();
+        item.metadata.has_snapshots = item.metadata.latest_snapshot_id.is_some();
         item.metadata.tags = tags.get(&item.path).cloned().unwrap_or_default();
     }
     Ok(())
@@ -3984,22 +4124,22 @@ pub async fn load_preset(
 pub async fn save_snapshot(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<EditSnapshotInfo, String> {
-    let version = save_snapshot_version(&state).await?;
-    Ok(EditSnapshotInfo { version })
+    let id = save_new_snapshot(&state).await?;
+    Ok(EditSnapshotInfo { id })
 }
 
 #[tauri::command]
 pub async fn list_snapshots(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<Vec<SnapshotInfo>, String> {
-    let (file_hash, current_version) = {
+    let (file_hash, current_snapshot_id) = {
         let st = lock_editor_state(&state)?;
-        (st.current_image_hash.clone(), st.current_edit_version)
+        (st.current_image_hash.clone(), st.current_snapshot_id.clone())
     };
     let Some(file_hash) = file_hash else {
         return Ok(Vec::new());
     };
-    list_snapshot_versions(&file_hash, current_version).await
+    list_snapshots_for_file(&file_hash, current_snapshot_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -4013,7 +4153,7 @@ pub async fn load_snapshot(
             .clone()
             .ok_or_else(|| "cannot load a snapshot without a loaded image".to_string())?
     };
-    let snapshot = load_snapshot_version(&file_hash, params.version).await?;
+    let snapshot = load_snapshot_by_id(&file_hash, &params.id).await?;
     {
         let mut st = lock_editor_state(&state)?;
         let image_layers: Vec<_> = st
@@ -4041,27 +4181,32 @@ pub async fn load_snapshot(
             h,
         );
         st.stack.generation += 1;
-        st.current_edit_version = Some(params.version);
+        st.current_snapshot_id = Some(snapshot.id);
     }
     Ok(())
 }
 
-pub struct AppMediaProvider<R: tauri::Runtime = tauri::Wry> {
+pub struct AppPeerProvider<R: tauri::Runtime = tauri::Wry> {
     app: tauri::AppHandle<R>,
     prompt_lock: Arc<TokioMutex<()>>,
+    awareness: Arc<tokio::sync::Mutex<shade_p2p::AwarenessState>>,
 }
 
-impl<R: tauri::Runtime> AppMediaProvider<R> {
-    pub fn new(app: tauri::AppHandle<R>) -> Self {
+impl<R: tauri::Runtime> AppPeerProvider<R> {
+    pub fn new(
+        app: tauri::AppHandle<R>,
+        awareness: Arc<tokio::sync::Mutex<shade_p2p::AwarenessState>>,
+    ) -> Self {
         Self {
             app,
             prompt_lock: Arc::new(TokioMutex::new(())),
+            awareness,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<R: tauri::Runtime> shade_p2p::MediaProvider for AppMediaProvider<R> {
+impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
     async fn authorize_peer(&self, peer_endpoint_id: &str) -> anyhow::Result<()> {
         if is_peer_paired(peer_endpoint_id).map_err(anyhow::Error::msg)? {
             return Ok(());
@@ -4105,6 +4250,129 @@ impl<R: tauri::Runtime> shade_p2p::MediaProvider for AppMediaProvider<R> {
         load_picture_bytes(self.app.clone(), picture_id)
             .await
             .map_err(anyhow::Error::msg)
+    }
+
+    async fn get_awareness(&self) -> anyhow::Result<shade_p2p::AwarenessState> {
+        Ok(self.awareness.lock().await.clone())
+    }
+
+    async fn list_snapshots(
+        &self,
+        file_hash: &str,
+    ) -> anyhow::Result<Vec<shade_p2p::SyncSnapshotInfo>> {
+        let conn = open_edits_db().await.map_err(anyhow::Error::msg)?;
+        let mut rows = conn
+            .query(
+                "SELECT id, created_at FROM edit_versions WHERE file_hash = ?1 ORDER BY created_at DESC",
+                [file_hash],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let mut list = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!(e.to_string()))? {
+            let id = row.get::<String>(0).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let created_at = row.get::<i64>(1).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            list.push(shade_p2p::SyncSnapshotInfo { id, created_at });
+        }
+        Ok(list)
+    }
+
+    async fn get_snapshot_data(&self, id: &str) -> anyhow::Result<Vec<u8>> {
+        let conn = open_edits_db().await.map_err(anyhow::Error::msg)?;
+        let mut rows = conn
+            .query(
+                "SELECT layers_json FROM edit_versions WHERE id = ?1 LIMIT 1",
+                [id],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!(e.to_string()))? else {
+            return Err(anyhow::anyhow!("snapshot not found: {id}"));
+        };
+        let layers_json = row
+            .get::<String>(0)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        Ok(layers_json.into_bytes())
+    }
+
+    async fn get_metadata(
+        &self,
+        file_hashes: &[String],
+    ) -> anyhow::Result<Vec<shade_p2p::PictureMetadata>> {
+        if file_hashes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = open_edits_db().await.map_err(anyhow::Error::msg)?;
+        let mut result = Vec::new();
+        for file_hash in file_hashes {
+            // rating
+            let mut rows = conn
+                .query(
+                    "SELECT i.source_name FROM images i WHERE i.file_hash = ?1 LIMIT 1",
+                    [file_hash.as_str()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let source_name = if let Some(row) =
+                rows.next().await.map_err(|e| anyhow::anyhow!(e.to_string()))?
+            {
+                row.get::<Option<String>>(0)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            } else {
+                continue;
+            };
+            let Some(source_name) = source_name else {
+                continue;
+            };
+            let mut rating_rows = conn
+                .query(
+                    "SELECT rating, updated_at FROM media_ratings WHERE media_id = ?1 LIMIT 1",
+                    [source_name.as_str()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let (rating, rating_updated_at) =
+                if let Some(row) = rating_rows
+                    .next()
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                {
+                    let r = row.get::<u8>(0).ok();
+                    let t = row.get::<i64>(1).ok();
+                    (r, t)
+                } else {
+                    (None, None)
+                };
+            let mut tag_rows = conn
+                .query(
+                    "SELECT tag, updated_at FROM media_tags WHERE media_id = ?1",
+                    [source_name.as_str()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let mut tags = Vec::new();
+            let mut tags_updated_at: Option<i64> = None;
+            while let Some(row) = tag_rows
+                .next()
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            {
+                let tag = row.get::<String>(0).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let t = row.get::<i64>(1).ok();
+                tags.push(tag);
+                if let Some(t) = t {
+                    tags_updated_at = Some(tags_updated_at.map_or(t, |existing| existing.max(t)));
+                }
+            }
+            result.push(shade_p2p::PictureMetadata {
+                file_hash: file_hash.clone(),
+                rating,
+                tags,
+                rating_updated_at,
+                tags_updated_at,
+            });
+        }
+        Ok(result)
     }
 }
 
