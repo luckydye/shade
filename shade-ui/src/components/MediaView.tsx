@@ -2173,7 +2173,11 @@ export const MediaView: Component = () => {
         </div>
         <Show when={isScrolling() && scrollLabel()}>
           <div
-            class="pointer-events-none absolute right-4 z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]"
+            class={`pointer-events-none absolute ${
+              isEditorStrip()
+                ? "right-0 translate-x-[calc(100%+0.5rem)] text-left"
+                : "right-4"
+            } z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]`}
             style={{ top: `${tooltipTop()}px` }}
           >
             {scrollLabel()}
