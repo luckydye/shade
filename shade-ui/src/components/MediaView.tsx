@@ -1621,7 +1621,11 @@ export const MediaView: Component = () => {
     setError(null);
     try {
       await pairPeerDevice(peerId);
-      const nextLibrary = await addPeerLibrary(peerId);
+      const peer = p2pState.peers.find((entry) => entry.endpoint_id === peerId);
+      if (!peer) {
+        throw new Error("peer is no longer available");
+      }
+      const nextLibrary = await addPeerLibrary(peerId, peer.name);
       setPeerLibraries((current) => {
         const libraries = current ?? [];
         if (libraries.some((library) => library.peerId === peerId)) {
@@ -2028,7 +2032,7 @@ export const MediaView: Component = () => {
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
-                    {`Peer ${peer.endpoint_id.slice(0, 8)}`}
+                    {peer.name}
                   </Button>
                 )}
               </For>

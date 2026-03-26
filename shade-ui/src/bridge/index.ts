@@ -179,6 +179,7 @@ export interface OpenImageInfo {
 
 export interface LocalPeer {
   endpoint_id: string;
+  name: string;
   direct_addresses: string[];
   last_updated: number | null;
 }

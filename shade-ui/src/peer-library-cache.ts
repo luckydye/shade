@@ -2,7 +2,7 @@ import { getThumbnailBackend } from "./bridge/thumbnail-backend";
 import { listPeerPictures, type SharedPicture } from "./bridge/index";
 
 const DB_NAME = "shade-peer-cache";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const LIBRARIES_STORE = "libraries";
 const ITEMS_STORE = "items";
 const THUMBNAILS_STORE = "thumbnails";
@@ -58,10 +58,6 @@ function peerLibraryId(peerId: string) {
   return `peer:${peerId}`;
 }
 
-function peerLibraryName(peerId: string) {
-  return `Peer ${peerId.slice(0, 8)}`;
-}
-
 function thumbnailKey(peerId: string, pictureId: string) {
   return `${peerId}:${pictureId}`;
 }
@@ -88,6 +84,9 @@ function openDb(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
     request.onupgradeneeded = () => {
       const db = request.result;
+      if (db.objectStoreNames.contains(LIBRARIES_STORE)) {
+        db.deleteObjectStore(LIBRARIES_STORE);
+      }
       if (!db.objectStoreNames.contains(LIBRARIES_STORE)) {
         db.createObjectStore(LIBRARIES_STORE);
       }
@@ -132,11 +131,11 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function toPeerLibrary(peerId: string): PeerLibrary {
+function toPeerLibrary(peerId: string, name: string): PeerLibrary {
   return {
     id: peerLibraryId(peerId),
     kind: "peer",
-    name: peerLibraryName(peerId),
+    name,
     path: null,
     removable: true,
     readonly: true,
@@ -176,9 +175,19 @@ async function loadPeerLibraryIds() {
   });
 }
 
-async function addPeerLibraryId(peerId: string) {
+async function loadPeerLibraryName(peerId: string) {
+  return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
+    const value = await requestToPromise(stores[LIBRARIES_STORE].get(peerId));
+    if (typeof value !== "string") {
+      throw new Error("peer library name is missing");
+    }
+    return value;
+  });
+}
+
+async function addPeerLibraryId(peerId: string, name: string) {
   await withStores([LIBRARIES_STORE], "readwrite", async (stores) => {
-    await requestToPromise(stores[LIBRARIES_STORE].put(true, peerId));
+    await requestToPromise(stores[LIBRARIES_STORE].put(name, peerId));
   });
 }
 
@@ -312,7 +321,10 @@ async function warmPeerLibraryThumbnails(peerId: string, pictures: SharedPicture
 }
 
 export async function listPeerLibraries(): Promise<PeerLibrary[]> {
-  return (await loadPeerLibraryIds()).map(toPeerLibrary);
+  const peerIds = await loadPeerLibraryIds();
+  return Promise.all(
+    peerIds.map(async (peerId) => toPeerLibrary(peerId, await loadPeerLibraryName(peerId))),
+  );
 }
 
 export async function getCachedPeerLibraryItems(
@@ -321,12 +333,9 @@ export async function getCachedPeerLibraryItems(
   return toPeerLibraryItems(peerId, await loadPeerLibraryItems(peerId));
 }
 
-export async function addPeerLibrary(peerId: string): Promise<PeerLibrary> {
-  const peerIds = await loadPeerLibraryIds();
-  if (!peerIds.includes(peerId)) {
-    await addPeerLibraryId(peerId);
-  }
-  return toPeerLibrary(peerId);
+export async function addPeerLibrary(peerId: string, peerName: string): Promise<PeerLibrary> {
+  await addPeerLibraryId(peerId, peerName);
+  return toPeerLibrary(peerId, peerName);
 }
 
 export async function removePeerLibrary(peerId: string): Promise<void> {

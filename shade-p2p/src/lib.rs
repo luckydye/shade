@@ -12,7 +12,6 @@ use std::{collections::BTreeMap, sync::Arc};
 use tokio::{sync::RwLock, task::JoinHandle};
 use tokio_stream::StreamExt;
 
-const SHADE_P2P_DISCOVERY_TAG: &str = "shade-p2p";
 const SHADE_P2P_ALPN: &[u8] = b"/shade/p2p/1";
 const MAX_REQUEST_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_THUMBNAIL_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -105,6 +104,7 @@ enum Response {
 #[derive(Clone, Debug, Serialize)]
 pub struct LocalPeer {
     pub endpoint_id: String,
+    pub name: String,
     pub direct_addresses: Vec<String>,
     pub last_updated: Option<u64>,
 }
@@ -128,13 +128,12 @@ impl LocalPeerDiscovery {
         secret_key: Option<SecretKey>,
         peer_provider: Arc<dyn PeerProvider>,
     ) -> Result<Self> {
+        let device_name = local_device_name()?;
         let mut builder = Endpoint::empty_builder(RelayMode::Disabled);
         if let Some(secret_key) = secret_key {
             builder = builder.secret_key(secret_key);
         }
-        builder = builder.user_data_for_address_lookup(UserData::try_from(
-            SHADE_P2P_DISCOVERY_TAG.to_owned(),
-        )?);
+        builder = builder.user_data_for_address_lookup(UserData::try_from(device_name)?);
         let endpoint = builder.bind().await?;
         let mdns = MdnsAddressLookup::builder().build(endpoint.id())?;
         endpoint.address_lookup().add(mdns.clone());
@@ -386,6 +385,11 @@ async fn run_discovery_event_loop(
                 last_updated,
             } => {
                 let endpoint_id = endpoint_info.endpoint_id.to_string();
+                let name = endpoint_info
+                    .data
+                    .user_data()
+                    .expect("discovered peer missing device name")
+                    .to_string();
                 let direct_addresses = endpoint_info
                     .ip_addrs()
                     .map(|addr| addr.to_string())
@@ -394,6 +398,7 @@ async fn run_discovery_event_loop(
                     endpoint_id.clone(),
                     LocalPeer {
                         endpoint_id,
+                        name,
                         direct_addresses,
                         last_updated,
                     },
@@ -404,6 +409,38 @@ async fn run_discovery_event_loop(
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn local_device_name() -> Result<String> {
+    let mut buffer = [0u8; 256];
+    let result = unsafe {
+        libc::gethostname(
+            buffer.as_mut_ptr() as *mut libc::c_char,
+            buffer.len(),
+        )
+    };
+    if result != 0 {
+        return Err(anyhow::anyhow!(std::io::Error::last_os_error()));
+    }
+    let length = buffer
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(buffer.len());
+    let name = std::str::from_utf8(&buffer[..length])?.trim();
+    if name.is_empty() {
+        return Err(anyhow::anyhow!("device name is empty"));
+    }
+    Ok(name.to_owned())
+}
+
+#[cfg(windows)]
+fn local_device_name() -> Result<String> {
+    let name = std::env::var("COMPUTERNAME")?;
+    if name.is_empty() {
+        return Err(anyhow::anyhow!("device name is empty"));
+    }
+    Ok(name)
 }
 
 #[derive(Clone)]
@@ -585,6 +622,17 @@ mod tests {
 
         wait_for_peer(&a, &b_id).await?;
         wait_for_peer(&b, &a_id).await?;
+
+        let a_snapshot = a.snapshot().await;
+        let b_snapshot = b.snapshot().await;
+        assert!(
+            a_snapshot.peers.iter().all(|peer| !peer.name.is_empty()),
+            "peer names must be published"
+        );
+        assert!(
+            b_snapshot.peers.iter().all(|peer| !peer.name.is_empty()),
+            "peer names must be published"
+        );
 
         Ok(())
     }

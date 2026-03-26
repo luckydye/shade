@@ -7762,6 +7762,7 @@ dependencies = [
  "iroh",
  "iroh-blobs",
  "iroh-tickets",
+ "libc",
  "serde",
  "serde_json",
  "tokio",
