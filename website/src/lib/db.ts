@@ -12,7 +12,8 @@ export async function initSchema(): Promise<void> {
             tag_name TEXT NOT NULL,
             name TEXT NOT NULL,
             published_at TEXT NOT NULL,
-            html_url TEXT NOT NULL
+            html_url TEXT NOT NULL,
+            prerelease INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS assets (
             id INTEGER PRIMARY KEY,

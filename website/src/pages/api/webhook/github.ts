@@ -12,11 +12,12 @@ type GithubAsset = {
 };
 
 type GithubRelease = {
-    id: string;
+    id: number;
     tag_name: string;
     name: string;
     published_at: string;
     html_url: string;
+    prerelease: boolean;
     assets: GithubAsset[];
 };
 
@@ -39,8 +40,12 @@ async function verifySignature(secret: string, body: string, signature: string):
 }
 
 export const POST: APIRoute = async ({ request }) => {
-    const secret = import.meta.env.GITHUB_WEBHOOK_SECRET;
+    const secret: string = import.meta.env.GITHUB_WEBHOOK_SECRET;
     const signature = request.headers.get("x-hub-signature-256");
+
+    if (!secret) {
+        return new Response("Webhook secret not configured", { status: 500 });
+    }
 
     if (!signature) {
         return new Response("Missing signature", { status: 401 });
@@ -54,7 +59,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     const payload = JSON.parse(body) as GithubWebhookPayload;
 
-    if (payload.action !== "published") {
+    const UPSERT_ACTIONS = ["published", "edited", "released", "prereleased", "created"];
+    if (!UPSERT_ACTIONS.includes(payload.action)) {
         return new Response("OK", { status: 200 });
     }
 
@@ -63,26 +69,29 @@ export const POST: APIRoute = async ({ request }) => {
     await initSchema();
 
     await db.execute({
-        sql: `INSERT INTO releases (id, tag_name, name, published_at, html_url)
-              VALUES (?, ?, ?, ?, ?)
+        sql: `INSERT INTO releases (id, tag_name, name, published_at, html_url, prerelease)
+              VALUES (?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET
                 tag_name = excluded.tag_name,
                 name = excluded.name,
                 published_at = excluded.published_at,
-                html_url = excluded.html_url`,
-        args: [release.id, release.tag_name, release.name, release.published_at, release.html_url],
+                html_url = excluded.html_url,
+                prerelease = excluded.prerelease`,
+        args: [String(release.id), release.tag_name, release.name, release.published_at, release.html_url, release.prerelease ? 1 : 0],
     });
+
+    const releaseId = String(release.id);
 
     await db.execute({
         sql: "DELETE FROM assets WHERE release_id = ?",
-        args: [release.id],
+        args: [releaseId],
     });
 
     for (const asset of release.assets) {
         await db.execute({
             sql: `INSERT INTO assets (id, release_id, name, browser_download_url, content_type, size)
                   VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [asset.id, release.id, asset.name, asset.browser_download_url, asset.content_type, asset.size],
+            args: [asset.id, releaseId, asset.name, asset.browser_download_url, asset.content_type, asset.size],
         });
     }
 

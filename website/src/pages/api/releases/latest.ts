@@ -7,7 +7,7 @@ export const GET: APIRoute = async () => {
     await initSchema();
 
     const releaseResult = await db.execute(
-        "SELECT id, tag_name, name, published_at, html_url FROM releases ORDER BY published_at DESC LIMIT 1",
+        "SELECT id, tag_name, name, published_at, html_url FROM releases WHERE prerelease = 0 ORDER BY published_at DESC LIMIT 1",
     );
 
     if (releaseResult.rows.length === 0) {
