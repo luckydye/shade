@@ -31,8 +31,7 @@ type NavigatorWithUserAgentData = Navigator & {
     };
 };
 
-const RELEASE_URL =
-    "https://api.github.com/repos/luckydye/shade/releases/latest";
+const RELEASE_URL = "/api/releases/latest";
 
 const PLATFORM_LABELS: Record<Os, string> = {
     linux: "Linux",
@@ -198,11 +197,7 @@ function pickReleaseAsset(
 }
 
 async function fetchLatestRelease(): Promise<Release> {
-    const response = await fetch(RELEASE_URL, {
-        headers: {
-            Accept: "application/vnd.github+json",
-        },
-    });
+    const response = await fetch(RELEASE_URL);
 
     if (!response.ok) {
         throw new Error(`Release request failed with status ${response.status}.`);

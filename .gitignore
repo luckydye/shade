@@ -5,4 +5,8 @@ dist
 test/fixtures
 .claude
 .astro
+.vercel
 models
+
+.env
+.env.local
