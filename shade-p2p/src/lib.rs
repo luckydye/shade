@@ -385,10 +385,6 @@ async fn run_discovery_event_loop(
                 endpoint_info,
                 last_updated,
             } => {
-                match endpoint_info.data.user_data() {
-                    Some(user_data) if user_data.as_ref() == SHADE_P2P_DISCOVERY_TAG => {}
-                    _ => continue,
-                }
                 let endpoint_id = endpoint_info.endpoint_id.to_string();
                 let direct_addresses = endpoint_info
                     .ip_addrs()
