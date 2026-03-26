@@ -529,6 +529,7 @@ const MediaTile: Component<{
   compact?: boolean;
   active?: boolean;
   selected?: boolean;
+  showSelectionControls?: boolean;
   disableThumbnailLoad?: boolean;
   onActivate: (src: string | null) => void;
   onToggleSelection: () => void;
@@ -640,16 +641,16 @@ const MediaTile: Component<{
   const isHighlighted = () => props.active || props.selected;
   const buttonClass = () =>
     props.compact
-      ? `group flex w-full min-w-0 flex-col gap-1.5 rounded-md border p-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      ? `group flex w-full min-w-0 flex-col gap-1.5 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           isHighlighted()
-            ? "border-[var(--border-active)] bg-[var(--surface-active)]"
+            ? "border border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/40 bg-[var(--surface-subtle)]"
               : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`
-      : `group flex w-full min-w-0 flex-col gap-1.5 rounded-md border p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      : `group flex w-full min-w-0 flex-col gap-1.5 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           isHighlighted()
-            ? "border-[var(--border-active)] bg-[var(--surface-active)]"
+            ? "border border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/50 bg-[var(--surface-subtle)]"
               : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
@@ -705,23 +706,25 @@ const MediaTile: Component<{
           )}
         </div>
       </Button>
-      <button
-        type="button"
-        class={`absolute left-2.5 top-2.5 z-10 flex h-4 w-4 items-center justify-center rounded-sm border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
-          props.selected
-            ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
-            : "border-white/45 bg-black/35 text-transparent hover:border-white/70"
-        }`}
-        aria-label={props.selected ? `Deselect ${props.item.name}` : `Select ${props.item.name}`}
-        aria-pressed={props.selected ? "true" : "false"}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          props.onToggleSelection();
-        }}
-      >
-        <span class="text-[9px] font-semibold leading-none">✓</span>
-      </button>
+      <Show when={props.showSelectionControls}>
+        <button
+          type="button"
+          class={`absolute left-2.5 top-2.5 z-10 flex h-4 w-4 items-center justify-center rounded-sm border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+            props.selected
+              ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+              : "border-white/45 bg-black/35 text-transparent hover:border-white/70"
+          }`}
+          aria-label={props.selected ? `Deselect ${props.item.name}` : `Select ${props.item.name}`}
+          aria-pressed={props.selected ? "true" : "false"}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            props.onToggleSelection();
+          }}
+        >
+          <span class="text-[9px] font-semibold leading-none">✓</span>
+        </button>
+      </Show>
     </div>
   );
 };
@@ -842,6 +845,7 @@ export const MediaView: Component = () => {
     state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,
   );
   const selectedMediaItemIdSet = createMemo(() => new Set(selectedMediaItemIds()));
+  const showSelectionControls = createMemo(() => selectedMediaItemIds().length > 0);
   const availableItems = createMemo(() => {
     const current = items();
     if (current?.libraryId === selectedLibraryId()) {
@@ -2084,7 +2088,7 @@ export const MediaView: Component = () => {
             fallback={
               <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
                 <div
-                  class="grid gap-2"
+                  class="grid gap-x-0 gap-y-1"
                   style={{
                     "grid-template-columns": gridTemplateColumns(),
                     transform: `translateY(${offsetY()}px)`,
@@ -2104,14 +2108,15 @@ export const MediaView: Component = () => {
                               item && (
                                 <MediaTile
                                   item={item}
-                                  compact
-                                  disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
-                                  active={activeMediaItemId() === id}
-                                  selected={selectedMediaItemIdSet().has(id)}
-                                  onActivate={(src) =>
-                                    void handleOpenItem(item, selectedLibraryId()!, src)
-                                  }
-                                  onToggleSelection={() => toggleMediaSelection(id)}
+                                compact
+                                disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
+                                active={activeMediaItemId() === id}
+                                selected={selectedMediaItemIdSet().has(id)}
+                                showSelectionControls={showSelectionControls()}
+                                onActivate={(src) =>
+                                  void handleOpenItem(item, selectedLibraryId()!, src)
+                                }
+                                onToggleSelection={() => toggleMediaSelection(id)}
                                 />
                               )
                             );
@@ -2148,6 +2153,7 @@ export const MediaView: Component = () => {
                                 item={item}
                                 active={activeMediaItemId() === id}
                                 selected={selectedMediaItemIdSet().has(id)}
+                                showSelectionControls={showSelectionControls()}
                                 onActivate={(src) =>
                                   void handleOpenItem(item, selectedLibraryId()!, src)
                                 }
