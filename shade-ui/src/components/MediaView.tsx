@@ -878,7 +878,13 @@ export const MediaView: Component = () => {
   const selectedLibraryIsRefreshing = createMemo(() =>
     isLocalLibraryRefreshing(selectedLibrary()),
   );
+  const selectedLibraryIsOffline = createMemo(() =>
+    isLibraryOffline(selectedLibrary(), onlinePeerIds()),
+  );
   const displayedError = createMemo(() => {
+    if (selectedLibraryIsOffline()) {
+      return null;
+    }
     const current = items();
     if (current && current.libraryId === selectedLibraryId() && current.error) {
       return current.error;
@@ -886,9 +892,6 @@ export const MediaView: Component = () => {
     return error();
   });
   const hasLibraries = createMemo(() => libraryEntries().length > 0);
-  const selectedLibraryIsOffline = createMemo(() =>
-    isLibraryOffline(selectedLibrary(), onlinePeerIds()),
-  );
   const canRefreshSelectedLibrary = createMemo(() => {
     const library = selectedLibrary();
     return (
@@ -2002,17 +2005,77 @@ export const MediaView: Component = () => {
                 </Show>
               }
             >
-              <div
-                class={`${EMPTY_STATE_CLASS} ${
-                  isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                }`}
+              <Show
+                when={selectedLibraryIsOffline()}
+                fallback={
+                  <Show
+                    when={items.loading || !isLibraryScanComplete()}
+                    fallback={
+                      <div
+                        class={`${EMPTY_STATE_CLASS} ${
+                          isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                        }`}
+                      >
+                        {activeFilenameFilter().length > 0
+                          ? `No media match "${filenameFilter().trim()}".`
+                          : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+                      </div>
+                    }
+                  >
+                    <div
+                      class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
+                        isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                      }`}
+                    >
+                      <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
+                        <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]">
+                          <div class="absolute left-1/2 top-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--text-muted)]" />
+                        </div>
+                      </div>
+                      <div class="space-y-1">
+                        <h2 class="text-sm font-semibold text-[var(--text)]">
+                          Loading library
+                        </h2>
+                        <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                          Indexing images and restoring cached items.
+                        </p>
+                      </div>
+                    </div>
+                  </Show>
+                }
               >
-                {items.loading || !isLibraryScanComplete()
-                  ? "Loading…"
-                  : activeFilenameFilter().length > 0
-                    ? `No media match "${filenameFilter().trim()}".`
-                  : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
-              </div>
+                <div
+                  class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
+                    isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                  }`}
+                >
+                  <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
+                    <svg
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                      class="h-7 w-7"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
+                      <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />
+                      <path d="M8 9.5h.01" />
+                      <path d="M5 19 19 5" />
+                    </svg>
+                  </div>
+                  <div class="space-y-1">
+                    <h2 class="text-sm font-semibold text-[var(--text)]">
+                      This library is currently offline
+                    </h2>
+                    <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                      Reconnect it to browse the images that are already cached.
+                    </p>
+                  </div>
+                </div>
+              </Show>
             </Show>
           }
         >
