@@ -308,6 +308,14 @@ async fn sync_peer_snapshots_for_file_hash(
     let mut synced_ids = Vec::new();
     for snap in peer_snapshots {
         if local_ids.contains(&snap.id) {
+            if let Some(source_name) = source_name {
+                conn.execute(
+                    "UPDATE images SET source_name = ?1 WHERE file_hash = ?2",
+                    libsql::params![source_name, file_hash],
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            }
             continue;
         }
         let data_bytes = match p2p.get_peer_snapshot_data(peer_endpoint_id, &snap.id).await {
@@ -1180,6 +1188,61 @@ fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
     save_app_config(&config)
 }
 
+fn set_library_order(library_order: Vec<String>) -> Result<(), String> {
+    let mut config = load_app_config()?;
+    let mut seen = std::collections::HashSet::new();
+    let mut normalized_order = Vec::with_capacity(library_order.len() + 1);
+    normalized_order.push("pictures".to_string());
+    for library_id in &library_order {
+        if library_id == "pictures" {
+            continue;
+        }
+        if !seen.insert(library_id) {
+            return Err(format!("duplicate media library in order: {library_id}"));
+        }
+        normalized_order.push(library_id.clone());
+    }
+    config.library_order = normalized_order;
+    save_app_config(&config)
+}
+
+fn ordered_library_entries(
+    libraries: Vec<MediaLibrary>,
+    order: &[String],
+) -> Vec<MediaLibrary> {
+    let mut order = order.to_vec();
+    if let Some(index) = order.iter().position(|library_id| library_id == "pictures") {
+        if index != 0 {
+            let pictures = order.remove(index);
+            order.insert(0, pictures);
+        }
+    } else {
+        order.insert(0, "pictures".to_string());
+    }
+    for library in &libraries {
+        if !order.iter().any(|candidate| candidate == &library.id) {
+            order.push(library.id.clone());
+        }
+    }
+    let mut positions = std::collections::HashMap::new();
+    for (index, library_id) in order.iter().enumerate() {
+        positions.insert(library_id.clone(), index);
+    }
+    let mut libraries = libraries;
+    libraries.sort_by(|left, right| {
+        let left_index = positions
+            .get(&left.id)
+            .copied()
+            .unwrap_or_else(|| panic!("missing library order entry for {}", left.id));
+        let right_index = positions
+            .get(&right.id)
+            .copied()
+            .unwrap_or_else(|| panic!("missing library order entry for {}", right.id));
+        left_index.cmp(&right_index)
+    });
+    libraries
+}
+
 fn default_pictures_dir() -> Result<PathBuf, String> {
     Ok(home_dir()?.join("Pictures"))
 }
@@ -1439,7 +1502,12 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         }
         libraries.push(ccapi_library_for_host(&host, true, false));
     }
-    Ok(libraries)
+    Ok(ordered_library_entries(libraries, &config.library_order))
+}
+
+#[tauri::command]
+pub async fn set_media_library_order(library_order: Vec<String>) -> Result<(), String> {
+    set_library_order(library_order)
 }
 
 fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
@@ -2591,7 +2659,7 @@ pub async fn open_peer_image(
             info.bit_depth,
             info.color_space,
         );
-        restore_persisted_layers(&mut st, file_hash, file_name, persisted)?;
+        restore_persisted_layers(&mut st, file_hash, Some(picture_id), persisted)?;
         response
     };
     Ok(response)
@@ -4094,8 +4162,9 @@ pub async fn add_media_library<R: tauri::Runtime>(
             path: canonical_string,
         }),
     );
-    save_app_config(&config)?;
     let library = library_for_directory(canonical.clone(), true);
+    shade_io::append_library_order_id(&mut config.library_order, library.id.clone());
+    save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         let db_path = library_index_db_path()?;
@@ -4114,10 +4183,12 @@ pub async fn add_s3_media_library<R: tauri::Runtime>(
 ) -> Result<MediaLibrary, String> {
     let library = shade_io::normalize_s3_library_input(params)?;
     let mut config = load_app_config()?;
+    let persisted_library = library_for_s3(&library);
     shade_io::upsert_library_config(
         &mut config.libraries,
         shade_io::LibraryConfig::S3(library.clone()),
     );
+    shade_io::append_library_order_id(&mut config.library_order, persisted_library.id.clone());
     save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
@@ -4126,7 +4197,7 @@ pub async fn add_s3_media_library<R: tauri::Runtime>(
             .refresh_library(&library_index_db_path()?, &library)
             .await?;
     }
-    Ok(library_for_s3(&library))
+    Ok(persisted_library)
 }
 
 #[tauri::command]
@@ -4282,6 +4353,7 @@ pub async fn remove_media_library<R: tauri::Runtime>(
     config
         .libraries
         .retain(|library| shade_io::library_config_id(library) != id);
+    shade_io::remove_library_order_id(&mut config.library_order, &id);
     save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {

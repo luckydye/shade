@@ -1,11 +1,10 @@
+import type { Component, JSX } from "solid-js";
 import {
-  Component,
   createEffect,
   createMemo,
   createResource,
   createSignal,
   For,
-  JSX,
   on,
   onCleanup,
   onMount,
@@ -13,23 +12,22 @@ import {
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import { Button } from "./Button";
-import { MediaRating } from "./MediaRating";
 import {
-  addS3MediaLibrary,
   addMediaLibrary,
-  pairPeerDevice,
+  addS3MediaLibrary,
+  deleteMediaLibraryItem,
   isTauriRuntime,
-  listMediaRatings,
-  pickDirectory,
-  refreshLibraryIndex,
   type LibraryImage,
   listMediaLibraries,
-  removeMediaLibrary,
+  listMediaRatings,
   type MediaLibrary,
+  pairPeerDevice,
+  pickDirectory,
+  refreshLibraryIndex,
+  removeMediaLibrary,
   type S3MediaLibraryInput,
   type SharedPicture,
-  deleteMediaLibraryItem,
+  setMediaLibraryOrder,
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
 } from "../bridge/index";
@@ -40,21 +38,21 @@ import {
   resolveCameraThumbnailSrc,
 } from "../camera-library-cache";
 import {
-  addPeerLibrary,
-  getCachedPeerLibraryItems,
-  listPeerLibraries,
-  loadPeerLibraryItemsCachedOrRemote,
-  removePeerLibrary,
-  resolvePeerThumbnailSrc,
-  type PeerLibrary,
-  type PeerLibraryItem,
-} from "../peer-library-cache";
-import {
   getCachedLocalLibraryItems,
   loadLocalLibraryItemsCachedOrRemote,
   resetLocalThumbnailFailure,
   resolveLocalThumbnailSrc,
 } from "../local-library-cache";
+import {
+  addPeerLibrary,
+  getCachedPeerLibraryItems,
+  listPeerLibraries,
+  loadPeerLibraryItemsCachedOrRemote,
+  type PeerLibrary,
+  type PeerLibraryItem,
+  removePeerLibrary,
+  resolvePeerThumbnailSrc,
+} from "../peer-library-cache";
 import {
   openImage,
   openPeerImage,
@@ -63,6 +61,8 @@ import {
   transitionMediaSrc,
 } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
+import { Button } from "./Button";
+import { MediaRating } from "./MediaRating";
 
 type LibraryEntry = MediaLibrary | PeerLibrary;
 
@@ -153,10 +153,7 @@ function isLocalLibraryRefreshing(library: LibraryEntry | null) {
   );
 }
 
-function isLibraryOffline(
-  library: LibraryEntry | null,
-  onlinePeerIds: Set<string>,
-) {
+function isLibraryOffline(library: LibraryEntry | null, onlinePeerIds: Set<string>) {
   if (!library) {
     return false;
   }
@@ -178,6 +175,10 @@ function isS3Library(
   return library?.kind === "s3";
 }
 
+function isPinnedLibrary(library: LibraryEntry) {
+  return library.id === "pictures";
+}
+
 function libraryIsWritable(library: LibraryEntry | null) {
   return (
     !!library &&
@@ -185,6 +186,33 @@ function libraryIsWritable(library: LibraryEntry | null) {
     !library.readonly &&
     library.is_online !== false
   );
+}
+
+function mergeLibraryOrder(order: string[], libraryIds: string[]) {
+  const next = order.filter((id) => libraryIds.includes(id));
+  for (const id of libraryIds) {
+    if (!next.includes(id)) {
+      next.push(id);
+    }
+  }
+  return next;
+}
+
+function moveIdInOrder(order: string[], fromIdx: number, toIdx: number) {
+  if (fromIdx === toIdx || fromIdx + 1 === toIdx) {
+    return order;
+  }
+  if (fromIdx < 0 || fromIdx >= order.length) {
+    throw new Error("source library index is out of bounds");
+  }
+  if (toIdx < 0 || toIdx > order.length) {
+    throw new Error("target library index is out of bounds");
+  }
+  const next = [...order];
+  const [moved] = next.splice(fromIdx, 1);
+  const insertIdx = toIdx > fromIdx ? toIdx - 1 : toIdx;
+  next.splice(insertIdx, 0, moved);
+  return next;
 }
 
 function droppedFiles(dataTransfer: DataTransfer | null | undefined) {
@@ -489,17 +517,9 @@ async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string
     return resolvePeerThumbnailSrc(item.peerId, item.id, signal);
   }
   if (item.path.startsWith("ccapi://")) {
-    return resolveCameraThumbnailSrc(
-      item.path,
-      item.metadata.latestSnapshotId,
-      signal,
-    );
+    return resolveCameraThumbnailSrc(item.path, item.metadata.latestSnapshotId, signal);
   }
-  return resolveLocalThumbnailSrc(
-    item.path,
-    item.metadata.latestSnapshotId,
-    signal,
-  );
+  return resolveLocalThumbnailSrc(item.path, item.metadata.latestSnapshotId, signal);
 }
 
 async function openMediaItem(
@@ -588,7 +608,11 @@ const MediaTile: Component<{
 
   onCleanup(() => {
     const url = src();
-    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc && url !== transitionMediaSrc()) {
+    if (
+      url?.startsWith("blob:") &&
+      url !== state.loadingMediaSrc &&
+      url !== transitionMediaSrc()
+    ) {
       URL.revokeObjectURL(url);
     }
   });
@@ -740,7 +764,9 @@ const MediaTile: Component<{
               ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
               : "border-white/45 bg-black/35 text-transparent hover:border-white/70"
           }`}
-          aria-label={props.selected ? `Deselect ${props.item.name}` : `Select ${props.item.name}`}
+          aria-label={
+            props.selected ? `Deselect ${props.item.name}` : `Select ${props.item.name}`
+          }
           aria-pressed={props.selected ? "true" : "false"}
           onClick={(event) => {
             event.preventDefault();
@@ -764,8 +790,7 @@ export const MediaView: Component = () => {
     selectedLibraryId,
     loadLibraryData,
   );
-  const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] =
-    createResource(
+  const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] = createResource(
     selectedLibraryId,
     async (libraryId) => {
       if (!libraryId) {
@@ -797,6 +822,7 @@ export const MediaView: Component = () => {
   const [showAddDropdown, setShowAddDropdown] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
   const [filenameFilter, setFilenameFilter] = createSignal("");
+  const [libraryOrder, setLibraryOrder] = createSignal<string[]>([]);
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
     name: "",
     endpoint: "",
@@ -810,19 +836,32 @@ export const MediaView: Component = () => {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
+  const [libraryDropTarget, setLibraryDropTarget] = createSignal<{
+    libraryIdx: number;
+    position: "before" | "after";
+  } | null>(null);
   // Scroll anchor: track the first visible item so scroll position can be
   // restored after column count changes (e.g. window resize or view switch).
   const [anchorItemId, setAnchorItemId] = createSignal<string | null>(null);
   const [anchorRowOffset, setAnchorRowOffset] = createSignal(0);
   const [isScrolling, setIsScrolling] = createSignal(false);
   let scrollLabelTimeout: ReturnType<typeof setTimeout> | undefined;
+  let libraryDragState: {
+    pointerId: number;
+    libraryIdx: number;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+  } | null = null;
+  let suppressLibraryClickUntil = 0;
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
-  let scrollRef!: HTMLDivElement;
+  let scrollRef: HTMLDivElement | undefined;
+  let libraryTabsRef: HTMLDivElement | undefined;
   let libraryActionsRef: HTMLDivElement | undefined;
   let addDropdownRef: HTMLDivElement | undefined;
   let addDropdownMenuRef: HTMLDivElement | undefined;
@@ -830,6 +869,154 @@ export const MediaView: Component = () => {
     left: number;
     top: number;
   } | null>(null);
+
+  const clearLibraryDragState = () => {
+    libraryDragState = null;
+    setLibraryDropTarget(null);
+  };
+
+  const resolveLibraryDropIndex = (target: {
+    libraryIdx: number;
+    position: "before" | "after";
+  }) => (target.position === "before" ? target.libraryIdx : target.libraryIdx + 1);
+
+  const updateLibraryDropTargetFromPoint = (clientX: number, clientY: number) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    const target = element?.closest("[data-library-tab='true']");
+    if (!(target instanceof HTMLButtonElement)) {
+      setLibraryDropTarget(null);
+      return;
+    }
+    const libraryIdxAttr = target.dataset.libraryIdx;
+    if (!libraryIdxAttr) {
+      throw new Error("library tab is missing an index");
+    }
+    const libraryIdx = Number(libraryIdxAttr);
+    if (!Number.isInteger(libraryIdx)) {
+      throw new Error("library tab index must be an integer");
+    }
+    const bounds = target.getBoundingClientRect();
+    const isPinned = target.dataset.pinned === "true";
+    const position =
+      isPinned && clientX < bounds.left + bounds.width * 0.5
+        ? "after"
+        : clientX < bounds.left + bounds.width * 0.5
+          ? "before"
+          : "after";
+    setLibraryDropTarget({ libraryIdx, position });
+  };
+
+  const getLibraryDropCursorStyle = () => {
+    const container = libraryTabsRef;
+    const target = libraryDropTarget();
+    if (!container || !target) {
+      return { opacity: 0 };
+    }
+    const tab = container.querySelector<HTMLButtonElement>(
+      `[data-library-idx="${target.libraryIdx}"]`,
+    );
+    if (!(tab instanceof HTMLButtonElement)) {
+      throw new Error("library drop target tab is missing");
+    }
+    const containerBounds = container.getBoundingClientRect();
+    const tabBounds = tab.getBoundingClientRect();
+    const left =
+      (target.position === "before" ? tabBounds.left : tabBounds.right) -
+      containerBounds.left -
+      1.5;
+    return {
+      opacity: 1,
+      left: `${left}px`,
+      top: `${tabBounds.top - containerBounds.top}px`,
+      height: `${tabBounds.height}px`,
+    };
+  };
+
+  const startLibraryDrag = (event: PointerEvent, libraryIdx: number) => {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+    const currentTarget = event.currentTarget;
+    if (!(currentTarget instanceof HTMLButtonElement)) {
+      throw new Error("library tab must be a button");
+    }
+    if (currentTarget.dataset.pinned === "true") {
+      return;
+    }
+    currentTarget.setPointerCapture(event.pointerId);
+    libraryDragState = {
+      pointerId: event.pointerId,
+      libraryIdx,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+    };
+  };
+
+  const commitLibraryDrop = async () => {
+    const fromIdx = libraryDragState?.libraryIdx ?? null;
+    const target = libraryDropTarget();
+    clearLibraryDragState();
+    if (fromIdx === null || target === null) {
+      return;
+    }
+    const nextOrder = moveIdInOrder(
+      libraryOrder(),
+      fromIdx,
+      resolveLibraryDropIndex(target),
+    );
+    await setMediaLibraryOrder(nextOrder);
+    setLibraryOrder(nextOrder);
+  };
+
+  const handleLibraryPointerMove = (event: PointerEvent) => {
+    const drag = libraryDragState;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const deltaX = Math.abs(event.clientX - drag.startX);
+    const deltaY = Math.abs(event.clientY - drag.startY);
+    if (!drag.dragging) {
+      if (Math.hypot(deltaX, deltaY) < 8) {
+        return;
+      }
+      libraryDragState = { ...drag, dragging: true };
+    }
+    event.preventDefault();
+    updateLibraryDropTargetFromPoint(event.clientX, event.clientY);
+  };
+
+  const handleLibraryPointerUp = (event: PointerEvent) => {
+    const drag = libraryDragState;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const currentTarget = event.currentTarget;
+    if (
+      currentTarget instanceof HTMLButtonElement &&
+      currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (drag.dragging) {
+      event.preventDefault();
+      suppressLibraryClickUntil = performance.now() + 750;
+      void commitLibraryDrop();
+      return;
+    }
+    clearLibraryDragState();
+  };
+
+  const handleLibraryPointerCancel = (event: PointerEvent) => {
+    const currentTarget = event.currentTarget;
+    if (
+      currentTarget instanceof HTMLButtonElement &&
+      currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      currentTarget.releasePointerCapture(event.pointerId);
+    }
+    clearLibraryDragState();
+  };
 
   const discoveredPeerIds = createMemo(() =>
     p2pState.peers.map((peer) => peer.endpoint_id),
@@ -839,6 +1026,22 @@ export const MediaView: Component = () => {
     ...(libraries() ?? []),
     ...(peerLibraries() ?? []),
   ]);
+  const orderedLibraryEntries = createMemo(() => {
+    const entries = libraryEntries();
+    const order = mergeLibraryOrder(
+      libraryOrder(),
+      entries.map((library) => library.id),
+    );
+    const positions = new Map(order.map((id, index) => [id, index]));
+    return [...entries].sort((left, right) => {
+      const leftIndex = positions.get(left.id);
+      const rightIndex = positions.get(right.id);
+      if (leftIndex === undefined || rightIndex === undefined) {
+        throw new Error("library order is missing a visible library id");
+      }
+      return leftIndex - rightIndex;
+    });
+  });
   const suggestedPeers = createMemo(() => {
     const addedPeerIds = new Set(
       (peerLibraries() ?? []).map((library) => library.peerId),
@@ -847,7 +1050,7 @@ export const MediaView: Component = () => {
   });
 
   createEffect(() => {
-    const availableLibraries = libraryEntries();
+    const availableLibraries = orderedLibraryEntries();
     if (!availableLibraries.length) {
       setSelectedLibraryId(null);
       return;
@@ -869,8 +1072,25 @@ export const MediaView: Component = () => {
     setUploadDragFeedback(null);
   });
 
+  createEffect(() => {
+    const entries = libraryEntries();
+    const nextOrder = mergeLibraryOrder(
+      libraryOrder(),
+      entries.map((library) => library.id),
+    );
+    if (
+      nextOrder.length === libraryOrder().length &&
+      nextOrder.every((id, index) => id === libraryOrder()[index])
+    ) {
+      return;
+    }
+    setLibraryOrder(nextOrder);
+  });
+
   const selectedLibrary = createMemo(
-    () => libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null,
+    () =>
+      orderedLibraryEntries().find((library) => library.id === selectedLibraryId()) ??
+      null,
   );
   const activeMediaItemId = createMemo(() =>
     state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,
@@ -926,7 +1146,7 @@ export const MediaView: Component = () => {
     }
     return error();
   });
-  const hasLibraries = createMemo(() => libraryEntries().length > 0);
+  const hasLibraries = createMemo(() => orderedLibraryEntries().length > 0);
   const canRefreshSelectedLibrary = createMemo(() => {
     const library = selectedLibrary();
     return (
@@ -1446,7 +1666,12 @@ export const MediaView: Component = () => {
 
   async function handleRefreshLibrary() {
     const library = selectedLibrary();
-    if (!library || isPeerLibrary(library) || isCameraLibrary(library) || isS3Library(library)) {
+    if (
+      !library ||
+      isPeerLibrary(library) ||
+      isCameraLibrary(library) ||
+      isS3Library(library)
+    ) {
       return;
     }
     setIsSubmitting(true);
@@ -1486,11 +1711,7 @@ export const MediaView: Component = () => {
           completedFiles: index,
           currentFileName: file.name,
         });
-        await uploadMediaLibraryFile(
-          library.id,
-          file,
-          appendTimestampOnConflict,
-        );
+        await uploadMediaLibraryFile(library.id, file, appendTimestampOnConflict);
       }
       setUploadProgress({
         phase: "refreshing",
@@ -1699,9 +1920,10 @@ export const MediaView: Component = () => {
       : "media-scroll h-full overflow-y-auto p-4 md:p-6";
 
   return (
-    <div
+    <section
       ref={mediaShellRef}
       tabIndex={-1}
+      aria-label="Media view"
       class={`${shellClass()} relative`}
       onDragEnter={handleUploadDragEnter}
       onDragOver={handleUploadDragOver}
@@ -1728,50 +1950,75 @@ export const MediaView: Component = () => {
         </div>
       </Show>
       <Show when={!isEditorStrip()}>
-        <div class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}>
+        <div
+          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}
+        >
           <div class="flex w-full flex-wrap items-center gap-3">
-            <div class="grid min-w-0 flex-1 grid-cols-3 gap-2 md:flex md:overflow-x-auto">
-              <For each={libraryEntries()}>
-                {(library) =>
-                  (() => {
-                    const offline = isLibraryOffline(library, onlinePeerIds());
-                    const refreshing = isLocalLibraryRefreshing(library);
-                    return (
-                      <Button
-                        type="button"
-                        onClick={() => setSelectedLibraryId(library.id)}
-                        class={`${LIBRARY_TAB_BASE_CLASS} w-full md:w-auto ${
-                          selectedLibraryId() === library.id
-                            ? offline
-                              ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
-                              : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
-                            : offline
-                              ? "border-dashed border-amber-500/25 bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
-                              : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
-                        }`}
-                      >
-                        <span class="flex items-center gap-2">
-                          {(isPeerLibrary(library) ||
-                            isCameraLibrary(library) ||
-                            isS3Library(library) ||
-                            refreshing ||
-                            offline) && (
-                            <span
-                              class={`h-1.5 w-1.5 rounded-full ${
-                                refreshing
-                                  ? "animate-pulse bg-sky-400"
-                                  : offline
-                                    ? "bg-amber-400"
-                                    : "bg-emerald-400"
-                              }`}
-                            />
-                          )}
-                          <span>{library.name}</span>
-                        </span>
-                      </Button>
-                    );
-                  })()
-                }
+            <div
+              ref={libraryTabsRef}
+              class="relative grid min-w-0 flex-1 grid-cols-3 gap-2 md:flex md:overflow-x-auto"
+            >
+              <div
+                aria-hidden="true"
+                class="pointer-events-none absolute z-10 w-[3px] rounded-full bg-blue-400 shadow-[0_0_0_3px_rgba(96,165,250,0.18)]"
+                style={getLibraryDropCursorStyle()}
+              />
+              <For each={orderedLibraryEntries()}>
+                {(library, libraryIdx) => {
+                  const offline = isLibraryOffline(library, onlinePeerIds());
+                  const refreshing = isLocalLibraryRefreshing(library);
+                  const pinned = isPinnedLibrary(library);
+                  return (
+                    <Button
+                      type="button"
+                      data-library-tab="true"
+                      data-library-idx={String(libraryIdx())}
+                      data-pinned={pinned ? "true" : "false"}
+                      onClick={(event) => {
+                        if (performance.now() < suppressLibraryClickUntil) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          return;
+                        }
+                        setSelectedLibraryId(library.id);
+                      }}
+                      onPointerDown={(event) => startLibraryDrag(event, libraryIdx())}
+                      onPointerMove={pinned ? undefined : handleLibraryPointerMove}
+                      onPointerUp={pinned ? undefined : handleLibraryPointerUp}
+                      onPointerCancel={pinned ? undefined : handleLibraryPointerCancel}
+                      class={`${LIBRARY_TAB_BASE_CLASS} w-full ${
+                        pinned ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+                      } md:w-auto ${
+                        selectedLibraryId() === library.id
+                          ? offline
+                            ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
+                            : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+                          : offline
+                            ? "border-dashed border-amber-500/25 bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
+                            : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
+                      }`}
+                    >
+                      <span class="flex items-center gap-2">
+                        {(isPeerLibrary(library) ||
+                          isCameraLibrary(library) ||
+                          isS3Library(library) ||
+                          refreshing ||
+                          offline) && (
+                          <span
+                            class={`h-1.5 w-1.5 rounded-full ${
+                              refreshing
+                                ? "animate-pulse bg-sky-400"
+                                : offline
+                                  ? "bg-amber-400"
+                                  : "bg-emerald-400"
+                            }`}
+                          />
+                        )}
+                        <span>{library.name}</span>
+                      </span>
+                    </Button>
+                  );
+                }}
               </For>
               <For each={suggestedPeers()}>
                 {(peer) => (
@@ -1815,8 +2062,8 @@ export const MediaView: Component = () => {
                   role="menu"
                   class="fixed z-50 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
                   style={{
-                    left: `${addDropdownPosition()!.left}px`,
-                    top: `${addDropdownPosition()!.top + 8}px`,
+                    left: `${addDropdownPosition()?.left}px`,
+                    top: `${addDropdownPosition()?.top + 8}px`,
                   }}
                 >
                   <Button
@@ -1923,7 +2170,9 @@ export const MediaView: Component = () => {
                   <input
                     type="text"
                     value={s3Draft().endpoint}
-                    onInput={(event) => updateS3Draft("endpoint", event.currentTarget.value)}
+                    onInput={(event) =>
+                      updateS3Draft("endpoint", event.currentTarget.value)
+                    }
                     class={INPUT_CLASS}
                     placeholder="https://s3.example.com"
                   />
@@ -1933,7 +2182,9 @@ export const MediaView: Component = () => {
                   <input
                     type="text"
                     value={s3Draft().bucket}
-                    onInput={(event) => updateS3Draft("bucket", event.currentTarget.value)}
+                    onInput={(event) =>
+                      updateS3Draft("bucket", event.currentTarget.value)
+                    }
                     class={INPUT_CLASS}
                   />
                 </label>
@@ -1942,7 +2193,9 @@ export const MediaView: Component = () => {
                   <input
                     type="text"
                     value={s3Draft().region}
-                    onInput={(event) => updateS3Draft("region", event.currentTarget.value)}
+                    onInput={(event) =>
+                      updateS3Draft("region", event.currentTarget.value)
+                    }
                     class={INPUT_CLASS}
                   />
                 </label>
@@ -1951,7 +2204,9 @@ export const MediaView: Component = () => {
                   <input
                     type="text"
                     value={(s3Draft().prefix as string | undefined) ?? ""}
-                    onInput={(event) => updateS3Draft("prefix", event.currentTarget.value)}
+                    onInput={(event) =>
+                      updateS3Draft("prefix", event.currentTarget.value)
+                    }
                     class={INPUT_CLASS}
                     placeholder="optional/path"
                   />
@@ -2006,7 +2261,7 @@ export const MediaView: Component = () => {
       </Show>
       <div class="relative flex-1 min-h-0">
         <div
-          ref={scrollRef!}
+          ref={scrollRef}
           class={scrollClass()}
           onScroll={(event) => {
             const top = event.currentTarget.scrollTop;
@@ -2017,126 +2272,174 @@ export const MediaView: Component = () => {
             scrollLabelTimeout = setTimeout(() => setIsScrolling(false), 1000);
           }}
         >
-        <Show
-          when={displayedItems().length > 0}
-          fallback={
-            <Show
-              when={hasLibraries()}
-              fallback={
-                <Show
-                  when={!isEditorStrip()}
-                  fallback={
-                    <div class={`${EMPTY_STATE_CLASS} mx-1 text-xs`}>
-                      Open the media view to add your first library.
-                    </div>
-                  }
-                >
-                  <div class={EMPTY_STATE_PANEL_CLASS}>
-                    <div class="space-y-1">
-                      <p class={PANEL_SECTION_TITLE_CLASS}>Media Library</p>
-                      <h2 class="text-lg font-semibold text-[var(--text)]">
-                        Add your first library
-                      </h2>
-                    </div>
-                    <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                      Pick a folder with your images. Shade will index it and show it
-                      here in the media view.
-                    </p>
-                    <Button
-                      type="button"
-                      class={SURFACE_BUTTON_CLASS}
-                      disabled={isSubmitting()}
-                      onClick={() => void handleAddLibrary()}
-                    >
-                      Add Library
-                    </Button>
-                    <p class="text-xs text-[var(--text-faint)]">
-                      You can also use the + button in the library bar.
-                    </p>
-                  </div>
-                </Show>
-              }
-            >
+          <Show
+            when={displayedItems().length > 0}
+            fallback={
               <Show
-                when={selectedLibraryIsOffline()}
+                when={hasLibraries()}
                 fallback={
                   <Show
-                    when={items.loading || !isLibraryScanComplete()}
+                    when={!isEditorStrip()}
                     fallback={
-                      <div
-                        class={`${EMPTY_STATE_CLASS} ${
-                          isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                        }`}
-                      >
-                        {activeFilenameFilter().length > 0
-                          ? `No media match "${filenameFilter().trim()}".`
-                          : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+                      <div class={`${EMPTY_STATE_CLASS} mx-1 text-xs`}>
+                        Open the media view to add your first library.
                       </div>
                     }
                   >
-                    <div
-                      class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                        isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                      }`}
-                    >
-                      <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
-                        <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]">
-                          <div class="absolute left-1/2 top-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--text-muted)]" />
-                        </div>
-                      </div>
+                    <div class={EMPTY_STATE_PANEL_CLASS}>
                       <div class="space-y-1">
-                        <h2 class="text-sm font-semibold text-[var(--text)]">
-                          Loading library
+                        <p class={PANEL_SECTION_TITLE_CLASS}>Media Library</p>
+                        <h2 class="text-lg font-semibold text-[var(--text)]">
+                          Add your first library
                         </h2>
-                        <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                          Indexing images and restoring cached items.
-                        </p>
                       </div>
+                      <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                        Pick a folder with your images. Shade will index it and show it
+                        here in the media view.
+                      </p>
+                      <Button
+                        type="button"
+                        class={SURFACE_BUTTON_CLASS}
+                        disabled={isSubmitting()}
+                        onClick={() => void handleAddLibrary()}
+                      >
+                        Add Library
+                      </Button>
+                      <p class="text-xs text-[var(--text-faint)]">
+                        You can also use the + button in the library bar.
+                      </p>
                     </div>
                   </Show>
                 }
               >
-                <div
-                  class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                    isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                  }`}
-                >
-                  <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
-                    <svg
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                      class="h-7 w-7"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                <Show
+                  when={selectedLibraryIsOffline()}
+                  fallback={
+                    <Show
+                      when={items.loading || !isLibraryScanComplete()}
+                      fallback={
+                        <div
+                          class={`${EMPTY_STATE_CLASS} ${
+                            isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                          }`}
+                        >
+                          {activeFilenameFilter().length > 0
+                            ? `No media match "${filenameFilter().trim()}".`
+                            : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+                        </div>
+                      }
                     >
-                      <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
-                      <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />
-                      <path d="M8 9.5h.01" />
-                      <path d="M5 19 19 5" />
-                    </svg>
+                      <div
+                        class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
+                          isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                        }`}
+                      >
+                        <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
+                          <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]">
+                            <div class="absolute left-1/2 top-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--text-muted)]" />
+                          </div>
+                        </div>
+                        <div class="space-y-1">
+                          <h2 class="text-sm font-semibold text-[var(--text)]">
+                            Loading library
+                          </h2>
+                          <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                            Indexing images and restoring cached items.
+                          </p>
+                        </div>
+                      </div>
+                    </Show>
+                  }
+                >
+                  <div
+                    class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
+                      isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                    }`}
+                  >
+                    <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                        class="h-7 w-7"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
+                        <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />
+                        <path d="M8 9.5h.01" />
+                        <path d="M5 19 19 5" />
+                      </svg>
+                    </div>
+                    <div class="space-y-1">
+                      <h2 class="text-sm font-semibold text-[var(--text)]">
+                        This library is currently offline
+                      </h2>
+                      <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                        Reconnect it to browse the images that are already cached.
+                      </p>
+                    </div>
                   </div>
-                  <div class="space-y-1">
-                    <h2 class="text-sm font-semibold text-[var(--text)]">
-                      This library is currently offline
-                    </h2>
-                    <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                      Reconnect it to browse the images that are already cached.
-                    </p>
+                </Show>
+              </Show>
+            }
+          >
+            <Show
+              when={!isEditorStrip()}
+              fallback={
+                <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
+                  <div
+                    class="grid gap-x-0 gap-y-1"
+                    style={{
+                      "grid-template-columns": gridTemplateColumns(),
+                      transform: `translateY(${offsetY()}px)`,
+                    }}
+                  >
+                    <For each={visibleRows()}>
+                      {(row) =>
+                        row.kind === "date" ? (
+                          <h2 class="col-span-full px-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
+                            {formatModificationMonth(row.modifiedAt)}
+                          </h2>
+                        ) : (
+                          <For each={row.ids}>
+                            {(id) => {
+                              const item = itemsById().get(id);
+                              return (
+                                item && (
+                                  <MediaTile
+                                    item={item}
+                                    compact
+                                    offline={selectedLibraryIsOffline()}
+                                    disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
+                                    active={activeMediaItemId() === id}
+                                    selected={selectedMediaItemIdSet().has(id)}
+                                    showSelectionControls={showSelectionControls()}
+                                    onActivate={(src) => {
+                                      const libraryId = selectedLibraryId();
+                                      if (!libraryId) {
+                                        throw new Error("selected library is required");
+                                      }
+                                      void handleOpenItem(item, libraryId, src);
+                                    }}
+                                    onToggleSelection={() => toggleMediaSelection(id)}
+                                  />
+                                )
+                              );
+                            }}
+                          </For>
+                        )
+                      }
+                    </For>
                   </div>
                 </div>
-              </Show>
-            </Show>
-          }
-        >
-          <Show
-            when={!isEditorStrip()}
-            fallback={
+              }
+            >
               <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
                 <div
-                  class="grid gap-x-0 gap-y-1"
+                  class="grid gap-1"
                   style={{
                     "grid-template-columns": gridTemplateColumns(),
                     transform: `translateY(${offsetY()}px)`,
@@ -2145,7 +2448,7 @@ export const MediaView: Component = () => {
                   <For each={visibleRows()}>
                     {(row) =>
                       row.kind === "date" ? (
-                        <h2 class="col-span-full px-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
+                        <h2 class="col-span-full pt-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
                           {formatModificationMonth(row.modifiedAt)}
                         </h2>
                       ) : (
@@ -2156,15 +2459,17 @@ export const MediaView: Component = () => {
                               item && (
                                 <MediaTile
                                   item={item}
-                                  compact
                                   offline={selectedLibraryIsOffline()}
-                                  disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
                                   active={activeMediaItemId() === id}
                                   selected={selectedMediaItemIdSet().has(id)}
                                   showSelectionControls={showSelectionControls()}
-                                  onActivate={(src) =>
-                                    void handleOpenItem(item, selectedLibraryId()!, src)
-                                  }
+                                  onActivate={(src) => {
+                                    const libraryId = selectedLibraryId();
+                                    if (!libraryId) {
+                                      throw new Error("selected library is required");
+                                    }
+                                    void handleOpenItem(item, libraryId, src);
+                                  }}
                                   onToggleSelection={() => toggleMediaSelection(id)}
                                 />
                               )
@@ -2176,50 +2481,8 @@ export const MediaView: Component = () => {
                   </For>
                 </div>
               </div>
-            }
-          >
-            <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
-              <div
-                class="grid gap-1"
-                style={{
-                  "grid-template-columns": gridTemplateColumns(),
-                  transform: `translateY(${offsetY()}px)`,
-                }}
-              >
-                <For each={visibleRows()}>
-                  {(row) =>
-                    row.kind === "date" ? (
-                      <h2 class="col-span-full pt-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
-                        {formatModificationMonth(row.modifiedAt)}
-                      </h2>
-                    ) : (
-                      <For each={row.ids}>
-                        {(id) => {
-                          const item = itemsById().get(id);
-                          return (
-                            item && (
-                              <MediaTile
-                                item={item}
-                                offline={selectedLibraryIsOffline()}
-                                active={activeMediaItemId() === id}
-                                selected={selectedMediaItemIdSet().has(id)}
-                                showSelectionControls={showSelectionControls()}
-                                onActivate={(src) =>
-                                  void handleOpenItem(item, selectedLibraryId()!, src)
-                                }
-                                onToggleSelection={() => toggleMediaSelection(id)}
-                              />
-                            )
-                          );
-                        }}
-                      </For>
-                    )
-                  }
-                </For>
-              </div>
-            </div>
+            </Show>
           </Show>
-        </Show>
         </div>
         <Show when={isScrolling() && scrollLabel()}>
           <div
@@ -2293,9 +2556,7 @@ export const MediaView: Component = () => {
           <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
             <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
               <span>
-                {progress().phase === "uploading"
-                  ? "Uploading"
-                  : "Refreshing Library"}
+                {progress().phase === "uploading" ? "Uploading" : "Refreshing Library"}
               </span>
               <span class="text-[var(--text-dim)]">
                 {progress().completedFiles}/{progress().totalFiles}
@@ -2315,6 +2576,6 @@ export const MediaView: Component = () => {
           </div>
         )}
       </Show>
-    </div>
+    </section>
   );
 };

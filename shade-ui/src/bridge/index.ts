@@ -3,6 +3,7 @@
  * falls back to WASM worker when running in the browser.
  */
 
+import type { BrowserDirectoryHandle } from "../browser-media-library";
 import {
   addBrowserMediaLibrary,
   isBrowserMountedLibrary,
@@ -11,10 +12,9 @@ import {
   listBrowserMediaLibraries,
   openBrowserMountedImage,
   pickBrowserDirectory,
-  requestBrowserMountedImageReadPermission,
   removeBrowserMediaLibrary,
+  requestBrowserMountedImageReadPermission,
 } from "../browser-media-library";
-import type { BrowserDirectoryHandle } from "../browser-media-library";
 
 // ── Tauri path ──────────────────────────────────────────────────────────────
 type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -40,7 +40,7 @@ async function getTauriInvoke() {
 // ── WASM worker path ─────────────────────────────────────────────────────────
 let worker: Worker | null = null;
 let nextWorkerRequestId = 1;
-let pendingRequests = new Map<
+const pendingRequests = new Map<
   number,
   {
     responseType: string;
@@ -726,20 +726,14 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
   );
 }
 
-export async function renameLayer(
-  idx: number,
-  name: string | null,
-): Promise<void> {
+export async function renameLayer(idx: number, name: string | null): Promise<void> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("rename_layer", { params: { layer_idx: idx, name } });
     return;
   }
   await ensureWorkerReady();
-  await workerCall(
-    { type: "rename_layer", layerIdx: idx, name },
-    "layer_renamed",
-  );
+  await workerCall({ type: "rename_layer", layerIdx: idx, name }, "layer_renamed");
 }
 
 export async function deleteLayer(idx: number): Promise<void> {
@@ -928,6 +922,17 @@ export async function removeMediaLibrary(id: string): Promise<void> {
   await removeBrowserMediaLibrary(id);
 }
 
+export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("set_media_library_order", {
+      libraryOrder,
+    });
+    return;
+  }
+  throw new Error("setMediaLibraryOrder is only implemented for Tauri");
+}
+
 export async function refreshLibraryIndex(libraryId: string): Promise<void> {
   if (!(await isTauriRuntime())) {
     throw new Error("refreshLibraryIndex is only implemented for Tauri");
@@ -1094,9 +1099,7 @@ export async function setLocalAwareness(
   throw new Error("setLocalAwareness is only implemented for Tauri");
 }
 
-export async function getPeerAwareness(
-  peerEndpointId: string,
-): Promise<AwarenessState> {
+export async function getPeerAwareness(peerEndpointId: string): Promise<AwarenessState> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("get_peer_awareness", { peerEndpointId }) as Promise<AwarenessState>;
