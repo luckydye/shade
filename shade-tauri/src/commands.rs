@@ -280,6 +280,7 @@ async fn sync_peer_snapshots_for_file_hash(
     peer_endpoint_id: &str,
     file_hash: &str,
     p2p: &std::sync::Arc<shade_p2p::LocalPeerDiscovery>,
+    source_name: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let peer_snapshots = p2p
         .list_peer_snapshots(peer_endpoint_id, file_hash)
@@ -332,7 +333,7 @@ async fn sync_peer_snapshots_for_file_hash(
         };
         if let Err(e) = persist_snapshot(
             file_hash,
-            None,
+            source_name,
             Some(&snap.id),
             Some(peer_endpoint_id),
             &data,
@@ -356,7 +357,7 @@ async fn sync_snapshots_from_all_peers_for_file_hash(
     let mut synced_ids = Vec::new();
     for peer in snapshot.peers {
         synced_ids.extend(
-            sync_peer_snapshots_for_file_hash(&peer.endpoint_id, file_hash, p2p).await?,
+            sync_peer_snapshots_for_file_hash(&peer.endpoint_id, file_hash, p2p, None).await?,
         );
     }
     Ok(synced_ids)
@@ -646,9 +647,7 @@ async fn load_media_ratings_map(
     Ok(ratings)
 }
 
-async fn enrich_shared_picture_metadata(
-    pictures: &mut [shade_p2p::SharedPicture],
-) -> Result<(), String> {
+async fn snapshot_ids_by_source_name() -> Result<HashMap<String, String>, String> {
     let conn = open_edits_db().await?;
     let mut rows = conn
         .query(
@@ -671,11 +670,16 @@ async fn enrich_shared_picture_metadata(
         let id = row.get::<String>(1).map_err(|e| e.to_string())?;
         snapshot_ids.insert(source_name, id);
     }
-    for picture in pictures {
-        picture.latest_snapshot_id = snapshot_ids.get(&picture.name).cloned();
-        picture.has_snapshots = picture.latest_snapshot_id.is_some();
-    }
-    Ok(())
+    Ok(snapshot_ids)
+}
+
+#[derive(Serialize, Debug)]
+pub struct PeerPictureInfo {
+    pub id: String,
+    pub name: String,
+    pub modified_at: Option<u64>,
+    pub has_snapshots: bool,
+    pub latest_snapshot_id: Option<String>,
 }
 
 async fn load_media_tags_map(
@@ -2321,12 +2325,26 @@ pub async fn pair_peer_device<R: tauri::Runtime>(
 pub async fn list_peer_pictures(
     peer_endpoint_id: String,
     p2p: tauri::State<'_, crate::P2pState>,
-) -> Result<Vec<shade_p2p::SharedPicture>, String> {
-    require_p2p(&p2p)
+) -> Result<Vec<PeerPictureInfo>, String> {
+    let pictures = require_p2p(&p2p)
         .await?
         .list_peer_pictures(&peer_endpoint_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let snapshot_ids = snapshot_ids_by_source_name().await?;
+    Ok(pictures
+        .into_iter()
+        .map(|picture| {
+            let latest_snapshot_id = snapshot_ids.get(&picture.id).cloned();
+            PeerPictureInfo {
+                id: picture.id,
+                name: picture.name,
+                modified_at: picture.modified_at,
+                has_snapshots: latest_snapshot_id.is_some(),
+                latest_snapshot_id,
+            }
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -2400,7 +2418,13 @@ pub async fn sync_peer_snapshots(
 ) -> Result<SyncPeerSnapshotsResult, String> {
     let p2p = require_p2p(&p2p).await?;
     Ok(SyncPeerSnapshotsResult {
-        synced_ids: sync_peer_snapshots_for_file_hash(&peer_endpoint_id, &file_hash, &p2p).await?,
+        synced_ids: sync_peer_snapshots_for_file_hash(
+            &peer_endpoint_id,
+            &file_hash,
+            &p2p,
+            None,
+        )
+        .await?,
     })
 }
 
@@ -2546,7 +2570,13 @@ pub async fn open_peer_image(
         .map_err(|error| error.to_string())?;
     let file_hash = hash_bytes(&bytes);
     let peer = require_p2p(&p2p).await?;
-    let _ = sync_peer_snapshots_for_file_hash(&peer_endpoint_id, &file_hash, &peer).await;
+    let _ = sync_peer_snapshots_for_file_hash(
+        &peer_endpoint_id,
+        &file_hash,
+        &peer,
+        Some(&picture_id),
+    )
+    .await;
     let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let response = {
@@ -3738,12 +3768,9 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
                         name: picture_display_name(&photo.uri),
                         id: photo.uri,
                         modified_at: photo.modified_at,
-                        has_snapshots: false,
-                        latest_snapshot_id: None,
                     })
                     .collect::<Vec<_>>()
             })?;
-        enrich_shared_picture_metadata(&mut pictures).await?;
         return Ok(pictures);
     }
 
@@ -3767,8 +3794,6 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
                             name: picture_display_name(&photo.id),
                             id: photo.id,
                             modified_at: photo.modified_at,
-                            has_snapshots: false,
-                            latest_snapshot_id: None,
                         })
                         .collect::<Vec<_>>()
                 })
@@ -3776,23 +3801,19 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
         })
         .await
         .map_err(|e| e.to_string())??;
-        enrich_shared_picture_metadata(&mut pictures).await?;
         return Ok(pictures);
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        let mut pictures = collect_images_in_directory(&default_pictures_dir()?)?
+        let pictures = collect_images_in_directory(&default_pictures_dir()?)?
             .into_iter()
             .map(|picture| shade_p2p::SharedPicture {
                 name: picture.name,
                 id: picture.path,
                 modified_at: picture.modified_at,
-                has_snapshots: false,
-                latest_snapshot_id: None,
             })
             .collect::<Vec<_>>();
-        enrich_shared_picture_metadata(&mut pictures).await?;
         Ok(pictures)
     }
 }
