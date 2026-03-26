@@ -89,12 +89,7 @@ const features = [
                 </p>
 
                 <div class="flex items-center gap-4">
-                    <span
-                        aria-disabled="true"
-                        class="inline-flex leading-10 cursor-not-allowed gap-2 rounded-full border border-white/12 bg-white/[0.08] px-8 text-[14px] font-semibold text-white/45"
-                    >
-                        Coming soon
-                    </span>
+                    <download-cta></download-cta>
                 </div>
             </div>
         </section>
@@ -225,14 +220,10 @@ const features = [
                 No account. No credit card. Open the app and drop in your first
                 RAW file.
             </p>
-            <span
-                aria-disabled="true"
-                class="inline-flex leading-10 cursor-not-allowed gap-2 rounded-full border border-white/12 bg-white/[0.08] px-8 text-[14px] font-semibold text-white/45"
-            >
-                Coming soon
-            </span>
+            <download-cta></download-cta>
         </section>
     </main>
+
 
     <!-- Footer -->
     <footer class="border-t border-white/[0.06] py-7 text-center">
@@ -241,3 +232,6 @@ const features = [
         </p>
     </footer>
 </Layout>
+<script>
+    import "../scripts/download-cta-element";
+</script>

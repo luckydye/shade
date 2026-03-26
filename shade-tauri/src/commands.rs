@@ -410,7 +410,7 @@ fn restore_masks_from_params(
     }
 }
 
-async fn open_edits_db() -> Result<libsql::Connection, String> {
+pub async fn open_edits_db() -> Result<libsql::Connection, String> {
     let path = edits_db_path()?;
     let parent = path
         .parent()
@@ -548,6 +548,9 @@ async fn load_media_tags_map(
             continue;
         }
         let tag = row.get::<String>(1).map_err(|error| error.to_string())?;
+        if tag.is_empty() {
+            continue;
+        }
         tags.entry(media_id).or_default().push(tag);
     }
     Ok(tags)
@@ -574,7 +577,7 @@ async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), 
     Ok(())
 }
 
-async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
+pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
     let conn = open_edits_db().await?;
     conn.execute("BEGIN IMMEDIATE", ())
@@ -609,6 +612,51 @@ async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), Strin
             Err(error)
         }
     }
+}
+
+pub async fn persist_media_tags_empty(media_id: &str) -> Result<(), String> {
+    let conn = open_edits_db().await?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let result = async {
+        conn.execute("DELETE FROM media_tags WHERE media_id = ?1", [media_id])
+            .await
+            .map_err(|error| error.to_string())?;
+        conn.execute(
+            "INSERT INTO media_tags (media_id, tag, updated_at)
+             VALUES (?1, '', ?2)",
+            libsql::params![media_id, unix_timestamp_millis()?],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        Ok::<(), String>(())
+    }
+    .await;
+    match result {
+        Ok(()) => {
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", ()).await;
+            Err(error)
+        }
+    }
+}
+
+pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM media_tags WHERE media_id = ?1 LIMIT 1",
+            [media_id],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(rows.next().await.map_err(|error| error.to_string())?.is_some())
 }
 
 async fn load_latest_edit_version(
@@ -3247,7 +3295,16 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         },
     )
     .await?;
-    let _ = cache.0.put(&cache_key, &bytes).await;
+    cache.0.put(&cache_key, picture_id, &bytes).await?;
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    crate::tagging_worker::enqueue_thumbnail_for_tagging(
+        &app,
+        crate::thumbnail_cache::ThumbnailCacheEntry {
+            picture_id: cache_key,
+            media_id: picture_id.to_string(),
+            data: bytes.clone(),
+        },
+    )?;
     Ok(bytes)
 }
 
@@ -3566,14 +3623,17 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             ));
         }
         if library_id.starts_with("s3:") {
-            return _app
+            _app
                 .state::<crate::S3LibraryScanService>()
                 .0
                 .refresh_library(
                     &library_index_db_path()?,
                     &resolve_s3_library_config(&library_id)?,
                 )
-                .await;
+                .await?;
+            crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app)
+                .await?;
+            return Ok(());
         }
         let db_path = library_index_db_path()?;
         let library_path =
@@ -3581,7 +3641,10 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
         _app.state::<crate::LibraryScanService>()
             .0
             .refresh_library(&db_path, &library_id, library_path)
-            .await
+            .await?;
+        crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app)
+            .await?;
+        Ok(())
     }
 }
 
