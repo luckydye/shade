@@ -775,7 +775,7 @@ async fn persist_snapshot(
         "INSERT OR IGNORE INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         libsql::params![
-            snapshot_id,
+            snapshot_id.as_str(),
             file_hash,
             now,
             serde_json::to_string(data).map_err(|e| e.to_string())?,
@@ -873,7 +873,7 @@ async fn persist_current_edit_version(
             "UPDATE edit_versions SET layers_json = ?1 WHERE id = ?2",
             libsql::params![
                 serde_json::to_string(&data).map_err(|e| e.to_string())?,
-                existing_id,
+                existing_id.as_str(),
             ],
         )
         .await
@@ -4471,11 +4471,14 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             let (rating, rating_updated_at) =
                 if let Some(row) = rating_rows
-                    .next()
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?
-                {
-                    let r = row.get::<u8>(0).ok();
+                .next()
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            {
+                    let r = row
+                        .get::<i64>(0)
+                        .ok()
+                        .and_then(|value| u8::try_from(value).ok());
                     let t = row.get::<i64>(1).ok();
                     (r, t)
                 } else {
