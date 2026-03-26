@@ -104,6 +104,8 @@ export async function selectPeer(peerId: string) {
         id: picture.id,
         name: picture.name,
         modified_at: picture.modified_at,
+        has_snapshots: picture.has_snapshots,
+        latest_snapshot_id: picture.latest_snapshot_id,
       }),
     );
     if (state.selectedPeerId !== peerId) {

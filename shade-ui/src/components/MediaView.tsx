@@ -406,8 +406,8 @@ function peerMediaItem(image: PeerLibraryItem): MediaItem {
     peerId: image.peerId,
     modifiedAt: normalizeModifiedAt(image.modified_at),
     metadata: {
-      hasSnapshots: false,
-      latestSnapshotId: null,
+      hasSnapshots: image.has_snapshots,
+      latestSnapshotId: image.latest_snapshot_id,
       baseRating: null,
       rating: null,
       tags: [],
@@ -519,6 +519,8 @@ async function openMediaItem(
       id: item.id,
       name: item.name,
       modified_at: item.modifiedAt,
+      has_snapshots: item.metadata.hasSnapshots,
+      latest_snapshot_id: item.metadata.latestSnapshotId,
     };
     await openPeerImage(item.peerId, picture, src, activeMediaSelection, mode);
     return;

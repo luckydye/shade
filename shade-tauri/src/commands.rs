@@ -646,6 +646,38 @@ async fn load_media_ratings_map(
     Ok(ratings)
 }
 
+async fn enrich_shared_picture_metadata(
+    pictures: &mut [shade_p2p::SharedPicture],
+) -> Result<(), String> {
+    let conn = open_edits_db().await?;
+    let mut rows = conn
+        .query(
+            "SELECT i.source_name, ev.id
+             FROM images i
+             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             WHERE i.source_name IS NOT NULL
+             AND ev.created_at = (
+                 SELECT MAX(ev2.created_at)
+                 FROM edit_versions ev2
+                 WHERE ev2.file_hash = i.file_hash
+             )",
+            (),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut snapshot_ids: HashMap<String, String> = HashMap::new();
+    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+        let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
+        let id = row.get::<String>(1).map_err(|e| e.to_string())?;
+        snapshot_ids.insert(source_name, id);
+    }
+    for picture in pictures {
+        picture.latest_snapshot_id = snapshot_ids.get(&picture.name).cloned();
+        picture.has_snapshots = picture.latest_snapshot_id.is_some();
+    }
+    Ok(())
+}
+
 async fn load_media_tags_map(
     media_ids: &[String],
 ) -> Result<HashMap<String, Vec<String>>, String> {
@@ -3694,57 +3726,75 @@ pub async fn load_picture_entries<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
 ) -> Result<Vec<shade_p2p::SharedPicture>, String> {
     #[cfg(target_os = "android")]
-    return _app
-        .state::<crate::photos::PhotosHandle<R>>()
-        .list_photos()
-        .await
-        .map(|pictures| {
-            pictures
-                .into_iter()
-                .map(|photo| shade_p2p::SharedPicture {
-                    name: picture_display_name(&photo.uri),
-                    id: photo.uri,
-                    modified_at: photo.modified_at,
-                })
-                .collect()
-        });
-
-    #[cfg(target_os = "ios")]
-    return tokio::task::spawn_blocking(|| {
-        let ptr = unsafe { ios_list_photos() };
-        if ptr.is_null() {
-            return Ok(vec![]);
-        }
-        let json = unsafe {
-            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
-            ios_free_string(ptr);
-            s
-        };
-        serde_json::from_str::<Vec<IosPhotoEntry>>(&json)
+    {
+        let mut pictures = _app
+            .state::<crate::photos::PhotosHandle<R>>()
+            .list_photos()
+            .await
             .map(|pictures| {
                 pictures
                     .into_iter()
                     .map(|photo| shade_p2p::SharedPicture {
-                        name: picture_display_name(&photo.id),
-                        id: photo.id,
+                        name: picture_display_name(&photo.uri),
+                        id: photo.uri,
                         modified_at: photo.modified_at,
+                        has_snapshots: false,
+                        latest_snapshot_id: None,
                     })
-                    .collect()
-            })
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+                    .collect::<Vec<_>>()
+            })?;
+        enrich_shared_picture_metadata(&mut pictures).await?;
+        return Ok(pictures);
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        let mut pictures = tokio::task::spawn_blocking(|| {
+            let ptr = unsafe { ios_list_photos() };
+            if ptr.is_null() {
+                return Ok::<Vec<shade_p2p::SharedPicture>, String>(vec![]);
+            }
+            let json = unsafe {
+                let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+                ios_free_string(ptr);
+                s
+            };
+            serde_json::from_str::<Vec<IosPhotoEntry>>(&json)
+                .map(|pictures| {
+                    pictures
+                        .into_iter()
+                        .map(|photo| shade_p2p::SharedPicture {
+                            name: picture_display_name(&photo.id),
+                            id: photo.id,
+                            modified_at: photo.modified_at,
+                            has_snapshots: false,
+                            latest_snapshot_id: None,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        enrich_shared_picture_metadata(&mut pictures).await?;
+        return Ok(pictures);
+    }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    Ok(collect_images_in_directory(&default_pictures_dir()?)?
-        .into_iter()
-        .map(|picture| shade_p2p::SharedPicture {
-            name: picture.name,
-            id: picture.path,
-            modified_at: picture.modified_at,
-        })
-        .collect())
+    {
+        let mut pictures = collect_images_in_directory(&default_pictures_dir()?)?
+            .into_iter()
+            .map(|picture| shade_p2p::SharedPicture {
+                name: picture.name,
+                id: picture.path,
+                modified_at: picture.modified_at,
+                has_snapshots: false,
+                latest_snapshot_id: None,
+            })
+            .collect::<Vec<_>>();
+        enrich_shared_picture_metadata(&mut pictures).await?;
+        Ok(pictures)
+    }
 }
 
 #[tauri::command]

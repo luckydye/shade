@@ -193,6 +193,8 @@ export interface SharedPicture {
   id: string;
   name: string;
   modified_at: number | null;
+  has_snapshots: boolean;
+  latest_snapshot_id: string | null;
 }
 
 export interface LibraryImageMetadata {

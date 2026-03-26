@@ -23,6 +23,8 @@ export type PeerLibraryItem = {
   name: string;
   peerId: string;
   modified_at: number | null;
+  has_snapshots: boolean;
+  latest_snapshot_id: string | null;
 };
 
 type CachedPeerItem = {
@@ -30,6 +32,8 @@ type CachedPeerItem = {
   pictureId: string;
   name: string;
   modified_at: number | null;
+  has_snapshots: boolean;
+  latest_snapshot_id: string | null;
 };
 
 function normalizeModifiedAt(modifiedAt: unknown) {
@@ -45,6 +49,8 @@ function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
     modified_at: normalizeModifiedAt(
       (picture as SharedPicture & { modified_at?: unknown }).modified_at,
     ),
+    has_snapshots: picture.has_snapshots ?? false,
+    latest_snapshot_id: picture.latest_snapshot_id ?? null,
   };
 }
 
@@ -143,12 +149,14 @@ function toPeerLibraryItems(
   pictures: SharedPicture[],
 ): PeerLibraryItem[] {
   return pictures
-    .map((picture) => ({
+    .map((picture): PeerLibraryItem => ({
       kind: "peer",
       id: picture.id,
       name: picture.name,
       peerId,
       modified_at: normalizeModifiedAt(picture.modified_at),
+      has_snapshots: picture.has_snapshots ?? false,
+      latest_snapshot_id: picture.latest_snapshot_id ?? null,
     }))
     .sort((left, right) => {
       const leftModifiedAt = left.modified_at ?? 0;
@@ -190,6 +198,8 @@ function toCachedPeerItem(peerId: string, picture: SharedPicture): CachedPeerIte
     pictureId: picture.id,
     name: picture.name,
     modified_at: normalizeModifiedAt(picture.modified_at),
+    has_snapshots: picture.has_snapshots ?? false,
+    latest_snapshot_id: picture.latest_snapshot_id ?? null,
   };
 }
 
@@ -198,6 +208,8 @@ function toSharedPicture(item: CachedPeerItem): SharedPicture {
     id: item.pictureId,
     name: item.name,
     modified_at: normalizeModifiedAt(item.modified_at),
+    has_snapshots: item.has_snapshots ?? false,
+    latest_snapshot_id: item.latest_snapshot_id ?? null,
   };
 }
 

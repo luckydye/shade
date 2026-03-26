@@ -66,6 +66,8 @@ pub struct SharedPicture {
     pub id: String,
     pub name: String,
     pub modified_at: Option<u64>,
+    pub has_snapshots: bool,
+    pub latest_snapshot_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
