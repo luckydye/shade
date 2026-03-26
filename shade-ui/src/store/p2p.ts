@@ -4,7 +4,7 @@ import {
   type LocalPeerDiscoverySnapshot,
   type SharedPicture,
 } from "../bridge/index";
-import { getCachedPeerLibraryItems } from "../peer-library-cache";
+import { loadPeerLibraryItemsCachedOrRemote } from "../peer-library-cache";
 import { fetchPeerAwareness } from "./sync";
 
 interface P2pState extends LocalPeerDiscoverySnapshot {
@@ -99,7 +99,7 @@ export async function selectPeer(peerId: string) {
     peerBrowserError: "",
   });
   try {
-    const remotePictures = (await getCachedPeerLibraryItems(peerId)).map(
+    const remotePictures = (await loadPeerLibraryItemsCachedOrRemote(peerId)).map(
       (picture) => ({
         id: picture.id,
         name: picture.name,

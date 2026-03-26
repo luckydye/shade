@@ -534,6 +534,7 @@ const MediaTile: Component<{
   active?: boolean;
   selected?: boolean;
   showSelectionControls?: boolean;
+  offline?: boolean;
   disableThumbnailLoad?: boolean;
   onActivate: (src: string | null) => void;
   onToggleSelection: () => void;
@@ -569,6 +570,9 @@ const MediaTile: Component<{
       .then((nextSrc) => setSrc(nextSrc))
       .catch(() => {
         if (controller.signal.aborted) {
+          return;
+        }
+        if (props.offline) {
           return;
         }
         setLoadError(true);
@@ -674,7 +678,25 @@ const MediaTile: Component<{
         aria-pressed={isHighlighted() ? "true" : "false"}
       >
         <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
-          {!src() && !loadError() && (
+          {!src() && !loadError() && props.offline && (
+            <div class="flex h-full w-full items-center justify-center text-[var(--text-muted)]">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                class="h-8 w-8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
+                <path d="M8 14.5 10.5 12l2 2 2-2 2.5 2.5" />
+                <path d="M9 9.5h.01" />
+              </svg>
+            </div>
+          )}
+          {!src() && !loadError() && !props.offline && (
             <div class="h-full w-full animate-pulse bg-[var(--surface-hover)]" />
           )}
           {src() && (
@@ -2134,15 +2156,16 @@ export const MediaView: Component = () => {
                               item && (
                                 <MediaTile
                                   item={item}
-                                compact
-                                disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
-                                active={activeMediaItemId() === id}
-                                selected={selectedMediaItemIdSet().has(id)}
-                                showSelectionControls={showSelectionControls()}
-                                onActivate={(src) =>
-                                  void handleOpenItem(item, selectedLibraryId()!, src)
-                                }
-                                onToggleSelection={() => toggleMediaSelection(id)}
+                                  compact
+                                  offline={selectedLibraryIsOffline()}
+                                  disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
+                                  active={activeMediaItemId() === id}
+                                  selected={selectedMediaItemIdSet().has(id)}
+                                  showSelectionControls={showSelectionControls()}
+                                  onActivate={(src) =>
+                                    void handleOpenItem(item, selectedLibraryId()!, src)
+                                  }
+                                  onToggleSelection={() => toggleMediaSelection(id)}
                                 />
                               )
                             );
@@ -2177,6 +2200,7 @@ export const MediaView: Component = () => {
                             item && (
                               <MediaTile
                                 item={item}
+                                offline={selectedLibraryIsOffline()}
                                 active={activeMediaItemId() === id}
                                 selected={selectedMediaItemIdSet().has(id)}
                                 showSelectionControls={showSelectionControls()}
