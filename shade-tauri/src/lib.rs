@@ -128,6 +128,7 @@ pub fn run() {
             commands::set_local_awareness,
             commands::get_peer_awareness,
             commands::sync_peer_snapshots,
+            commands::apply_peer_metadata,
             commands::apply_gradient_mask,
             commands::remove_mask,
         ])

@@ -1048,6 +1048,78 @@ export async function applyGradientMask(params: GradientMaskParams): Promise<voi
   );
 }
 
+// ── P2P Awareness & Sync ──────────────────────────────────────────────────────
+
+export interface AwarenessState {
+  display_name: string | null;
+  active_file_hash: string | null;
+  active_snapshot_id: string | null;
+}
+
+export interface SyncPeerSnapshotsResult {
+  synced_ids: string[];
+}
+
+export interface ApplyPeerMetadataResult {
+  ratings_updated: number;
+  tags_added: number;
+}
+
+export async function setLocalAwareness(
+  displayName: string | null,
+  fileHash: string | null,
+  snapshotId: string | null,
+): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("set_local_awareness", {
+      displayName: displayName ?? null,
+      fileHash: fileHash ?? null,
+      snapshotId: snapshotId ?? null,
+    });
+    return;
+  }
+  throw new Error("setLocalAwareness is only implemented for Tauri");
+}
+
+export async function getPeerAwareness(
+  peerEndpointId: string,
+): Promise<AwarenessState> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("get_peer_awareness", { peerEndpointId }) as Promise<AwarenessState>;
+  }
+  throw new Error("getPeerAwareness is only implemented for Tauri");
+}
+
+export async function syncPeerSnapshots(
+  peerEndpointId: string,
+  fileHash: string,
+): Promise<SyncPeerSnapshotsResult> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("sync_peer_snapshots", {
+      peerEndpointId,
+      fileHash,
+    }) as Promise<SyncPeerSnapshotsResult>;
+  }
+  throw new Error("syncPeerSnapshots is only implemented for Tauri");
+}
+
+export async function applyPeerMetadata(
+  peerEndpointId: string,
+  fileHashes: string[],
+): Promise<ApplyPeerMetadataResult> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("apply_peer_metadata", {
+      peerEndpointId,
+      fileHashes,
+    }) as Promise<ApplyPeerMetadataResult>;
+  }
+  throw new Error("applyPeerMetadata is only implemented for Tauri");
+}
+
 export async function removeMask(idx: number): Promise<void> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();

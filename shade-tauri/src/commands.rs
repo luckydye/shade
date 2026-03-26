@@ -2209,11 +2209,15 @@ pub async fn get_peer_image_bytes(
 /// Update local awareness state (what image we are currently editing).
 #[tauri::command]
 pub async fn set_local_awareness(
+    display_name: Option<String>,
     file_hash: Option<String>,
     snapshot_id: Option<String>,
     awareness: tauri::State<'_, crate::AwarenessStateHandle>,
 ) -> Result<(), String> {
     let mut state = awareness.0.lock().await;
+    if display_name.is_some() {
+        state.display_name = display_name;
+    }
     state.active_file_hash = file_hash;
     state.active_snapshot_id = snapshot_id;
     Ok(())
@@ -2286,9 +2290,20 @@ pub async fn sync_peer_snapshots(
                 continue;
             }
         };
-        let layers_json = String::from_utf8(data_bytes).map_err(|e| e.to_string())?;
-        let data: PersistedLayerData =
-            serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+        let layers_json = match String::from_utf8(data_bytes) {
+            Ok(j) => j,
+            Err(e) => {
+                log::warn!("invalid UTF-8 in snapshot {} from peer: {}", snap.id, e);
+                continue;
+            }
+        };
+        let data: PersistedLayerData = match serde_json::from_str(&layers_json) {
+            Ok(d) => d,
+            Err(e) => {
+                log::warn!("invalid JSON in snapshot {} from peer: {}", snap.id, e);
+                continue;
+            }
+        };
         if let Err(e) = persist_snapshot(
             &file_hash,
             None,
@@ -2305,6 +2320,129 @@ pub async fn sync_peer_snapshots(
     }
 
     Ok(SyncPeerSnapshotsResult { synced_ids })
+}
+
+/// Fetch metadata from a peer for the given file hashes and apply it locally
+/// using last-write-wins for ratings and additive union for tags.
+#[tauri::command]
+pub async fn apply_peer_metadata(
+    peer_endpoint_id: String,
+    file_hashes: Vec<String>,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<ApplyPeerMetadataResult, String> {
+    let p2p = require_p2p(&p2p).await?;
+
+    if file_hashes.is_empty() {
+        return Ok(ApplyPeerMetadataResult {
+            ratings_updated: 0,
+            tags_added: 0,
+        });
+    }
+
+    let peer_metadata = p2p
+        .get_peer_metadata(&peer_endpoint_id, &file_hashes)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if peer_metadata.is_empty() {
+        return Ok(ApplyPeerMetadataResult {
+            ratings_updated: 0,
+            tags_added: 0,
+        });
+    }
+
+    let conn = open_edits_db().await?;
+    let mut ratings_updated: u32 = 0;
+    let mut tags_added: u32 = 0;
+
+    for meta in peer_metadata {
+        // Resolve file_hash → local source_name (media_id).
+        let mut rows = conn
+            .query(
+                "SELECT source_name FROM images WHERE file_hash = ?1 LIMIT 1",
+                [meta.file_hash.as_str()],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let media_id = match rows.next().await.map_err(|e| e.to_string())? {
+            Some(row) => match row.get::<Option<String>>(0).map_err(|e| e.to_string())? {
+                Some(name) => name,
+                None => continue,
+            },
+            None => continue,
+        };
+
+        // ── Rating: last-write-wins ──────────────────────────────────────
+        if let Some(peer_rating) = meta.rating {
+            let peer_ts = meta.rating_updated_at.unwrap_or(0);
+            let local_ts: i64 = conn
+                .query(
+                    "SELECT updated_at FROM media_ratings WHERE media_id = ?1 LIMIT 1",
+                    [media_id.as_str()],
+                )
+                .await
+                .map_err(|e| e.to_string())?
+                .next()
+                .await
+                .map_err(|e| e.to_string())?
+                .and_then(|row| row.get::<i64>(0).ok())
+                .unwrap_or(0);
+
+            if peer_ts > local_ts {
+                conn.execute(
+                    "INSERT INTO media_ratings (media_id, rating, updated_at)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(media_id)
+                     DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
+                    libsql::params![media_id.as_str(), i64::from(peer_rating), peer_ts],
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                ratings_updated += 1;
+            }
+        }
+
+        // ── Tags: additive union ─────────────────────────────────────────
+        if !meta.tags.is_empty() {
+            let peer_tags_ts = meta.tags_updated_at.unwrap_or(0);
+            let mut existing_tags = std::collections::HashSet::new();
+            let mut tag_rows = conn
+                .query(
+                    "SELECT tag FROM media_tags WHERE media_id = ?1",
+                    [media_id.as_str()],
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            while let Some(row) = tag_rows.next().await.map_err(|e| e.to_string())? {
+                if let Ok(tag) = row.get::<String>(0) {
+                    existing_tags.insert(tag);
+                }
+            }
+            for tag in &meta.tags {
+                if !existing_tags.contains(tag) {
+                    conn.execute(
+                        "INSERT INTO media_tags (media_id, tag, updated_at)
+                         VALUES (?1, ?2, ?3)",
+                        libsql::params![media_id.as_str(), tag.as_str(), peer_tags_ts],
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    tags_added += 1;
+                }
+            }
+        }
+    }
+
+    Ok(ApplyPeerMetadataResult {
+        ratings_updated,
+        tags_added,
+    })
+}
+
+#[derive(Serialize, Debug)]
+pub struct ApplyPeerMetadataResult {
+    pub ratings_updated: u32,
+    pub tags_added: u32,
 }
 
 #[tauri::command]

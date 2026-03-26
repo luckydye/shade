@@ -1,11 +1,21 @@
 import { createStore } from "solid-js/store";
 import { p2pState } from "./p2p";
+import {
+  isTauriRuntime,
+  getPeerAwareness as bridgeGetPeerAwareness,
+  setLocalAwareness as bridgeSetLocalAwareness,
+  syncPeerSnapshots as bridgeSyncPeerSnapshots,
+  applyPeerMetadata as bridgeApplyPeerMetadata,
+  type AwarenessState,
+  type SyncPeerSnapshotsResult,
+  type ApplyPeerMetadataResult,
+} from "../bridge";
 
 export interface PeerAwareness {
   endpoint_id: string;
-  display_name?: string | null;
-  active_file_hash?: string | null;
-  active_snapshot_id?: string | null;
+  display_name: string | null;
+  active_file_hash: string | null;
+  active_snapshot_id: string | null;
   fetched_at: number;
 }
 
@@ -26,28 +36,18 @@ export { syncState };
 // ── Awareness ────────────────────────────────────────────────────────────────
 
 export async function setLocalAwareness(
+  displayName: string | null,
   fileHash: string | null,
   snapshotId: string | null,
 ): Promise<void> {
   if (!(await isTauriRuntime())) return;
-  const inv = await getTauriInvoke();
-  await inv("set_local_awareness", {
-    fileHash: fileHash ?? null,
-    snapshotId: snapshotId ?? null,
-  });
+  await bridgeSetLocalAwareness(displayName, fileHash, snapshotId);
 }
 
 export async function fetchPeerAwareness(peerId: string): Promise<void> {
   if (!(await isTauriRuntime())) return;
   try {
-    const inv = await getTauriInvoke();
-    const awareness = (await inv("get_peer_awareness", {
-      peerEndpointId: peerId,
-    })) as {
-      display_name?: string | null;
-      active_file_hash?: string | null;
-      active_snapshot_id?: string | null;
-    };
+    const awareness: AwarenessState = await bridgeGetPeerAwareness(peerId);
     setSyncState("peer_awareness", peerId, {
       endpoint_id: peerId,
       display_name: awareness.display_name ?? null,
@@ -74,20 +74,14 @@ export function getPeersViewingImage(fileHash: string): PeerAwareness[] {
 
 // ── Snapshot sync ─────────────────────────────────────────────────────────────
 
-export interface SyncPeerSnapshotsResult {
-  synced_ids: string[];
-}
+export type { SyncPeerSnapshotsResult };
 
 export async function syncPeerSnapshots(
   peerId: string,
   fileHash: string,
 ): Promise<SyncPeerSnapshotsResult> {
   if (!(await isTauriRuntime())) return { synced_ids: [] };
-  const inv = await getTauriInvoke();
-  return inv("sync_peer_snapshots", {
-    peerEndpointId: peerId,
-    fileHash,
-  }) as Promise<SyncPeerSnapshotsResult>;
+  return bridgeSyncPeerSnapshots(peerId, fileHash);
 }
 
 /** Sync snapshots for a file_hash from all currently connected peers. */
@@ -119,20 +113,25 @@ export async function syncSnapshotsFromAllPeers(
   return allSynced;
 }
 
-// ── Internal helpers (lazy Tauri imports matching bridge pattern) ──────────────
+// ── Metadata sync ─────────────────────────────────────────────────────────────
 
-type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-let _invoke: InvokeFn | null = null;
+export type { ApplyPeerMetadataResult };
 
-async function isTauriRuntime(): Promise<boolean> {
-  const { isTauri } = await import("@tauri-apps/api/core");
-  return (isTauri as () => boolean)();
+export async function applyPeerMetadata(
+  peerId: string,
+  fileHashes: string[],
+): Promise<ApplyPeerMetadataResult> {
+  if (!(await isTauriRuntime())) return { ratings_updated: 0, tags_added: 0 };
+  return bridgeApplyPeerMetadata(peerId, fileHashes);
 }
 
-async function getTauriInvoke(): Promise<InvokeFn> {
-  if (!_invoke) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    _invoke = invoke as unknown as InvokeFn;
-  }
-  return _invoke!;
+/** Apply metadata from all connected peers for the given file hashes. */
+export async function applyMetadataFromAllPeers(
+  fileHashes: string[],
+): Promise<void> {
+  const peers = p2pState.peers;
+  if (peers.length === 0 || fileHashes.length === 0) return;
+  await Promise.allSettled(
+    peers.map((peer) => applyPeerMetadata(peer.endpoint_id, fileHashes)),
+  );
 }
