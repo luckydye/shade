@@ -23,6 +23,12 @@ export async function initSchema(): Promise<void> {
             content_type TEXT NOT NULL,
             size INTEGER NOT NULL
         );
-        ALTER TABLE releases ADD COLUMN IF NOT EXISTS prerelease INTEGER NOT NULL DEFAULT 0;
     `);
+
+    try {
+        await db.execute("ALTER TABLE releases ADD COLUMN prerelease INTEGER NOT NULL DEFAULT 0");
+    } catch (e: unknown) {
+        // column already exists — ignore
+        if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+    }
 }
