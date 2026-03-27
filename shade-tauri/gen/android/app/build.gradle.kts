@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -13,9 +14,47 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+val requiredSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val missingSigningKeys = requiredSigningKeys.filterNot(keystoreProperties::containsKey)
+val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("release", ignoreCase = true)
+}
+
+if (releaseTaskRequested && missingSigningKeys.isNotEmpty()) {
+    throw GradleException(
+        "Android release signing is not configured. Missing ${
+            missingSigningKeys.joinToString(", ")
+        } in ${keystorePropertiesFile.absolutePath}."
+    )
+}
+
+fun requireSigningProperty(name: String): String {
+    return keystoreProperties.getProperty(name)
+        ?: throw GradleException(
+            "Android release signing is not configured. Missing $name in ${keystorePropertiesFile.absolutePath}."
+        )
+}
+
 android {
     compileSdk = 36
     namespace = "com.shade.editor"
+    if (missingSigningKeys.isEmpty()) {
+        signingConfigs {
+            create("release") {
+                keyAlias = requireSigningProperty("keyAlias")
+                keyPassword = requireSigningProperty("keyPassword")
+                storeFile = file(requireSigningProperty("storeFile"))
+                storePassword = requireSigningProperty("storePassword")
+            }
+        }
+    }
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.shade.editor"
@@ -30,13 +69,17 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+            packaging {
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
                 jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
             }
         }
         getByName("release") {
+            if (missingSigningKeys.isEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

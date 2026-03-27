@@ -15,6 +15,7 @@ import {
   removeBrowserMediaLibrary,
   requestBrowserMountedImageReadPermission,
 } from "../browser-media-library";
+import { getThumbnailBackend } from "./thumbnail-backend";
 
 // ── Tauri path ──────────────────────────────────────────────────────────────
 type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -558,7 +559,6 @@ export async function getPeerThumbnailBytes(
   peer_endpoint_id: string,
   picture_id: string,
 ): Promise<Uint8Array> {
-  const { getThumbnailBackend } = await import("./thumbnail-backend");
   return getThumbnailBackend().getPeerThumbnailBytes(peer_endpoint_id, picture_id);
 }
 
@@ -764,7 +764,6 @@ export async function moveLayer(fromIdx: number, toIdx: number): Promise<number>
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
 export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
-  const { getThumbnailBackend } = await import("./thumbnail-backend");
   return getThumbnailBackend().getThumbnailBytes(path);
 }
 
