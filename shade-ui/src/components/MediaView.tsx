@@ -2605,7 +2605,7 @@ export const MediaView: Component = () => {
       </div>
       
       <Show when={selectedLibrary()}>
-        <div class="fixed left-0 right-0 w-auto bottom-[env(safe-area-inset-bottom)] px-7">
+        <div class="fixed left-0 right-0 w-auto bottom-[env(safe-area-inset-bottom)] px-7 md:hidden">
           <input
             type="text"
             value={filenameFilter()}
