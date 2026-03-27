@@ -1,49 +1,17 @@
-import { Component, JSX, Show } from "solid-js";
+import type { Component } from "solid-js";
 import { MEDIA_FILE_ACCEPT } from "../media-file-accept";
 import {
   exportImage,
   pickExportTarget,
   openImageFile,
   showEditorView,
-  showMediaView,
   state,
 } from "../store/editor";
 import { Button } from "./Button";
+import { ActionButton } from "./ActionButton";
 
-interface ActionButtonProps {
-  label: string;
-  icon: JSX.Element;
-  onClick?: () => void;
-  disabled?: boolean;
-  primary?: boolean;
-}
-
-const TOOLBAR_BUTTON_BASE_CLASS =
-  "inline-flex h-8 items-center gap-2 rounded-md border px-3 text-[11px] font-semibold uppercase tracking-[0.03em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-45";
-const TOOLBAR_BUTTON_PRIMARY_CLASS =
-  "border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)] enabled:hover:bg-[var(--btn-primary-hover)]";
-const TOOLBAR_BUTTON_SECONDARY_CLASS =
-  "border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-active)] enabled:hover:bg-[var(--surface-hover)] enabled:hover:text-[var(--text)]";
 const STATUS_TRIGGER_CLASS =
   "min-w-0 rounded-md px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
-const STATUS_PILL_CLASS =
-  "inline-flex h-8 items-center rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-medium text-[var(--text-value)]";
-
-const ActionButton: Component<ActionButtonProps> = (props) => (
-  <Button
-    type="button"
-    onClick={props.onClick}
-    disabled={props.disabled}
-    class={`${TOOLBAR_BUTTON_BASE_CLASS} ${
-      props.primary
-        ? TOOLBAR_BUTTON_PRIMARY_CLASS
-        : TOOLBAR_BUTTON_SECONDARY_CLASS
-    }`}
-  >
-    <span class="inline-flex items-center justify-center">{props.icon}</span>
-    <span class="hidden sm:inline">{props.label}</span>
-  </Button>
-);
 
 const UploadIcon = () => (
   <svg
@@ -128,40 +96,14 @@ export const Toolbar: Component = () => {
   return (
     <header
       data-tauri-drag-region
-      class="absolute top-0 z-50 grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-3 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-[18px] md:static md:grid-cols-[56px_minmax(0,1fr)_auto] md:pt-2"
+      class="static grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 py-3 backdrop-blur-[18px] md:grid-cols-[56px_minmax(0,1fr)_auto]"
     >
-      <div class="flex h-8 items-center">
-        <Show when={hasImage() && state.currentView === "editor"}>
-          <ActionButton
-            label="Back"
-            icon={
-              <svg
-                width="24px"
-                height="24px"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                class="h-4 w-4"
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            }
-            onClick={() => {
-              if (document.startViewTransition) {
-                document.startViewTransition(showMediaView);
-              } else {
-                showMediaView();
-              }
-            }}
-          />
-        </Show>
-      </div>
+      <div class="flex h-8 items-center"></div>
 
-      <div class="min-w-0 flex justify-center text-center">
+      <div class="min-w-0 flex justify-center text-center pointer-events-none">
         <Button
           type="button"
-          class={`min-w-0 max-w-full ${STATUS_TRIGGER_CLASS} ${
+          class={`pointer-events-auto min-w-0 max-w-full ${STATUS_TRIGGER_CLASS} ${
             canResumeEditor()
               ? "cursor-pointer hover:bg-[var(--surface-subtle)]"
               : "cursor-default"

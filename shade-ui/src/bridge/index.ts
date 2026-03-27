@@ -786,7 +786,7 @@ export async function listPictures(): Promise<string[]> {
 export interface MediaLibrary {
   id: string;
   name: string;
-  kind: "directory" | "camera" | "s3";
+  kind: "directory" | "camera" | "s3" | "peer";
   path?: string | null;
   removable: boolean;
   readonly: boolean;

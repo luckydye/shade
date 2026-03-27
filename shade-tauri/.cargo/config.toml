@@ -1,0 +1,2 @@
+[alias]
+tauri = "run --quiet --manifest-path /Users/tihav/source/shade/shade-tauri/tools/cargo-tauri-wrapper/Cargo.toml --"

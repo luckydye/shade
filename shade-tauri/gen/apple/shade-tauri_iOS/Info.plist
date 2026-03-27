@@ -20,6 +20,12 @@
 	<string>0.1.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_irohv1._udp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Shade needs local network access to discover nearby Shade peers and sync media directly between devices.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Shade needs access to your photo library to let you edit your photos.</string>
 	<key>UILaunchStoryboardName</key>

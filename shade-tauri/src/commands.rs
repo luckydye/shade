@@ -19,7 +19,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tokio::sync::Mutex as TokioMutex;
 
@@ -95,6 +95,11 @@ pub struct LibraryImage {
 pub struct LibraryImageListing {
     pub items: Vec<LibraryImage>,
     pub is_complete: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct PeerPairedEvent {
+    peer_endpoint_id: String,
 }
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -1188,6 +1193,19 @@ fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
     save_app_config(&config)
 }
 
+fn emit_peer_paired<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    peer_endpoint_id: &str,
+) -> Result<(), String> {
+    app.emit(
+        "peer-paired",
+        PeerPairedEvent {
+            peer_endpoint_id: peer_endpoint_id.to_owned(),
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn set_library_order(library_order: Vec<String>) -> Result<(), String> {
     let mut config = load_app_config()?;
     let mut seen = std::collections::HashSet::new();
@@ -1259,6 +1277,10 @@ fn ccapi_library_id(host: &str) -> String {
     shade_io::camera_library_id(host)
 }
 
+fn peer_library_id(peer_endpoint_id: &str) -> String {
+    shade_io::peer_library_id(peer_endpoint_id)
+}
+
 fn ccapi_media_path(host: &str, file_path: &str) -> String {
     format!("ccapi://{host}{file_path}")
 }
@@ -1270,6 +1292,23 @@ fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> Media
         kind: "camera".into(),
         path: Some(host.to_string()),
         removable,
+        readonly: true,
+        is_online: Some(is_online),
+        is_refreshing: None,
+    }
+}
+
+fn peer_library_for_endpoint(
+    peer_endpoint_id: &str,
+    name: &str,
+    is_online: bool,
+) -> MediaLibrary {
+    MediaLibrary {
+        id: peer_library_id(peer_endpoint_id),
+        name: name.to_owned(),
+        kind: "peer".into(),
+        path: Some(peer_endpoint_id.to_owned()),
+        removable: true,
         readonly: true,
         is_online: Some(is_online),
         is_refreshing: None,
@@ -1468,6 +1507,17 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
     let config = load_app_config()?;
+    let discovered_peers = if let Some(p2p) = app.state::<crate::P2pState>().0.read().await.clone()
+    {
+        p2p.snapshot()
+            .await
+            .peers
+            .into_iter()
+            .map(|peer| (peer.endpoint_id.clone(), peer))
+            .collect::<HashMap<_, _>>()
+    } else {
+        HashMap::new()
+    };
     let mut configured_camera_hosts = std::collections::HashSet::new();
     for library in &config.libraries {
         match library {
@@ -1488,7 +1538,16 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
                     true,
                 ));
             }
-            shade_io::LibraryConfig::Peer(_) => {}
+            shade_io::LibraryConfig::Peer(config) => {
+                let discovered = discovered_peers.get(&config.peer_id);
+                libraries.push(peer_library_for_endpoint(
+                    &config.peer_id,
+                    discovered
+                        .map(|peer| peer.name.as_str())
+                        .unwrap_or(config.peer_id.as_str()),
+                    discovered.is_some(),
+                ));
+            }
         }
     }
     for host in app
@@ -2371,9 +2430,11 @@ pub async fn pair_peer_device<R: tauri::Runtime>(
     if is_peer_paired(&peer_endpoint_id).map_err(|error| error.to_string())? {
         return Ok(());
     }
+    let dialog_app = app.clone();
     let peer_endpoint_id_for_prompt = peer_endpoint_id.clone();
     let allow = tokio::task::spawn_blocking(move || -> bool {
-        app.dialog()
+        dialog_app
+            .dialog()
             .message(format!(
                 "Pair peer {peer_endpoint_id_for_prompt} with this device?"
             ))
@@ -2386,6 +2447,7 @@ pub async fn pair_peer_device<R: tauri::Runtime>(
         return Err("peer pairing denied".to_string());
     }
     pair_peer(&peer_endpoint_id).map_err(|error| error.to_string())?;
+    emit_peer_paired(&app, &peer_endpoint_id)?;
     Ok(())
 }
 
@@ -3892,8 +3954,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 ) -> Result<Vec<MediaLibrary>, String> {
     #[cfg(target_os = "android")]
     {
-        let _ = _app;
-        return Ok(vec![MediaLibrary {
+        let mut libraries = vec![MediaLibrary {
             id: "photos".into(),
             name: "Photos".into(),
             kind: "directory".into(),
@@ -3902,13 +3963,37 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             readonly: true,
             is_online: None,
             is_refreshing: None,
-        }]);
+        }];
+        let config = load_app_config()?;
+        let discovered_peers = if let Some(p2p) = _app.state::<crate::P2pState>().0.read().await.clone()
+        {
+            p2p.snapshot()
+                .await
+                .peers
+                .into_iter()
+                .map(|peer| (peer.endpoint_id.clone(), peer))
+                .collect::<HashMap<_, _>>()
+        } else {
+            HashMap::new()
+        };
+        for library in &config.libraries {
+            if let shade_io::LibraryConfig::Peer(config) = library {
+                let discovered = discovered_peers.get(&config.peer_id);
+                libraries.push(peer_library_for_endpoint(
+                    &config.peer_id,
+                    discovered
+                        .map(|peer| peer.name.as_str())
+                        .unwrap_or(config.peer_id.as_str()),
+                    discovered.is_some(),
+                ));
+            }
+        }
+        return Ok(ordered_library_entries(libraries, &config.library_order));
     }
 
     #[cfg(target_os = "ios")]
     {
-        let _ = _app;
-        return Ok(vec![MediaLibrary {
+        let mut libraries = vec![MediaLibrary {
             id: "photos".into(),
             name: "Photos".into(),
             kind: "directory".into(),
@@ -3917,7 +4002,32 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             readonly: true,
             is_online: None,
             is_refreshing: None,
-        }]);
+        }];
+        let config = load_app_config()?;
+        let discovered_peers = if let Some(p2p) = _app.state::<crate::P2pState>().0.read().await.clone()
+        {
+            p2p.snapshot()
+                .await
+                .peers
+                .into_iter()
+                .map(|peer| (peer.endpoint_id.clone(), peer))
+                .collect::<HashMap<_, _>>()
+        } else {
+            HashMap::new()
+        };
+        for library in &config.libraries {
+            if let shade_io::LibraryConfig::Peer(config) = library {
+                let discovered = discovered_peers.get(&config.peer_id);
+                libraries.push(peer_library_for_endpoint(
+                    &config.peer_id,
+                    discovered
+                        .map(|peer| peer.name.as_str())
+                        .unwrap_or(config.peer_id.as_str()),
+                    discovered.is_some(),
+                ));
+            }
+        }
+        return Ok(ordered_library_entries(libraries, &config.library_order));
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -4577,7 +4687,9 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         if !allow {
             return Err(anyhow::anyhow!("peer access denied"));
         }
-        pair_peer(&peer_endpoint_id).map_err(anyhow::Error::msg)
+        pair_peer(&peer_endpoint_id).map_err(anyhow::Error::msg)?;
+        emit_peer_paired(&self.app, &peer_endpoint_id).map_err(anyhow::Error::msg)?;
+        Ok(())
     }
 
     async fn list_pictures(&self) -> anyhow::Result<Vec<shade_p2p::SharedPicture>> {

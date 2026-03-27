@@ -53,6 +53,9 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
+        NSBonjourServices:
+          - _irohv1._udp
+        NSLocalNetworkUsageDescription: "Shade needs local network access to discover nearby Shade peers and sync media directly between devices."
         NSPhotoLibraryUsageDescription: "Shade needs access to your photo library to let you edit your photos."
     entitlements:
       path: shade-tauri_iOS/shade-tauri_iOS.entitlements

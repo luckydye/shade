@@ -17,9 +17,12 @@
         "height": 900,
         "minWidth": 900,
         "minHeight": 600,
-        "theme": "Dark",
-        "titleBarStyle": "Transparent",
-        "backgroundColor": "#000000",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 26
+        },
         "decorations": true,
         "resizable": true
       }
@@ -36,6 +39,9 @@
   },
   "bundle": {
     "active": true,
+    "iOS": {
+      "developmentTeam": "V54JVP5QGU"
+    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

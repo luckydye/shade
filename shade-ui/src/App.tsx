@@ -25,8 +25,10 @@ const App: Component = () => {
   });
 
   return (
-    <div class="app-gradient flex h-screen w-screen select-none flex-col overflow-hidden text-[var(--text)]">
-      <Toolbar />
+    <div class="app-gradient relative flex h-screen w-screen select-none flex-col overflow-hidden text-[var(--text)]">
+      <div class="mt-[env(safe-area-inset-top)]">
+        <Toolbar />
+      </div>
       <div class="flex min-h-0 flex-1">
         <MediaView />
         <div

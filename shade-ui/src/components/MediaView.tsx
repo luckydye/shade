@@ -46,7 +46,6 @@ import {
 import {
   addPeerLibrary,
   getCachedPeerLibraryItems,
-  listPeerLibraries,
   loadPeerLibraryItemsCachedOrRemote,
   type PeerLibrary,
   type PeerLibraryItem,
@@ -57,14 +56,18 @@ import {
   openImage,
   openPeerImage,
   setTransitionMediaSrc,
+  showMediaView,
   state,
   transitionMediaSrc,
 } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
+import { ActionButton } from "./ActionButton";
 
 type LibraryEntry = MediaLibrary | PeerLibrary;
+type BackendPeerLibrary = MediaLibrary & { kind: "peer" };
+type VisiblePeerLibrary = PeerLibrary | BackendPeerLibrary;
 
 type MediaItemMetadata = {
   hasSnapshots: boolean;
@@ -131,16 +134,20 @@ const MENU_ITEM_BUTTON_CLASS =
 const MENU_DANGER_ITEM_BUTTON_CLASS =
   "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
 const INPUT_CLASS =
-  "h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+  "h-10 md:h-8 w-full rounded-full md:rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-4 md:px-2 text-base md:text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const EMPTY_STATE_CLASS =
-  "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
+  "px-3 py-4 text-sm text-[var(--text-faint)]";
 const EMPTY_STATE_PANEL_CLASS =
   "mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-6 py-8 text-center";
 const LIBRARY_TAB_BASE_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 
-function isPeerLibrary(library: LibraryEntry | null): library is PeerLibrary {
+function isPeerLibrary(library: LibraryEntry | null): library is VisiblePeerLibrary {
   return library?.kind === "peer";
+}
+
+function peerLibraryPeerId(library: VisiblePeerLibrary) {
+  return "peerId" in library ? library.peerId : library.id.slice("peer:".length);
 }
 
 function isLocalLibraryRefreshing(library: LibraryEntry | null) {
@@ -157,7 +164,7 @@ function isLibraryOffline(library: LibraryEntry | null, onlinePeerIds: Set<strin
     return false;
   }
   if (isPeerLibrary(library)) {
-    return !onlinePeerIds.has(library.peerId);
+    return !onlinePeerIds.has(peerLibraryPeerId(library));
   }
   return library.is_online === false;
 }
@@ -783,8 +790,6 @@ const MediaTile: Component<{
 export const MediaView: Component = () => {
   const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
-  const [peerLibraries, { mutate: setPeerLibraries, refetch: refetchPeerLibraries }] =
-    createResource(listPeerLibraries);
   const [items, { refetch: refetchItems }] = createResource(
     selectedLibraryId,
     loadLibraryData,
@@ -1021,10 +1026,7 @@ export const MediaView: Component = () => {
     p2pState.peers.map((peer) => peer.endpoint_id),
   );
   const onlinePeerIds = createMemo(() => new Set(discoveredPeerIds()));
-  const libraryEntries = createMemo<LibraryEntry[]>(() => [
-    ...(libraries() ?? []),
-    ...(peerLibraries() ?? []),
-  ]);
+  const libraryEntries = createMemo<LibraryEntry[]>(() => libraries() ?? []);
   const orderedLibraryEntries = createMemo(() => {
     const entries = libraryEntries();
     const order = mergeLibraryOrder(
@@ -1043,7 +1045,9 @@ export const MediaView: Component = () => {
   });
   const suggestedPeers = createMemo(() => {
     const addedPeerIds = new Set(
-      (peerLibraries() ?? []).map((library) => library.peerId),
+      libraryEntries()
+        .filter(isPeerLibrary)
+        .map((library) => peerLibraryPeerId(library)),
     );
     return p2pState.peers.filter((peer) => !addedPeerIds.has(peer.endpoint_id));
   });
@@ -1127,7 +1131,7 @@ export const MediaView: Component = () => {
     if (!library) {
       return "";
     }
-    return isPeerLibrary(library) ? library.peerId : (library.path ?? "");
+    return isPeerLibrary(library) ? peerLibraryPeerId(library) : (library.path ?? "");
   });
   const selectedLibraryIsRefreshing = createMemo(() =>
     isLocalLibraryRefreshing(selectedLibrary()),
@@ -1398,8 +1402,25 @@ export const MediaView: Component = () => {
 
   onMount(() => {
     startP2pPolling();
-    void refetchPeerLibraries();
     void isTauriRuntime().then(setSupportsS3Libraries);
+    void isTauriRuntime().then(async (isTauri) => {
+      if (!isTauri) {
+        return;
+      }
+      const { listen } = await import("@tauri-apps/api/event");
+      const unlisten = await listen<{ peer_endpoint_id: string }>(
+        "peer-paired",
+        async (event) => {
+          const peerId = event.payload.peer_endpoint_id;
+          const peer = p2pState.peers.find((entry) => entry.endpoint_id === peerId);
+          await addPeerLibrary(peerId, peer?.name ?? peerId);
+          await refetchLibraries();
+        },
+      );
+      onCleanup(() => {
+        void unlisten();
+      });
+    });
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
     }, 3000);
@@ -1630,15 +1651,9 @@ export const MediaView: Component = () => {
       if (!peer) {
         throw new Error("peer is no longer available");
       }
-      const nextLibrary = await addPeerLibrary(peerId, peer.name);
-      setPeerLibraries((current) => {
-        const libraries = current ?? [];
-        if (libraries.some((library) => library.peerId === peerId)) {
-          return libraries;
-        }
-        return [...libraries, nextLibrary];
-      });
-      setSelectedLibraryId(nextLibrary.id);
+      await addPeerLibrary(peerId, peer.name);
+      await refetchLibraries();
+      setSelectedLibraryId(`peer:${peerId}`);
       await refetchCachedLibraryItems();
       await refetchItems();
     } catch (err) {
@@ -1657,10 +1672,9 @@ export const MediaView: Component = () => {
     setError(null);
     try {
       if (isPeerLibrary(library)) {
-        await removePeerLibrary(library.peerId);
-        setPeerLibraries((current) =>
-          (current ?? []).filter((entry) => entry.id !== library.id),
-        );
+        await removeMediaLibrary(library.id);
+        await removePeerLibrary(peerLibraryPeerId(library));
+        await refetchLibraries();
         await refetchCachedLibraryItems();
         return;
       }
@@ -1922,12 +1936,14 @@ export const MediaView: Component = () => {
   const shellClass = () =>
     isEditorStrip()
       ? "hidden w-[112px] shrink-0 border-r border-[var(--border)] bg-[var(--panel-bg)] lg:flex lg:flex-col"
-      : "mt-[calc(env(safe-area-inset-top)+3.5rem)] flex flex-1 flex-col overflow-hidden md:mt-0";
+      : "flex flex-1 flex-col overflow-hidden md:mt-0";
   const scrollClass = () =>
     isEditorStrip()
       ? "media-scroll h-full overflow-y-auto px-2 py-3"
       : "media-scroll h-full overflow-y-auto p-4 md:p-6";
 
+  const hasImage = () => state.canvasWidth > 0 || state.isLoading;
+  
   return (
     <section
       ref={mediaShellRef}
@@ -1960,12 +1976,12 @@ export const MediaView: Component = () => {
       </Show>
       <Show when={!isEditorStrip()}>
         <div
-          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-3 md:px-6`}
+          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-4 md:px-6`}
         >
           <div class="flex w-full flex-wrap items-center gap-3">
             <div
               ref={libraryTabsRef}
-              class="relative min-w-full md:min-w-0 gap-2 flex flex-1 overflow-x-auto"
+              class="relative gap-2 flex flex-1 overflow-x-auto"
             >
               <div
                 aria-hidden="true"
@@ -1996,8 +2012,6 @@ export const MediaView: Component = () => {
                       onPointerUp={pinned ? undefined : handleLibraryPointerUp}
                       onPointerCancel={pinned ? undefined : handleLibraryPointerCancel}
                       class={`${LIBRARY_TAB_BASE_CLASS} ${
-                        pinned ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-                      } ${
                         selectedLibraryId() === library.id
                           ? offline
                             ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
@@ -2023,7 +2037,7 @@ export const MediaView: Component = () => {
                             }`}
                           />
                         )}
-                        <span>{library.name}</span>
+                        <span class="block max-w-[140px] overflow-hidden text-ellipsis">{library.name}</span>
                       </span>
                     </Button>
                   );
@@ -2037,11 +2051,11 @@ export const MediaView: Component = () => {
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
-                    {peer.name}
+                    <span class="block max-w-[140px] overflow-hidden text-ellipsis">{peer.name}</span>
                   </Button>
                 )}
               </For>
-              <div class="relative flex shrink-0 items-center" ref={addDropdownRef}>
+              <div class="hidden md:flex relative shrink-0 items-center" ref={addDropdownRef}>
                 <Button
                   type="button"
                   class={`${LIBRARY_TAB_BASE_CLASS} w-full border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] md:w-auto`}
@@ -2104,9 +2118,9 @@ export const MediaView: Component = () => {
                 </div>
               </Portal>
             </Show>
-            <div class="flex gap-3 w-full md:w-auto">
+            <div class="relative flex items-center" ref={libraryActionsRef}>
               <Show when={selectedLibrary()}>
-                <label class="w-full md:w-56">
+                <label class="hidden md:block w-full w-56">
                   <input
                     type="text"
                     value={filenameFilter()}
@@ -2117,50 +2131,49 @@ export const MediaView: Component = () => {
                   />
                 </label>
               </Show>
-              <div class="relative flex items-center" ref={libraryActionsRef}>
-                <Button
-                  type="button"
-                  class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
-                  disabled={isSubmitting() || !selectedLibrary()}
-                  aria-label="Library actions"
-                  aria-haspopup="menu"
-                  aria-expanded={showLibraryActions() ? "true" : "false"}
-                  onClick={() => setShowLibraryActions((current) => !current)}
+              
+              <Button
+                type="button"
+                class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
+                disabled={isSubmitting() || !selectedLibrary()}
+                aria-label="Library actions"
+                aria-haspopup="menu"
+                aria-expanded={showLibraryActions() ? "true" : "false"}
+                onClick={() => setShowLibraryActions((current) => !current)}
+              >
+                •••
+              </Button>
+              <Show when={showLibraryActions()}>
+                <div
+                  role="menu"
+                  class="absolute right-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
                 >
-                  •••
-                </Button>
-                <Show when={showLibraryActions()}>
-                  <div
-                    role="menu"
-                    class="absolute right-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    class={MENU_ITEM_BUTTON_CLASS}
+                    disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+                    onClick={() => {
+                      setShowLibraryActions(false);
+                      void handleRefreshLibrary();
+                    }}
                   >
-                    <Button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_ITEM_BUTTON_CLASS}
-                      disabled={!canRefreshSelectedLibrary() || isSubmitting()}
-                      onClick={() => {
-                        setShowLibraryActions(false);
-                        void handleRefreshLibrary();
-                      }}
-                    >
-                      Refresh
-                    </Button>
-                    <Button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_DANGER_ITEM_BUTTON_CLASS}
-                      disabled={!selectedLibrary()?.removable || isSubmitting()}
-                      onClick={() => {
-                        setShowLibraryActions(false);
-                        void handleRemoveLibrary();
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </Show>
-              </div>
+                    Refresh
+                  </Button>
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    class={MENU_DANGER_ITEM_BUTTON_CLASS}
+                    disabled={!selectedLibrary()?.removable || isSubmitting()}
+                    onClick={() => {
+                      setShowLibraryActions(false);
+                      void handleRemoveLibrary();
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </Show>
             </div>
             <Show when={showS3Form()}>
               <div class="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 md:grid-cols-3">
@@ -2271,6 +2284,34 @@ export const MediaView: Component = () => {
         </div>
       </Show>
       <div class="relative flex-1 min-h-0">
+        <Show when={hasImage() && state.currentView === "editor"}>
+          <div class="px-3 pt-3 pb-2 w-full">
+            <ActionButton
+              label="Back"
+              icon={
+                <svg
+                  width="24px"
+                  height="24px"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  class="h-4 w-4"
+                >
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              }
+              onClick={() => {
+                if (document.startViewTransition) {
+                  document.startViewTransition(showMediaView);
+                } else {
+                  showMediaView();
+                }
+              }}
+            />
+          </div>
+        </Show>
+      
         <div
           ref={scrollRef}
           class={scrollClass()}
@@ -2510,7 +2551,7 @@ export const MediaView: Component = () => {
       </div>
 
       <div
-        class={`flex flex-col gap-2 border-t border-[var(--border)] ${
+        class={`hidden md:flex flex-col gap-2 border-t border-[var(--border)] ${
           isEditorStrip() ? "px-3 py-2" : "px-4 py-3 md:px-6"
         }`}
       >
@@ -2562,6 +2603,20 @@ export const MediaView: Component = () => {
           </p>
         </Show>
       </div>
+      
+      <Show when={selectedLibrary()}>
+        <div class="fixed left-0 right-0 w-auto bottom-[env(safe-area-inset-bottom)] px-7">
+          <input
+            type="text"
+            value={filenameFilter()}
+            onInput={(event) => setFilenameFilter(event.currentTarget.value)}
+            class={INPUT_CLASS}
+            placeholder="Search names or tags"
+            aria-label="Search names or tags"
+          />
+        </div>
+      </Show>
+      
       <Show when={uploadProgress()}>
         {(progress) => (
           <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">

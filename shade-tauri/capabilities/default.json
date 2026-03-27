@@ -7,7 +7,7 @@
     "core:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "core:window:default", 
+    "core:window:default",
     "core:window:allow-start-dragging"
   ]
 }

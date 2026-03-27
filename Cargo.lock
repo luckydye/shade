@@ -835,6 +835,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-tauri-wrapper"
+version = "0.1.0"
+
+[[package]]
 name = "cargo_metadata"
 version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

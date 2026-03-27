@@ -57,37 +57,27 @@ pub fn run() {
             )?);
             let pairing_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
             app.manage(PeerPairingState(pairing_lock.clone()));
-            #[cfg(not(target_os = "ios"))]
-            {
-                let handle = app.handle().clone();
-                let secret_key = commands::load_p2p_secret_key()?;
-                let awareness = std::sync::Arc::new(tokio::sync::Mutex::new(
-                    shade_p2p::AwarenessState::default(),
-                ));
-                app.manage(AwarenessStateHandle(awareness.clone()));
-                let p2p = std::sync::Arc::new(
-                    tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
-                        secret_key,
-                        std::sync::Arc::new(commands::AppPeerProvider::new(
-                            handle,
-                            awareness,
-                            pairing_lock,
-                        )),
-                    ))
-                    .map_err(|error| error.to_string())?,
-                );
-                commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
-                tauri::async_runtime::block_on(async {
-                    *app.state::<P2pState>().0.write().await = Some(p2p);
-                });
-            }
-            #[cfg(target_os = "ios")]
-            {
-                let awareness = std::sync::Arc::new(tokio::sync::Mutex::new(
-                    shade_p2p::AwarenessState::default(),
-                ));
-                app.manage(AwarenessStateHandle(awareness));
-            }
+            let handle = app.handle().clone();
+            let secret_key = commands::load_p2p_secret_key()?;
+            let awareness = std::sync::Arc::new(tokio::sync::Mutex::new(
+                shade_p2p::AwarenessState::default(),
+            ));
+            app.manage(AwarenessStateHandle(awareness.clone()));
+            let p2p = std::sync::Arc::new(tauri::async_runtime::block_on(
+                shade_p2p::LocalPeerDiscovery::bind(
+                    secret_key,
+                    std::sync::Arc::new(commands::AppPeerProvider::new(
+                        handle,
+                        awareness,
+                        pairing_lock,
+                    )),
+                ),
+            )
+            .map_err(|error| error.to_string())?);
+            commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
+            tauri::async_runtime::block_on(async {
+                *app.state::<P2pState>().0.write().await = Some(p2p);
+            });
             commands::spawn_camera_discovery(app.handle().clone());
             commands::prime_missing_library_indexes(&app.handle().clone())?;
             Ok(())
