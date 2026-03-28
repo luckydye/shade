@@ -5,6 +5,13 @@
 
 import type { BrowserDirectoryHandle } from "../browser-media-library";
 import {
+  listBrowserPresets,
+  loadBrowserPreset,
+  saveBrowserPreset,
+  type BrowserPresetFile,
+  type BrowserPresetLayer,
+} from "../browser-presets";
+import {
   addBrowserMediaLibrary,
   isBrowserMountedLibrary,
   isBrowserMountedPath,
@@ -941,12 +948,182 @@ export async function refreshLibraryIndex(libraryId: string): Promise<void> {
   await inv("refresh_library_index", { libraryId });
 }
 
+function serializeBrowserPresetLayers(layers: LayerInfo[]): BrowserPresetLayer[] {
+  return layers
+    .filter((layer) => layer.kind !== "image")
+    .map((layer) => {
+      if (layer.kind !== "adjustment" && layer.kind !== "crop") {
+        throw new Error(`unsupported preset layer kind: ${layer.kind}`);
+      }
+      if (layer.has_mask && !layer.mask_params) {
+        throw new Error("browser presets only support gradient masks");
+      }
+      if (layer.kind === "crop" && !layer.crop) {
+        throw new Error("crop layer is missing crop values");
+      }
+      return {
+        kind: layer.kind,
+        name: layer.name ?? null,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        adjustments: layer.adjustments ?? null,
+        crop: layer.crop ?? null,
+        mask_params: layer.mask_params ?? null,
+      };
+    });
+}
+
+function requiredNumber(value: number | null | undefined, label: string) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`preset mask is missing ${label}`);
+  }
+  return value;
+}
+
+async function applyBrowserPresetAdjustment(layerIdx: number, adjustments: AdjustmentValues) {
+  if (adjustments.tone) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "tone",
+      exposure: adjustments.tone.exposure,
+      contrast: adjustments.tone.contrast,
+      blacks: adjustments.tone.blacks,
+      whites: adjustments.tone.whites,
+      highlights: adjustments.tone.highlights,
+      shadows: adjustments.tone.shadows,
+      gamma: adjustments.tone.gamma,
+    });
+  }
+  if (adjustments.color) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "color",
+      saturation: adjustments.color.saturation,
+      vibrancy: adjustments.color.vibrancy,
+      temperature: adjustments.color.temperature,
+      tint: adjustments.color.tint,
+    });
+  }
+  if (adjustments.curves) {
+    if (!adjustments.curves.control_points) {
+      throw new Error("preset curves are missing control points");
+    }
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "curves",
+      curve_points: adjustments.curves.control_points,
+    });
+  }
+  if (adjustments.vignette) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "vignette",
+      vignette_amount: adjustments.vignette.amount,
+    });
+  }
+  if (adjustments.sharpen) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "sharpen",
+      sharpen_amount: adjustments.sharpen.amount,
+    });
+  }
+  if (adjustments.grain) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "grain",
+      grain_amount: adjustments.grain.amount,
+      grain_size: adjustments.grain.size,
+    });
+  }
+  if (adjustments.glow) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "glow",
+      glow_amount: adjustments.glow.amount,
+    });
+  }
+  if (adjustments.hsl) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "hsl",
+      red_hue: adjustments.hsl.red_hue,
+      red_sat: adjustments.hsl.red_sat,
+      red_lum: adjustments.hsl.red_lum,
+      green_hue: adjustments.hsl.green_hue,
+      green_sat: adjustments.hsl.green_sat,
+      green_lum: adjustments.hsl.green_lum,
+      blue_hue: adjustments.hsl.blue_hue,
+      blue_sat: adjustments.hsl.blue_sat,
+      blue_lum: adjustments.hsl.blue_lum,
+    });
+  }
+  if (adjustments.denoise) {
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "denoise",
+      denoise_luma_strength: adjustments.denoise.luma_strength,
+      denoise_chroma_strength: adjustments.denoise.chroma_strength,
+      denoise_mode: adjustments.denoise.mode,
+    });
+  }
+}
+
+async function applyBrowserPresetLayer(layer: BrowserPresetLayer) {
+  const layerIdx = await addLayer(layer.kind);
+  if (layer.kind === "crop") {
+    if (!layer.crop) {
+      throw new Error("crop layer is missing crop values");
+    }
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "crop",
+      crop_x: layer.crop.x,
+      crop_y: layer.crop.y,
+      crop_width: layer.crop.width,
+      crop_height: layer.crop.height,
+      crop_rotation: layer.crop.rotation,
+    });
+  } else if (layer.adjustments) {
+    await applyBrowserPresetAdjustment(layerIdx, layer.adjustments);
+  }
+  if (layer.mask_params) {
+    if (layer.mask_params.kind === "linear") {
+      await applyGradientMask({
+        kind: "linear",
+        layer_idx: layerIdx,
+        x1: requiredNumber(layer.mask_params.x1, "x1"),
+        y1: requiredNumber(layer.mask_params.y1, "y1"),
+        x2: requiredNumber(layer.mask_params.x2, "x2"),
+        y2: requiredNumber(layer.mask_params.y2, "y2"),
+      });
+    } else {
+      await applyGradientMask({
+        kind: "radial",
+        layer_idx: layerIdx,
+        cx: requiredNumber(layer.mask_params.cx, "cx"),
+        cy: requiredNumber(layer.mask_params.cy, "cy"),
+        radius: requiredNumber(layer.mask_params.radius, "radius"),
+      });
+    }
+  }
+  if (layer.name !== null) {
+    await renameLayer(layerIdx, layer.name);
+  }
+  if (layer.opacity !== 1) {
+    await setLayerOpacity(layerIdx, layer.opacity);
+  }
+  if (!layer.visible) {
+    await setLayerVisible(layerIdx, false);
+  }
+}
+
 export async function listPresets(): Promise<PresetInfo[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("list_presets") as Promise<PresetInfo[]>;
   }
-  throw new Error("listPresets is only implemented for Tauri");
+  return listBrowserPresets();
 }
 
 export async function savePreset(name: string): Promise<PresetInfo> {
@@ -954,7 +1131,11 @@ export async function savePreset(name: string): Promise<PresetInfo> {
     const inv = await getTauriInvoke();
     return inv("save_preset", { name }) as Promise<PresetInfo>;
   }
-  throw new Error("savePreset is only implemented for Tauri");
+  const stack = await getLayerStack();
+  return saveBrowserPreset(name, {
+    version: 1,
+    layers: serializeBrowserPresetLayers(stack.layers),
+  } satisfies BrowserPresetFile);
 }
 
 export async function loadPreset(name: string): Promise<void> {
@@ -963,7 +1144,19 @@ export async function loadPreset(name: string): Promise<void> {
     await inv("load_preset", { name });
     return;
   }
-  throw new Error("loadPreset is only implemented for Tauri");
+  const preset = await loadBrowserPreset(name);
+  const stack = await getLayerStack();
+  if (!stack.layers.some((layer) => layer.kind === "image")) {
+    throw new Error("cannot load a preset without a loaded image");
+  }
+  for (let idx = stack.layers.length - 1; idx >= 0; idx -= 1) {
+    if (stack.layers[idx]?.kind !== "image") {
+      await deleteLayer(idx);
+    }
+  }
+  for (const layer of preset.layers) {
+    await applyBrowserPresetLayer(layer);
+  }
 }
 
 export async function saveSnapshot(): Promise<EditSnapshotInfo> {
