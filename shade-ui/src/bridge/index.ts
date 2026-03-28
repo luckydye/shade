@@ -12,6 +12,13 @@ import {
   type BrowserPresetLayer,
 } from "../browser-presets";
 import {
+  getBrowserCurrentSnapshot,
+  getBrowserSnapshot,
+  listBrowserSnapshots,
+  markBrowserSnapshotCurrent,
+  saveBrowserSnapshot,
+} from "../browser-snapshots";
+import {
   addBrowserMediaLibrary,
   isBrowserMountedLibrary,
   isBrowserMountedPath,
@@ -1159,20 +1166,24 @@ export async function loadPreset(name: string): Promise<void> {
   }
 }
 
-export async function saveSnapshot(): Promise<EditSnapshotInfo> {
+export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("save_snapshot") as Promise<EditSnapshotInfo>;
   }
-  throw new Error("saveSnapshot is only implemented for Tauri");
+  const stack = await getLayerStack();
+  if (!stack.layers.some((layer) => layer.kind === "image")) {
+    throw new Error("cannot save a snapshot without a loaded image");
+  }
+  return saveBrowserSnapshot(serializeBrowserPresetLayers(stack.layers), imagePath ?? null);
 }
 
-export async function listSnapshots(): Promise<SnapshotInfo[]> {
+export async function listSnapshots(imagePath?: string | null): Promise<SnapshotInfo[]> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("list_snapshots") as Promise<SnapshotInfo[]>;
   }
-  throw new Error("listSnapshots is only implemented for Tauri");
+  return listBrowserSnapshots(imagePath ?? null);
 }
 
 export async function listMediaRatings(
@@ -1197,13 +1208,45 @@ export async function setMediaRating(params: MediaRatingParams): Promise<void> {
   throw new Error("setMediaRating is only implemented for Tauri");
 }
 
+/**
+ * Applies the current snapshot for the given image path to the already-loaded image.
+ * Returns true if a snapshot was applied, false if there was nothing to restore.
+ * No-op on Tauri (the native runtime restores edit state automatically).
+ */
+export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<boolean> {
+  if (await isTauriRuntime()) {
+    return false;
+  }
+  const snapshot = await getBrowserCurrentSnapshot(imagePath);
+  if (!snapshot) {
+    return false;
+  }
+  for (const layer of snapshot.layers) {
+    await applyBrowserPresetLayer(layer);
+  }
+  return true;
+}
+
 export async function loadSnapshot(id: string): Promise<void> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("load_snapshot", { params: { id } });
     return;
   }
-  throw new Error("loadSnapshot is only implemented for Tauri");
+  const record = await getBrowserSnapshot(id);
+  const stack = await getLayerStack();
+  if (!stack.layers.some((layer) => layer.kind === "image")) {
+    throw new Error("cannot load a snapshot without a loaded image");
+  }
+  for (let idx = stack.layers.length - 1; idx >= 0; idx -= 1) {
+    if (stack.layers[idx]?.kind !== "image") {
+      await deleteLayer(idx);
+    }
+  }
+  for (const layer of record.layers) {
+    await applyBrowserPresetLayer(layer);
+  }
+  await markBrowserSnapshotCurrent(id);
 }
 
 export async function addLayer(kind: string): Promise<number> {

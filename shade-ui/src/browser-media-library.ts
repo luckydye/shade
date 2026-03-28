@@ -3,6 +3,7 @@ import type {
   LibraryImageListing,
   MediaLibrary,
 } from "./bridge/index";
+import { getBrowserSnapshotPathMap } from "./browser-snapshots";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;
@@ -224,14 +225,18 @@ function toMediaLibrary(record: BrowserMediaLibraryRecord): MediaLibrary {
   };
 }
 
-function toLibraryImage(record: BrowserMediaItemRecord): LibraryImage {
+function toLibraryImage(
+  record: BrowserMediaItemRecord,
+  snapshotMap: Map<string, string>,
+): LibraryImage {
+  const latestSnapshotId = snapshotMap.get(record.path) ?? null;
   return {
     path: record.path,
     name: record.name,
     modified_at: record.modified_at,
     metadata: {
-      has_snapshots: false,
-      latest_snapshot_id: null,
+      has_snapshots: latestSnapshotId !== null,
+      latest_snapshot_id: latestSnapshotId,
       rating: null,
       tags: [],
     },
@@ -480,10 +485,13 @@ export async function listBrowserLibraryImages(
     throw new Error(`mounted library not found: ${libraryId}`);
   }
   await assertReadable(library.rootHandle);
-  const items = await scanDirectory(library.rootHandle, library.id);
+  const [items, snapshotMap] = await Promise.all([
+    scanDirectory(library.rootHandle, library.id),
+    getBrowserSnapshotPathMap(),
+  ]);
   await replaceLibraryItems(library, items);
   return {
-    items: items.map(toLibraryImage),
+    items: items.map((item) => toLibraryImage(item, snapshotMap)),
     is_complete: true,
   };
 }

@@ -168,6 +168,12 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       sourceBitDepth: info.source_bit_depth,
     });
     await refreshLayerStack();
+    if (artboard.source.kind === "path") {
+      const restored = await bridge.restoreCurrentBrowserSnapshot(artboard.source.path);
+      if (restored) {
+        await refreshLayerStack();
+      }
+    }
     resumePreview();
     await refreshPreview();
   } catch (error) {
@@ -366,6 +372,12 @@ async function openImageFrom(
       sourceBitDepth: info.source_bit_depth,
     });
     await refreshLayerStack();
+    if (source.kind === "path") {
+      const restored = await bridge.restoreCurrentBrowserSnapshot(source.path);
+      if (restored) {
+        await refreshLayerStack();
+      }
+    }
     resumePreview();
     await refreshPreview();
   } catch (error) {

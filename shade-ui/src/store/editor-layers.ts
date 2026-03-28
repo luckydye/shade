@@ -1,6 +1,7 @@
 import * as bridge from "../bridge/index";
 import {
   fullCanvasCrop,
+  getSelectedArtboard,
   LayerInfo,
   normalizeCropRect,
   resolveSelectedLayerIdx,
@@ -397,7 +398,9 @@ export async function listPresets() {
 }
 
 export async function listSnapshots() {
-  return bridge.listSnapshots();
+  const artboard = getSelectedArtboard();
+  const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;
+  return bridge.listSnapshots(imagePath);
 }
 
 export async function savePreset(name: string) {
@@ -411,7 +414,9 @@ export async function loadPreset(name: string) {
 }
 
 export async function saveSnapshot() {
-  return bridge.saveSnapshot();
+  const artboard = getSelectedArtboard();
+  const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;
+  return bridge.saveSnapshot(imagePath);
 }
 
 export async function loadSnapshot(id: string) {
