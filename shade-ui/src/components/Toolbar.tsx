@@ -1,10 +1,11 @@
-import type { Component } from "solid-js";
+import { Show, type Component } from "solid-js";
 import { MEDIA_FILE_ACCEPT } from "../media-file-accept";
 import {
   exportImage,
   pickExportTarget,
   openImageFile,
   showEditorView,
+  showMediaView,
   state,
 } from "../store/editor";
 import { Button } from "./Button";
@@ -45,11 +46,26 @@ const SaveIcon = () => (
   </svg>
 );
 
+const BackIcon = () => (
+  <svg
+    width="24px"
+    height="24px"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    class="h-4 w-4"
+  >
+    <path d="M15 18l-6-6 6-6" />
+  </svg>
+);
+
 export const Toolbar: Component = () => {
   let fileInputRef: HTMLInputElement | undefined;
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   const canResumeEditor = () => state.artboards.length > 0 && state.currentView === "media";
   const canExport = () => state.canvasWidth > 0 && state.canvasHeight > 0;
+  const showMobileLibraryButton = () => state.currentView === "editor";
 
   const statusText = () => {
     if (state.loadError) return state.loadError;
@@ -98,7 +114,24 @@ export const Toolbar: Component = () => {
       data-tauri-drag-region
       class="static grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 py-3 backdrop-blur-[18px] md:grid-cols-[56px_minmax(0,1fr)_auto]"
     >
-      <div class="flex h-8 items-center"></div>
+      <div class="flex h-8 items-center">
+        <Show when={showMobileLibraryButton()}>
+          <Button
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] lg:hidden"
+            aria-label="Back to library"
+            onClick={() => {
+              if (document.startViewTransition) {
+                document.startViewTransition(showMediaView);
+              } else {
+                showMediaView();
+              }
+            }}
+          >
+            <BackIcon />
+          </Button>
+        </Show>
+      </div>
 
       <div class="min-w-0 flex justify-center text-center pointer-events-none">
         <Button

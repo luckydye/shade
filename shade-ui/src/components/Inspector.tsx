@@ -107,16 +107,13 @@ interface SliderProps {
 }
 
 const Slider: Component<SliderProps> = (props) => {
-  let trackRef!: HTMLDivElement;
   const [dragging, setDragging] = createSignal(false);
-  let pendingPointer:
-    | {
-        pointerId: number;
-        startX: number;
-        startY: number;
-      }
+  let activePointer:
+    | { pointerId: number; startX: number; startY: number; pointerType: string }
     | null = null;
-
+  let lastTap:
+    | { at: number; x: number; y: number; pointerType: string }
+    | null = null;
   const fraction = () =>
     clamp((props.value - props.min) / (props.max - props.min), 0, 1);
   const defaultFrac = () =>
@@ -125,15 +122,34 @@ const Slider: Component<SliderProps> = (props) => {
   const fillLeft = () => Math.min(fraction(), defaultFrac()) * 100;
   const fillWidth = () => Math.abs(fraction() - defaultFrac()) * 100;
   const accent = () => props.accentColor ?? "var(--curve-stroke)";
-
-  const resolve = (clientX: number) => {
-    const rect = trackRef.getBoundingClientRect();
-    const t = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
-    const raw = props.min + t * (props.max - props.min);
-    const step = props.step ?? 0.01;
-    return clamp(Math.round(raw / step) * step, props.min, props.max);
+  const maybeResetToDefault = (event: PointerEvent & { currentTarget: HTMLInputElement }) => {
+    if (!activePointer || activePointer.pointerId !== event.pointerId) {
+      return;
+    }
+    const moved =
+      Math.hypot(
+        event.clientX - activePointer.startX,
+        event.clientY - activePointer.startY,
+      ) > 10;
+    const pointerType = activePointer.pointerType;
+    activePointer = null;
+    if (moved) {
+      lastTap = null;
+      return;
+    }
+    const now = performance.now();
+    if (
+      lastTap &&
+      lastTap.pointerType === pointerType &&
+      now - lastTap.at <= 300 &&
+      Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= 24
+    ) {
+      lastTap = null;
+      props.onChange(props.defaultValue);
+      return;
+    }
+    lastTap = { at: now, x: event.clientX, y: event.clientY, pointerType };
   };
-
   return (
     <div class={`${PARAMETER_ROW_CLASS} ${props.class ?? ""}`}>
       <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
@@ -145,70 +161,48 @@ const Slider: Component<SliderProps> = (props) => {
       <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
         {props.valueLabel ?? props.value.toFixed(2)}
       </span>
-      <div
-        ref={trackRef!}
-        class="relative col-start-2 col-end-4 h-7 cursor-pointer select-none touch-none"
-        style={{ "touch-action": "pan-y" }}
-        onPointerDown={(e) => {
-          if (e.pointerType === "mouse") {
-            e.preventDefault();
-            trackRef.setPointerCapture(e.pointerId);
+      <div class="relative col-start-2 col-end-4 h-7 w-full self-center">
+        <input
+          type="range"
+          min={props.min}
+          max={props.max}
+          step={props.step ?? 0.01}
+          value={props.value}
+          aria-label={props.label}
+          class="shade-slider absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+          style={{ "--slider-accent": accent() }}
+          onInput={(event) => {
+            const nextValue = event.currentTarget.valueAsNumber;
+            if (Number.isNaN(nextValue)) {
+              throw new Error("slider input produced NaN");
+            }
+            props.onChange(nextValue);
+          }}
+          onPointerDown={(event) => {
+            activePointer = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              pointerType: event.pointerType,
+            };
             setDragging(true);
-            props.onChange(resolve(e.clientX));
-            return;
-          }
-          pendingPointer = {
-            pointerId: e.pointerId,
-            startX: e.clientX,
-            startY: e.clientY,
-          };
-        }}
-        onPointerMove={(e) => {
-          if (!dragging()) {
-            if (!pendingPointer || pendingPointer.pointerId !== e.pointerId) {
-              return;
-            }
-            const deltaX = Math.abs(e.clientX - pendingPointer.startX);
-            const deltaY = Math.abs(e.clientY - pendingPointer.startY);
-            if (deltaX < 8 && deltaY < 8) {
-              return;
-            }
-            if (deltaY > deltaX) {
-              pendingPointer = null;
-              return;
-            }
-            e.preventDefault();
-            trackRef.setPointerCapture(e.pointerId);
-            pendingPointer = null;
-            setDragging(true);
-            props.onChange(resolve(e.clientX));
-            return;
-          }
-          e.preventDefault();
-          props.onChange(resolve(e.clientX));
-        }}
-        onPointerUp={(e) => {
-          if (!dragging() && pendingPointer?.pointerId === e.pointerId) {
-            pendingPointer = null;
-            props.onChange(resolve(e.clientX));
-            return;
-          }
-          if (trackRef.hasPointerCapture(e.pointerId))
-            trackRef.releasePointerCapture(e.pointerId);
-          pendingPointer = null;
-          setDragging(false);
-        }}
-        onPointerCancel={(e) => {
-          if (trackRef.hasPointerCapture(e.pointerId))
-            trackRef.releasePointerCapture(e.pointerId);
-          pendingPointer = null;
-          setDragging(false);
-        }}
-        onDblClick={() => props.onChange(props.defaultValue)}
-      >
-        <div class="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--slider-track)]" />
+          }}
+          onPointerUp={(event) => {
+            setDragging(false);
+            maybeResetToDefault(event);
+          }}
+          onPointerCancel={() => {
+            activePointer = null;
+            setDragging(false);
+          }}
+          onBlur={() => {
+            activePointer = null;
+            setDragging(false);
+          }}
+        />
+        <div class="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--slider-track)]" />
         <div
-          class="absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full"
+          class="pointer-events-none absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full"
           style={{
             left: `${fillLeft()}%`,
             width: `${fillWidth()}%`,
@@ -221,12 +215,12 @@ const Slider: Component<SliderProps> = (props) => {
         />
         <Show when={isBipolar()}>
           <div
-            class="absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--slider-notch)]"
+            class="pointer-events-none absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--slider-notch)]"
             style={{ left: `${defaultFrac() * 100}%` }}
           />
         </Show>
         <div
-          class="absolute top-1/2"
+          class="pointer-events-none absolute top-1/2"
           style={{
             left: `${fraction() * 100}%`,
             transform: `translate(-50%, -50%) scale(${dragging() ? 1.2 : 1})`,
@@ -747,7 +741,6 @@ export const Inspector: Component = () => {
   const [presetName, setPresetName] = createSignal("");
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);
-  const [layerNameDraft, setLayerNameDraft] = createSignal("");
   const [editingLayerIdx, setEditingLayerIdx] = createSignal<number | null>(null);
   const [editingLayerName, setEditingLayerName] = createSignal("");
   const [draggedLayerIdx, setDraggedLayerIdx] = createSignal<number | null>(null);
@@ -1863,18 +1856,6 @@ export const Inspector: Component = () => {
 
   createEffect(
     on(
-      () => {
-        const layer = selectedLayer();
-        return `${state.selectedLayerIdx}:${layer?.name ?? ""}`;
-      },
-      () => {
-        setLayerNameDraft(selectedLayer()?.name ?? "");
-      },
-    ),
-  );
-
-  createEffect(
-    on(
       () => state.layers.length,
       () => {
         const idx = editingLayerIdx();
@@ -1952,7 +1933,7 @@ export const Inspector: Component = () => {
     }
   };
 
-  const renderLayerBody = () => {
+  const MobileLayerBody: Component = () => {
     switch (selectedFocus()) {
       case "light":
         return <LightSliders />;
@@ -1977,25 +1958,6 @@ export const Inspector: Component = () => {
       case "denoise":
         return <DenoiseSliders />;
     }
-  };
-
-  const commitSelectedLayerName = async () => {
-    const idx = state.selectedLayerIdx;
-    if (idx < 0) {
-      return;
-    }
-    const layer = selectedLayer();
-    if (!layer) {
-      throw new Error("cannot rename without a selected layer");
-    }
-    const nextName = layerNameDraft().trim();
-    const normalizedName = nextName.length > 0 ? nextName : null;
-    if ((layer.name ?? null) === normalizedName) {
-      setLayerNameDraft(normalizedName ?? "");
-      return;
-    }
-    await renameLayer(idx, normalizedName);
-    setLayerNameDraft(normalizedName ?? "");
   };
 
   const startInlineLayerRename = (idx: number) => {
@@ -2029,34 +1991,6 @@ export const Inspector: Component = () => {
       return;
     }
     await renameLayer(idx, normalizedName);
-  };
-
-  const LayerNameField: Component<{ class?: string }> = (props) => {
-    const layer = () => selectedLayer();
-    return (
-      <Show when={layer()}>
-        {(currentLayer) => (
-          <section class={`flex flex-col gap-2 ${props.class ?? ""}`}>
-            <SectionHeader title="Layer" detail={getLayerDisplayName(currentLayer())} />
-            <input
-              type="text"
-              value={layerNameDraft()}
-              placeholder={getLayerDefaultName(currentLayer().kind)}
-              class={INPUT_CLASS}
-              onInput={(event) => setLayerNameDraft(event.currentTarget.value)}
-              onBlur={() => void commitSelectedLayerName()}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") {
-                  return;
-                }
-                event.preventDefault();
-                event.currentTarget.blur();
-              }}
-            />
-          </section>
-        )}
-      </Show>
-    );
   };
 
   const CropPanel: Component = () => {
@@ -2565,12 +2499,13 @@ export const Inspector: Component = () => {
       fallback={<EmptyState>Open an image and select a layer to edit.</EmptyState>}
     >
       <div class="px-1 flex flex-col gap-3">
-        <LayerNameField />
         <Show
           when={selectedCropLayer()}
           fallback={
             <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
-              <div>{renderLayerBody()}</div>
+              <div>
+                <MobileLayerBody />
+              </div>
             </Show>
           }
         >
@@ -2667,16 +2602,8 @@ export const Inspector: Component = () => {
           <div class="mb-2 h-1.5 w-14 rounded-full bg-[var(--surface-active)]" />
         </div>
 
-        <div class="border-b border-[var(--border)] px-4 pb-3">
-          <InspectorTabs />
-        </div>
-
         <div class="px-4 pt-3 pb-2">
-          <Show when={inspectorTab() === "presets"} fallback={<MobileSelectedLayerPanel />}>
-            <div class="px-1">
-              <PresetsPanel />
-            </div>
-          </Show>
+          <MobileSelectedLayerPanel />
         </div>
 
         <div class="pb-[env(safe-area-inset-bottom)]"></div>
