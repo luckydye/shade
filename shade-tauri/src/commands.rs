@@ -1237,11 +1237,8 @@ fn sync_persisted_peer_names(
         .collect::<Vec<_>>();
     let mut changed = false;
     for (peer_endpoint_id, peer_name) in persisted_peer_names {
-        changed |= shade_io::pair_peer(
-            config,
-            &peer_endpoint_id,
-            Some(peer_name.as_str()),
-        );
+        changed |=
+            shade_io::pair_peer(config, &peer_endpoint_id, Some(peer_name.as_str()));
     }
     changed
 }
@@ -2206,31 +2203,14 @@ pub struct ThumbnailRenderJob {
     response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
 }
 
-fn cancelled_preview_response() -> Result<PreviewFrameResponse, String> {
-    Ok(PreviewFrameResponse {
-        pixels: Vec::new(),
-        width: 0,
-        height: 0,
-    })
-}
-
-fn cancelled_preview_float16_response() -> Result<PreviewFrameFloat16Response, String> {
-    Ok(PreviewFrameFloat16Response {
-        pixels: Vec::new(),
-        width: 0,
-        height: 0,
-    })
-}
-
-fn cancel_render_job(job: RenderJob) {
-    match job {
-        RenderJob::Preview { response, .. } => {
-            let _ = response.send(cancelled_preview_response());
-        }
-        RenderJob::PreviewFloat16 { response, .. } => {
-            let _ = response.send(cancelled_preview_float16_response());
-        }
+fn panic_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        return (*s).to_string();
     }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "render worker panic".to_string()
 }
 
 pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
@@ -2238,16 +2218,27 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
     std::thread::Builder::new()
         .name("shade-render".into())
         .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
+            let runtime = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("failed to create render runtime");
-            let renderer = runtime
-                .block_on(shade_gpu::Renderer::new())
-                .map_err(|e| e.to_string());
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("render worker: failed to create runtime: {e}");
+                    return;
+                }
+            };
+            let renderer = match runtime.block_on(shade_gpu::Renderer::new()) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("render worker: Renderer::new() failed: {e}");
+                    return;
+                }
+            };
+            eprintln!("render worker: ready");
             while let Ok(mut job) = receiver.recv() {
                 while let Ok(next_job) = receiver.try_recv() {
-                    cancel_render_job(job);
+                    drop(job);
                     job = next_job;
                 }
                 match job {
@@ -2259,30 +2250,32 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                         request,
                         response,
                     } => {
-                        let result = match &renderer {
-                            Ok(renderer) => runtime
-                                .block_on(renderer.render_stack_preview(
-                                    &stack,
-                                    sources.as_ref(),
-                                    canvas_width,
-                                    canvas_height,
-                                    request.target_width,
-                                    request.target_height,
-                                    request.crop.map(|crop| shade_gpu::PreviewCrop {
-                                        x: crop.x,
-                                        y: crop.y,
-                                        width: crop.width,
-                                        height: crop.height,
-                                    }),
-                                ))
-                                .map(|pixels| PreviewFrameResponse {
-                                    pixels,
-                                    width: request.target_width,
-                                    height: request.target_height,
-                                })
-                                .map_err(|e| e.to_string()),
-                            Err(error) => Err(error.clone()),
-                        };
+                        let result = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| {
+                                runtime
+                                    .block_on(renderer.render_stack_preview(
+                                        &stack,
+                                        sources.as_ref(),
+                                        canvas_width,
+                                        canvas_height,
+                                        request.target_width,
+                                        request.target_height,
+                                        request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                            x: crop.x,
+                                            y: crop.y,
+                                            width: crop.width,
+                                            height: crop.height,
+                                        }),
+                                    ))
+                                    .map(|pixels| PreviewFrameResponse {
+                                        pixels,
+                                        width: request.target_width,
+                                        height: request.target_height,
+                                    })
+                                    .map_err(|e| e.to_string())
+                            }),
+                        )
+                        .unwrap_or_else(|e| Err(panic_to_string(e)));
                         let _ = response.send(result);
                     }
                     RenderJob::PreviewFloat16 {
@@ -2293,30 +2286,32 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                         request,
                         response,
                     } => {
-                        let result = match &renderer {
-                            Ok(renderer) => runtime
-                                .block_on(renderer.render_stack_preview_f16(
-                                    &stack,
-                                    sources.as_ref(),
-                                    canvas_width,
-                                    canvas_height,
-                                    request.target_width,
-                                    request.target_height,
-                                    request.crop.map(|crop| shade_gpu::PreviewCrop {
-                                        x: crop.x,
-                                        y: crop.y,
-                                        width: crop.width,
-                                        height: crop.height,
-                                    }),
-                                ))
-                                .map(|pixels| PreviewFrameFloat16Response {
-                                    pixels,
-                                    width: request.target_width,
-                                    height: request.target_height,
-                                })
-                                .map_err(|e| e.to_string()),
-                            Err(error) => Err(error.clone()),
-                        };
+                        let result = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| {
+                                runtime
+                                    .block_on(renderer.render_stack_preview_f16(
+                                        &stack,
+                                        sources.as_ref(),
+                                        canvas_width,
+                                        canvas_height,
+                                        request.target_width,
+                                        request.target_height,
+                                        request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                            x: crop.x,
+                                            y: crop.y,
+                                            width: crop.width,
+                                            height: crop.height,
+                                        }),
+                                    ))
+                                    .map(|pixels| PreviewFrameFloat16Response {
+                                        pixels,
+                                        width: request.target_width,
+                                        height: request.target_height,
+                                    })
+                                    .map_err(|e| e.to_string())
+                            }),
+                        )
+                        .unwrap_or_else(|e| Err(panic_to_string(e)));
                         let _ = response.send(result);
                     }
                 }
@@ -2340,29 +2335,34 @@ pub fn spawn_thumbnail_render_worker() -> crossbeam_channel::Sender<ThumbnailRen
                 .map_err(|e| e.to_string());
             while let Ok(job) = receiver.recv() {
                 let result = match &renderer {
-                    Ok(renderer) => runtime
-                        .block_on(renderer.render_stack_preview(
-                            &job.stack,
-                            job.sources.as_ref(),
-                            job.canvas_width,
-                            job.canvas_height,
-                            job.request.target_width,
-                            job.request.target_height,
-                            job.request.crop.map(|crop| shade_gpu::PreviewCrop {
-                                x: crop.x,
-                                y: crop.y,
-                                width: crop.width,
-                                height: crop.height,
-                            }),
-                        ))
-                        .map_err(|e| e.to_string())
-                        .and_then(|pixels| {
-                            encode_jpeg_thumbnail(
-                                pixels,
-                                job.request.target_width,
-                                job.request.target_height,
-                            )
-                        }),
+                    Ok(renderer) => {
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            runtime
+                                .block_on(renderer.render_stack_preview(
+                                    &job.stack,
+                                    job.sources.as_ref(),
+                                    job.canvas_width,
+                                    job.canvas_height,
+                                    job.request.target_width,
+                                    job.request.target_height,
+                                    job.request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        x: crop.x,
+                                        y: crop.y,
+                                        width: crop.width,
+                                        height: crop.height,
+                                    }),
+                                ))
+                                .map_err(|e| e.to_string())
+                                .and_then(|pixels| {
+                                    encode_jpeg_thumbnail(
+                                        pixels,
+                                        job.request.target_width,
+                                        job.request.target_height,
+                                    )
+                                })
+                        }))
+                        .unwrap_or_else(|e| Err(panic_to_string(e)))
+                    }
                     Err(error) => Err(error.clone()),
                 };
                 let _ = job.response.send(result);

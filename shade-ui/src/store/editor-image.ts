@@ -1,12 +1,5 @@
 import * as bridge from "../bridge/index";
 import {
-  fullCanvasCrop,
-  setState,
-  state,
-  type ArtboardSource,
-  type ArtboardState,
-} from "./editor-store";
-import {
   clearPreviewTiles,
   refreshPreview,
   resetPreviewLatencyEstimate,
@@ -15,6 +8,13 @@ import {
   suspendPreview,
 } from "../viewport/preview";
 import { refreshLayerStack } from "./editor-layers";
+import {
+  type ArtboardSource,
+  type ArtboardState,
+  fullCanvasCrop,
+  setState,
+  state,
+} from "./editor-store";
 
 const ARTBOARD_GAP = 96;
 const DEFAULT_PENDING_ARTBOARD_WIDTH = 1600;
@@ -111,8 +111,7 @@ function artboardSourceMatches(a: ArtboardSource, b: ArtboardSource) {
     case "peer": {
       const other = b as ArtboardSource & { kind: "peer" };
       return (
-        a.peerEndpointId === other.peerEndpointId &&
-        a.picture.id === other.picture.id
+        a.peerEndpointId === other.peerEndpointId && a.picture.id === other.picture.id
       );
     }
     default:
@@ -153,16 +152,14 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
     }
     resetPreviewLatencyEstimate();
     clearPreviewTiles();
-    setState(
-      "artboards",
-      (candidate) => candidate.id === artboard.id,
-      {
-        ...artboard,
-        width: info.canvas_width,
-        height: info.canvas_height,
-        sourceBitDepth: info.source_bit_depth,
-      },
-    );
+    setState("artboards", (candidate) => candidate.id === artboard.id, {
+      ...artboard,
+      width: info.canvas_width,
+      height: info.canvas_height,
+      sourceBitDepth: info.source_bit_depth,
+      previewTile: null,
+      backdropTile: null,
+    });
     resetViewportState(info.canvas_width, info.canvas_height);
     setState({
       sourceBitDepth: info.source_bit_depth,
@@ -290,7 +287,8 @@ async function openImageFrom(
   }
   const replacementArtboard =
     mode === "replace"
-      ? state.artboards.find((artboard) => artboard.id === state.selectedArtboardId) ?? null
+      ? (state.artboards.find((artboard) => artboard.id === state.selectedArtboardId) ??
+        null)
       : null;
   const previousSelectedArtboardId = state.selectedArtboardId;
   const pendingSize = replacementArtboard ?? getPendingArtboardSize();
@@ -314,22 +312,18 @@ async function openImageFrom(
   if (!replacementArtboard) {
     setState("artboards", (artboards) => [...artboards, artboard]);
   } else {
-    setState(
-      "artboards",
-      (candidate) => candidate.id === artboard.id,
-      {
-        ...artboard,
-        title: getArtboardTitle(source),
-        source,
-        sourceBitDepth: "Loading",
-        activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
-        activeMediaItemId: activeMediaSelection?.itemId ?? null,
-        activeMediaRating: activeMediaSelection?.rating ?? null,
-        activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
-        previewTile: null,
-        backdropTile: null,
-      },
-    );
+    setState("artboards", (candidate) => candidate.id === artboard.id, {
+      ...artboard,
+      title: getArtboardTitle(source),
+      source,
+      sourceBitDepth: "Loading",
+      activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
+      activeMediaItemId: activeMediaSelection?.itemId ?? null,
+      activeMediaRating: activeMediaSelection?.rating ?? null,
+      activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
+      previewTile: null,
+      backdropTile: null,
+    });
   }
   setPendingEditorState(
     artboard.id,
@@ -349,24 +343,20 @@ async function openImageFrom(
     }
     resetPreviewLatencyEstimate();
     clearPreviewTiles();
-    setState(
-      "artboards",
-      (candidate) => candidate.id === artboard.id,
-      {
-        ...artboard,
-        title: getArtboardTitle(source),
-        width: info.canvas_width,
-        height: info.canvas_height,
-        sourceBitDepth: info.source_bit_depth,
-        source,
-        activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
-        activeMediaItemId: activeMediaSelection?.itemId ?? null,
-        activeMediaRating: activeMediaSelection?.rating ?? null,
-        activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
-        previewTile: null,
-        backdropTile: null,
-      },
-    );
+    setState("artboards", (candidate) => candidate.id === artboard.id, {
+      ...artboard,
+      title: getArtboardTitle(source),
+      width: info.canvas_width,
+      height: info.canvas_height,
+      sourceBitDepth: info.source_bit_depth,
+      source,
+      activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
+      activeMediaItemId: activeMediaSelection?.itemId ?? null,
+      activeMediaRating: activeMediaSelection?.rating ?? null,
+      activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
+      previewTile: null,
+      backdropTile: null,
+    });
     resetViewportState(info.canvas_width, info.canvas_height);
     setState({
       sourceBitDepth: info.source_bit_depth,
@@ -436,11 +426,15 @@ export function closeImage() {
 }
 
 export async function closeArtboard(artboardId: string) {
-  const artboardIndex = state.artboards.findIndex((candidate) => candidate.id === artboardId);
+  const artboardIndex = state.artboards.findIndex(
+    (candidate) => candidate.id === artboardId,
+  );
   if (artboardIndex < 0) {
     throw new Error("artboard not found");
   }
-  const remainingArtboards = state.artboards.filter((candidate) => candidate.id !== artboardId);
+  const remainingArtboards = state.artboards.filter(
+    (candidate) => candidate.id !== artboardId,
+  );
   if (remainingArtboards.length === 0) {
     closeImage();
     return;
@@ -494,7 +488,13 @@ export async function openImage(
 }
 
 export async function openImageFile(file: File, mode: OpenImageMode = "replace") {
-  await openImageFrom(() => bridge.openImageFile(file), { kind: "file", file }, null, null, mode);
+  await openImageFrom(
+    () => bridge.openImageFile(file),
+    { kind: "file", file },
+    null,
+    null,
+    mode,
+  );
 }
 
 export async function openPeerImage(

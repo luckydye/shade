@@ -2502,8 +2502,8 @@ export const MediaView: Component = () => {
       </div>
 
       <div
-        class={`hidden md:flex flex-col gap-2 border-t border-[var(--border)] ${
-          isEditorStrip() ? "px-3 py-2" : "px-4 py-3 md:px-6"
+        class={`hidden flex-col gap-2 border-t border-[var(--border)] ${
+          isEditorStrip() ? "" : "md:flex px-4 py-3 md:px-6"
         }`}
       >
         {displayedError() && (
