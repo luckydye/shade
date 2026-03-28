@@ -6,7 +6,6 @@ import {
   getSelectedArtboard,
   getCommittedCropRect,
   getViewportZoomPercent,
-  isDrawerOpen,
   moveArtboardBy,
   openImageFile,
   offsetViewportCenter,
@@ -1486,9 +1485,6 @@ export const Viewport: Component = () => {
         <div
           ref={containerRef}
           class="relative flex h-full w-full items-center justify-center lg:h-full"
-          style={{
-            height: isDrawerOpen() ? "calc(100% - 30vh)" : undefined,
-          }}
         >
           <canvas
             ref={canvasRef}

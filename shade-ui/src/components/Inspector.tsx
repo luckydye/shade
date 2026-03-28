@@ -1,7 +1,9 @@
 import {
   Component,
   JSX,
+  Match,
   Show,
+  Switch,
   createEffect,
   createMemo,
   createSignal,
@@ -754,8 +756,8 @@ export const Inspector: Component = () => {
   const [curvePointCache, setCurvePointCache] = createSignal(
     new Map<number, ControlPoint[]>(),
   );
-  const [mobileSelectedFocus, setMobileSelectedFocus] =
-    createSignal<MobileLayerFocus>("light");
+  const [pendingAddedLayerFocus, setPendingAddedLayerFocus] =
+    createSignal<MobileLayerFocus | null>(null);
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
   const [maskPickerLayer, setMaskPickerLayer] = createSignal<number | null>(null);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
@@ -1775,15 +1777,12 @@ export const Inspector: Component = () => {
       .map((layer, idx) => ({ layer, idx }))
       .filter(({ layer }) => layer.kind === "adjustment");
 
-  createEffect(() => {
-    const selectedLayerIdx = state.selectedLayerIdx;
-    const overrides = layerFocusOverrides();
-    setMobileSelectedFocus(
-      overrides.get(selectedLayerIdx) ?? inferFocus(state.layers[selectedLayerIdx]),
-    );
-  });
+  const resolvedLayerFocus = (idx: number): MobileLayerFocus =>
+    idx === state.selectedLayerIdx && pendingAddedLayerFocus() !== null
+      ? pendingAddedLayerFocus()!
+      : layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
 
-  const selectedFocus = (): MobileLayerFocus => mobileSelectedFocus();
+  const selectedFocus = (): MobileLayerFocus => resolvedLayerFocus(state.selectedLayerIdx);
 
   const displayedCrop = () =>
     selectedCropLayer()?.crop ?? {
@@ -1827,14 +1826,18 @@ export const Inspector: Component = () => {
 
   const handleAddLayer = async (focus: MobileLayerFocus) => {
     setIsPickerOpen(false);
-    const newIdx =
-      focus === "curves"
-        ? await addLayer("curves", state.layers.length)
-        : await addLayer("adjustment", state.layers.length);
-    setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
-    setMobileSelectedFocus(focus);
-    selectLayer(newIdx);
-    setIsDrawerOpen(true);
+    setPendingAddedLayerFocus(focus);
+    try {
+      const newIdx =
+        focus === "curves"
+          ? await addLayer("curves", state.layers.length)
+          : await addLayer("adjustment", state.layers.length);
+      setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
+      selectLayer(newIdx);
+      setIsDrawerOpen(true);
+    } finally {
+      setPendingAddedLayerFocus(null);
+    }
   };
 
   const handleApplyLinearMask = async (idx: number) => {
@@ -1972,30 +1975,43 @@ export const Inspector: Component = () => {
   };
 
   const MobileLayerBody: Component = () => {
-    switch (selectedFocus()) {
-      case "light":
-        return <LightSliders />;
-      case "levels":
-        return <LevelSliders />;
-      case "color":
-        return <SaturationSliders />;
-      case "wb":
-        return <WhiteBalanceSliders />;
-      case "curves":
-        return <CurvesEditor />;
-      case "grain":
-        return <GrainSliders />;
-      case "glow":
-        return <GlowSlider />;
-      case "vignette":
-        return <VignetteSlider />;
-      case "sharpen":
-        return <SharpenSlider />;
-      case "hsl":
-        return <HslSection />;
-      case "denoise":
-        return <DenoiseSliders />;
-    }
+    return (
+      <Switch>
+        <Match when={selectedFocus() === "light"}>
+          <LightSliders />
+        </Match>
+        <Match when={selectedFocus() === "levels"}>
+          <LevelSliders />
+        </Match>
+        <Match when={selectedFocus() === "color"}>
+          <SaturationSliders />
+        </Match>
+        <Match when={selectedFocus() === "wb"}>
+          <WhiteBalanceSliders />
+        </Match>
+        <Match when={selectedFocus() === "curves"}>
+          <CurvesEditor />
+        </Match>
+        <Match when={selectedFocus() === "grain"}>
+          <GrainSliders />
+        </Match>
+        <Match when={selectedFocus() === "glow"}>
+          <GlowSlider />
+        </Match>
+        <Match when={selectedFocus() === "vignette"}>
+          <VignetteSlider />
+        </Match>
+        <Match when={selectedFocus() === "sharpen"}>
+          <SharpenSlider />
+        </Match>
+        <Match when={selectedFocus() === "hsl"}>
+          <HslSection />
+        </Match>
+        <Match when={selectedFocus() === "denoise"}>
+          <DenoiseSliders />
+        </Match>
+      </Switch>
+    );
   };
 
   const startInlineLayerRename = (idx: number) => {
@@ -2581,14 +2597,12 @@ export const Inspector: Component = () => {
             <div class="media-scroll min-w-0 flex-1 overflow-x-auto">
               <div class="flex items-center gap-1">
                 {adjustmentLayers().map(({ idx }) => {
-                  const focus = () =>
-                    layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
+                  const focus = () => resolvedLayerFocus(idx);
                   const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
                   return (
                     <Button
                       type="button"
                       onClick={() => {
-                        setMobileSelectedFocus(focus());
                         selectLayer(idx);
                         setIsDrawerOpen(true);
                         setIsPickerOpen(false);
