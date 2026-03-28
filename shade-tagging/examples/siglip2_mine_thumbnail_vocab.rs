@@ -45,8 +45,9 @@ async fn main() -> Result<()> {
     let samples = load_samples(&conn, limit).await?;
     let mut labels = BTreeMap::<String, LabelStats>::new();
     for sample in samples {
-        let image = image::load_from_memory(&sample.data)
-            .with_context(|| format!("failed to decode thumbnail for {}", sample.media_id))?;
+        let image = image::load_from_memory(&sample.data).with_context(|| {
+            format!("failed to decode thumbnail for {}", sample.media_id)
+        })?;
         let scores = tagger.score_image_with_vocabulary(
             &TagImage::from_dynamic_image(image),
             &vocabulary,

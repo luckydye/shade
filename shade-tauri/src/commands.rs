@@ -323,13 +323,14 @@ async fn sync_peer_snapshots_for_file_hash(
             }
             continue;
         }
-        let data_bytes = match p2p.get_peer_snapshot_data(peer_endpoint_id, &snap.id).await {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!("failed to fetch snapshot {} from peer: {}", snap.id, e);
-                continue;
-            }
-        };
+        let data_bytes =
+            match p2p.get_peer_snapshot_data(peer_endpoint_id, &snap.id).await {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!("failed to fetch snapshot {} from peer: {}", snap.id, e);
+                    continue;
+                }
+            };
         let layers_json = match String::from_utf8(data_bytes) {
             Ok(j) => j,
             Err(e) => {
@@ -370,7 +371,8 @@ async fn sync_snapshots_from_all_peers_for_file_hash(
     let mut synced_ids = Vec::new();
     for peer in snapshot.peers {
         synced_ids.extend(
-            sync_peer_snapshots_for_file_hash(&peer.endpoint_id, file_hash, p2p, None).await?,
+            sync_peer_snapshots_for_file_hash(&peer.endpoint_id, file_hash, p2p, None)
+                .await?,
         );
     }
     Ok(synced_ids)
@@ -823,7 +825,10 @@ pub async fn max_media_tag_updated_at() -> Result<i64, String> {
         .await
         .map_err(|error| error.to_string())?;
     let max = match rows.next().await.map_err(|error| error.to_string())? {
-        Some(row) => row.get::<Option<i64>>(0).map_err(|e| e.to_string())?.unwrap_or(0),
+        Some(row) => row
+            .get::<Option<i64>>(0)
+            .map_err(|e| e.to_string())?
+            .unwrap_or(0),
         None => 0,
     };
     Ok(max)
@@ -838,7 +843,11 @@ pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
         )
         .await
         .map_err(|error| error.to_string())?;
-    Ok(rows.next().await.map_err(|error| error.to_string())?.is_some())
+    Ok(rows
+        .next()
+        .await
+        .map_err(|error| error.to_string())?
+        .is_some())
 }
 
 async fn load_latest_edit_version(
@@ -1036,7 +1045,8 @@ async fn save_new_snapshot(
             non_image_layer_data(&st.stack),
         )
     };
-    let id = persist_snapshot(&file_hash, source_name.as_deref(), None, None, &data).await?;
+    let id =
+        persist_snapshot(&file_hash, source_name.as_deref(), None, None, &data).await?;
     let mut st = lock_editor_state(state)?;
     st.current_snapshot_id = Some(id.clone());
     Ok(id)
@@ -1187,10 +1197,53 @@ fn is_peer_paired(peer_endpoint_id: &str) -> Result<bool, String> {
     ))
 }
 
-fn pair_peer(peer_endpoint_id: &str) -> Result<(), String> {
+fn pair_peer(peer_endpoint_id: &str, peer_name: Option<&str>) -> Result<(), String> {
     let mut config = load_app_config()?;
-    shade_io::pair_peer(&mut config, peer_endpoint_id);
+    if !shade_io::pair_peer(&mut config, peer_endpoint_id, peer_name) {
+        return Ok(());
+    }
     save_app_config(&config)
+}
+
+async fn discovered_peers_by_endpoint<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> HashMap<String, shade_p2p::LocalPeer> {
+    let Some(p2p) = app.state::<crate::P2pState>().0.read().await.clone() else {
+        return HashMap::new();
+    };
+    p2p.snapshot()
+        .await
+        .peers
+        .into_iter()
+        .map(|peer| (peer.endpoint_id.clone(), peer))
+        .collect()
+}
+
+fn sync_persisted_peer_names(
+    config: &mut shade_io::AppConfig,
+    discovered_peers: &HashMap<String, shade_p2p::LocalPeer>,
+) -> bool {
+    let persisted_peer_names = config
+        .libraries
+        .iter()
+        .filter_map(|library| {
+            let shade_io::LibraryConfig::Peer(peer_config) = library else {
+                return None;
+            };
+            discovered_peers
+                .get(&peer_config.peer_id)
+                .map(|peer| (peer_config.peer_id.clone(), peer.name.clone()))
+        })
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    for (peer_endpoint_id, peer_name) in persisted_peer_names {
+        changed |= shade_io::pair_peer(
+            config,
+            &peer_endpoint_id,
+            Some(peer_name.as_str()),
+        );
+    }
+    changed
 }
 
 fn emit_peer_paired<R: tauri::Runtime>(
@@ -1506,18 +1559,11 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         is_online: Some(pictures_online),
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
     }];
-    let config = load_app_config()?;
-    let discovered_peers = if let Some(p2p) = app.state::<crate::P2pState>().0.read().await.clone()
-    {
-        p2p.snapshot()
-            .await
-            .peers
-            .into_iter()
-            .map(|peer| (peer.endpoint_id.clone(), peer))
-            .collect::<HashMap<_, _>>()
-    } else {
-        HashMap::new()
-    };
+    let mut config = load_app_config()?;
+    let discovered_peers = discovered_peers_by_endpoint(app).await;
+    if sync_persisted_peer_names(&mut config, &discovered_peers) {
+        save_app_config(&config)?;
+    }
     let mut configured_camera_hosts = std::collections::HashSet::new();
     for library in &config.libraries {
         match library {
@@ -1544,6 +1590,7 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
                     &config.peer_id,
                     discovered
                         .map(|peer| peer.name.as_str())
+                        .or(config.name.as_deref())
                         .unwrap_or(config.peer_id.as_str()),
                     discovered.is_some(),
                 ));
@@ -2438,7 +2485,10 @@ pub async fn pair_peer_device<R: tauri::Runtime>(
             .message(format!(
                 "Pair peer {peer_endpoint_id_for_prompt} with this device?"
             ))
-            .buttons(MessageDialogButtons::OkCancelCustom("Pair".into(), "Deny".into()))
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Pair".into(),
+                "Deny".into(),
+            ))
             .blocking_show()
     })
     .await
@@ -2446,7 +2496,12 @@ pub async fn pair_peer_device<R: tauri::Runtime>(
     if !allow {
         return Err("peer pairing denied".to_string());
     }
-    pair_peer(&peer_endpoint_id).map_err(|error| error.to_string())?;
+    let discovered_peer_name = discovered_peers_by_endpoint(&app)
+        .await
+        .remove(&peer_endpoint_id)
+        .map(|peer| peer.name);
+    pair_peer(&peer_endpoint_id, discovered_peer_name.as_deref())
+        .map_err(|error| error.to_string())?;
     emit_peer_paired(&app, &peer_endpoint_id)?;
     Ok(())
 }
@@ -3964,18 +4019,11 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             is_online: None,
             is_refreshing: None,
         }];
-        let config = load_app_config()?;
-        let discovered_peers = if let Some(p2p) = _app.state::<crate::P2pState>().0.read().await.clone()
-        {
-            p2p.snapshot()
-                .await
-                .peers
-                .into_iter()
-                .map(|peer| (peer.endpoint_id.clone(), peer))
-                .collect::<HashMap<_, _>>()
-        } else {
-            HashMap::new()
-        };
+        let mut config = load_app_config()?;
+        let discovered_peers = discovered_peers_by_endpoint(&_app).await;
+        if sync_persisted_peer_names(&mut config, &discovered_peers) {
+            save_app_config(&config)?;
+        }
         for library in &config.libraries {
             if let shade_io::LibraryConfig::Peer(config) = library {
                 let discovered = discovered_peers.get(&config.peer_id);
@@ -3983,6 +4031,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
                     &config.peer_id,
                     discovered
                         .map(|peer| peer.name.as_str())
+                        .or(config.name.as_deref())
                         .unwrap_or(config.peer_id.as_str()),
                     discovered.is_some(),
                 ));
@@ -4003,18 +4052,11 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             is_online: None,
             is_refreshing: None,
         }];
-        let config = load_app_config()?;
-        let discovered_peers = if let Some(p2p) = _app.state::<crate::P2pState>().0.read().await.clone()
-        {
-            p2p.snapshot()
-                .await
-                .peers
-                .into_iter()
-                .map(|peer| (peer.endpoint_id.clone(), peer))
-                .collect::<HashMap<_, _>>()
-        } else {
-            HashMap::new()
-        };
+        let mut config = load_app_config()?;
+        let discovered_peers = discovered_peers_by_endpoint(&_app).await;
+        if sync_persisted_peer_names(&mut config, &discovered_peers) {
+            save_app_config(&config)?;
+        }
         for library in &config.libraries {
             if let shade_io::LibraryConfig::Peer(config) = library {
                 let discovered = discovered_peers.get(&config.peer_id);
@@ -4022,6 +4064,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
                     &config.peer_id,
                     discovered
                         .map(|peer| peer.name.as_str())
+                        .or(config.name.as_deref())
                         .unwrap_or(config.peer_id.as_str()),
                     discovered.is_some(),
                 ));
@@ -4227,16 +4270,14 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             ));
         }
         if library_id.starts_with("s3:") {
-            _app
-                .state::<crate::S3LibraryScanService>()
+            _app.state::<crate::S3LibraryScanService>()
                 .0
                 .refresh_library(
                     &library_index_db_path()?,
                     &resolve_s3_library_config(&library_id)?,
                 )
                 .await?;
-            crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app)
-                .await?;
+            crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app).await?;
             return Ok(());
         }
         let db_path = library_index_db_path()?;
@@ -4246,8 +4287,7 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             .0
             .refresh_library(&db_path, &library_id, library_path)
             .await?;
-        crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app)
-            .await?;
+        crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app).await?;
         Ok(())
     }
 }
@@ -4298,7 +4338,10 @@ pub async fn add_s3_media_library<R: tauri::Runtime>(
         &mut config.libraries,
         shade_io::LibraryConfig::S3(library.clone()),
     );
-    shade_io::append_library_order_id(&mut config.library_order, persisted_library.id.clone());
+    shade_io::append_library_order_id(
+        &mut config.library_order,
+        persisted_library.id.clone(),
+    );
     save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
@@ -4589,7 +4632,10 @@ pub async fn list_snapshots(
 ) -> Result<Vec<SnapshotInfo>, String> {
     let (file_hash, current_snapshot_id) = {
         let st = lock_editor_state(&state)?;
-        (st.current_image_hash.clone(), st.current_snapshot_id.clone())
+        (
+            st.current_image_hash.clone(),
+            st.current_snapshot_id.clone(),
+        )
     };
     let Some(file_hash) = file_hash else {
         return Ok(Vec::new());
@@ -4687,7 +4733,12 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         if !allow {
             return Err(anyhow::anyhow!("peer access denied"));
         }
-        pair_peer(&peer_endpoint_id).map_err(anyhow::Error::msg)?;
+        let discovered_peer_name = discovered_peers_by_endpoint(&self.app)
+            .await
+            .remove(&peer_endpoint_id)
+            .map(|peer| peer.name);
+        pair_peer(&peer_endpoint_id, discovered_peer_name.as_deref())
+            .map_err(anyhow::Error::msg)?;
         emit_peer_paired(&self.app, &peer_endpoint_id).map_err(anyhow::Error::msg)?;
         Ok(())
     }
@@ -4727,9 +4778,17 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let mut list = Vec::new();
-        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!(e.to_string()))? {
-            let id = row.get::<String>(0).map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let created_at = row.get::<i64>(1).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            let id = row
+                .get::<String>(0)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let created_at = row
+                .get::<i64>(1)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             list.push(shade_p2p::SyncSnapshotInfo { id, created_at });
         }
         Ok(list)
@@ -4744,7 +4803,11 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
             )
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!(e.to_string()))? else {
+        let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        else {
             return Err(anyhow::anyhow!("snapshot not found: {id}"));
         };
         let layers_json = row
@@ -4771,8 +4834,10 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let source_name = if let Some(row) =
-                rows.next().await.map_err(|e| anyhow::anyhow!(e.to_string()))?
+            let source_name = if let Some(row) = rows
+                .next()
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?
             {
                 row.get::<Option<String>>(0)
                     .map_err(|e| anyhow::anyhow!(e.to_string()))?
@@ -4789,21 +4854,20 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let (rating, rating_updated_at) =
-                if let Some(row) = rating_rows
+            let (rating, rating_updated_at) = if let Some(row) = rating_rows
                 .next()
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?
             {
-                    let r = row
-                        .get::<i64>(0)
-                        .ok()
-                        .and_then(|value| u8::try_from(value).ok());
-                    let t = row.get::<i64>(1).ok();
-                    (r, t)
-                } else {
-                    (None, None)
-                };
+                let r = row
+                    .get::<i64>(0)
+                    .ok()
+                    .and_then(|value| u8::try_from(value).ok());
+                let t = row.get::<i64>(1).ok();
+                (r, t)
+            } else {
+                (None, None)
+            };
             let mut tag_rows = conn
                 .query(
                     "SELECT tag, updated_at FROM media_tags WHERE media_id = ?1",
@@ -4818,11 +4882,14 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?
             {
-                let tag = row.get::<String>(0).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let tag = row
+                    .get::<String>(0)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 let t = row.get::<i64>(1).ok();
                 tags.push(tag);
                 if let Some(t) = t {
-                    tags_updated_at = Some(tags_updated_at.map_or(t, |existing| existing.max(t)));
+                    tags_updated_at =
+                        Some(tags_updated_at.map_or(t, |existing| existing.max(t)));
                 }
             }
             result.push(shade_p2p::PictureMetadata {

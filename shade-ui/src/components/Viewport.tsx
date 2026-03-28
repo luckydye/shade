@@ -169,6 +169,7 @@ export const Viewport: Component = () => {
   const shouldShowZoomIndicator = () =>
     state.viewportZoom > 1.001 || state.viewportZoom < 0.999;
   const viewportZoomPercent = () => getViewportZoomPercent();
+  const zoomIndicatorPositionClass = () => "right-4 top-4";
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
   const selectedArtboard = () => getSelectedArtboard();
@@ -1542,7 +1543,7 @@ export const Viewport: Component = () => {
           {shouldShowZoomIndicator() && viewportZoomPercent() !== null && (
             <Button
               type="button"
-              class="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition hover:border-white/20 hover:bg-black/60"
+              class={`absolute ${zoomIndicatorPositionClass()} flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition hover:border-white/20 hover:bg-black/60`}
               onClick={() => resetViewport()}
             >
               <span>Zoom</span>

@@ -15,11 +15,13 @@ video = ["shade-io/ffmpeg"]
 shade-core = { path = "../shade-core" }
 shade-gpu = { path = "../shade-gpu" }
 shade-io = { path = "../shade-io" }
+shade-p2p = { path = "../shade-p2p" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
+async-trait = "0.1"
 
 [dev-dependencies]
 image = { workspace = true }

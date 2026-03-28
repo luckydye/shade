@@ -7694,6 +7694,7 @@ name = "shade-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "env_logger",
  "exr",
@@ -7702,6 +7703,7 @@ dependencies = [
  "shade-core",
  "shade-gpu",
  "shade-io",
+ "shade-p2p",
  "tempfile",
  "tokio",
 ]

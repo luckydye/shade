@@ -44,10 +44,8 @@ import {
   resolveLocalThumbnailSrc,
 } from "../local-library-cache";
 import {
-  addPeerLibrary,
   getCachedPeerLibraryItems,
   loadPeerLibraryItemsCachedOrRemote,
-  type PeerLibrary,
   type PeerLibraryItem,
   removePeerLibrary,
   resolvePeerThumbnailSrc,
@@ -65,9 +63,8 @@ import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import { ActionButton } from "./ActionButton";
 
-type LibraryEntry = MediaLibrary | PeerLibrary;
-type BackendPeerLibrary = MediaLibrary & { kind: "peer" };
-type VisiblePeerLibrary = PeerLibrary | BackendPeerLibrary;
+type LibraryEntry = MediaLibrary;
+type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };
 
 type MediaItemMetadata = {
   hasSnapshots: boolean;
@@ -147,7 +144,7 @@ function isPeerLibrary(library: LibraryEntry | null): library is VisiblePeerLibr
 }
 
 function peerLibraryPeerId(library: VisiblePeerLibrary) {
-  return "peerId" in library ? library.peerId : library.id.slice("peer:".length);
+  return library.id.slice("peer:".length);
 }
 
 function isLocalLibraryRefreshing(library: LibraryEntry | null) {
@@ -1410,10 +1407,7 @@ export const MediaView: Component = () => {
       const { listen } = await import("@tauri-apps/api/event");
       const unlisten = await listen<{ peer_endpoint_id: string }>(
         "peer-paired",
-        async (event) => {
-          const peerId = event.payload.peer_endpoint_id;
-          const peer = p2pState.peers.find((entry) => entry.endpoint_id === peerId);
-          await addPeerLibrary(peerId, peer?.name ?? peerId);
+        async () => {
           await refetchLibraries();
         },
       );
@@ -1651,7 +1645,6 @@ export const MediaView: Component = () => {
       if (!peer) {
         throw new Error("peer is no longer available");
       }
-      await addPeerLibrary(peerId, peer.name);
       await refetchLibraries();
       setSelectedLibraryId(`peer:${peerId}`);
       await refetchCachedLibraryItems();

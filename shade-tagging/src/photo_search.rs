@@ -13,7 +13,8 @@ pub type TagVocabularySeed = (&'static str, &'static [&'static str]);
 pub fn build_tag_vocabulary_entries(
     seeds: &[TagVocabularySeed],
 ) -> Result<Vec<TagVocabularyEntry>> {
-    seeds.iter()
+    seeds
+        .iter()
         .map(|(label, variants)| TagVocabularyEntry::with_variants(*label, *variants))
         .collect()
 }
@@ -54,13 +55,31 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
                 "group of people",
             ],
         ),
-        ("family", &["family portrait", "family photo", "family group"]),
-        ("child", &["young child", "kid", "photo of a child", "child portrait"]),
-        ("baby", &["infant", "newborn", "photo of a baby", "baby portrait"]),
-        ("dog", &["pet dog", "canine", "photo of a dog", "dog portrait"]),
-        ("cat", &["pet cat", "feline", "photo of a cat", "cat portrait"]),
+        (
+            "family",
+            &["family portrait", "family photo", "family group"],
+        ),
+        (
+            "child",
+            &["young child", "kid", "photo of a child", "child portrait"],
+        ),
+        (
+            "baby",
+            &["infant", "newborn", "photo of a baby", "baby portrait"],
+        ),
+        (
+            "dog",
+            &["pet dog", "canine", "photo of a dog", "dog portrait"],
+        ),
+        (
+            "cat",
+            &["pet cat", "feline", "photo of a cat", "cat portrait"],
+        ),
         ("bird", &["flying bird", "photo of a bird", "bird photo"]),
-        ("wildlife", &["wild animal", "wildlife photo", "animal in nature"]),
+        (
+            "wildlife",
+            &["wild animal", "wildlife photo", "animal in nature"],
+        ),
         ("pet", &["domestic animal", "pet photo"]),
         (
             "interior",
@@ -75,13 +94,25 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
             "exterior",
             &["outside a building", "outdoor scene", "exterior photo"],
         ),
-        ("living room", &["home interior living room", "living room interior"]),
+        (
+            "living room",
+            &["home interior living room", "living room interior"],
+        ),
         ("bedroom", &["home interior bedroom", "bedroom interior"]),
         ("kitchen", &["home interior kitchen", "kitchen interior"]),
-        ("dining room", &["home interior dining room", "dining room interior"]),
+        (
+            "dining room",
+            &["home interior dining room", "dining room interior"],
+        ),
         ("bathroom", &["home interior bathroom", "bathroom interior"]),
-        ("office", &["workspace interior", "office interior", "office room"]),
-        ("library", &["library interior", "reading room", "library room"]),
+        (
+            "office",
+            &["workspace interior", "office interior", "office room"],
+        ),
+        (
+            "library",
+            &["library interior", "reading room", "library room"],
+        ),
         ("cafe", &["coffee shop", "cafe interior"]),
         ("restaurant", &["restaurant interior", "dining space"]),
         ("bar", &["bar interior", "pub interior"]),
@@ -110,7 +141,15 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
         ("lake", &["lake view", "lake landscape"]),
         ("river", &["river landscape", "river view"]),
         ("waterfall", &["cascading waterfall", "waterfall scene"]),
-        ("forest", &["forest landscape", "woods", "forest photo", "trees in nature"]),
+        (
+            "forest",
+            &[
+                "forest landscape",
+                "woods",
+                "forest photo",
+                "trees in nature",
+            ],
+        ),
         (
             "mountain",
             &["mountain landscape", "mountain photo", "mountain view"],
@@ -126,9 +165,23 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
                 "sunset photo",
             ],
         ),
-        ("sunrise", &["early morning sky", "sunrise sky", "sunrise photo"]),
-        ("snow scene", &["snowy landscape", "winter scene", "snowy outdoor scene"]),
-        ("cityscape", &["urban skyline", "city view", "cityscape photo", "city scene"]),
+        (
+            "sunrise",
+            &["early morning sky", "sunrise sky", "sunrise photo"],
+        ),
+        (
+            "snow scene",
+            &["snowy landscape", "winter scene", "snowy outdoor scene"],
+        ),
+        (
+            "cityscape",
+            &[
+                "urban skyline",
+                "city view",
+                "cityscape photo",
+                "city scene",
+            ],
+        ),
         (
             "street scene",
             &["city street", "urban street", "street photo", "street view"],
@@ -136,7 +189,10 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
         ("bridge", &["bridge over water", "bridge scene"]),
         ("staircase", &["interior stairs", "stairs in a building"]),
         ("corridor", &["hallway", "interior corridor"]),
-        ("window", &["large window", "photo of a window", "window in a room"]),
+        (
+            "window",
+            &["large window", "photo of a window", "window in a room"],
+        ),
         (
             "stained glass window",
             &[
@@ -147,7 +203,10 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
             ],
         ),
         ("doorway", &["arched doorway", "front door"]),
-        ("table", &["tabletop", "photo of a table", "table in a room"]),
+        (
+            "table",
+            &["tabletop", "photo of a table", "table in a room"],
+        ),
         ("desk", &["work desk", "desk photo", "writing desk"]),
         ("chair", &["wooden chair", "chair in a room"]),
         ("sofa", &["couch", "sofa in a room"]),
@@ -172,17 +231,48 @@ pub fn photo_auto_tag_vocabulary() -> Result<Vec<TagVocabularyEntry>> {
             ],
         ),
         ("car", &["parked car", "photo of a car", "car on a street"]),
-        ("bicycle", &["bike", "photo of a bicycle", "bicycle on a street"]),
+        (
+            "bicycle",
+            &["bike", "photo of a bicycle", "bicycle on a street"],
+        ),
         ("coffee", &["cup of coffee", "coffee photo", "coffee cup"]),
         ("tea", &["cup of tea", "tea cup"]),
         ("cup", &["coffee cup", "tea cup", "drinking cup"]),
-        ("sunlight", &["bright sunlight", "sunlit scene", "sunny light"]),
+        (
+            "sunlight",
+            &["bright sunlight", "sunlit scene", "sunny light"],
+        ),
         ("shadow", &["strong shadow", "shadow in scene"]),
         ("silhouette", &["silhouetted subject", "backlit silhouette"]),
-        ("reflection", &["reflective surface", "reflection in water", "reflected scene"]),
-        ("lamp", &["table lamp", "floor lamp", "lit lamp", "lamp in a room"]),
-        ("black and white", &["monochrome photo", "grayscale image", "black and white photo"]),
-        ("vintage", &["retro style", "old fashioned", "vintage photo", "retro photo"]),
+        (
+            "reflection",
+            &[
+                "reflective surface",
+                "reflection in water",
+                "reflected scene",
+            ],
+        ),
+        (
+            "lamp",
+            &["table lamp", "floor lamp", "lit lamp", "lamp in a room"],
+        ),
+        (
+            "black and white",
+            &[
+                "monochrome photo",
+                "grayscale image",
+                "black and white photo",
+            ],
+        ),
+        (
+            "vintage",
+            &[
+                "retro style",
+                "old fashioned",
+                "vintage photo",
+                "retro photo",
+            ],
+        ),
         ("cozy", &["warm cozy interior", "cozy room"]),
         ("moody", &["moody atmosphere", "dramatic mood"]),
         ("dramatic", &["dramatic lighting", "dramatic photo"]),

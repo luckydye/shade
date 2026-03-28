@@ -36,8 +36,9 @@ pub mod video_encoder;
 
 #[cfg(feature = "native")]
 pub use app_config::{
-    append_library_order_id, app_config_path, is_peer_paired, load_app_config, normalize_library_order,
-    pair_peer, remove_library_order_id, save_app_config, upsert_library_config, AppConfig,
+    app_config_path, append_library_order_id, is_peer_paired, load_app_config,
+    normalize_library_order, pair_peer, remove_library_order_id, save_app_config,
+    upsert_library_config, AppConfig,
 };
 #[cfg(feature = "native")]
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};

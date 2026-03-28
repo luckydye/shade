@@ -16,13 +16,13 @@ pub mod photo_search;
 
 pub use photo_search::{
     build_tag_vocabulary_entries, photo_auto_tag_vocabulary,
-    photo_search_animal_vocabulary,
-    photo_search_architecture_vocabulary, photo_search_food_vocabulary,
-    photo_search_light_vocabulary, photo_search_nature_vocabulary,
-    photo_search_object_vocabulary, photo_search_people_vocabulary,
-    photo_search_place_vocabulary, photo_search_style_vocabulary,
-    photo_search_travel_vocabulary, photo_search_vocabulary,
-    photo_search_vocabulary_categories, TagVocabularyCategory, TagVocabularySeed,
+    photo_search_animal_vocabulary, photo_search_architecture_vocabulary,
+    photo_search_food_vocabulary, photo_search_light_vocabulary,
+    photo_search_nature_vocabulary, photo_search_object_vocabulary,
+    photo_search_people_vocabulary, photo_search_place_vocabulary,
+    photo_search_style_vocabulary, photo_search_travel_vocabulary,
+    photo_search_vocabulary, photo_search_vocabulary_categories, TagVocabularyCategory,
+    TagVocabularySeed,
 };
 
 const DEFAULT_PROMPT_PREFIX: &str = "This is a photo of ";
@@ -339,15 +339,20 @@ impl Siglip2Tagger {
             .into_iter()
             .collect::<Vec<_>>();
         if !uncached_prompts.is_empty() {
-            let embeddings =
-                compute_text_embeddings(&mut self.text_session, &self.tokenizer, &uncached_prompts, self.config.max_text_length)?;
+            let embeddings = compute_text_embeddings(
+                &mut self.text_session,
+                &self.tokenizer,
+                &uncached_prompts,
+                self.config.max_text_length,
+            )?;
             for (prompt, embedding) in uncached_prompts.into_iter().zip(embeddings) {
                 self.text_embedding_cache.insert(prompt, embedding);
             }
         }
 
         // Single vision pass for this image.
-        let image_embedding = compute_image_embedding(&mut self.vision_session, image, self.image_size)?;
+        let image_embedding =
+            compute_image_embedding(&mut self.vision_session, image, self.image_size)?;
 
         // Dot product + logit scale/bias + sigmoid, aggregating variants by max score.
         let mut aggregated = BTreeMap::<String, f32>::new();
@@ -356,7 +361,11 @@ impl Siglip2Tagger {
                 .text_embedding_cache
                 .get(&entry.prompt)
                 .expect("text embedding must be cached at this point");
-            let dot: f32 = image_embedding.iter().zip(text_embedding.iter()).map(|(a, b)| a * b).sum();
+            let dot: f32 = image_embedding
+                .iter()
+                .zip(text_embedding.iter())
+                .map(|(a, b)| a * b)
+                .sum();
             let score = sigmoid(dot * LOGIT_SCALE + LOGIT_BIAS);
             aggregated
                 .entry(entry.label.clone())
@@ -412,18 +421,22 @@ pub struct Siglip2ModelInfo {
 }
 
 impl Siglip2ModelInfo {
-    pub fn from_files(config_path: &Path, preprocessor_config_path: &Path) -> Result<Self> {
+    pub fn from_files(
+        config_path: &Path,
+        preprocessor_config_path: &Path,
+    ) -> Result<Self> {
         let config = std::fs::read_to_string(config_path).with_context(|| {
             format!("failed to read SigLIP2 config: {}", config_path.display())
         })?;
-        let parsed = serde_json::from_str::<Siglip2ConfigFile>(&config).with_context(|| {
-            format!(
-                "failed to parse SigLIP2 config JSON: {}",
-                config_path.display()
-            )
-        })?;
-        let preprocessor_config =
-            std::fs::read_to_string(preprocessor_config_path).with_context(|| {
+        let parsed =
+            serde_json::from_str::<Siglip2ConfigFile>(&config).with_context(|| {
+                format!(
+                    "failed to parse SigLIP2 config JSON: {}",
+                    config_path.display()
+                )
+            })?;
+        let preprocessor_config = std::fs::read_to_string(preprocessor_config_path)
+            .with_context(|| {
                 format!(
                     "failed to read SigLIP2 preprocessor config: {}",
                     preprocessor_config_path.display()
@@ -432,11 +445,11 @@ impl Siglip2ModelInfo {
         let preprocessor_parsed =
             serde_json::from_str::<Siglip2PreprocessorConfigFile>(&preprocessor_config)
                 .with_context(|| {
-                    format!(
-                        "failed to parse SigLIP2 preprocessor config JSON: {}",
-                        preprocessor_config_path.display()
-                    )
-                })?;
+                format!(
+                    "failed to parse SigLIP2 preprocessor config JSON: {}",
+                    preprocessor_config_path.display()
+                )
+            })?;
         if preprocessor_parsed.size.height != preprocessor_parsed.size.width {
             return Err(anyhow!(
                 "SigLIP2 preprocessor size must be square, got {}x{}",
@@ -468,20 +481,20 @@ pub fn compute_text_embeddings(
         .collect::<Vec<_>>();
     let batch_size = prompts.len();
     let input_tensor =
-        Tensor::from_array((vec![batch_size as i64, sequence_length as i64], input_ids))?.upcast();
+        Tensor::from_array((vec![batch_size as i64, sequence_length as i64], input_ids))?
+            .upcast();
     let outputs = session
-        .run(vec![("input_ids".to_string(), SessionInputValue::from(input_tensor))])
+        .run(vec![(
+            "input_ids".to_string(),
+            SessionInputValue::from(input_tensor),
+        )])
         .context("SigLIP2 text model inference failed")?;
     let pooler = outputs["pooler_output"]
         .try_extract_tensor::<f32>()
         .context("SigLIP2 text model output `pooler_output` is missing")?;
     // pooler shape: [batch, 768] — L2-normalize each row
     let embed_dim = pooler.1.len() / batch_size;
-    Ok(pooler
-        .1
-        .chunks(embed_dim)
-        .map(l2_normalize)
-        .collect())
+    Ok(pooler.1.chunks(embed_dim).map(l2_normalize).collect())
 }
 
 pub fn compute_image_embedding(
@@ -496,7 +509,10 @@ pub fn compute_image_embedding(
     ))?
     .upcast();
     let outputs = session
-        .run(vec![("pixel_values".to_string(), SessionInputValue::from(pixel_tensor))])
+        .run(vec![(
+            "pixel_values".to_string(),
+            SessionInputValue::from(pixel_tensor),
+        )])
         .context("SigLIP2 vision model inference failed")?;
     let pooler = outputs["pooler_output"]
         .try_extract_tensor::<f32>()
@@ -570,7 +586,8 @@ pub fn normalize_tag_vocabulary(
 ) -> Result<Vec<TagVocabularyEntry>> {
     let mut merged = BTreeMap::<String, BTreeSet<String>>::new();
     for entry in vocabulary {
-        let normalized = TagVocabularyEntry::with_variants(&entry.label, &entry.variants)?;
+        let normalized =
+            TagVocabularyEntry::with_variants(&entry.label, &entry.variants)?;
         merged
             .entry(normalized.label)
             .or_default()
@@ -770,9 +787,9 @@ mod tests {
         .expect("prompts");
         assert_eq!(prompts.len(), 5);
         assert!(prompts.iter().any(|entry| entry.label == "window"));
-        assert!(prompts.iter().any(|entry| {
-            entry.prompt == "This is a photo of stained glass window."
-        }));
+        assert!(prompts
+            .iter()
+            .any(|entry| { entry.prompt == "This is a photo of stained glass window." }));
     }
 
     #[test]

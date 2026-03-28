@@ -1,6 +1,6 @@
 use crate::{
-    library_config_id, peer_library_id, LibraryConfig, LocalLibraryConfig, PeerLibraryConfig,
-    S3LibraryConfig,
+    library_config_id, peer_library_id, LibraryConfig, LocalLibraryConfig,
+    PeerLibraryConfig, S3LibraryConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -60,32 +60,55 @@ pub fn is_peer_paired(config: &AppConfig, peer_endpoint_id: &str) -> bool {
     })
 }
 
-pub fn pair_peer(config: &mut AppConfig, peer_endpoint_id: &str) {
-    if is_peer_paired(config, peer_endpoint_id) {
-        return;
+pub fn pair_peer(
+    config: &mut AppConfig,
+    peer_endpoint_id: &str,
+    peer_name: Option<&str>,
+) -> bool {
+    let normalized_peer_name = peer_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned);
+    for library in &mut config.libraries {
+        let LibraryConfig::Peer(existing) = library else {
+            continue;
+        };
+        if existing.peer_id != peer_endpoint_id {
+            continue;
+        }
+        if normalized_peer_name.is_none() || existing.name == normalized_peer_name {
+            return false;
+        }
+        existing.name = normalized_peer_name;
+        return true;
     }
     upsert_library_config(
         &mut config.libraries,
         LibraryConfig::Peer(PeerLibraryConfig {
             peer_id: peer_endpoint_id.to_owned(),
+            name: normalized_peer_name,
         }),
     );
     append_library_order_id(&mut config.library_order, peer_library_id(peer_endpoint_id));
+    true
 }
 
 pub fn upsert_library_config(libraries: &mut Vec<LibraryConfig>, library: LibraryConfig) {
-  let id = library_config_id(&library);
-  match libraries
-      .iter()
-      .position(|existing| library_config_id(existing) == id)
-  {
-      Some(index) => libraries[index] = library,
-      None => libraries.push(library),
-  }
+    let id = library_config_id(&library);
+    match libraries
+        .iter()
+        .position(|existing| library_config_id(existing) == id)
+    {
+        Some(index) => libraries[index] = library,
+        None => libraries.push(library),
+    }
 }
 
 pub fn append_library_order_id(library_order: &mut Vec<String>, library_id: String) {
-    if !library_order.iter().any(|candidate| candidate == &library_id) {
+    if !library_order
+        .iter()
+        .any(|candidate| candidate == &library_id)
+    {
         library_order.push(library_id);
     }
 }
@@ -94,7 +117,10 @@ pub fn remove_library_order_id(library_order: &mut Vec<String>, library_id: &str
     library_order.retain(|candidate| candidate != library_id);
 }
 
-pub fn normalize_library_order(library_order: &mut Vec<String>, libraries: &[LibraryConfig]) {
+pub fn normalize_library_order(
+    library_order: &mut Vec<String>,
+    libraries: &[LibraryConfig],
+) {
     library_order.retain(|library_id| library_id != PINNED_LIBRARY_ID);
     library_order.retain(|library_id| {
         libraries
@@ -125,7 +151,10 @@ fn migrate_app_config(config: PersistedAppConfig) -> AppConfig {
     for peer_id in config.paired_peers {
         upsert_library_config(
             &mut libraries,
-            LibraryConfig::Peer(PeerLibraryConfig { peer_id }),
+            LibraryConfig::Peer(PeerLibraryConfig {
+                peer_id,
+                name: None,
+            }),
         );
     }
     let mut library_order = if config.library_order.is_empty() {

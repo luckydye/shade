@@ -36,8 +36,9 @@ async fn main() -> Result<()> {
             println!("missing|{}", sample.media_id);
             continue;
         };
-        let image = image::load_from_memory(&bytes)
-            .with_context(|| format!("failed to decode thumbnail for {}", sample.media_id))?;
+        let image = image::load_from_memory(&bytes).with_context(|| {
+            format!("failed to decode thumbnail for {}", sample.media_id)
+        })?;
         let scores = tagger.score_image_with_vocabulary(
             &TagImage::from_dynamic_image(image),
             &vocabulary,

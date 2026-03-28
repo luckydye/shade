@@ -15,8 +15,8 @@ fn main() -> Result<()> {
     let mut config = Siglip2TaggerConfig::base_patch16_224(&args[0]);
     config.acceptance_threshold = 0.05;
     let mut tagger = Siglip2Tagger::new(config)?;
-    let result =
-        tagger.tag_image_with_vocabulary(&TagImage::from_dynamic_image(image), &vocabulary)?;
+    let result = tagger
+        .tag_image_with_vocabulary(&TagImage::from_dynamic_image(image), &vocabulary)?;
     if result.tags.is_empty() {
         println!("no-tags");
         return Ok(());

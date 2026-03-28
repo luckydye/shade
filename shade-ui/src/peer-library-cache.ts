@@ -2,20 +2,9 @@ import { getThumbnailBackend } from "./bridge/thumbnail-backend";
 import { listPeerPictures, type SharedPicture } from "./bridge/index";
 
 const DB_NAME = "shade-peer-cache";
-const DB_VERSION = 3;
-const LIBRARIES_STORE = "libraries";
+const DB_VERSION = 4;
 const ITEMS_STORE = "items";
 const THUMBNAILS_STORE = "thumbnails";
-
-export type PeerLibrary = {
-  id: string;
-  kind: "peer";
-  name: string;
-  path: null;
-  removable: true;
-  readonly: true;
-  peerId: string;
-};
 
 export type PeerLibraryItem = {
   kind: "peer";
@@ -54,10 +43,6 @@ function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
   };
 }
 
-function peerLibraryId(peerId: string) {
-  return `peer:${peerId}`;
-}
-
 function thumbnailKey(peerId: string, pictureId: string) {
   return `${peerId}:${pictureId}`;
 }
@@ -84,11 +69,8 @@ function openDb(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (db.objectStoreNames.contains(LIBRARIES_STORE)) {
-        db.deleteObjectStore(LIBRARIES_STORE);
-      }
-      if (!db.objectStoreNames.contains(LIBRARIES_STORE)) {
-        db.createObjectStore(LIBRARIES_STORE);
+      if (db.objectStoreNames.contains("libraries")) {
+        db.deleteObjectStore("libraries");
       }
       if (!db.objectStoreNames.contains(ITEMS_STORE)) {
         db.createObjectStore(ITEMS_STORE);
@@ -131,18 +113,6 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function toPeerLibrary(peerId: string, name: string): PeerLibrary {
-  return {
-    id: peerLibraryId(peerId),
-    kind: "peer",
-    name,
-    path: null,
-    removable: true,
-    readonly: true,
-    peerId,
-  };
-}
-
 function toPeerLibraryItems(
   peerId: string,
   pictures: SharedPicture[],
@@ -166,35 +136,6 @@ function toPeerLibraryItems(
         left.id.localeCompare(right.id)
       );
     });
-}
-
-async function loadPeerLibraryIds() {
-  return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
-    const keys = await requestToPromise(stores[LIBRARIES_STORE].getAllKeys());
-    return keys.filter((value): value is string => typeof value === "string");
-  });
-}
-
-async function loadPeerLibraryName(peerId: string) {
-  return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
-    const value = await requestToPromise(stores[LIBRARIES_STORE].get(peerId));
-    if (typeof value !== "string") {
-      throw new Error("peer library name is missing");
-    }
-    return value;
-  });
-}
-
-async function addPeerLibraryId(peerId: string, name: string) {
-  await withStores([LIBRARIES_STORE], "readwrite", async (stores) => {
-    await requestToPromise(stores[LIBRARIES_STORE].put(name, peerId));
-  });
-}
-
-async function removePeerLibraryId(peerId: string) {
-  await withStores([LIBRARIES_STORE], "readwrite", async (stores) => {
-    await requestToPromise(stores[LIBRARIES_STORE].delete(peerId));
-  });
 }
 
 function peerItemKey(peerId: string, pictureId: string) {
@@ -320,26 +261,13 @@ async function warmPeerLibraryThumbnails(peerId: string, pictures: SharedPicture
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
-export async function listPeerLibraries(): Promise<PeerLibrary[]> {
-  const peerIds = await loadPeerLibraryIds();
-  return Promise.all(
-    peerIds.map(async (peerId) => toPeerLibrary(peerId, await loadPeerLibraryName(peerId))),
-  );
-}
-
 export async function getCachedPeerLibraryItems(
   peerId: string,
 ): Promise<PeerLibraryItem[]> {
   return toPeerLibraryItems(peerId, await loadPeerLibraryItems(peerId));
 }
 
-export async function addPeerLibrary(peerId: string, peerName: string): Promise<PeerLibrary> {
-  await addPeerLibraryId(peerId, peerName);
-  return toPeerLibrary(peerId, peerName);
-}
-
 export async function removePeerLibrary(peerId: string): Promise<void> {
-  await removePeerLibraryId(peerId);
   await withStores([ITEMS_STORE], "readwrite", async (stores) => {
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(

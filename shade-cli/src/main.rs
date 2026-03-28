@@ -7,13 +7,19 @@ use shade_core::{
 };
 use shade_gpu::{PreviewCrop, Renderer};
 use shade_io::{
-    from_linear_srgb_f32, load_image, load_image_f32_with_colorspace, quantize_rgba_f32,
-    save_image, to_linear_srgb_f32,
+    from_linear_srgb_f32, generate_desktop_thumbnail, load_image,
+    load_image_f32_with_colorspace, quantize_rgba_f32, save_image, scan_directory_images,
+    to_linear_srgb_f32,
 };
 #[cfg(feature = "video")]
 use shade_io::{VideoCodec, VideoDecoder, VideoEncoder};
+use shade_p2p::{
+    AwarenessState, LocalPeerDiscovery, PeerProvider, PictureMetadata, SharedPicture,
+    SyncSnapshotInfo,
+};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Shade — GPU-accelerated photo editor CLI
 #[derive(Parser, Debug)]
@@ -25,6 +31,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Serve the current working directory as a headless peer-discoverable media library.
+    Serve,
+
     /// Apply tone and color adjustments to an image and export the result.
     Edit {
         /// Input image path (JPEG, PNG, TIFF, WebP, …)
@@ -282,6 +291,155 @@ enum Commands {
     },
 }
 
+pub struct ServePeerProvider {
+    pub root: PathBuf,
+    pub awareness: AwarenessState,
+}
+
+impl ServePeerProvider {
+    pub fn new(root: PathBuf) -> Result<Self> {
+        let root = canonicalize_served_root(root)?;
+        Ok(Self {
+            awareness: AwarenessState {
+                display_name: Some(serve_peer_name(&root)?),
+                active_file_hash: None,
+                active_snapshot_id: None,
+            },
+            root,
+        })
+    }
+
+    pub fn list_shared_pictures(&self) -> Result<Vec<SharedPicture>> {
+        Ok(scan_directory_images(&self.root)
+            .map_err(anyhow::Error::msg)?
+            .into_iter()
+            .map(|picture| SharedPicture {
+                id: picture.path,
+                name: picture.name,
+                modified_at: picture.modified_at,
+            })
+            .collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl PeerProvider for ServePeerProvider {
+    async fn authorize_peer(&self, _peer_endpoint_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn list_pictures(&self) -> Result<Vec<SharedPicture>> {
+        self.list_shared_pictures()
+    }
+
+    async fn get_thumbnail(&self, picture_id: &str) -> Result<Vec<u8>> {
+        let picture_path = resolve_served_picture_path(&self.root, picture_id)?;
+        generate_desktop_thumbnail(path_string(&picture_path)?)
+            .map_err(anyhow::Error::msg)
+    }
+
+    async fn get_image_bytes(&self, picture_id: &str) -> Result<Vec<u8>> {
+        let picture_path = resolve_served_picture_path(&self.root, picture_id)?;
+        std::fs::read(&picture_path).with_context(|| {
+            format!("failed to read served picture: {}", picture_path.display())
+        })
+    }
+
+    async fn get_awareness(&self) -> Result<AwarenessState> {
+        Ok(self.awareness.clone())
+    }
+
+    async fn list_snapshots(&self, _file_hash: &str) -> Result<Vec<SyncSnapshotInfo>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_snapshot_data(&self, _id: &str) -> Result<Vec<u8>> {
+        anyhow::bail!("snapshot data is not available for served directories")
+    }
+
+    async fn get_metadata(
+        &self,
+        _file_hashes: &[String],
+    ) -> Result<Vec<PictureMetadata>> {
+        Ok(Vec::new())
+    }
+}
+
+pub fn canonicalize_served_root(root: PathBuf) -> Result<PathBuf> {
+    let canonical = root
+        .canonicalize()
+        .with_context(|| format!("failed to resolve served root: {}", root.display()))?;
+    if !canonical.is_dir() {
+        anyhow::bail!("served root is not a directory: {}", canonical.display());
+    }
+    Ok(canonical)
+}
+
+pub fn serve_peer_name(root: &Path) -> Result<String> {
+    let name = root
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .ok_or_else(|| anyhow::anyhow!("working directory name must be valid utf-8"))?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("working directory name is empty");
+    }
+    Ok(trimmed.to_owned())
+}
+
+pub fn resolve_served_picture_path(root: &Path, picture_id: &str) -> Result<PathBuf> {
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("failed to resolve served root: {}", root.display()))?;
+    let picture_path = Path::new(picture_id)
+        .canonicalize()
+        .with_context(|| format!("failed to resolve picture path: {picture_id}"))?;
+    if !picture_path.starts_with(&canonical_root) {
+        anyhow::bail!(
+            "requested picture is outside served root: {}",
+            picture_path.display()
+        );
+    }
+    if !picture_path.is_file() {
+        anyhow::bail!(
+            "requested picture is not a file: {}",
+            picture_path.display()
+        );
+    }
+    if !shade_io::is_supported_library_image(&picture_path) {
+        anyhow::bail!(
+            "requested picture is not a supported image: {}",
+            picture_path.display()
+        );
+    }
+    Ok(picture_path)
+}
+
+pub fn path_string(path: &Path) -> Result<&str> {
+    path.to_str()
+        .ok_or_else(|| anyhow::anyhow!("non-utf8 path: {}", path.display()))
+}
+
+pub async fn run_serve_command() -> Result<()> {
+    let provider = Arc::new(ServePeerProvider::new(std::env::current_dir()?)?);
+    let peer_name = serve_peer_name(&provider.root)?;
+    let discovery =
+        LocalPeerDiscovery::bind_with_name(peer_name.clone(), None, provider.clone())
+            .await?;
+    let snapshot = discovery.snapshot().await;
+
+    println!("Serving {}", provider.root.display());
+    println!("Peer name: {peer_name}");
+    println!("Endpoint ID: {}", snapshot.local_endpoint_id);
+    for address in snapshot.local_direct_addresses {
+        println!("Direct address: {address}");
+    }
+
+    tokio::signal::ctrl_c().await?;
+    drop(discovery);
+    Ok(())
+}
+
 fn preview_crop_from_args(
     crop_x: Option<f32>,
     crop_y: Option<f32>,
@@ -344,6 +502,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Serve => {
+            run_serve_command().await?;
+        }
         Commands::Edit {
             input,
             output,
@@ -796,4 +957,58 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_served_picture_path, ServePeerProvider};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn serve_provider_lists_supported_images_recursively() {
+        let dir = tempdir().expect("failed to create temp dir");
+        let nested = dir.path().join("nested");
+        fs::create_dir(&nested).expect("failed to create nested directory");
+        fs::write(dir.path().join("top.jpg"), []).expect("failed to create image");
+        fs::write(nested.join("deep.png"), []).expect("failed to create nested image");
+        fs::write(dir.path().join("notes.txt"), []).expect("failed to create text file");
+
+        let provider = ServePeerProvider::new(dir.path().to_path_buf())
+            .expect("failed to build serve provider");
+        let pictures = provider
+            .list_shared_pictures()
+            .expect("failed to list served pictures");
+
+        assert_eq!(pictures.len(), 2);
+        assert!(pictures.iter().any(|picture| picture.name == "top.jpg"));
+        assert!(pictures.iter().any(|picture| picture.name == "deep.png"));
+    }
+
+    #[test]
+    fn served_picture_path_rejects_escape_outside_root() {
+        let dir = tempdir().expect("failed to create temp dir");
+        let root = dir.path().join("root");
+        fs::create_dir(&root).expect("failed to create root directory");
+        let inside = root.join("inside.jpg");
+        let outside = dir.path().join("outside.jpg");
+        fs::write(&inside, []).expect("failed to create inside image");
+        fs::write(&outside, []).expect("failed to create outside image");
+
+        let resolved =
+            resolve_served_picture_path(&root, inside.to_str().expect("utf-8 path"))
+                .expect("failed to resolve served picture");
+        assert_eq!(
+            resolved,
+            inside.canonicalize().expect("canonical inside path")
+        );
+
+        let error =
+            resolve_served_picture_path(&root, outside.to_str().expect("utf-8 path"))
+                .expect_err("outside path should be rejected");
+        assert!(
+            error.to_string().contains("outside served root"),
+            "unexpected error: {error}"
+        );
+    }
 }

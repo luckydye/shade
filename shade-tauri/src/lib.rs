@@ -63,17 +63,17 @@ pub fn run() {
                 shade_p2p::AwarenessState::default(),
             ));
             app.manage(AwarenessStateHandle(awareness.clone()));
-            let p2p = std::sync::Arc::new(tauri::async_runtime::block_on(
-                shade_p2p::LocalPeerDiscovery::bind(
+            let p2p = std::sync::Arc::new(
+                tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
                     secret_key,
                     std::sync::Arc::new(commands::AppPeerProvider::new(
                         handle,
                         awareness,
                         pairing_lock,
                     )),
-                ),
-            )
-            .map_err(|error| error.to_string())?);
+                ))
+                .map_err(|error| error.to_string())?,
+            );
             commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
             tauri::async_runtime::block_on(async {
                 *app.state::<P2pState>().0.write().await = Some(p2p);

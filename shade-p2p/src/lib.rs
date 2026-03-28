@@ -128,7 +128,15 @@ impl LocalPeerDiscovery {
         secret_key: Option<SecretKey>,
         peer_provider: Arc<dyn PeerProvider>,
     ) -> Result<Self> {
-        let device_name = local_device_name()?;
+        Self::bind_with_name(local_device_name()?, secret_key, peer_provider).await
+    }
+
+    pub async fn bind_with_name(
+        advertised_name: String,
+        secret_key: Option<SecretKey>,
+        peer_provider: Arc<dyn PeerProvider>,
+    ) -> Result<Self> {
+        let device_name = normalize_discovery_name(&advertised_name)?;
         let mut builder = Endpoint::empty_builder(RelayMode::Disabled);
         if let Some(secret_key) = secret_key {
             builder = builder.secret_key(secret_key);
@@ -363,6 +371,14 @@ impl LocalPeerDiscovery {
     }
 }
 
+fn normalize_discovery_name(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!("device name is empty"));
+    }
+    Ok(trimmed.to_owned())
+}
+
 impl Drop for LocalPeerDiscovery {
     fn drop(&mut self) {
         self.event_task.abort();
@@ -415,10 +431,7 @@ async fn run_discovery_event_loop(
 fn local_device_name() -> Result<String> {
     let mut buffer = [0u8; 256];
     let result = unsafe {
-        libc::gethostname(
-            buffer.as_mut_ptr() as *mut libc::c_char,
-            buffer.len(),
-        )
+        libc::gethostname(buffer.as_mut_ptr() as *mut libc::c_char, buffer.len())
     };
     if result != 0 {
         return Err(anyhow::anyhow!(std::io::Error::last_os_error()));
@@ -473,14 +486,15 @@ impl ProtocolHandler for ShadeProtocol {
             .read_to_end(MAX_REQUEST_MESSAGE_BYTES)
             .await
             .map_err(AcceptError::from_err)?;
-        let request = serde_json::from_slice::<Request>(&request)
-            .map_err(AcceptError::from_err)?;
+        let request =
+            serde_json::from_slice::<Request>(&request).map_err(AcceptError::from_err)?;
         let response = match request {
             Request::ListPictures { offset, limit } => {
                 match self.peer_provider.list_pictures().await {
                     Ok(pictures) => {
                         let total = pictures.len();
-                        let page = pictures.into_iter().skip(offset).take(limit).collect();
+                        let page =
+                            pictures.into_iter().skip(offset).take(limit).collect();
                         Response::PicturesPage {
                             pictures: page,
                             has_more: offset.saturating_add(limit) < total,
@@ -577,7 +591,10 @@ mod tests {
             Ok(AwarenessState::default())
         }
 
-        async fn list_snapshots(&self, _file_hash: &str) -> Result<Vec<SyncSnapshotInfo>> {
+        async fn list_snapshots(
+            &self,
+            _file_hash: &str,
+        ) -> Result<Vec<SyncSnapshotInfo>> {
             Ok(Vec::new())
         }
 
@@ -585,7 +602,10 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn get_metadata(&self, _file_hashes: &[String]) -> Result<Vec<PictureMetadata>> {
+        async fn get_metadata(
+            &self,
+            _file_hashes: &[String],
+        ) -> Result<Vec<PictureMetadata>> {
             Ok(Vec::new())
         }
     }

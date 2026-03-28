@@ -21,10 +21,7 @@ fn main() {
         )
         .join("lib/darwin");
 
-        println!(
-            "cargo:rustc-link-search=native={}",
-            resource_dir.display()
-        );
+        println!("cargo:rustc-link-search=native={}", resource_dir.display());
         println!("cargo:rustc-link-arg=-Wl,-undefined,dynamic_lookup");
     }
 }

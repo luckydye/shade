@@ -15,7 +15,8 @@ fn main() -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     let image = image::open(&args[1])?;
     let mut tagger = Siglip2Tagger::new(Siglip2TaggerConfig::base_patch16_224(&args[0]))?;
-    let result = tagger.tag_image_with_vocabulary(&TagImage::from_dynamic_image(image), &entries)?;
+    let result = tagger
+        .tag_image_with_vocabulary(&TagImage::from_dynamic_image(image), &entries)?;
     for tag in result.tags {
         println!("{:.4}\t{}", tag.score, tag.label);
     }

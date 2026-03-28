@@ -28,6 +28,8 @@ pub struct CameraLibraryConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PeerLibraryConfig {
     pub peer_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]

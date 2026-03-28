@@ -24,8 +24,14 @@ fn main() -> Result<()> {
         let t0 = Instant::now();
         let result = tagger.tag_image_with_vocabulary(&image, &vocabulary)?;
         let infer_secs = t0.elapsed().as_secs_f64();
-        let first = result.tags.first().map(|tag| format!("{}:{:.4}", tag.label, tag.score));
-        println!("run={idx} infer_secs={infer_secs:.4} first={}", first.unwrap_or_default());
+        let first = result
+            .tags
+            .first()
+            .map(|tag| format!("{}:{:.4}", tag.label, tag.score));
+        println!(
+            "run={idx} infer_secs={infer_secs:.4} first={}",
+            first.unwrap_or_default()
+        );
     }
 
     Ok(())
