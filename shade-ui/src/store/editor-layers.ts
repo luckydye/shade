@@ -367,6 +367,7 @@ export async function addLayer(kind: string, position: number) {
   }
   setState("selectedLayerIdx", idx);
   await refreshPreview();
+  return idx;
 }
 
 export async function moveLayer(fromIdx: number, toIdx: number) {

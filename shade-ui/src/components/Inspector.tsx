@@ -754,6 +754,8 @@ export const Inspector: Component = () => {
   const [curvePointCache, setCurvePointCache] = createSignal(
     new Map<number, ControlPoint[]>(),
   );
+  const [mobileSelectedFocus, setMobileSelectedFocus] =
+    createSignal<MobileLayerFocus>("light");
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
   const [maskPickerLayer, setMaskPickerLayer] = createSignal<number | null>(null);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
@@ -1773,9 +1775,15 @@ export const Inspector: Component = () => {
       .map((layer, idx) => ({ layer, idx }))
       .filter(({ layer }) => layer.kind === "adjustment");
 
-  const selectedFocus = (): MobileLayerFocus =>
-    layerFocusOverrides().get(state.selectedLayerIdx) ??
-    inferFocus(state.layers[state.selectedLayerIdx]);
+  createEffect(() => {
+    const selectedLayerIdx = state.selectedLayerIdx;
+    const overrides = layerFocusOverrides();
+    setMobileSelectedFocus(
+      overrides.get(selectedLayerIdx) ?? inferFocus(state.layers[selectedLayerIdx]),
+    );
+  });
+
+  const selectedFocus = (): MobileLayerFocus => mobileSelectedFocus();
 
   const displayedCrop = () =>
     selectedCropLayer()?.crop ?? {
@@ -1819,13 +1827,13 @@ export const Inspector: Component = () => {
 
   const handleAddLayer = async (focus: MobileLayerFocus) => {
     setIsPickerOpen(false);
-    if (focus === "curves") {
-      await addLayer("curves", state.layers.length);
-    } else {
-      await addLayer("adjustment", state.layers.length);
-    }
-    const newIdx = state.selectedLayerIdx;
+    const newIdx =
+      focus === "curves"
+        ? await addLayer("curves", state.layers.length)
+        : await addLayer("adjustment", state.layers.length);
     setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
+    setMobileSelectedFocus(focus);
+    selectLayer(newIdx);
     setIsDrawerOpen(true);
   };
 
@@ -2552,60 +2560,82 @@ export const Inspector: Component = () => {
       <Show when={selectedAdjustmentLayer()}>
         <div
           data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-          class="mobile-slider-fade mt-3 flex items-center gap-1 overflow-x-auto border-t border-[var(--border)] pt-3 transition-opacity duration-150"
+          class="mobile-slider-fade mt-3 flex flex-col gap-3 border-t border-[var(--border)] pt-3 transition-opacity duration-150"
         >
-          {adjustmentLayers().map(({ idx }) => {
-            const focus = () =>
-              layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
-            const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
-            return (
+          <Show when={isPickerOpen()}>
+            <div class="flex gap-2 overflow-x-auto">
+              {ADD_LAYER_FOCI.map((focus) => (
+                <Button
+                  type="button"
+                  onClick={() => void handleAddLayer(focus)}
+                  class="flex min-w-[5.5rem] flex-shrink-0 flex-col items-center gap-1 rounded-lg border border-[var(--border-medium)] bg-[var(--surface)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
+                >
+                  <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]()}</span>
+                  <span>{focusLabels[focus]}</span>
+                </Button>
+              ))}
+            </div>
+          </Show>
+
+          <div class="flex items-center gap-1 overflow-x-auto">
+            <div class="media-scroll min-w-0 flex-1 overflow-x-auto">
+              <div class="flex items-center gap-1">
+                {adjustmentLayers().map(({ idx }) => {
+                  const focus = () =>
+                    layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
+                  const isActive = () => state.selectedLayerIdx === idx && isDrawerOpen();
+                  return (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setMobileSelectedFocus(focus());
+                        selectLayer(idx);
+                        setIsDrawerOpen(true);
+                        setIsPickerOpen(false);
+                      }}
+                      class={`${MOBILE_LAYER_TAB_CLASS} ${
+                        isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
+                      }`}
+                    >
+                      <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
+                      <span>{focusLabels[focus()]}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-1">
               <Button
                 type="button"
-                onClick={() => {
-                  selectLayer(idx);
-                  setIsDrawerOpen(true);
-                  setIsPickerOpen(false);
-                }}
-                class={`${MOBILE_LAYER_TAB_CLASS} ${
-                  isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
+                onClick={() => setIsPickerOpen((v) => !v)}
+                class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] ${
+                  isPickerOpen() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
                 }`}
               >
-                <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
-                <span>{focusLabels[focus()]}</span>
+                <span class="flex h-5 w-5 items-center justify-center text-lg leading-none">
+                  +
+                </span>
+                <span>Add</span>
               </Button>
-            );
-          })}
 
-          <div class="flex-1"></div>
-
-          <Button
-            type="button"
-            onClick={() => setIsPickerOpen((v) => !v)}
-            class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] ${
-              isPickerOpen() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
-            }`}
-          >
-            <span class="flex h-[24px] w-[24px] items-center justify-center text-lg leading-none">
-              +
-            </span>
-            <span>Add</span>
-          </Button>
-
-          <Show
-            when={
-              state.selectedLayerIdx >= 0 &&
-              state.layers[state.selectedLayerIdx]?.kind !== "image"
-            }
-          >
-            <Button
-              type="button"
-              onClick={() => void handleDeleteSelectedLayer()}
-              class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem]`}
-            >
-              <TrashIcon />
-              <span>Delete</span>
-            </Button>
-          </Show>
+              <Show
+                when={
+                  state.selectedLayerIdx >= 0 &&
+                  state.layers[state.selectedLayerIdx]?.kind !== "image"
+                }
+              >
+                <Button
+                  type="button"
+                  onClick={() => void handleDeleteSelectedLayer()}
+                  class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] [&>svg]:h-5 [&>svg]:w-5`}
+                >
+                  <TrashIcon />
+                  <span>Delete</span>
+                </Button>
+              </Show>
+            </div>
+          </div>
         </div>
       </Show>
     </Show>
@@ -2652,43 +2682,6 @@ export const Inspector: Component = () => {
           class="mobile-slider-fade pb-[env(safe-area-inset-bottom)] transition-opacity duration-150"
         ></div>
       </div>
-
-      {/* Add layer dialog */}
-      <Show when={isPickerOpen()}>
-        <div
-          class="fixed bottom-35 right-0 z-50 flex items-center justify-center lg:hidden"
-          onClick={() => setIsPickerOpen(false)}
-        >
-          <div
-            class="mx-6 w-full max-w-xs rounded-2xl border border-[var(--border-medium)] bg-[var(--panel-bg)] p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div class="mb-4">
-              <SectionHeader title="Add Adjustment Layer" />
-            </div>
-            <div class="grid gap-2">
-              {ADD_LAYER_FOCI.map((focus) => (
-                <Button
-                  type="button"
-                  onClick={() => void handleAddLayer(focus)}
-                  class="flex h-10 items-center gap-2 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
-                >
-                  <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]()}</span>
-                  <span>{focusLabels[focus]}</span>
-                </Button>
-              ))}
-
-              <Button
-                type="button"
-                onClick={() => void setIsPickerOpen(false)}
-                class="flex h-10 items-center justify-end gap-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
-              >
-                <span>Cancel</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Show>
     </aside>
   );
 };
