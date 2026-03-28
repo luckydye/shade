@@ -366,7 +366,6 @@ impl LocalPeerDiscovery {
         send.write_all(&request).await?;
         send.finish()?;
         let response = recv.read_to_end(max_response_bytes).await?;
-        connection.close(0u32.into(), b"done");
         Ok(serde_json::from_slice(&response)?)
     }
 }
