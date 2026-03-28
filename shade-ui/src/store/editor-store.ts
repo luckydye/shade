@@ -114,7 +114,6 @@ export const [isAdjustmentSliderActive, setIsAdjustmentSliderActive] =
   createSignal(false);
 export const [activeAdjustmentSliderId, setActiveAdjustmentSliderId] =
   createSignal<string | null>(null);
-export const [transitionMediaSrc, setTransitionMediaSrc] = createSignal<string | null>(null);
 export const [viewportToneSample, setViewportToneSample] = createSignal<number | null>(null);
 
 export function getSelectedArtboard() {

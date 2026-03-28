@@ -18,7 +18,6 @@ import {
   setViewportScreenSize,
   setViewportToneSample,
   state,
-  transitionMediaSrc,
   zoomViewport,
 } from "../store/editor";
 import { setMediaRating, type MaskParamsInfo } from "../bridge/index";
@@ -1494,30 +1493,12 @@ export const Viewport: Component = () => {
             style={{
               width: "100%",
               height: "100%",
-              "view-transition-name":
-                state.currentView === "editor" &&
-                state.layers.length > 0 &&
-                !state.isLoading
-                  ? "active-editor-media"
-                  : "none",
             }}
             class={`${
               state.artboards.length === 0 && !state.isLoading ? "opacity-0" : "opacity-100"
             }`}
           />
-          {transitionMediaSrc() && (
-            <div class="pointer-events-none absolute inset-0">
-              <img
-                src={transitionMediaSrc()!}
-                alt=""
-                class="absolute inset-0 h-full w-full object-contain"
-                style={{
-                  "view-transition-name": "active-media",
-                }}
-              />
-              <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_40%)]" />
-            </div>
-          )}
+
           {selectedCropLayer() && activeCrop() && (
             <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
               <span>Crop</span>

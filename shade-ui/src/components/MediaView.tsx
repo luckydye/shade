@@ -54,10 +54,8 @@ import {
   isAdjustmentSliderActive,
   openImage,
   openPeerImage,
-  setTransitionMediaSrc,
   showMediaView,
   state,
-  transitionMediaSrc,
 } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { Button } from "./Button";
@@ -612,11 +610,7 @@ const MediaTile: Component<{
 
   onCleanup(() => {
     const url = src();
-    if (
-      url?.startsWith("blob:") &&
-      url !== state.loadingMediaSrc &&
-      url !== transitionMediaSrc()
-    ) {
+    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) {
       URL.revokeObjectURL(url);
     }
   });
@@ -637,41 +631,7 @@ const MediaTile: Component<{
       setLoadError(false);
       setLoadRequestVersion((current) => current + 1);
     }
-    const clearViewTransitionName = () => {
-      if (!imgRef) {
-        return;
-      }
-      imgRef.style.viewTransitionName = "";
-    };
-    if (imgRef) {
-      imgRef.style.viewTransitionName = "active-media";
-    }
-
-    const handleError = () => {
-      setLoadError(true);
-    };
-
-    const currentSrc = src() ?? null;
-    if (document.startViewTransition) {
-      setTransitionMediaSrc(currentSrc);
-      const transition = document.startViewTransition(() => {
-        props.onActivate(currentSrc);
-        clearViewTransitionName();
-      });
-      void transition.finished.finally(() => {
-        clearViewTransitionName();
-        setTransitionMediaSrc(null);
-      });
-      return;
-    }
-    setTransitionMediaSrc(null);
-    try {
-      props.onActivate(currentSrc);
-    } catch {
-      handleError();
-    } finally {
-      clearViewTransitionName();
-    }
+    props.onActivate(src() ?? null);
   }
 
   const isHighlighted = () => props.active || props.selected;
@@ -2297,11 +2257,7 @@ export const MediaView: Component = () => {
                 </svg>
               }
               onClick={() => {
-                if (document.startViewTransition) {
-                  document.startViewTransition(showMediaView);
-                } else {
-                  showMediaView();
-                }
+                showMediaView();
               }}
             />
           </div>

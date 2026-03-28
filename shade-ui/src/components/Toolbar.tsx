@@ -123,11 +123,7 @@ export const Toolbar: Component = () => {
             class="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] lg:hidden"
             aria-label="Back to library"
             onClick={() => {
-              if (document.startViewTransition) {
-                document.startViewTransition(showMediaView);
-              } else {
-                showMediaView();
-              }
+              showMediaView();
             }}
           >
             <BackIcon />
@@ -143,19 +139,9 @@ export const Toolbar: Component = () => {
               ? "cursor-pointer hover:bg-[var(--surface-subtle)]"
               : "cursor-default"
           }`}
-          style={{
-            "view-transition-name":
-              hasImage() && state.currentView === "media"
-                ? "active-editor-media"
-                : "none",
-          }}
           onClick={() => {
             if (!canResumeEditor()) return;
-            if (document.startViewTransition) {
-              document.startViewTransition(showEditorView);
-            } else {
-              showEditorView();
-            }
+            showEditorView();
           }}
           disabled={!canResumeEditor()}
         >

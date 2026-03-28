@@ -10,8 +10,6 @@ export {
   state,
   setViewportToneSample,
   viewportToneSample,
-  setTransitionMediaSrc,
-  transitionMediaSrc,
 } from "./editor-store";
 
 export {

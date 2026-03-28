@@ -234,19 +234,6 @@ input[type="range"].shade-slider::-moz-range-thumb {
   box-shadow: var(--slider-thumb-shadow);
 }
 
-/* ─── View transitions ───────────────────────────────────────────────────── */
-
-::view-transition-old(active-media),
-::view-transition-new(active-media) {
-  animation-duration: 340ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 240ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────── */
 
