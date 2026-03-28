@@ -29,6 +29,18 @@ function createArtboardId() {
   return globalThis.crypto?.randomUUID?.() ?? `artboard-${Date.now()}-${Math.random()}`;
 }
 
+async function getImageDimensions(
+  src: string,
+): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () =>
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error("failed to load image"));
+    image.src = src;
+  });
+}
+
 function getNextArtboardWorldX() {
   const rightEdge = state.artboards.reduce(
     (max, artboard) => Math.max(max, artboard.worldX + artboard.width),
@@ -291,12 +303,31 @@ async function openImageFrom(
         null)
       : null;
   const previousSelectedArtboardId = state.selectedArtboardId;
-  const pendingSize = replacementArtboard ?? getPendingArtboardSize();
-  const artboard = replacementArtboard ?? {
-    id: createArtboardId(),
+  let pendingSize: { width: number; height: number };
+  if (mode === "replace" && loadingMediaSrc) {
+    try {
+      const dims = await getImageDimensions(loadingMediaSrc);
+      pendingSize = dims;
+    } catch {
+      pendingSize = {
+        width: DEFAULT_PENDING_ARTBOARD_WIDTH,
+        height: DEFAULT_PENDING_ARTBOARD_HEIGHT,
+      };
+    }
+  } else if (mode === "replace") {
+    pendingSize = {
+      width: DEFAULT_PENDING_ARTBOARD_WIDTH,
+      height: DEFAULT_PENDING_ARTBOARD_HEIGHT,
+    };
+  } else {
+    pendingSize = getPendingArtboardSize();
+  }
+  const artboardId = replacementArtboard?.id ?? createArtboardId();
+  const artboard = {
+    id: artboardId,
     title: getArtboardTitle(source),
-    worldX: getNextArtboardWorldX(),
-    worldY: 0,
+    worldX: replacementArtboard?.worldX ?? getNextArtboardWorldX(),
+    worldY: replacementArtboard?.worldY ?? 0,
     width: pendingSize.width,
     height: pendingSize.height,
     sourceBitDepth: "Loading",
@@ -309,22 +340,12 @@ async function openImageFrom(
     backdropTile: null,
   };
   const loadToken = beginLoadToken();
-  if (!replacementArtboard) {
-    setState("artboards", (artboards) => [...artboards, artboard]);
-  } else {
-    setState("artboards", (candidate) => candidate.id === artboard.id, {
-      ...artboard,
-      title: getArtboardTitle(source),
-      source,
-      sourceBitDepth: "Loading",
-      activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
-      activeMediaItemId: activeMediaSelection?.itemId ?? null,
-      activeMediaRating: activeMediaSelection?.rating ?? null,
-      activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
-      previewTile: null,
-      backdropTile: null,
-    });
+  if (replacementArtboard) {
+    setState("artboards", (artboards) =>
+      artboards.filter((a) => a.id !== replacementArtboard.id),
+    );
   }
+  setState("artboards", (artboards) => [...artboards, artboard]);
   setPendingEditorState(
     artboard.id,
     pendingSize.width,
