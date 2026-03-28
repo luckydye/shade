@@ -90,9 +90,7 @@ const App: Component = () => {
 
   return (
     <div class="app-gradient relative flex h-screen w-screen select-none flex-col overflow-hidden text-[var(--text)]">
-      <div class="mt-[env(safe-area-inset-top)]">
-        <Toolbar />
-      </div>
+      <Toolbar />
       <div class="flex min-h-0 flex-1">
         <MediaView />
         <div

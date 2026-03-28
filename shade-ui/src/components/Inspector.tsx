@@ -5,16 +5,19 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  createUniqueId,
   on,
   onCleanup,
   onMount,
 } from "solid-js";
 import {
+  activeAdjustmentSliderId,
   addLayer,
   applyEdit,
   applyGradientMask,
   deleteLayer,
   findCropLayerIdx,
+  isAdjustmentSliderActive,
   isDrawerOpen,
   listPresets,
   listSnapshots,
@@ -27,6 +30,8 @@ import {
   savePreset,
   saveSnapshot,
   selectLayer,
+  setActiveAdjustmentSliderId,
+  setIsAdjustmentSliderActive,
   setIsDrawerOpen,
   setLayerVisible,
   state,
@@ -107,6 +112,7 @@ interface SliderProps {
 }
 
 const Slider: Component<SliderProps> = (props) => {
+  const sliderId = createUniqueId();
   const [dragging, setDragging] = createSignal(false);
   let activePointer:
     | { pointerId: number; startX: number; startY: number; pointerType: string }
@@ -122,6 +128,11 @@ const Slider: Component<SliderProps> = (props) => {
   const fillLeft = () => Math.min(fraction(), defaultFrac()) * 100;
   const fillWidth = () => Math.abs(fraction() - defaultFrac()) * 100;
   const accent = () => props.accentColor ?? "var(--curve-stroke)";
+  const setSliderDragging = (next: boolean) => {
+    setDragging(next);
+    setIsAdjustmentSliderActive(next);
+    setActiveAdjustmentSliderId(next ? sliderId : null);
+  };
   const maybeResetToDefault = (event: PointerEvent & { currentTarget: HTMLInputElement }) => {
     if (!activePointer || activePointer.pointerId !== event.pointerId) {
       return;
@@ -150,8 +161,18 @@ const Slider: Component<SliderProps> = (props) => {
     }
     lastTap = { at: now, x: event.clientX, y: event.clientY, pointerType };
   };
+  onCleanup(() => {
+    if (activeAdjustmentSliderId() === sliderId) {
+      setIsAdjustmentSliderActive(false);
+      setActiveAdjustmentSliderId(null);
+    }
+  });
   return (
-    <div class={`${PARAMETER_ROW_CLASS} ${props.class ?? ""}`}>
+    <div
+      data-mobile-slider-active={isAdjustmentSliderActive() ? "true" : undefined}
+      data-mobile-slider-current={activeAdjustmentSliderId() === sliderId ? "true" : undefined}
+      class={`${PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150`}
+    >
       <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
         {props.icon}
       </span>
@@ -185,19 +206,19 @@ const Slider: Component<SliderProps> = (props) => {
               startY: event.clientY,
               pointerType: event.pointerType,
             };
-            setDragging(true);
+            setSliderDragging(true);
           }}
           onPointerUp={(event) => {
-            setDragging(false);
+            setSliderDragging(false);
             maybeResetToDefault(event);
           }}
           onPointerCancel={() => {
             activePointer = null;
-            setDragging(false);
+            setSliderDragging(false);
           }}
           onBlur={() => {
             activePointer = null;
-            setDragging(false);
+            setSliderDragging(false);
           }}
         />
         <div class="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--slider-track)]" />
@@ -677,7 +698,10 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
 };
 
 const SectionHeader: Component<{ title: string; detail?: string }> = (props) => (
-  <div class="flex items-center justify-between gap-3 mt-2">
+  <div
+    data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+    class="mobile-slider-fade mt-2 flex items-center justify-between gap-3 transition-opacity duration-150"
+  >
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
     <Show when={props.detail}>
       {(detail) => (
@@ -1195,7 +1219,10 @@ export const Inspector: Component = () => {
     };
 
     return (
-      <div class={`${PARAMETER_ROW_CLASS} gap-y-1.5`}>
+      <div
+        data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+        class={`${PARAMETER_ROW_CLASS} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
+      >
         <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
           <CurveIcon />
         </span>
@@ -1407,7 +1434,10 @@ export const Inspector: Component = () => {
     };
     return (
       <div class="space-y-3">
-        <div class={`${SEGMENTED_CONTROL_CLASS} grid-cols-3`}>
+        <div
+          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+          class={`${SEGMENTED_CONTROL_CLASS} mobile-slider-fade grid-cols-3 transition-opacity duration-150`}
+        >
           {(["red", "green", "blue"] as const).map((c) => (
             <Button
               type="button"
@@ -2233,7 +2263,10 @@ export const Inspector: Component = () => {
   );
 
   const InspectorTabs: Component<{ class?: string }> = (props) => (
-    <div class={props.class ?? ""}>
+    <div
+      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+      class={`${props.class ?? ""} mobile-slider-fade transition-opacity duration-150`}
+    >
       <div class={`${SEGMENTED_CONTROL_CLASS} grid-cols-2`}>
         {(["edit", "presets"] as const).map((tab) => (
           <Button
@@ -2253,7 +2286,10 @@ export const Inspector: Component = () => {
   );
 
   const DesktopLayerList: Component = () => (
-    <div class="flex flex-col gap-3">
+    <div
+      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+      class="mobile-slider-fade flex flex-col gap-3 transition-opacity duration-150"
+    >
       <div ref={desktopLayerListRef} class="relative flex flex-col gap-1">
         <div
           class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)] transition-opacity"
@@ -2514,7 +2550,10 @@ export const Inspector: Component = () => {
       </div>
 
       <Show when={selectedAdjustmentLayer()}>
-        <div class="mt-3 flex items-center gap-1 overflow-x-auto border-t border-[var(--border)] pt-3">
+        <div
+          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+          class="mobile-slider-fade mt-3 flex items-center gap-1 overflow-x-auto border-t border-[var(--border)] pt-3 transition-opacity duration-150"
+        >
           {adjustmentLayers().map(({ idx }) => {
             const focus = () =>
               layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
@@ -2591,12 +2630,14 @@ export const Inspector: Component = () => {
 
       {/* Mobile: drawer overlay */}
       <div
-        class={`fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--border)] bg-[var(--panel-bg)] transition-transform duration-300 ease-out lg:hidden ${
+        data-mobile-slider-active={isAdjustmentSliderActive() ? "true" : undefined}
+        class={`mobile-slider-drawer fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--border)] bg-[var(--panel-bg)] transition-transform duration-300 ease-out lg:hidden ${
           isDrawerOpen() ? "translate-y-0" : "translate-y-[calc(100%-4.5rem)]"
         }`}
       >
         <div
-          class="flex cursor-pointer flex-col items-center px-4 pt-3 pb-1"
+          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+          class="mobile-slider-fade flex cursor-pointer flex-col items-center px-4 pt-3 pb-1 transition-opacity duration-150"
           onClick={() => setIsDrawerOpen((v) => !v)}
         >
           <div class="mb-2 h-1.5 w-14 rounded-full bg-[var(--surface-active)]" />
@@ -2606,7 +2647,10 @@ export const Inspector: Component = () => {
           <MobileSelectedLayerPanel />
         </div>
 
-        <div class="pb-[env(safe-area-inset-bottom)]"></div>
+        <div
+          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+          class="mobile-slider-fade pb-[env(safe-area-inset-bottom)] transition-opacity duration-150"
+        ></div>
       </div>
 
       {/* Add layer dialog */}

@@ -2,6 +2,7 @@ import { Show, type Component } from "solid-js";
 import { MEDIA_FILE_ACCEPT } from "../media-file-accept";
 import {
   exportImage,
+  isAdjustmentSliderActive,
   pickExportTarget,
   openImageFile,
   showEditorView,
@@ -112,7 +113,8 @@ export const Toolbar: Component = () => {
   return (
     <header
       data-tauri-drag-region
-      class="static grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 py-3 backdrop-blur-[18px] md:grid-cols-[56px_minmax(0,1fr)_auto]"
+      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+      class="mobile-slider-fade fixed inset-x-0 top-0 z-40 grid w-full select-none grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] backdrop-blur-[18px] transition-opacity duration-150 md:grid-cols-[56px_minmax(0,1fr)_auto] lg:static lg:pb-3 lg:pt-3"
     >
       <div class="flex h-8 items-center">
         <Show when={showMobileLibraryButton()}>

@@ -51,6 +51,7 @@ import {
   resolvePeerThumbnailSrc,
 } from "../peer-library-cache";
 import {
+  isAdjustmentSliderActive,
   openImage,
   openPeerImage,
   setTransitionMediaSrc,
@@ -1929,7 +1930,7 @@ export const MediaView: Component = () => {
   const shellClass = () =>
     isEditorStrip()
       ? "hidden w-[112px] shrink-0 border-r border-[var(--border)] bg-[var(--panel-bg)] lg:flex lg:flex-col"
-      : "flex flex-1 flex-col overflow-hidden md:mt-0";
+      : "flex flex-1 flex-col overflow-hidden pt-[calc(env(safe-area-inset-top)+3.5rem)] lg:pt-0";
   const scrollClass = () =>
     isEditorStrip()
       ? "media-scroll h-full overflow-y-auto px-2 py-3"
@@ -1942,7 +1943,8 @@ export const MediaView: Component = () => {
       ref={mediaShellRef}
       tabIndex={-1}
       aria-label="Media view"
-      class={`${shellClass()} outline-none relative`}
+      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+      class={`${shellClass()} mobile-slider-fade outline-none relative transition-opacity duration-150`}
       onDragEnter={handleUploadDragEnter}
       onDragOver={handleUploadDragOver}
       onDragLeave={handleUploadDragLeave}

@@ -157,6 +157,36 @@ button[data-pressed="true"] {
   transform: scale(0.99);
 }
 
+@media (max-width: 1023px) {
+  .mobile-slider-drawer {
+    transition:
+      transform 300ms ease-out,
+      opacity 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .mobile-slider-drawer[data-mobile-slider-active="true"] {
+    background-color: transparent;
+    border-color: transparent;
+  }
+
+  .mobile-slider-fade[data-mobile-faded="true"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .mobile-slider-fade-row[data-mobile-slider-active="true"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .mobile-slider-fade-row[data-mobile-slider-active="true"][data-mobile-slider-current="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 input[type="range"].shade-slider {
   -webkit-appearance: none;
   appearance: none;
