@@ -44,6 +44,8 @@ export {
   setLayerVisible,
   renameLayer,
   removeMask,
+  createBrushMask,
+  stampBrushMask,
   startCropMode,
   updateCropDraft,
   deleteLayer,

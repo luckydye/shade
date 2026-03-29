@@ -130,6 +130,9 @@ pub fn run() {
             commands::apply_peer_metadata,
             commands::apply_gradient_mask,
             commands::remove_mask,
+            commands::create_brush_mask,
+            commands::stamp_brush_mask,
+            commands::get_mask_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

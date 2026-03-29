@@ -366,6 +366,20 @@ export async function removeMask(idx: number) {
   await runLayerMutation(() => bridge.removeMask(idx));
 }
 
+export async function createBrushMask(idx: number) {
+  await runLayerMutation(() => bridge.createBrushMask(idx));
+}
+
+export async function stampBrushMask(
+  layerIdx: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  softness: number,
+) {
+  await bridge.stampBrushMask(layerIdx, cx, cy, radius, softness);
+}
+
 export async function addLayer(kind: string, position: number) {
   let idx = await bridge.addLayer(kind);
   await refreshLayerStack();

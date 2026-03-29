@@ -3,7 +3,6 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  createUniqueId,
   type JSX,
   Match,
   on,
@@ -12,12 +11,14 @@ import {
   Show,
   Switch,
 } from "solid-js";
+import { Slider } from "./Slider";
 import type { LayerInfo } from "../store/editor";
 import {
   activeAdjustmentSliderId,
   addLayer,
   applyEdit,
   applyGradientMask,
+  createBrushMask,
   backdropTile,
   deleteLayer,
   findCropLayerIdx,
@@ -99,174 +100,6 @@ const ADD_LAYER_FOCI = [
   "hsl",
   "denoise",
 ] as const satisfies readonly MobileLayerFocus[];
-
-interface SliderProps {
-  label: string;
-  icon: JSX.Element;
-  value: number;
-  defaultValue: number;
-  min: number;
-  max: number;
-  step?: number;
-  valueLabel?: string;
-  onChange: (value: number) => void;
-  class?: string;
-  accentColor?: string;
-}
-
-const Slider: Component<SliderProps> = (props) => {
-  const sliderId = createUniqueId();
-  const [dragging, setDragging] = createSignal(false);
-  let activePointer: {
-    pointerId: number;
-    startX: number;
-    startY: number;
-    pointerType: string;
-  } | null = null;
-  let lastTap: { at: number; x: number; y: number; pointerType: string } | null = null;
-  const fraction = () => clamp((props.value - props.min) / (props.max - props.min), 0, 1);
-  const defaultFrac = () =>
-    clamp((props.defaultValue - props.min) / (props.max - props.min), 0, 1);
-  const isBipolar = () => defaultFrac() > 0.01 && defaultFrac() < 0.99;
-  const fillLeft = () => Math.min(fraction(), defaultFrac()) * 100;
-  const fillWidth = () => Math.abs(fraction() - defaultFrac()) * 100;
-  const accent = () => props.accentColor ?? "var(--curve-stroke)";
-  const setSliderDragging = (next: boolean) => {
-    setDragging(next);
-    setIsAdjustmentSliderActive(next);
-    setActiveAdjustmentSliderId(next ? sliderId : null);
-  };
-  const maybeResetToDefault = (
-    event: PointerEvent & { currentTarget: HTMLInputElement },
-  ) => {
-    if (!activePointer || activePointer.pointerId !== event.pointerId) {
-      return;
-    }
-    const moved =
-      Math.hypot(
-        event.clientX - activePointer.startX,
-        event.clientY - activePointer.startY,
-      ) > 10;
-    const pointerType = activePointer.pointerType;
-    activePointer = null;
-    if (moved) {
-      lastTap = null;
-      return;
-    }
-    const now = performance.now();
-    if (
-      lastTap &&
-      lastTap.pointerType === pointerType &&
-      now - lastTap.at <= 300 &&
-      Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= 24
-    ) {
-      lastTap = null;
-      props.onChange(props.defaultValue);
-      return;
-    }
-    lastTap = { at: now, x: event.clientX, y: event.clientY, pointerType };
-  };
-  onCleanup(() => {
-    if (activeAdjustmentSliderId() === sliderId) {
-      setIsAdjustmentSliderActive(false);
-      setActiveAdjustmentSliderId(null);
-    }
-  });
-  return (
-    <div
-      data-mobile-slider-active={isAdjustmentSliderActive() ? "true" : undefined}
-      data-mobile-slider-current={
-        activeAdjustmentSliderId() === sliderId ? "true" : undefined
-      }
-      class={`${PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150`}
-    >
-      <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
-        {props.icon}
-      </span>
-      <span class="min-w-0 self-center text-[13px] font-medium text-[var(--text-strong)]">
-        {props.label}
-      </span>
-      <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
-        {props.valueLabel ?? props.value.toFixed(2)}
-      </span>
-      <div class="relative col-start-2 col-end-4 h-7 w-full self-center">
-        <input
-          type="range"
-          min={props.min}
-          max={props.max}
-          step={props.step ?? 0.01}
-          value={props.value}
-          aria-label={props.label}
-          class="shade-slider absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-          style={{ "--slider-accent": accent() }}
-          onInput={(event) => {
-            const nextValue = event.currentTarget.valueAsNumber;
-            if (Number.isNaN(nextValue)) {
-              throw new Error("slider input produced NaN");
-            }
-            props.onChange(nextValue);
-          }}
-          onPointerDown={(event) => {
-            activePointer = {
-              pointerId: event.pointerId,
-              startX: event.clientX,
-              startY: event.clientY,
-              pointerType: event.pointerType,
-            };
-            setSliderDragging(true);
-          }}
-          onPointerUp={(event) => {
-            setSliderDragging(false);
-            maybeResetToDefault(event);
-          }}
-          onPointerCancel={() => {
-            activePointer = null;
-            setSliderDragging(false);
-          }}
-          onBlur={() => {
-            activePointer = null;
-            setSliderDragging(false);
-          }}
-        />
-        <div class="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--slider-track)]" />
-        <div
-          class="pointer-events-none absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full"
-          style={{
-            left: `${fillLeft()}%`,
-            width: `${fillWidth()}%`,
-            background: accent(),
-            opacity: 0.65,
-            transition: dragging() ? "none" : "left 140ms ease-out, width 140ms ease-out",
-          }}
-        />
-        <Show when={isBipolar()}>
-          <div
-            class="pointer-events-none absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--slider-notch)]"
-            style={{ left: `${defaultFrac() * 100}%` }}
-          />
-        </Show>
-        <div
-          class="pointer-events-none absolute top-1/2"
-          style={{
-            left: `${fraction() * 100}%`,
-            transform: `translate(-50%, -50%) scale(${dragging() ? 1.2 : 1})`,
-            transition: dragging()
-              ? "none"
-              : "left 140ms ease-out, transform 100ms ease-out",
-          }}
-        >
-          <div
-            class="h-[14px] w-[14px] rounded-full border-2 border-[var(--slider-thumb-border)]"
-            style={{
-              background: accent(),
-              "box-shadow": "var(--slider-thumb-shadow)",
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const CURVE_SAMPLE_INDICES = [64, 128, 192] as const;
 const CURVE_MIN_X = 0;
@@ -2444,6 +2277,11 @@ export const Inspector: Component = () => {
     setMaskPickerLayer(null);
   };
 
+  const handleApplyBrushMask = async (idx: number) => {
+    await createBrushMask(idx);
+    setMaskPickerLayer(null);
+  };
+
   const handleRemoveMask = async (idx: number) => {
     await removeMask(idx);
   };
@@ -3085,7 +2923,7 @@ export const Inspector: Component = () => {
                 </Show>
               </div>
               <Show when={maskPickerLayer() === realIdx}>
-                <div class="ml-6 grid grid-cols-2 gap-2">
+                <div class="ml-6 grid grid-cols-3 gap-2">
                   <Button
                     type="button"
                     onClick={() => void handleApplyLinearMask(realIdx)}
@@ -3099,6 +2937,13 @@ export const Inspector: Component = () => {
                     class={SECONDARY_BUTTON_CLASS}
                   >
                     Radial
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleApplyBrushMask(realIdx)}
+                    class={SECONDARY_BUTTON_CLASS}
+                  >
+                    Brush
                   </Button>
                 </div>
               </Show>

@@ -294,7 +294,7 @@ export interface LsCurveValues {
 }
 
 export interface MaskParamsInfo {
-  kind: "linear" | "radial";
+  kind: "linear" | "radial" | "brush";
   x1?: number | null;
   y1?: number | null;
   x2?: number | null;
@@ -1407,4 +1407,50 @@ export async function removeMask(idx: number): Promise<void> {
   }
   await ensureWorkerReady();
   await workerCall({ type: "remove_mask", layerIdx: idx }, "mask_removed");
+}
+
+export async function createBrushMask(layerIdx: number): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("create_brush_mask", { params: { layer_idx: layerIdx } });
+    return;
+  }
+  throw new Error("createBrushMask is only implemented for Tauri");
+}
+
+export async function stampBrushMask(
+  layerIdx: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  softness: number,
+): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("stamp_brush_mask", {
+      params: { layer_idx: layerIdx, cx, cy, radius, softness },
+    });
+    return;
+  }
+  throw new Error("stampBrushMask is only implemented for Tauri");
+}
+
+export interface MaskThumbnail {
+  pixels: number[];
+  width: number;
+  height: number;
+}
+
+export async function getMaskThumbnail(
+  layerIdx: number,
+  maxW: number,
+  maxH: number,
+): Promise<MaskThumbnail> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("get_mask_thumbnail", {
+      params: { layer_idx: layerIdx, max_w: maxW, max_h: maxH },
+    }) as Promise<MaskThumbnail>;
+  }
+  throw new Error("getMaskThumbnail is only implemented for Tauri");
 }

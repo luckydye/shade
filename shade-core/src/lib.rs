@@ -330,12 +330,33 @@ pub struct FloatImage {
 /// A unique identifier for a mask resource.
 pub type MaskId = u64;
 
-/// Parameters that define how a gradient mask was generated.
-/// Stored alongside pixel data so the UI can draw interactive handles.
+mod base64_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use base64::Engine;
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(d)?;
+        base64::engine::general_purpose::STANDARD.decode(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Parameters that define how a mask was generated.
+/// For gradient masks, stored so the UI can draw interactive handles.
+/// For brush masks, stores the serialized pixel data for persistence.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MaskParams {
     Linear { x1: f32, y1: f32, x2: f32, y2: f32 },
     Radial { cx: f32, cy: f32, radius: f32 },
+    Brush {
+        width: u32,
+        height: u32,
+        #[serde(with = "base64_serde")]
+        pixels: Vec<u8>,
+    },
 }
 
 /// R8 mask data (one byte per pixel, 0=transparent, 255=opaque).
@@ -396,6 +417,59 @@ impl MaskData {
                 self.pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
             }
         }
+    }
+
+    /// Stamp a soft circular brush at (cx, cy) with given radius and softness.
+    /// softness=0 → hard edge; softness=1 → smooth cosine falloff to edge.
+    /// Pixels are set to the maximum of their current value and the brush alpha.
+    pub fn stamp_brush(&mut self, cx: f32, cy: f32, radius: f32, softness: f32) {
+        assert!(radius > 0.0, "brush radius must be positive");
+        let r_ceil = radius.ceil() as i32;
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let col_min = (cx as i32 - r_ceil).max(0);
+        let col_max = (cx as i32 + r_ceil).min(w - 1);
+        let row_min = (cy as i32 - r_ceil).max(0);
+        let row_max = (cy as i32 + r_ceil).min(h - 1);
+        for row in row_min..=row_max {
+            for col in col_min..=col_max {
+                let dx = col as f32 + 0.5 - cx;
+                let dy = row as f32 + 0.5 - cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let t = (dist / radius).clamp(0.0, 1.0);
+                // hard_edge is the normalised radius where softness kicks in
+                let hard_edge = 1.0 - softness.clamp(0.0, 1.0);
+                let alpha = if t <= hard_edge {
+                    1.0_f32
+                } else {
+                    let s = (t - hard_edge) / (1.0 - hard_edge + f32::EPSILON);
+                    // cosine ease-out for a natural brush feel
+                    0.5 * (1.0 + (std::f32::consts::PI * s).cos())
+                };
+                let idx = (row * w + col) as usize;
+                let new_val = (alpha * 255.0) as u8;
+                self.pixels[idx] = self.pixels[idx].max(new_val);
+            }
+        }
+    }
+
+    /// Returns a downscaled copy of the mask, fitting within max_w × max_h
+    /// using nearest-neighbour sampling.
+    pub fn get_thumbnail(&self, max_w: u32, max_h: u32) -> (Vec<u8>, u32, u32) {
+        let scale = (max_w as f32 / self.width as f32)
+            .min(max_h as f32 / self.height as f32)
+            .min(1.0);
+        let tw = ((self.width as f32 * scale).round() as u32).max(1);
+        let th = ((self.height as f32 * scale).round() as u32).max(1);
+        let mut out = vec![0u8; (tw * th) as usize];
+        for ty in 0..th {
+            for tx in 0..tw {
+                let sx = (tx as f32 / tw as f32 * self.width as f32) as u32;
+                let sy = (ty as f32 / th as f32 * self.height as f32) as u32;
+                out[(ty * tw + tx) as usize] = self.pixels[(sy * self.width + sx) as usize];
+            }
+        }
+        (out, tw, th)
     }
 }
 

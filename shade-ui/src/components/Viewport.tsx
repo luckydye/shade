@@ -17,10 +17,11 @@ import {
   selectArtboard,
   setViewportScreenSize,
   setViewportToneSample,
+  stampBrushMask,
   state,
   zoomViewport,
 } from "../store/editor";
-import { setMediaRating, type MaskParamsInfo } from "../bridge/index";
+import { getMaskThumbnail, setMediaRating, type MaskParamsInfo } from "../bridge/index";
 import { compositeArtboard } from "../viewport/compositor";
 import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
 import { getViewportFitRef } from "../viewport/preview";
@@ -28,6 +29,7 @@ import type { WorldTransform } from "../viewport/transform";
 import { clamp, setState, type ArtboardState } from "../store/editor-store";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
+import { Slider } from "./Slider";
 
 type CropHandle =
   | "move"
@@ -102,6 +104,14 @@ export const Viewport: Component = () => {
     rotation: number;
   } | null>(null);
   const [draftMask, setDraftMask] = createSignal<MaskParamsInfo | null>(null);
+  const [brushSize, setBrushSize] = createSignal(100);
+  const [brushSoftness, setBrushSoftness] = createSignal(0.5);
+  let brushOverlayCanvas: HTMLCanvasElement | null = null;
+  // R8 pixel values (0–255) at thumbnail resolution — single source of truth for the overlay
+  let brushOverlayPixels: Uint8Array | null = null;
+  // Last pointer position in stage-relative CSS pixels (for brush cursor drawing)
+  let lastBrushCursorPos: { sx: number; sy: number } | null = null;
+  const BRUSH_OVERLAY_MAX = 512;
   const [loadingArtboardImage, setLoadingArtboardImage] =
     createSignal<HTMLImageElement | null>(null);
   const [isSavingRating, setIsSavingRating] = createSignal(false);
@@ -149,6 +159,12 @@ export const Viewport: Component = () => {
         x: number;
         y: number;
       }
+    | {
+        kind: "brush_paint";
+        pointerId: number;
+        lastImgX: number;
+        lastImgY: number;
+      }
     | null = null;
 
   const selectedCropLayer = () => {
@@ -171,6 +187,77 @@ export const Viewport: Component = () => {
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
   const selectedArtboard = () => getSelectedArtboard();
+
+  async function initBrushOverlay() {
+    const w = state.canvasWidth;
+    const h = state.canvasHeight;
+    if (w === 0 || h === 0) return;
+    const scale = Math.min(1, BRUSH_OVERLAY_MAX / Math.max(w, h));
+    const tw = Math.max(1, Math.round(w * scale));
+    const th = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = tw;
+    canvas.height = th;
+    brushOverlayCanvas = canvas;
+    brushOverlayPixels = new Uint8Array(tw * th);
+    // Populate with current mask state
+    const layerIdx = state.selectedLayerIdx;
+    if (state.layers[layerIdx]?.has_mask) {
+      try {
+        const thumb = await getMaskThumbnail(layerIdx, BRUSH_OVERLAY_MAX, BRUSH_OVERLAY_MAX);
+        brushOverlayPixels = new Uint8Array(thumb.pixels);
+        redrawOverlayCanvas();
+      } catch {
+        // mask has no data yet
+      }
+    }
+    drawFrame();
+  }
+
+  function redrawOverlayCanvas() {
+    if (!brushOverlayCanvas || !brushOverlayPixels) return;
+    const ctx = brushOverlayCanvas.getContext("2d");
+    if (!ctx) return;
+    const tw = brushOverlayCanvas.width;
+    const th = brushOverlayCanvas.height;
+    const imgData = ctx.createImageData(tw, th);
+    for (let i = 0; i < brushOverlayPixels.length; i++) {
+      imgData.data[i * 4 + 0] = 220;
+      imgData.data[i * 4 + 1] = 30;
+      imgData.data[i * 4 + 2] = 30;
+      imgData.data[i * 4 + 3] = Math.round(brushOverlayPixels[i] * 0.65);
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  function stampBrushOverlay(imageX: number, imageY: number, radius: number, softness: number) {
+    if (!brushOverlayCanvas || !brushOverlayPixels) return;
+    const tw = brushOverlayCanvas.width;
+    const th = brushOverlayCanvas.height;
+    const scaleX = tw / state.canvasWidth;
+    const scaleY = th / state.canvasHeight;
+    const tx = imageX * scaleX;
+    const ty = imageY * scaleY;
+    const tr = radius * scaleX;
+    const rCeil = Math.ceil(tr);
+    const hardEdge = 1 - softness;
+    for (let dy = -rCeil; dy <= rCeil; dy++) {
+      for (let dx = -rCeil; dx <= rCeil; dx++) {
+        const px = Math.round(tx) + dx;
+        const py = Math.round(ty) + dy;
+        if (px < 0 || px >= tw || py < 0 || py >= th) continue;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const t = Math.min(1, dist / (tr + 0.001));
+        const alpha =
+          t <= hardEdge
+            ? 1
+            : 0.5 * (1 + Math.cos((Math.PI * (t - hardEdge)) / (1 - hardEdge + 0.001)));
+        const idx = py * tw + px;
+        brushOverlayPixels[idx] = Math.max(brushOverlayPixels[idx], Math.round(alpha * 255));
+      }
+    }
+    redrawOverlayCanvas();
+  }
   const selectedArtboardRating = () => selectedArtboard()?.activeMediaRating ?? null;
 
   async function handleSetRating(rating: number | null) {
@@ -442,7 +529,8 @@ export const Viewport: Component = () => {
   function maskHandleAtPoint(sx: number, sy: number): MaskHandle | null {
     if (!stageRef) return null;
     const mp = activeMask();
-    if (!mp) return null;
+    // Brush masks don't have drag handles
+    if (!mp || mp.kind === "brush") return null;
     const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
     if (t.scale <= 0) return null;
 
@@ -496,6 +584,35 @@ export const Viewport: Component = () => {
         ctx.stroke();
       }
     };
+
+    if (mp.kind === "brush") {
+      // Draw accumulated brush strokes as red overlay
+      if (brushOverlayCanvas) {
+        const tl = worldToScreen(toWorldX(0), toWorldY(0), t);
+        const br = worldToScreen(toWorldX(state.canvasWidth), toWorldY(state.canvasHeight), t);
+        ctx.drawImage(brushOverlayCanvas, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      }
+      // Draw brush cursor at current pointer position
+      if (lastBrushCursorPos) {
+        const cursorRadius = brushSize() * t.scale;
+        ctx.beginPath();
+        ctx.arc(lastBrushCursorPos.sx, lastBrushCursorPos.sy, cursorRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(lastBrushCursorPos.sx, lastBrushCursorPos.sy, cursorRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(lastBrushCursorPos.sx, lastBrushCursorPos.sy, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.fill();
+      }
+      ctx.restore();
+      return;
+    }
 
     if (mp.kind === "linear") {
       const s = toScreen(mp.x1 ?? 0, mp.y1 ?? 0);
@@ -840,6 +957,18 @@ export const Viewport: Component = () => {
     drawFrame();
   });
 
+  // Initialize / clear brush overlay when brush mask mode changes
+  createEffect(() => {
+    const isBrush = activeMask()?.kind === "brush";
+    if (!isBrush) {
+      brushOverlayCanvas = null;
+      brushOverlayPixels = null;
+      lastBrushCursorPos = null;
+      return;
+    }
+    void initBrushOverlay();
+  });
+
   createEffect(() => {
     const src = state.loadingMediaSrc;
     if (!src) {
@@ -1030,6 +1159,23 @@ export const Viewport: Component = () => {
       drawFrame();
       return;
     }
+    if (activeMask()?.kind === "brush") {
+      const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+      if (t.scale > 0) {
+        const rect = stageRef.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const world = screenToWorld(sx, sy, t);
+        const imgX = world.x - getViewWorldOffset().x;
+        const imgY = world.y - getViewWorldOffset().y;
+        stampBrushOverlay(imgX, imgY, brushSize(), brushSoftness());
+        void stampBrushMask(state.selectedLayerIdx, imgX, imgY, brushSize(), brushSoftness());
+        gesture = { kind: "brush_paint", pointerId: e.pointerId, lastImgX: imgX, lastImgY: imgY };
+        stageRef.setPointerCapture(e.pointerId);
+        drawFrame();
+        return;
+      }
+    }
     if (activeMask()) {
       const rect = stageRef.getBoundingClientRect();
       const handle = maskHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
@@ -1111,7 +1257,42 @@ export const Viewport: Component = () => {
     lastStagePointer = { x: e.clientX, y: e.clientY };
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     updateViewportToneFromPointer(e.clientX, e.clientY);
+    // Update brush cursor position and repaint if in brush mode
+    if (activeMask()?.kind === "brush") {
+      const rect = stageRef.getBoundingClientRect();
+      lastBrushCursorPos = { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
+      if (!gesture) {
+        drawFrame();
+        return;
+      }
+    }
     if (!gesture) return;
+    if (gesture.kind === "brush_paint") {
+      const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+      if (t.scale <= 0) return;
+      const rect = stageRef.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy, t);
+      const imgX = world.x - getViewWorldOffset().x;
+      const imgY = world.y - getViewWorldOffset().y;
+      // Interpolate stamps along the path to avoid gaps at high speed
+      const dist = Math.hypot(imgX - gesture.lastImgX, imgY - gesture.lastImgY);
+      const spacing = Math.max(1, brushSize() * 0.3);
+      if (dist >= spacing) {
+        const steps = Math.floor(dist / spacing);
+        for (let i = 1; i <= steps; i++) {
+          const f = i / steps;
+          const ix = gesture.lastImgX + (imgX - gesture.lastImgX) * f;
+          const iy = gesture.lastImgY + (imgY - gesture.lastImgY) * f;
+          stampBrushOverlay(ix, iy, brushSize(), brushSoftness());
+          void stampBrushMask(state.selectedLayerIdx, ix, iy, brushSize(), brushSoftness());
+        }
+        gesture = { kind: "brush_paint", pointerId: gesture.pointerId, lastImgX: imgX, lastImgY: imgY };
+      }
+      drawFrame();
+      return;
+    }
     if (gesture.kind === "pan") {
       const movedX = e.clientX - gesture.startX;
       const movedY = e.clientY - gesture.startY;
@@ -1357,6 +1538,15 @@ export const Viewport: Component = () => {
       return;
     }
     setPressedArtboardChrome(null);
+    if (gesture?.kind === "brush_paint") {
+      if (stageRef && e && stageRef.hasPointerCapture(e.pointerId)) {
+        stageRef.releasePointerCapture(e.pointerId);
+      }
+      gesture = null;
+      // Refresh GPU preview after stroke is committed
+      void refreshPreview();
+      return;
+    }
     if (
       (gesture?.kind === "crop" ||
         gesture?.kind === "mask") &&
@@ -1460,7 +1650,7 @@ export const Viewport: Component = () => {
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[var(--canvas-bg)]"
-        style={{ "touch-action": "none" }}
+        style={{ "touch-action": "none", cursor: activeMask()?.kind === "brush" ? "none" : undefined }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -1470,11 +1660,13 @@ export const Viewport: Component = () => {
         onPointerUp={onPointerUp}
         onPointerLeave={(e) => {
           lastStagePointer = null;
+          lastBrushCursorPos = null;
           updateSmoothedToneSample(null);
           onPointerUp(e);
         }}
         onPointerCancel={(e) => {
           lastStagePointer = null;
+          lastBrushCursorPos = null;
           updateSmoothedToneSample(null);
           onPointerUp(e);
         }}
@@ -1510,11 +1702,50 @@ export const Viewport: Component = () => {
             </div>
           )}
           {activeMask() && (
-            <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
+            <div
+              class="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur"
+              style={{ "pointer-events": activeMask()?.kind === "brush" ? "auto" : "none" }}
+            >
               <span>Mask</span>
               <span class="text-white/35">
-                {activeMask()!.kind === "linear" ? "Linear" : "Radial"}
+                {activeMask()?.kind === "linear"
+                  ? "Linear"
+                  : activeMask()?.kind === "radial"
+                    ? "Radial"
+                    : "Brush"}
               </span>
+              <div class="flex items-center gap-4">
+                {activeMask()?.kind === "brush" && (
+                  <>
+                    <div class="h-3.5 w-px bg-white/20" />
+                    <Slider
+                      label="Size"
+                      value={brushSize()}
+                      defaultValue={100}
+                      min={5}
+                      max={500}
+                      step={1}
+                      valueLabel={`${brushSize()}px`}
+                      onChange={setBrushSize}
+                      containerClass="flex items-center gap-1.5"
+                      sliderClass="w-[150px]!"
+                    />
+                    <div class="h-3.5 w-px bg-white/20" />
+                    <Slider
+                      label="Softness"
+                      value={brushSoftness()}
+                      defaultValue={0.5}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      valueLabel={`${Math.round(brushSoftness() * 100)}%`}
+                      onChange={setBrushSoftness}
+                      containerClass="flex items-center gap-1.5"
+                      sliderClass="w-[150px]!"
+                    />
+                  </>
+                )}
+              </div>
             </div>
           )}
           {shouldShowZoomIndicator() && viewportZoomPercent() !== null && (

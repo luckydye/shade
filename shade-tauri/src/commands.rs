@@ -454,7 +454,22 @@ fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
     let mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams> = layers
         .iter()
         .filter_map(|entry| entry.mask)
-        .filter_map(|id| stack.mask_params.get(&id).map(|p| (id, p.clone())))
+        .filter_map(|id| {
+            let params = stack.mask_params.get(&id)?;
+            // For brush masks, sync current pixel data from the mask store into params
+            let synced = match params {
+                shade_core::MaskParams::Brush { .. } => {
+                    let data = stack.masks.get(&id)?;
+                    shade_core::MaskParams::Brush {
+                        width: data.width,
+                        height: data.height,
+                        pixels: data.pixels.clone(),
+                    }
+                }
+                _ => params.clone(),
+            };
+            Some((id, synced))
+        })
         .collect();
     PersistedLayerData {
         layers,
@@ -499,15 +514,21 @@ fn restore_masks_from_params(
             stack.layers[i].mask = None;
             continue;
         };
-        let mut mask = shade_core::MaskData::new_empty(width, height);
-        match params {
+        let mask = match params {
             shade_core::MaskParams::Linear { x1, y1, x2, y2 } => {
-                mask.fill_linear_gradient(*x1, *y1, *x2, *y2);
+                let mut m = shade_core::MaskData::new_empty(width, height);
+                m.fill_linear_gradient(*x1, *y1, *x2, *y2);
+                m
             }
             shade_core::MaskParams::Radial { cx, cy, radius } => {
-                mask.fill_radial_gradient(*cx, *cy, *radius);
+                let mut m = shade_core::MaskData::new_empty(width, height);
+                m.fill_radial_gradient(*cx, *cy, *radius);
+                m
             }
-        }
+            shade_core::MaskParams::Brush { width: bw, height: bh, pixels } => {
+                shade_core::MaskData { width: *bw, height: *bh, pixels: pixels.clone() }
+            }
+        };
         stack.set_mask_with_params(i, mask, params.clone());
     }
 }
@@ -3764,6 +3785,16 @@ impl From<&MaskParams> for MaskParamsInfo {
                 cy: Some(*cy),
                 radius: Some(*radius),
             },
+            MaskParams::Brush { .. } => MaskParamsInfo {
+                kind: "brush".into(),
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                cx: None,
+                cy: None,
+                radius: None,
+            },
         }
     }
 }
@@ -5151,6 +5182,91 @@ pub async fn remove_mask(
     }
     persist_current_edit_version(&state).await?;
     Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateBrushMaskParams {
+    pub layer_idx: usize,
+}
+
+#[tauri::command]
+pub async fn create_brush_mask(
+    params: CreateBrushMaskParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        let w = st.canvas_width;
+        let h = st.canvas_height;
+        let mask = shade_core::MaskData::new_empty(w, h);
+        let mp = shade_core::MaskParams::Brush { width: w, height: h, pixels: vec![0u8; (w * h) as usize] };
+        st.stack.set_mask_with_params(params.layer_idx, mask, mp);
+    }
+    persist_current_edit_version(&state).await?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StampBrushMaskParams {
+    pub layer_idx: usize,
+    pub cx: f32,
+    pub cy: f32,
+    pub radius: f32,
+    pub softness: f32,
+}
+
+#[tauri::command]
+pub async fn stamp_brush_mask(
+    params: StampBrushMaskParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    {
+        let mut st = lock_editor_state(&state)?;
+        if params.layer_idx >= st.stack.layers.len() {
+            return Err("index out of bounds".into());
+        }
+        let mask_id = st.stack.layers[params.layer_idx]
+            .mask
+            .ok_or("layer has no mask")?;
+        let data = st.stack.masks.get_mut(&mask_id).ok_or("mask data missing")?;
+        data.stamp_brush(params.cx, params.cy, params.radius, params.softness);
+        st.stack.generation += 1;
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetMaskThumbnailParams {
+    pub layer_idx: usize,
+    pub max_w: u32,
+    pub max_h: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MaskThumbnail {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn get_mask_thumbnail(
+    params: GetMaskThumbnailParams,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<MaskThumbnail, String> {
+    let st = lock_editor_state(&state)?;
+    if params.layer_idx >= st.stack.layers.len() {
+        return Err("index out of bounds".into());
+    }
+    let mask_id = st.stack.layers[params.layer_idx]
+        .mask
+        .ok_or("layer has no mask")?;
+    let data = st.stack.masks.get(&mask_id).ok_or("mask data missing")?;
+    let (pixels, width, height) = data.get_thumbnail(params.max_w, params.max_h);
+    Ok(MaskThumbnail { pixels, width, height })
 }
 
 fn normalize_crop_rect(

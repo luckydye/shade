@@ -2,6 +2,7 @@ import { type Component, createSignal, For, Show } from "solid-js";
 import {
   addLayer,
   applyGradientMask,
+  createBrushMask,
   deleteLayer,
   moveLayer,
   removeMask,
@@ -66,6 +67,11 @@ const LayerPanel: Component = () => {
       cy: h / 2,
       radius: Math.min(w, h) / 2,
     });
+    setMaskTarget(null);
+  };
+
+  const applyBrushMask = async (idx: number) => {
+    await createBrushMask(idx);
     setMaskTarget(null);
   };
 
@@ -219,6 +225,12 @@ const LayerPanel: Component = () => {
                       onClick={() => void applyRadialMask(realIdx)}
                     >
                       Radial
+                    </Button>
+                    <Button
+                      class="flex-1 text-[10px] py-0.5 bg-[var(--surface-hover)] hover:bg-[var(--surface-active)] rounded transition-colors"
+                      onClick={() => void applyBrushMask(realIdx)}
+                    >
+                      Brush
                     </Button>
                   </div>
                 </Show>
