@@ -5216,6 +5216,7 @@ pub struct StampBrushMaskParams {
     pub cy: f32,
     pub radius: f32,
     pub softness: f32,
+    pub erase: bool,
 }
 
 #[tauri::command]
@@ -5232,7 +5233,7 @@ pub async fn stamp_brush_mask(
             .mask
             .ok_or("layer has no mask")?;
         let data = st.stack.masks.get_mut(&mask_id).ok_or("mask data missing")?;
-        data.stamp_brush(params.cx, params.cy, params.radius, params.softness);
+        data.stamp_brush(params.cx, params.cy, params.radius, params.softness, params.erase);
         st.stack.generation += 1;
     }
     Ok(())

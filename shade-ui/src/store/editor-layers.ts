@@ -376,8 +376,9 @@ export async function stampBrushMask(
   cy: number,
   radius: number,
   softness: number,
+  erase: boolean,
 ) {
-  await bridge.stampBrushMask(layerIdx, cx, cy, radius, softness);
+  await bridge.stampBrushMask(layerIdx, cx, cy, radius, softness, erase);
 }
 
 export async function addLayer(kind: string, position: number) {

@@ -1,4 +1,4 @@
-import { Component, createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { Component, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import {
   applyEdit,
   applyGradientMask,
@@ -25,6 +25,7 @@ import { getMaskThumbnail, setMediaRating, type MaskParamsInfo } from "../bridge
 import { compositeArtboard } from "../viewport/compositor";
 import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
 import { getViewportFitRef } from "../viewport/preview";
+import { makeBrushCursor } from "../viewport/brush-cursor";
 import type { WorldTransform } from "../viewport/transform";
 import { clamp, setState, type ArtboardState } from "../store/editor-store";
 import { Button } from "./Button";
@@ -109,8 +110,6 @@ export const Viewport: Component = () => {
   let brushOverlayCanvas: HTMLCanvasElement | null = null;
   // R8 pixel values (0–255) at thumbnail resolution — single source of truth for the overlay
   let brushOverlayPixels: Uint8Array | null = null;
-  // Last pointer position in stage-relative CSS pixels (for brush cursor drawing)
-  let lastBrushCursorPos: { sx: number; sy: number } | null = null;
   const BRUSH_OVERLAY_MAX = 512;
   const [loadingArtboardImage, setLoadingArtboardImage] =
     createSignal<HTMLImageElement | null>(null);
@@ -164,6 +163,7 @@ export const Viewport: Component = () => {
         pointerId: number;
         lastImgX: number;
         lastImgY: number;
+        erase: boolean;
       }
     | null = null;
 
@@ -187,6 +187,17 @@ export const Viewport: Component = () => {
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
   const selectedArtboard = () => getSelectedArtboard();
+
+  const brushCursorStyle = createMemo((): string | undefined => {
+    if (activeMask()?.kind !== "brush") return undefined;
+    const sw = state.viewportScreenWidth;
+    const sh = state.viewportScreenHeight;
+    const cw = state.canvasWidth;
+    const ch = state.canvasHeight;
+    if (sw <= 0 || sh <= 0 || cw <= 0 || ch <= 0) return "none";
+    const fitScale = Math.min(sw / cw, sh / ch) * state.viewportZoom;
+    return makeBrushCursor(brushSize(), fitScale);
+  });
 
   async function initBrushOverlay() {
     const w = state.canvasWidth;
@@ -230,7 +241,7 @@ export const Viewport: Component = () => {
     ctx.putImageData(imgData, 0, 0);
   }
 
-  function stampBrushOverlay(imageX: number, imageY: number, radius: number, softness: number) {
+  function stampBrushOverlay(imageX: number, imageY: number, radius: number, softness: number, erase: boolean) {
     if (!brushOverlayCanvas || !brushOverlayPixels) return;
     const tw = brushOverlayCanvas.width;
     const th = brushOverlayCanvas.height;
@@ -253,7 +264,12 @@ export const Viewport: Component = () => {
             ? 1
             : 0.5 * (1 + Math.cos((Math.PI * (t - hardEdge)) / (1 - hardEdge + 0.001)));
         const idx = py * tw + px;
-        brushOverlayPixels[idx] = Math.max(brushOverlayPixels[idx], Math.round(alpha * 255));
+        if (erase) {
+          const floor = Math.round((1 - alpha) * 255);
+          brushOverlayPixels[idx] = Math.min(brushOverlayPixels[idx], floor);
+        } else {
+          brushOverlayPixels[idx] = Math.max(brushOverlayPixels[idx], Math.round(alpha * 255));
+        }
       }
     }
     redrawOverlayCanvas();
@@ -586,29 +602,10 @@ export const Viewport: Component = () => {
     };
 
     if (mp.kind === "brush") {
-      // Draw accumulated brush strokes as red overlay
       if (brushOverlayCanvas) {
         const tl = worldToScreen(toWorldX(0), toWorldY(0), t);
         const br = worldToScreen(toWorldX(state.canvasWidth), toWorldY(state.canvasHeight), t);
         ctx.drawImage(brushOverlayCanvas, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-      }
-      // Draw brush cursor at current pointer position
-      if (lastBrushCursorPos) {
-        const cursorRadius = brushSize() * t.scale;
-        ctx.beginPath();
-        ctx.arc(lastBrushCursorPos.sx, lastBrushCursorPos.sy, cursorRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(lastBrushCursorPos.sx, lastBrushCursorPos.sy, cursorRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(lastBrushCursorPos.sx, lastBrushCursorPos.sy, 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.fill();
       }
       ctx.restore();
       return;
@@ -963,7 +960,6 @@ export const Viewport: Component = () => {
     if (!isBrush) {
       brushOverlayCanvas = null;
       brushOverlayPixels = null;
-      lastBrushCursorPos = null;
       return;
     }
     void initBrushOverlay();
@@ -1126,17 +1122,17 @@ export const Viewport: Component = () => {
       e.clientX - rect.left,
       e.clientY - rect.top,
     );
-    if (clickedArtboardClose) {
+    if (e.button === 0 && clickedArtboardClose) {
       setPressedArtboardChrome({
         kind: "close",
         artboardId: clickedArtboardClose.id,
       });
       return;
     }
-    const clickedArtboardTitle = artboardTitleAtPoint(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
-    );
+    const clickedArtboardTitle =
+      e.button === 0
+        ? artboardTitleAtPoint(e.clientX - rect.left, e.clientY - rect.top)
+        : null;
     const clickedArtboard = artboardAtPoint(e.clientX - rect.left, e.clientY - rect.top);
     lastStagePointer = { x: e.clientX, y: e.clientY };
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1159,7 +1155,7 @@ export const Viewport: Component = () => {
       drawFrame();
       return;
     }
-    if (activeMask()?.kind === "brush") {
+    if (activeMask()?.kind === "brush" && e.button === 0) {
       const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
       if (t.scale > 0) {
         const rect = stageRef.getBoundingClientRect();
@@ -1168,9 +1164,10 @@ export const Viewport: Component = () => {
         const world = screenToWorld(sx, sy, t);
         const imgX = world.x - getViewWorldOffset().x;
         const imgY = world.y - getViewWorldOffset().y;
-        stampBrushOverlay(imgX, imgY, brushSize(), brushSoftness());
-        void stampBrushMask(state.selectedLayerIdx, imgX, imgY, brushSize(), brushSoftness());
-        gesture = { kind: "brush_paint", pointerId: e.pointerId, lastImgX: imgX, lastImgY: imgY };
+        const erase = e.altKey;
+        stampBrushOverlay(imgX, imgY, brushSize(), brushSoftness(), erase);
+        void stampBrushMask(state.selectedLayerIdx, imgX, imgY, brushSize(), brushSoftness(), erase);
+        gesture = { kind: "brush_paint", pointerId: e.pointerId, lastImgX: imgX, lastImgY: imgY, erase };
         stageRef.setPointerCapture(e.pointerId);
         drawFrame();
         return;
@@ -1236,7 +1233,7 @@ export const Viewport: Component = () => {
         startX: e.clientX,
         startY: e.clientY,
         moved: false,
-        tapArtboardId: clickedArtboard.id,
+        tapArtboardId: e.button === 0 ? clickedArtboard.id : null,
       };
       return;
     }
@@ -1257,15 +1254,6 @@ export const Viewport: Component = () => {
     lastStagePointer = { x: e.clientX, y: e.clientY };
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     updateViewportToneFromPointer(e.clientX, e.clientY);
-    // Update brush cursor position and repaint if in brush mode
-    if (activeMask()?.kind === "brush") {
-      const rect = stageRef.getBoundingClientRect();
-      lastBrushCursorPos = { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
-      if (!gesture) {
-        drawFrame();
-        return;
-      }
-    }
     if (!gesture) return;
     if (gesture.kind === "brush_paint") {
       const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
@@ -1281,14 +1269,15 @@ export const Viewport: Component = () => {
       const spacing = Math.max(1, brushSize() * 0.3);
       if (dist >= spacing) {
         const steps = Math.floor(dist / spacing);
+        const { erase } = gesture;
         for (let i = 1; i <= steps; i++) {
           const f = i / steps;
           const ix = gesture.lastImgX + (imgX - gesture.lastImgX) * f;
           const iy = gesture.lastImgY + (imgY - gesture.lastImgY) * f;
-          stampBrushOverlay(ix, iy, brushSize(), brushSoftness());
-          void stampBrushMask(state.selectedLayerIdx, ix, iy, brushSize(), brushSoftness());
+          stampBrushOverlay(ix, iy, brushSize(), brushSoftness(), erase);
+          void stampBrushMask(state.selectedLayerIdx, ix, iy, brushSize(), brushSoftness(), erase);
         }
-        gesture = { kind: "brush_paint", pointerId: gesture.pointerId, lastImgX: imgX, lastImgY: imgY };
+        gesture = { kind: "brush_paint", pointerId: gesture.pointerId, lastImgX: imgX, lastImgY: imgY, erase };
       }
       drawFrame();
       return;
@@ -1650,7 +1639,8 @@ export const Viewport: Component = () => {
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[var(--canvas-bg)]"
-        style={{ "touch-action": "none", cursor: activeMask()?.kind === "brush" ? "none" : undefined }}
+        style={{ "touch-action": "none", cursor: brushCursorStyle() }}
+        onContextMenu={(e) => e.preventDefault()}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -1660,13 +1650,11 @@ export const Viewport: Component = () => {
         onPointerUp={onPointerUp}
         onPointerLeave={(e) => {
           lastStagePointer = null;
-          lastBrushCursorPos = null;
           updateSmoothedToneSample(null);
           onPointerUp(e);
         }}
         onPointerCancel={(e) => {
           lastStagePointer = null;
-          lastBrushCursorPos = null;
           updateSmoothedToneSample(null);
           onPointerUp(e);
         }}
@@ -1729,6 +1717,7 @@ export const Viewport: Component = () => {
                       onChange={setBrushSize}
                       containerClass="flex items-center gap-1.5"
                       sliderClass="w-[150px]!"
+                      tooltip
                     />
                     <div class="h-3.5 w-px bg-white/20" />
                     <Slider
@@ -1742,6 +1731,7 @@ export const Viewport: Component = () => {
                       onChange={setBrushSoftness}
                       containerClass="flex items-center gap-1.5"
                       sliderClass="w-[150px]!"
+                      tooltip
                     />
                   </>
                 )}

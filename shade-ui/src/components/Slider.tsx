@@ -21,6 +21,8 @@ export const Slider: Component<{
   onChange: (value: number) => void;
   /** Replaces the default grid container class. Use for non-Inspector layouts. */
   containerClass?: string;
+  /** Hides the static value label and shows a tooltip bubble above the thumb while dragging. */
+  tooltip?: boolean;
   sliderClass?: string;
   class?: string;
   accentColor?: string;
@@ -96,9 +98,11 @@ export const Slider: Component<{
       <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
         {props.label}
       </span>
-      <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
-        {props.valueLabel ?? props.value.toFixed(2)}
-      </span>
+      <Show when={!props.tooltip}>
+        <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
+          {props.valueLabel ?? props.value.toFixed(2)}
+        </span>
+      </Show>
       <div class={`${props.sliderClass} relative col-start-2 col-end-4 h-7 w-full self-center`}>
         <input
           type="range"
@@ -166,6 +170,11 @@ export const Slider: Component<{
               : "left 140ms ease-out, transform 100ms ease-out",
           }}
         >
+          <Show when={props.tooltip && dragging()}>
+            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/80 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white shadow-sm">
+              {props.valueLabel ?? props.value.toFixed(2)}
+            </div>
+          </Show>
           <div
             class="h-[14px] w-[14px] rounded-full border-2 border-[var(--slider-thumb-border)]"
             style={{

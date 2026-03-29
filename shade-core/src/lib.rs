@@ -422,7 +422,8 @@ impl MaskData {
     /// Stamp a soft circular brush at (cx, cy) with given radius and softness.
     /// softness=0 → hard edge; softness=1 → smooth cosine falloff to edge.
     /// Pixels are set to the maximum of their current value and the brush alpha.
-    pub fn stamp_brush(&mut self, cx: f32, cy: f32, radius: f32, softness: f32) {
+    /// erase=false → max-blend (paint); erase=true → min-blend (erase).
+    pub fn stamp_brush(&mut self, cx: f32, cy: f32, radius: f32, softness: f32, erase: bool) {
         assert!(radius > 0.0, "brush radius must be positive");
         let r_ceil = radius.ceil() as i32;
         let w = self.width as i32;
@@ -437,18 +438,20 @@ impl MaskData {
                 let dy = row as f32 + 0.5 - cy;
                 let dist = (dx * dx + dy * dy).sqrt();
                 let t = (dist / radius).clamp(0.0, 1.0);
-                // hard_edge is the normalised radius where softness kicks in
                 let hard_edge = 1.0 - softness.clamp(0.0, 1.0);
                 let alpha = if t <= hard_edge {
                     1.0_f32
                 } else {
                     let s = (t - hard_edge) / (1.0 - hard_edge + f32::EPSILON);
-                    // cosine ease-out for a natural brush feel
                     0.5 * (1.0 + (std::f32::consts::PI * s).cos())
                 };
                 let idx = (row * w + col) as usize;
-                let new_val = (alpha * 255.0) as u8;
-                self.pixels[idx] = self.pixels[idx].max(new_val);
+                if erase {
+                    let floor = ((1.0 - alpha) * 255.0) as u8;
+                    self.pixels[idx] = self.pixels[idx].min(floor);
+                } else {
+                    self.pixels[idx] = self.pixels[idx].max((alpha * 255.0) as u8);
+                }
             }
         }
     }

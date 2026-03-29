@@ -1424,11 +1424,12 @@ export async function stampBrushMask(
   cy: number,
   radius: number,
   softness: number,
+  erase: boolean,
 ): Promise<void> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("stamp_brush_mask", {
-      params: { layer_idx: layerIdx, cx, cy, radius, softness },
+      params: { layer_idx: layerIdx, cx, cy, radius, softness, erase },
     });
     return;
   }
