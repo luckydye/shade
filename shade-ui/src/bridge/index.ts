@@ -5,20 +5,6 @@
 
 import type { BrowserDirectoryHandle } from "../browser-media-library";
 import {
-  listBrowserPresets,
-  loadBrowserPreset,
-  saveBrowserPreset,
-  type BrowserPresetFile,
-  type BrowserPresetLayer,
-} from "../browser-presets";
-import {
-  getBrowserCurrentSnapshot,
-  getBrowserSnapshot,
-  listBrowserSnapshots,
-  markBrowserSnapshotCurrent,
-  saveBrowserSnapshot,
-} from "../browser-snapshots";
-import {
   addBrowserMediaLibrary,
   isBrowserMountedLibrary,
   isBrowserMountedPath,
@@ -29,6 +15,20 @@ import {
   removeBrowserMediaLibrary,
   requestBrowserMountedImageReadPermission,
 } from "../browser-media-library";
+import {
+  type BrowserPresetFile,
+  type BrowserPresetLayer,
+  listBrowserPresets,
+  loadBrowserPreset,
+  saveBrowserPreset,
+} from "../browser-presets";
+import {
+  getBrowserCurrentSnapshot,
+  getBrowserSnapshot,
+  listBrowserSnapshots,
+  markBrowserSnapshotCurrent,
+  saveBrowserSnapshot,
+} from "../browser-snapshots";
 import { getThumbnailBackend } from "./thumbnail-backend";
 
 // ── Tauri path ──────────────────────────────────────────────────────────────
@@ -269,6 +269,7 @@ export interface CurveControlPoint {
 export interface AdjustmentValues {
   tone: ToneValues | null;
   curves: CurvesValues | null;
+  ls_curve: LsCurveValues | null;
   color: ColorValues | null;
   vignette: { amount: number } | null;
   sharpen: { amount: number } | null;
@@ -284,6 +285,11 @@ export interface CurvesValues {
   lut_b: number[];
   lut_master: number[];
   per_channel: boolean;
+  control_points?: CurveControlPoint[] | null;
+}
+
+export interface LsCurveValues {
+  lut: number[];
   control_points?: CurveControlPoint[] | null;
 }
 
@@ -680,6 +686,12 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
         "curves_applied",
       );
       break;
+    case "ls_curve":
+      await workerCall(
+        { type: "apply_ls_curve", layerIdx: layer_idx, ...rest },
+        "ls_curve_applied",
+      );
+      break;
     case "vignette":
       await workerCall(
         { type: "apply_vignette", layerIdx: layer_idx, ...rest },
@@ -987,7 +999,10 @@ function requiredNumber(value: number | null | undefined, label: string) {
   return value;
 }
 
-async function applyBrowserPresetAdjustment(layerIdx: number, adjustments: AdjustmentValues) {
+async function applyBrowserPresetAdjustment(
+  layerIdx: number,
+  adjustments: AdjustmentValues,
+) {
   if (adjustments.tone) {
     await applyEdit({
       layer_idx: layerIdx,
@@ -1019,6 +1034,16 @@ async function applyBrowserPresetAdjustment(layerIdx: number, adjustments: Adjus
       layer_idx: layerIdx,
       op: "curves",
       curve_points: adjustments.curves.control_points,
+    });
+  }
+  if (adjustments.ls_curve) {
+    if (!adjustments.ls_curve.control_points) {
+      throw new Error("preset ls_curve are missing control points");
+    }
+    await applyEdit({
+      layer_idx: layerIdx,
+      op: "ls_curve",
+      curve_points: adjustments.ls_curve.control_points,
     });
   }
   if (adjustments.vignette) {
@@ -1175,7 +1200,10 @@ export async function saveSnapshot(imagePath?: string | null): Promise<EditSnaps
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot save a snapshot without a loaded image");
   }
-  return saveBrowserSnapshot(serializeBrowserPresetLayers(stack.layers), imagePath ?? null);
+  return saveBrowserSnapshot(
+    serializeBrowserPresetLayers(stack.layers),
+    imagePath ?? null,
+  );
 }
 
 export async function listSnapshots(imagePath?: string | null): Promise<SnapshotInfo[]> {

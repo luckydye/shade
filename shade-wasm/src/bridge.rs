@@ -201,6 +201,17 @@ pub fn apply_curves(layer_idx: usize, control_points: JsValue) -> Result<(), JsV
 }
 
 #[wasm_bindgen]
+pub fn apply_ls_curve(layer_idx: usize, control_points: JsValue) -> Result<(), JsValue> {
+    let points: Vec<CurveControlPoint> =
+        serde_wasm_bindgen::from_value(control_points)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    ENGINE.with(|e| {
+        e.borrow_mut().apply_ls_curve(layer_idx, points);
+    });
+    Ok(())
+}
+
+#[wasm_bindgen]
 pub fn apply_vignette(layer_idx: usize, amount: f32) {
     ENGINE.with(|e| e.borrow_mut().apply_vignette(layer_idx, amount));
 }
@@ -419,6 +430,7 @@ pub fn get_stack_json() -> String {
                         let mut color = None;
                         let mut hsl = None;
                         let mut curves = None;
+                        let mut ls_curve = None;
                         let mut vignette = None;
                         let mut sharpen = None;
                         let mut grain = None;
@@ -483,6 +495,15 @@ pub fn get_stack_json() -> String {
                                         "control_points": control_points,
                                     }));
                                 }
+                                shade_core::AdjustmentOp::LsCurve {
+                                    lut,
+                                    control_points,
+                                } => {
+                                    ls_curve = Some(serde_json::json!({
+                                        "lut": lut,
+                                        "control_points": control_points,
+                                    }));
+                                }
                                 shade_core::AdjustmentOp::Vignette(params) => {
                                     vignette = Some(serde_json::json!({
                                         "amount": params.amount,
@@ -516,6 +537,7 @@ pub fn get_stack_json() -> String {
                         Some(serde_json::json!({
                             "tone": tone,
                             "curves": curves,
+                            "ls_curve": ls_curve,
                             "color": color,
                             "vignette": vignette,
                             "sharpen": sharpen,

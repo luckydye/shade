@@ -303,6 +303,10 @@ pub enum AdjustmentOp {
         per_channel: bool,
         control_points: Option<Vec<CurveControlPoint>>,
     },
+    LsCurve {
+        lut: Vec<f32>,
+        control_points: Option<Vec<CurveControlPoint>>,
+    },
     Color(ColorParams),
     Vignette(VignetteParams),
     Sharpen(SharpenParams),

@@ -8,35 +8,35 @@
   --app-bg-highlight: rgba(255, 255, 255, 0.06);
   --toolbar-bg: rgba(4, 4, 4, 0.94);
   --panel-bg: rgba(17, 17, 17, 0.92);
-  --input-bg: rgba(0, 0, 0, 0.30);
+  --input-bg: rgba(0, 0, 0, 0.3);
 
   /* Surfaces */
   --surface-subtle: rgba(255, 255, 255, 0.02);
   --surface-faint: rgba(255, 255, 255, 0.03);
   --surface: rgba(255, 255, 255, 0.04);
   --surface-hover: rgba(255, 255, 255, 0.06);
-  --surface-selected: rgba(255, 255, 255, 0.10);
+  --surface-selected: rgba(255, 255, 255, 0.1);
   --surface-active: rgba(255, 255, 255, 0.12);
 
   /* Borders */
   --border-subtle: rgba(255, 255, 255, 0.05);
   --border: rgba(255, 255, 255, 0.06);
   --border-soft: rgba(255, 255, 255, 0.08);
-  --border-medium: rgba(255, 255, 255, 0.10);
+  --border-medium: rgba(255, 255, 255, 0.1);
   --border-dashed: rgba(255, 255, 255, 0.14);
   --border-active: rgba(255, 255, 255, 0.18);
 
   /* Text */
   --text: #f5f5f4;
   --text-strong: rgba(255, 255, 255, 0.82);
-  --text-secondary: rgba(255, 255, 255, 0.80);
+  --text-secondary: rgba(255, 255, 255, 0.8);
   --text-muted: rgba(255, 255, 255, 0.62);
   --text-value: rgba(255, 255, 255, 0.62);
   --text-icon: rgba(255, 255, 255, 0.42);
-  --text-faint: rgba(255, 255, 255, 0.40);
-  --text-subtle: rgba(255, 255, 255, 0.30);
+  --text-faint: rgba(255, 255, 255, 0.4);
+  --text-subtle: rgba(255, 255, 255, 0.3);
   --text-dim: rgba(255, 255, 255, 0.24);
-  --text-placeholder: rgba(255, 255, 255, 0.20);
+  --text-placeholder: rgba(255, 255, 255, 0.2);
 
   /* Primary button */
   --btn-primary-bg: #f5f5f4;
@@ -51,18 +51,20 @@
   --curve-stroke: #f5f5f4;
   --curve-histogram: #f5f5f4;
   --curve-point-stroke: #111111;
+  --curve-point: #f5f5f5;
+  --curve-endpoint: #f5f5f5;
   --curve-label: #a3a3a3;
 
   /* Slider */
   --slider-track: rgba(255, 255, 255, 0.08);
-  --slider-notch: rgba(255, 255, 255, 0.20);
+  --slider-notch: rgba(255, 255, 255, 0.2);
   --slider-thumb-border: #111111;
   --slider-thumb-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 1px 3px rgb(0 0 0 / 0.4);
 
   /* Scrollbar */
   --scrollbar-thumb: rgba(255, 255, 255, 0.28);
   --scrollbar-track: rgba(255, 255, 255, 0.05);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.40);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
 
   /* Canvas */
   --canvas-bg: #0b0b0b;
@@ -70,9 +72,9 @@
 
   /* Semantic danger */
   --danger-text: #f87171;
-  --danger-border: rgba(239, 68, 68, 0.30);
+  --danger-border: rgba(239, 68, 68, 0.3);
   --danger-hover-text: #fca5a5;
-  --danger-hover-border: rgba(239, 68, 68, 0.50);
+  --danger-hover-border: rgba(239, 68, 68, 0.5);
 }
 
 @media (prefers-color-scheme: light) {
@@ -100,12 +102,12 @@
     --text: #1c1917;
     --text-strong: rgba(0, 0, 0, 0.82);
     --text-secondary: rgba(0, 0, 0, 0.78);
-    --text-muted: rgba(0, 0, 0, 0.60);
-    --text-value: rgba(0, 0, 0, 0.60);
+    --text-muted: rgba(0, 0, 0, 0.6);
+    --text-value: rgba(0, 0, 0, 0.6);
     --text-icon: rgba(0, 0, 0, 0.45);
     --text-faint: rgba(0, 0, 0, 0.45);
     --text-subtle: rgba(0, 0, 0, 0.35);
-    --text-dim: rgba(0, 0, 0, 0.30);
+    --text-dim: rgba(0, 0, 0, 0.3);
     --text-placeholder: rgba(0, 0, 0, 0.25);
 
     --btn-primary-bg: #1c1917;
@@ -119,10 +121,12 @@
     --curve-stroke: #292524;
     --curve-histogram: #292524;
     --curve-point-stroke: #e8e8e6;
+    --curve-point: #292524;
+    --curve-endpoint: #292524;
     --curve-label: #737373;
 
     --slider-track: rgba(0, 0, 0, 0.08);
-    --slider-notch: rgba(0, 0, 0, 0.20);
+    --slider-notch: rgba(0, 0, 0, 0.2);
     --slider-thumb-border: #e0e0de;
     --slider-thumb-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.2);
 
@@ -233,7 +237,6 @@ input[type="range"].shade-slider::-moz-range-thumb {
   background: var(--slider-accent, var(--curve-stroke));
   box-shadow: var(--slider-thumb-shadow);
 }
-
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────── */
 

@@ -22,7 +22,8 @@ use crate::{
     denoise::DenoisePipeline,
     pipelines::{
         ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, EffectSpace,
-        GlowPipeline, GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
+        GlowPipeline, GrainPipeline, HslPipeline, LsCurvePipeline, SharpenPipeline,
+        VignettePipeline,
     },
     sharpen2::SharpenTwoPassPipeline,
     texture_cache::TextureCache,
@@ -44,6 +45,7 @@ pub struct Renderer {
     pub ctx: GpuContext,
     pub tone_pipeline: TonePipeline,
     pub curves_pipeline: CurvesPipeline,
+    pub ls_curve_pipeline: LsCurvePipeline,
     pub color_pipeline: ColorPipeline,
     pub vignette_pipeline: VignettePipeline,
     pub sharpen_pipeline: SharpenPipeline,
@@ -65,6 +67,7 @@ impl Renderer {
         let ctx = GpuContext::new_headless().await?;
         let tone_pipeline = TonePipeline::new(&ctx)?;
         let curves_pipeline = CurvesPipeline::new(&ctx)?;
+        let ls_curve_pipeline = LsCurvePipeline::new(&ctx)?;
         let color_pipeline = ColorPipeline::new(&ctx)?;
         let vignette_pipeline = VignettePipeline::new(&ctx)?;
         let sharpen_pipeline = SharpenPipeline::new(&ctx)?;
@@ -90,6 +93,7 @@ impl Renderer {
             ctx,
             tone_pipeline,
             curves_pipeline,
+            ls_curve_pipeline,
             color_pipeline,
             vignette_pipeline,
             sharpen_pipeline,
@@ -260,6 +264,12 @@ impl Renderer {
                     lut_master,
                     *per_channel,
                 )?,
+                AdjustmentOp::LsCurve {
+                    lut,
+                    control_points: _,
+                } => self
+                    .ls_curve_pipeline
+                    .process(&self.ctx, current_tex, lut)?,
                 AdjustmentOp::Color(params) => {
                     self.color_pipeline
                         .process(&self.ctx, current_tex, *params)?
@@ -543,6 +553,13 @@ impl Renderer {
                                             lut_master,
                                             *per_channel,
                                         )?),
+                                        AdjustmentOp::LsCurve {
+                                            lut,
+                                            control_points: _,
+                                        } => Some(
+                                            self.ls_curve_pipeline
+                                                .process(&self.ctx, tex_in, lut)?,
+                                        ),
                                         AdjustmentOp::Color(params) => Some(
                                             self.color_pipeline
                                                 .process(&self.ctx, tex_in, *params)?,

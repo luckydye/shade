@@ -3276,7 +3276,7 @@ pub async fn export_image(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EditParams {
     pub layer_idx: usize,
-    pub op: String, // "tone", "curves", "color", "vignette", "sharpen", "grain"
+    pub op: String, // "tone", "curves", "ls_curve", "color", "vignette", "sharpen", "grain"
     pub exposure: Option<f32>,
     pub contrast: Option<f32>,
     pub blacks: Option<f32>,
@@ -3401,6 +3401,22 @@ pub async fn apply_edit(
                         if let Some(op) = ops
                             .iter_mut()
                             .find(|op| matches!(op, AdjustmentOp::Curves { .. }))
+                        {
+                            *op = next;
+                        } else {
+                            ops.push(next);
+                        }
+                    }
+                    "ls_curve" => {
+                        let curve_points =
+                            params.curve_points.ok_or("missing curve_points")?;
+                        let next = AdjustmentOp::LsCurve {
+                            lut: build_curve_lut_from_points(&curve_points),
+                            control_points: Some(curve_points),
+                        };
+                        if let Some(op) = ops
+                            .iter_mut()
+                            .find(|op| matches!(op, AdjustmentOp::LsCurve { .. }))
                         {
                             *op = next;
                         } else {
@@ -3548,6 +3564,10 @@ pub async fn add_layer(
                 lut_b: linear_lut(),
                 lut_master: linear_lut(),
                 per_channel: false,
+                control_points: None,
+            }]),
+            "ls_curve" => st.stack.add_adjustment_layer(vec![AdjustmentOp::LsCurve {
+                lut: linear_lut(),
                 control_points: None,
             }]),
             "crop" => st.stack.add_crop_layer(CropRect {
@@ -3774,6 +3794,7 @@ pub struct CropValues {
 pub struct AdjustmentValues {
     pub tone: Option<ToneValues>,
     pub curves: Option<CurvesValues>,
+    pub ls_curve: Option<LsCurveValues>,
     pub color: Option<ColorValues>,
     pub vignette: Option<VignetteValues>,
     pub sharpen: Option<SharpenValues>,
@@ -3808,6 +3829,12 @@ pub struct CurvesValues {
     pub lut_b: Vec<f32>,
     pub lut_master: Vec<f32>,
     pub per_channel: bool,
+    pub control_points: Option<Vec<CurveControlPoint>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LsCurveValues {
+    pub lut: Vec<f32>,
     pub control_points: Option<Vec<CurveControlPoint>>,
 }
 
@@ -4985,6 +5012,15 @@ pub async fn get_layer_stack(
                                     lut_b: lut_b.clone(),
                                     lut_master: lut_master.clone(),
                                     per_channel: *per_channel,
+                                    control_points: control_points.clone(),
+                                });
+                            }
+                            AdjustmentOp::LsCurve {
+                                lut,
+                                control_points,
+                            } => {
+                                adjustments.ls_curve = Some(LsCurveValues {
+                                    lut: lut.clone(),
                                     control_points: control_points.clone(),
                                 });
                             }

@@ -1,18 +1,19 @@
 import * as bridge from "../bridge/index";
+import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 import {
   fullCanvasCrop,
   getSelectedArtboard,
-  LayerInfo,
+  type LayerInfo,
   normalizeCropRect,
   resolveSelectedLayerIdx,
   setState,
   state,
 } from "./editor-store";
-import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 
 let pendingEdits = new Map<string, Record<string, unknown>>();
 let editFlushPromise: Promise<void> | null = null;
-let editFlushWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
+let editFlushWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> =
+  [];
 
 function getEditKey(params: Record<string, unknown>) {
   const layerIdx = params.layer_idx;
@@ -78,6 +79,7 @@ function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
   return {
     tone: null,
     curves: null,
+    ls_curve: null,
     color: null,
     vignette: null,
     sharpen: null,
@@ -202,6 +204,15 @@ function applyAdjustmentLayerEdit(layerIdx: number, params: Record<string, unkno
         },
       });
       return;
+    case "ls_curve":
+      setState("layers", layerIdx, "adjustments", {
+        ...adjustments,
+        ls_curve: {
+          lut: adjustments.ls_curve?.lut ?? [],
+          control_points: params.curve_points as bridge.CurveControlPoint[] | undefined,
+        },
+      });
+      return;
     case "vignette":
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
@@ -217,7 +228,10 @@ function applyAdjustmentLayerEdit(layerIdx: number, params: Record<string, unkno
     case "grain":
       setState("layers", layerIdx, "adjustments", {
         ...adjustments,
-        grain: { amount: params.grain_amount as number, size: params.grain_size as number },
+        grain: {
+          amount: params.grain_amount as number,
+          size: params.grain_size as number,
+        },
       });
       return;
     case "glow":

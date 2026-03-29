@@ -13,6 +13,7 @@ use wgpu::{
 use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 const CURVES_WGSL: &str = include_str!("../shaders/curves.wgsl");
+const LS_CURVE_WGSL: &str = include_str!("../shaders/ls_curve.wgsl");
 const COLOR_WGSL: &str = include_str!("../shaders/color.wgsl");
 const VIGNETTE_WGSL: &str = include_str!("../shaders/vignette.wgsl");
 const SHARPEN_WGSL: &str = include_str!("../shaders/sharpen.wgsl");
@@ -475,6 +476,142 @@ impl CurvesPipeline {
             width,
             height,
             "curves pass",
+        );
+
+        Ok(output_tex)
+    }
+}
+
+// ─── LsCurvePipeline ───────────────────────────────────────────────────────────
+
+pub struct LsCurvePipeline {
+    pipeline: ComputePipeline,
+    bind_group_layout: BindGroupLayout,
+}
+
+impl LsCurvePipeline {
+    pub fn new(ctx: &GpuContext) -> Result<Self> {
+        let device = &ctx.device;
+
+        let bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("ls_curve bind group layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: false,
+                            },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: INTERNAL_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("ls_curve.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(LS_CURVE_WGSL.into()),
+            });
+
+        let pipeline_layout =
+            ctx.device
+                .create_pipeline_layout(&PipelineLayoutDescriptor {
+                    label: Some("ls_curve pipeline layout"),
+                    bind_group_layouts: &[&bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+
+        let pipeline = ctx
+            .device
+            .create_compute_pipeline(&ComputePipelineDescriptor {
+                label: Some("ls_curve compute pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+        })
+    }
+
+    pub fn process(
+        &self,
+        ctx: &GpuContext,
+        input_tex: &Texture,
+        lut: &[f32],
+    ) -> Result<Texture> {
+        let device = &ctx.device;
+        let size = input_tex.size();
+        let (width, height) = (size.width, size.height);
+
+        let output_tex =
+            create_output_texture(device, width, height, "ls_curve output texture");
+
+        let lut_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ls_curve lut"),
+            contents: bytemuck::cast_slice(lut),
+            usage: BufferUsages::STORAGE,
+        });
+
+        let input_view = input_tex.create_view(&TextureViewDescriptor::default());
+        let output_view = output_tex.create_view(&TextureViewDescriptor::default());
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("ls_curve bind group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&input_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&output_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: lut_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        dispatch_simple(
+            ctx,
+            &self.pipeline,
+            &bind_group,
+            width,
+            height,
+            "ls_curve pass",
         );
 
         Ok(output_tex)

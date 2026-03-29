@@ -126,6 +126,13 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "apply_ls_curve": {
+        await ensureWasmReady();
+        await wasm.apply_ls_curve(msg.layerIdx, msg.curve_points ?? []);
+        self.postMessage({ type: "ls_curve_applied", requestId });
+        break;
+      }
+
       case "apply_vignette": {
         await ensureWasmReady();
         wasm.apply_vignette(msg.layerIdx, msg.vignette_amount ?? 0);
@@ -210,25 +217,14 @@ self.onmessage = async (e: MessageEvent) => {
 
       case "apply_linear_mask": {
         await ensureWasmReady();
-        wasm.apply_linear_gradient_mask(
-          msg.layerIdx,
-          msg.x1,
-          msg.y1,
-          msg.x2,
-          msg.y2,
-        );
+        wasm.apply_linear_gradient_mask(msg.layerIdx, msg.x1, msg.y1, msg.x2, msg.y2);
         self.postMessage({ type: "mask_applied", requestId });
         break;
       }
 
       case "apply_radial_mask": {
         await ensureWasmReady();
-        wasm.apply_radial_gradient_mask(
-          msg.layerIdx,
-          msg.cx,
-          msg.cy,
-          msg.radius,
-        );
+        wasm.apply_radial_gradient_mask(msg.layerIdx, msg.cx, msg.cy, msg.radius);
         self.postMessage({ type: "mask_applied", requestId });
         break;
       }

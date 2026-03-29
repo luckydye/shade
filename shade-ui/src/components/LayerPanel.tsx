@@ -1,13 +1,13 @@
-import { Component, For, Show, createSignal } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
 import {
-  state,
+  addLayer,
+  applyGradientMask,
+  deleteLayer,
+  moveLayer,
+  removeMask,
   selectLayer,
   setLayerVisible,
-  addLayer,
-  deleteLayer,
-  applyGradientMask,
-  removeMask,
-  moveLayer,
+  state,
 } from "../store/editor";
 import { getLayerDisplayName } from "../store/editor-store";
 import { Button } from "./Button";
@@ -36,6 +36,10 @@ const LayerPanel: Component = () => {
 
   const addCurvesLayer = async () => {
     await addLayer("curves", topLayerInsertPosition());
+  };
+
+  const addLsCurveLayer = async () => {
+    await addLayer("ls_curve", topLayerInsertPosition());
   };
 
   const applyLinearMask = async (idx: number) => {
@@ -114,7 +118,12 @@ const LayerPanel: Component = () => {
             const rowDropTarget = () => dropTarget();
             return (
               <div>
-                <Show when={rowDropTarget()?.layerIdx === realIdx && rowDropTarget()?.position === "before"}>
+                <Show
+                  when={
+                    rowDropTarget()?.layerIdx === realIdx &&
+                    rowDropTarget()?.position === "before"
+                  }
+                >
                   <div class="pointer-events-none px-2">
                     <div class="h-0.5 rounded-full bg-blue-400" />
                   </div>
@@ -213,7 +222,12 @@ const LayerPanel: Component = () => {
                     </Button>
                   </div>
                 </Show>
-                <Show when={rowDropTarget()?.layerIdx === realIdx && rowDropTarget()?.position === "after"}>
+                <Show
+                  when={
+                    rowDropTarget()?.layerIdx === realIdx &&
+                    rowDropTarget()?.position === "after"
+                  }
+                >
                   <div class="pointer-events-none px-2">
                     <div class="h-0.5 rounded-full bg-blue-400" />
                   </div>

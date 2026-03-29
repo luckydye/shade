@@ -1,22 +1,24 @@
 import {
-  Component,
-  JSX,
-  Match,
-  Show,
-  Switch,
+  type Component,
   createEffect,
   createMemo,
   createSignal,
   createUniqueId,
+  type JSX,
+  Match,
   on,
   onCleanup,
   onMount,
+  Show,
+  Switch,
 } from "solid-js";
+import type { LayerInfo } from "../store/editor";
 import {
   activeAdjustmentSliderId,
   addLayer,
   applyEdit,
   applyGradientMask,
+  backdropTile,
   deleteLayer,
   findCropLayerIdx,
   isAdjustmentSliderActive,
@@ -25,7 +27,6 @@ import {
   listSnapshots,
   loadPreset,
   loadSnapshot,
-  backdropTile,
   moveLayer,
   removeMask,
   renameLayer,
@@ -39,12 +40,11 @@ import {
   state,
   viewportToneSample,
 } from "../store/editor";
-import type { LayerInfo } from "../store/editor";
 import {
+  type ArtboardSource,
   getLayerDefaultName,
   getLayerDisplayName,
   getSelectedArtboard,
-  type ArtboardSource,
 } from "../store/editor-store";
 import { Button } from "./Button";
 
@@ -54,6 +54,7 @@ type MobileLayerFocus =
   | "color"
   | "wb"
   | "curves"
+  | "ls_curve"
   | "grain"
   | "glow"
   | "vignette"
@@ -69,8 +70,7 @@ const SECTION_TITLE_CLASS =
   "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)]";
 const PARAMETER_ROW_CLASS =
   "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";
-const SEGMENTED_CONTROL_CLASS =
-  "grid h-8 rounded-lg bg-[var(--surface)] p-0.5";
+const SEGMENTED_CONTROL_CLASS = "grid h-8 rounded-lg bg-[var(--surface)] p-0.5";
 const SEGMENT_BUTTON_CLASS =
   "rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const SECONDARY_BUTTON_CLASS =
@@ -91,6 +91,7 @@ const ADD_LAYER_FOCI = [
   "color",
   "wb",
   "curves",
+  "ls_curve",
   "grain",
   "glow",
   "vignette",
@@ -116,14 +117,14 @@ interface SliderProps {
 const Slider: Component<SliderProps> = (props) => {
   const sliderId = createUniqueId();
   const [dragging, setDragging] = createSignal(false);
-  let activePointer:
-    | { pointerId: number; startX: number; startY: number; pointerType: string }
-    | null = null;
-  let lastTap:
-    | { at: number; x: number; y: number; pointerType: string }
-    | null = null;
-  const fraction = () =>
-    clamp((props.value - props.min) / (props.max - props.min), 0, 1);
+  let activePointer: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    pointerType: string;
+  } | null = null;
+  let lastTap: { at: number; x: number; y: number; pointerType: string } | null = null;
+  const fraction = () => clamp((props.value - props.min) / (props.max - props.min), 0, 1);
   const defaultFrac = () =>
     clamp((props.defaultValue - props.min) / (props.max - props.min), 0, 1);
   const isBipolar = () => defaultFrac() > 0.01 && defaultFrac() < 0.99;
@@ -135,7 +136,9 @@ const Slider: Component<SliderProps> = (props) => {
     setIsAdjustmentSliderActive(next);
     setActiveAdjustmentSliderId(next ? sliderId : null);
   };
-  const maybeResetToDefault = (event: PointerEvent & { currentTarget: HTMLInputElement }) => {
+  const maybeResetToDefault = (
+    event: PointerEvent & { currentTarget: HTMLInputElement },
+  ) => {
     if (!activePointer || activePointer.pointerId !== event.pointerId) {
       return;
     }
@@ -172,7 +175,9 @@ const Slider: Component<SliderProps> = (props) => {
   return (
     <div
       data-mobile-slider-active={isAdjustmentSliderActive() ? "true" : undefined}
-      data-mobile-slider-current={activeAdjustmentSliderId() === sliderId ? "true" : undefined}
+      data-mobile-slider-current={
+        activeAdjustmentSliderId() === sliderId ? "true" : undefined
+      }
       class={`${PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150`}
     >
       <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
@@ -231,9 +236,7 @@ const Slider: Component<SliderProps> = (props) => {
             width: `${fillWidth()}%`,
             background: accent(),
             opacity: 0.65,
-            transition: dragging()
-              ? "none"
-              : "left 140ms ease-out, width 140ms ease-out",
+            transition: dragging() ? "none" : "left 140ms ease-out, width 140ms ease-out",
           }}
         />
         <Show when={isBipolar()}>
@@ -269,6 +272,7 @@ const CURVE_SAMPLE_INDICES = [64, 128, 192] as const;
 const CURVE_MIN_X = 0;
 const CURVE_MAX_X = 255;
 const IDENTITY_LUT = Array.from({ length: 256 }, (_, idx) => idx / 255);
+const LS_CURVE_IDENTITY = Array.from({ length: 256 }, () => 1.0);
 const DEFAULT_TONE = {
   exposure: 0,
   contrast: 0,
@@ -340,6 +344,20 @@ function normalizePoints(points: readonly ControlPoint[]): ControlPoint[] {
   return normalized;
 }
 
+function normalizeLsPoints(points: readonly ControlPoint[]): ControlPoint[] {
+  const normalized = [...points]
+    .map(normalizeLsPoint)
+    .sort((a, b) => a.x - b.x)
+    .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
+  if (normalized[0]?.x !== CURVE_MIN_X) {
+    normalized.unshift({ x: CURVE_MIN_X, y: 1 });
+  }
+  if (normalized[normalized.length - 1]?.x !== CURVE_MAX_X) {
+    normalized.push({ x: CURVE_MAX_X, y: 1 });
+  }
+  return normalized;
+}
+
 function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
   const anchors = normalizePoints(points);
   if (anchors.length < 2) {
@@ -404,11 +422,93 @@ function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
   return lut;
 }
 
+function buildLsCurveLutFromPoints(points: readonly ControlPoint[]): number[] {
+  const anchors = normalizeLsPoints(points);
+  if (anchors.length < 2) {
+    throw new Error("curve requires explicit left and right endpoint clamps");
+  }
+  if (anchors[0]?.x !== CURVE_MIN_X) {
+    throw new Error("curve must include a left endpoint clamp at x=0");
+  }
+  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
+    throw new Error("curve must include a right endpoint clamp at x=255");
+  }
+  const lut = new Array<number>(256);
+  const delta = new Array<number>(anchors.length - 1);
+  const tangent = new Array<number>(anchors.length);
+  for (let i = 0; i < anchors.length - 1; i += 1) {
+    const span = anchors[i + 1].x - anchors[i].x;
+    if (span <= 0) throw new Error("curve anchors must be strictly increasing");
+    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
+  }
+  tangent[0] = delta[0];
+  tangent[anchors.length - 1] = delta[delta.length - 1];
+  for (let i = 1; i < anchors.length - 1; i += 1) {
+    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
+  }
+  for (let i = 0; i < delta.length; i += 1) {
+    if (delta[i] === 0) {
+      tangent[i] = 0;
+      tangent[i + 1] = 0;
+      continue;
+    }
+    const a = tangent[i] / delta[i];
+    const b = tangent[i + 1] / delta[i];
+    const norm = Math.hypot(a, b);
+    if (norm > 3) {
+      const scale = 3 / norm;
+      tangent[i] = scale * a * delta[i];
+      tangent[i + 1] = scale * b * delta[i];
+    }
+  }
+  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
+    const start = anchors[seg];
+    const end = anchors[seg + 1];
+    const span = end.x - start.x;
+    for (let x = start.x; x <= end.x; x += 1) {
+      const t = (x - start.x) / span;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1;
+      const h10 = t3 - 2 * t2 + t;
+      const h01 = -2 * t3 + 3 * t2;
+      const h11 = t3 - t2;
+      lut[x] = clamp(
+        h00 * start.y +
+          h10 * span * tangent[seg] +
+          h01 * end.y +
+          h11 * span * tangent[seg + 1],
+        0,
+        2,
+      );
+    }
+  }
+  return lut;
+}
+
 function normalizePoint(point: ControlPoint): ControlPoint {
   const roundedX = Math.round(point.x);
   return {
-    x: roundedX <= CURVE_MIN_X ? CURVE_MIN_X : roundedX >= CURVE_MAX_X ? CURVE_MAX_X : clamp(roundedX, 1, 254),
+    x:
+      roundedX <= CURVE_MIN_X
+        ? CURVE_MIN_X
+        : roundedX >= CURVE_MAX_X
+          ? CURVE_MAX_X
+          : clamp(roundedX, 1, 254),
     y: clamp(point.y, 0, 1),
+  };
+}
+
+function normalizeLsPoint(point: ControlPoint): ControlPoint {
+  const roundedX = Math.round(point.x);
+  return {
+    x:
+      roundedX <= CURVE_MIN_X
+        ? CURVE_MIN_X
+        : roundedX >= CURVE_MAX_X
+          ? CURVE_MAX_X
+          : clamp(roundedX, 1, 254),
+    y: clamp(point.y, 0, 2),
   };
 }
 
@@ -416,6 +516,13 @@ function normalizeInteriorPoint(point: ControlPoint): ControlPoint {
   return {
     x: clamp(Math.round(point.x), 1, 254),
     y: clamp(point.y, 0, 1),
+  };
+}
+
+function normalizeLsInteriorPoint(point: ControlPoint): ControlPoint {
+  return {
+    x: clamp(Math.round(point.x), 1, 254),
+    y: clamp(point.y, 0, 2),
   };
 }
 
@@ -428,6 +535,16 @@ function curvePath(lut: readonly number[]) {
     .map((value, idx) => {
       const x = (idx / 255) * 100;
       const y = (1 - clamp(value, 0, 1)) * 100;
+      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
+    })
+    .join(" ");
+}
+
+function lsCurvePath(lut: readonly number[]) {
+  return lut
+    .map((value, idx) => {
+      const x = (idx / 255) * 100;
+      const y = ((2 - clamp(value, 0, 2)) / 2) * 100;
       return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
     })
     .join(" ");
@@ -641,6 +758,7 @@ const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
   color: () => <DropletIcon />,
   wb: () => <ToneIcon />,
   curves: () => <CurveIcon />,
+  ls_curve: () => <CurveIcon />,
   grain: () => <GrainIcon />,
   glow: () => <SparkIcon />,
   vignette: () => <CircleIcon />,
@@ -655,6 +773,7 @@ const focusLabels: Record<MobileLayerFocus, string> = {
   color: "Color",
   wb: "WB",
   curves: "Curves",
+  ls_curve: "LS Curve",
   grain: "Grain",
   glow: "Glow",
   vignette: "Vignette",
@@ -670,6 +789,7 @@ const ADJUSTMENT_FOCUS_MAP: readonly {
   { key: "tone", focus: "light" },
   { key: "color", focus: "color" },
   { key: "curves", focus: "curves" },
+  { key: "ls_curve", focus: "ls_curve" },
   { key: "grain", focus: "grain" },
   { key: "glow", focus: "glow" },
   { key: "vignette", focus: "vignette" },
@@ -707,7 +827,9 @@ const SectionHeader: Component<{ title: string; detail?: string }> = (props) => 
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
     <Show when={props.detail}>
       {(detail) => (
-        <div class="text-xs font-medium tabular-nums text-[var(--text-value)]">{detail()}</div>
+        <div class="text-xs font-medium tabular-nums text-[var(--text-value)]">
+          {detail()}
+        </div>
       )}
     </Show>
   </div>
@@ -756,6 +878,19 @@ export const Inspector: Component = () => {
   const [curvePointCache, setCurvePointCache] = createSignal(
     new Map<number, ControlPoint[]>(),
   );
+  const [lsCurvePointCache, setLsCurvePointCache] = createSignal(
+    new Map<number, ControlPoint[]>(),
+  );
+  const [lastCanvasKey, setLastCanvasKey] = createSignal<string>("");
+  createEffect(() => {
+    const key = `${state.canvasWidth}x${state.canvasHeight}`;
+    const prev = lastCanvasKey();
+    if (prev && prev !== key) {
+      setCurvePointCache(new Map());
+      setLsCurvePointCache(new Map());
+    }
+    setLastCanvasKey(key);
+  });
   const [pendingAddedLayerFocus, setPendingAddedLayerFocus] =
     createSignal<MobileLayerFocus | null>(null);
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
@@ -792,6 +927,8 @@ export const Inspector: Component = () => {
   };
   const defaultCurvePoints = () =>
     normalizePoints(CURVE_SAMPLE_INDICES.map((x) => ({ x, y: IDENTITY_LUT[x] })));
+  const defaultLsCurvePoints = () =>
+    normalizeLsPoints(CURVE_SAMPLE_INDICES.map((x) => ({ x, y: LS_CURVE_IDENTITY[x] })));
 
   const tone = () =>
     selectedAdjustmentLayer()?.adjustments?.tone ?? {
@@ -938,6 +1075,18 @@ export const Inspector: Component = () => {
     });
   };
 
+  const applyLsCurve = (points: readonly ControlPoint[]) => {
+    const normalizedPoints = normalizePoints(points);
+    setLsCurvePointCache((prev) =>
+      new Map(prev).set(state.selectedLayerIdx, normalizedPoints),
+    );
+    return applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "ls_curve",
+      curve_points: normalizedPoints,
+    });
+  };
+
   const applyHsl = (next: Partial<ReturnType<typeof hsl>>) => {
     const current = hsl();
     return applyEdit({
@@ -1021,10 +1170,12 @@ export const Inspector: Component = () => {
             defaultCurvePoints();
           nextId = 0;
           setPts(
-            normalizePoints(points.length === 0 ? defaultCurvePoints() : points).map((point) => ({
-              ...point,
-              id: nextId++,
-            })),
+            normalizePoints(points.length === 0 ? defaultCurvePoints() : points).map(
+              (point) => ({
+                ...point,
+                id: nextId++,
+              }),
+            ),
           );
           setDraggingId(null);
           setHoveredId(null);
@@ -1196,12 +1347,22 @@ export const Inspector: Component = () => {
       }
       setHoveredId(id);
       const now = Date.now();
-      if (now - lastTapTime < 300 && lastTapId === id && !isEndpointPoint(point)) {
+      if (now - lastTapTime < 300 && lastTapId === id) {
         lastTapTime = 0;
-        const next = pts().filter((p) => p.id !== id);
-        setPts(next);
-        selectedAdjustmentLayerOrThrow();
-        void applyCurves(next);
+        if (isEndpointPoint(point)) {
+          const resetY = point.x === CURVE_MIN_X ? 0 : 1;
+          const next = pts()
+            .map((p) => (p.id === id ? { ...p, y: resetY } : p))
+            .sort((a, b) => a.x - b.x);
+          setPts(next);
+          selectedAdjustmentLayerOrThrow();
+          void applyCurves(next);
+        } else {
+          const next = pts().filter((p) => p.id !== id);
+          setPts(next);
+          selectedAdjustmentLayerOrThrow();
+          void applyCurves(next);
+        }
         finishDraggingPoint();
         setHoveredId(null);
         return false;
@@ -1236,7 +1397,7 @@ export const Inspector: Component = () => {
         <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
           Master
         </span>
-        <div class="col-start-1 col-end-4 overflow-hidden">
+        <div class="col-start-2 col-end-4 overflow-hidden">
           <svg
             ref={svgRef!}
             viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
@@ -1376,7 +1537,9 @@ export const Inspector: Component = () => {
                     }
                     const touch = e.touches.item(0);
                     if (!touch) {
-                      throw new Error("curve point touch interaction requires an active touch point");
+                      throw new Error(
+                        "curve point touch interaction requires an active touch point",
+                      );
                     }
                     activeTouchId = touch.identifier;
                     e.preventDefault();
@@ -1516,6 +1679,414 @@ export const Inspector: Component = () => {
             );
           }}
         />
+      </div>
+    );
+  };
+
+  const LsCurveEditor: Component = () => {
+    const [draggingId, setDraggingId] = createSignal<number | null>(null);
+    const [hoveredId, setHoveredId] = createSignal<number | null>(null);
+    const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
+    const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
+    const luminanceHistogram = createMemo(() => {
+      const frame = backdropTile();
+      return frame ? buildLuminanceHistogram(frame.image) : [];
+    });
+    let svgRef!: SVGSVGElement;
+    let nextId = 0;
+    let lastTapTime = 0;
+    let lastTapId = -1;
+    let activeTouchId: number | null = null;
+    let clearCurveDragListeners: (() => void) | null = null;
+
+    createEffect(
+      on(
+        () => state.selectedLayerIdx,
+        (layerIdx) => {
+          const layer = state.layers[layerIdx];
+          if (layer?.kind !== "adjustment") {
+            setPts([]);
+            setDraggingId(null);
+            setHoveredId(null);
+            return;
+          }
+          const points =
+            lsCurvePointCache().get(layerIdx) ??
+            layer.adjustments?.ls_curve?.control_points ??
+            defaultLsCurvePoints();
+          nextId = 0;
+          setPts(
+            normalizeLsPoints(points.length === 0 ? defaultLsCurvePoints() : points).map(
+              (point) => ({
+                ...point,
+                id: nextId++,
+              }),
+            ),
+          );
+          setDraggingId(null);
+          setHoveredId(null);
+        },
+      ),
+    );
+
+    const lut = () => buildLsCurveLutFromPoints(pts());
+    const graphPadding = 0;
+    const innerWidth = () => Math.max(1, svgSize().width - graphPadding * 2);
+    const innerHeight = () => Math.max(1, svgSize().height - graphPadding * 2);
+    const chartX = (value: number) => graphPadding + (value / 255) * innerWidth();
+    const chartY = (value: number) => graphPadding + (2 - value) * innerHeight() * 0.5;
+    const chartThresholdX = (value: number) => graphPadding + value * innerWidth();
+    const curveSvgPath = () =>
+      remapPath(lsCurvePath(lut()), svgSize().width, svgSize().height, graphPadding);
+    const histogramSvgPath = () =>
+      remapPath(
+        histogramPath(luminanceHistogram()),
+        svgSize().width,
+        svgSize().height,
+        graphPadding,
+      );
+
+    onMount(() => {
+      const updateSize = () => {
+        const width = Math.max(1, Math.round(svgRef.clientWidth));
+        const height = Math.max(1, Math.round(svgRef.clientHeight));
+        setSvgSize({ width, height });
+      };
+      updateSize();
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(svgRef);
+      onCleanup(() => {
+        observer.disconnect();
+        clearCurveDragListeners?.();
+      });
+    });
+
+    const svgCoords = (event: { clientX: number; clientY: number }) => {
+      const point = svgRef.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const ctm = svgRef.getScreenCTM();
+      if (!ctm) throw new Error("missing SVG screen transform");
+      const local = point.matrixTransform(ctm.inverse());
+      return {
+        x: clamp(((local.x - graphPadding) / innerWidth()) * 255, 1, 254),
+        y: clamp(2 - ((local.y - graphPadding) / innerHeight()) * 2, 0, 2),
+      };
+    };
+
+    const updateDraggingPoint = (clientX: number, clientY: number) => {
+      const id = draggingId();
+      if (id === null) {
+        return;
+      }
+      const current = pts().find((point) => point.id === id);
+      if (!current) {
+        throw new Error("dragged curve point not found");
+      }
+      const nextCoords = svgCoords({ clientX, clientY });
+      const { x, y } = isEndpointPoint(current)
+        ? { x: current.x, y: clamp(nextCoords.y, 0, 2) }
+        : normalizeLsInteriorPoint(nextCoords);
+      const next = pts()
+        .map((p) => (p.id === id ? { ...p, x, y } : p))
+        .sort((a, b) => a.x - b.x);
+      setPts(next);
+      selectedAdjustmentLayerOrThrow();
+      void applyLsCurve(next);
+    };
+
+    const finishDraggingPoint = () => {
+      clearCurveDragListeners?.();
+      clearCurveDragListeners = null;
+      activeTouchId = null;
+      setDraggingId(null);
+    };
+
+    const trackPointerDrag = (pointerId: number) => {
+      clearCurveDragListeners?.();
+      const onPointerMove = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        updateDraggingPoint(event.clientX, event.clientY);
+      };
+      const onPointerUp = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        finishDraggingPoint();
+      };
+      const onPointerCancel = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        finishDraggingPoint();
+        setHoveredId(null);
+      };
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("pointercancel", onPointerCancel);
+      clearCurveDragListeners = () => {
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("pointercancel", onPointerCancel);
+      };
+    };
+
+    const trackTouchDrag = (identifier: number) => {
+      clearCurveDragListeners?.();
+      const onTouchMove = (event: TouchEvent) => {
+        const touch = findTouch(event.touches, identifier);
+        if (!touch) {
+          return;
+        }
+        event.preventDefault();
+        updateDraggingPoint(touch.clientX, touch.clientY);
+      };
+      const onTouchEnd = (event: TouchEvent) => {
+        const touch = findTouch(event.changedTouches, identifier);
+        if (!touch) {
+          return;
+        }
+        event.preventDefault();
+        finishDraggingPoint();
+      };
+      const onTouchCancel = (event: TouchEvent) => {
+        const touch = findTouch(event.changedTouches, identifier);
+        if (!touch) {
+          return;
+        }
+        finishDraggingPoint();
+        setHoveredId(null);
+      };
+      window.addEventListener("touchmove", onTouchMove, { passive: false });
+      window.addEventListener("touchend", onTouchEnd);
+      window.addEventListener("touchcancel", onTouchCancel);
+      clearCurveDragListeners = () => {
+        window.removeEventListener("touchmove", onTouchMove);
+        window.removeEventListener("touchend", onTouchEnd);
+        window.removeEventListener("touchcancel", onTouchCancel);
+      };
+    };
+
+    const startNewPointDrag = (clientX: number, clientY: number) => {
+      const { x, y } = normalizeLsInteriorPoint(svgCoords({ clientX, clientY }));
+      const id = nextId++;
+      const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
+      setPts(next);
+      selectedAdjustmentLayerOrThrow();
+      void applyLsCurve(next);
+      setDraggingId(id);
+    };
+
+    const startExistingPointDrag = (id: number) => {
+      const point = pts().find((candidate) => candidate.id === id);
+      if (!point) {
+        throw new Error("curve point not found");
+      }
+      setHoveredId(id);
+      const now = Date.now();
+      if (now - lastTapTime < 300 && lastTapId === id) {
+        lastTapTime = 0;
+        if (isEndpointPoint(point)) {
+          const next = pts()
+            .map((p) => (p.id === id ? { ...p, y: 1 } : p))
+            .sort((a, b) => a.x - b.x);
+          setPts(next);
+          selectedAdjustmentLayerOrThrow();
+          void applyLsCurve(next);
+        } else {
+          const next = pts().filter((p) => p.id !== id);
+          setPts(next);
+          selectedAdjustmentLayerOrThrow();
+          void applyLsCurve(next);
+        }
+        finishDraggingPoint();
+        setHoveredId(null);
+        return false;
+      }
+      lastTapTime = now;
+      lastTapId = id;
+      setDraggingId(id);
+      return true;
+    };
+
+    const findTouch = (touches: TouchList, identifier: number) => {
+      for (let index = 0; index < touches.length; index += 1) {
+        const touch = touches.item(index);
+        if (touch?.identifier === identifier) {
+          return touch;
+        }
+      }
+      return null;
+    };
+
+    return (
+      <div
+        data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+        class={`${PARAMETER_ROW_CLASS} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
+      >
+        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
+          <CurveIcon />
+        </span>
+        <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
+          LS Curve
+        </span>
+        <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
+          Lum-Sat
+        </span>
+        <div class="col-start-2 col-end-4 overflow-hidden">
+          <svg
+            ref={svgRef!}
+            viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
+            class="block h-36 min-h-[136px] w-full select-none"
+            style={{
+              cursor: draggingId() !== null ? "grabbing" : "crosshair",
+              "touch-action": "none",
+            }}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              if (e.pointerType === "touch") return;
+              if (e.target !== svgRef) return;
+              e.preventDefault();
+              startNewPointDrag(e.clientX, e.clientY);
+              trackPointerDrag(e.pointerId);
+            }}
+            onPointerLeave={() => {
+              setHoveredId(null);
+            }}
+            onTouchStart={(e) => {
+              if (e.touches.length !== 1) {
+                finishDraggingPoint();
+                return;
+              }
+              const touch = e.touches.item(0);
+              if (!touch) {
+                throw new Error("curve touch interaction requires an active touch point");
+              }
+              activeTouchId = touch.identifier;
+              if (e.target === svgRef) {
+                e.preventDefault();
+                startNewPointDrag(touch.clientX, touch.clientY);
+                trackTouchDrag(touch.identifier);
+              }
+            }}
+          >
+            <rect
+              x={graphPadding}
+              y={graphPadding}
+              width={innerWidth()}
+              height={innerHeight()}
+              fill="var(--curve-bg)"
+              pointer-events="none"
+            />
+            {TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
+              <line
+                x1={chartThresholdX(boundary.value)}
+                y1={graphPadding}
+                x2={chartThresholdX(boundary.value)}
+                y2={graphPadding + innerHeight()}
+                stroke="var(--curve-guide)"
+                stroke-width="0.7"
+                stroke-dasharray="4 6"
+                opacity="0.5"
+                pointer-events="none"
+              />
+            ))}
+            <Show when={histogramSvgPath()}>
+              {(path) => (
+                <path
+                  d={path()}
+                  fill="var(--curve-stroke)"
+                  fill-opacity="0.12"
+                  stroke="none"
+                  pointer-events="none"
+                />
+              )}
+            </Show>
+            <path
+              d={`M ${graphPadding} ${graphPadding + innerHeight() * 0.5} L ${
+                graphPadding + innerWidth()
+              } ${graphPadding + innerHeight() * 0.5}`}
+              stroke="var(--curve-mid-line)"
+              stroke-width="0.8"
+              fill="none"
+              pointer-events="none"
+            />
+            <path
+              d={curveSvgPath()}
+              stroke="var(--curve-stroke)"
+              stroke-width="1.5"
+              fill="none"
+              pointer-events="none"
+            />
+            {pts().map((pt) => (
+              <>
+                <circle
+                  cx={chartX(pt.x)}
+                  cy={chartY(pt.y)}
+                  r="7"
+                  fill="none"
+                  stroke="var(--curve-stroke)"
+                  stroke-width="1.5"
+                  opacity={hoveredId() === pt.id ? "0.75" : "0"}
+                  pointer-events="none"
+                />
+                <circle
+                  cx={chartX(pt.x)}
+                  cy={chartY(pt.y)}
+                  r="14"
+                  fill="transparent"
+                  stroke="none"
+                  style={{
+                    cursor: draggingId() === pt.id ? "grabbing" : "grab",
+                  }}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    if (e.touches.length !== 1) {
+                      finishDraggingPoint();
+                      return;
+                    }
+                    const touch = e.touches.item(0);
+                    if (!touch) {
+                      throw new Error(
+                        "curve point touch interaction requires an active touch point",
+                      );
+                    }
+                    activeTouchId = touch.identifier;
+                    e.preventDefault();
+                    if (!startExistingPointDrag(pt.id)) {
+                      return;
+                    }
+                    trackTouchDrag(touch.identifier);
+                  }}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    if (e.pointerType === "touch") return;
+                    e.stopPropagation();
+                    if (!startExistingPointDrag(pt.id)) {
+                      return;
+                    }
+                    trackPointerDrag(e.pointerId);
+                  }}
+                />
+                <circle
+                  cx={chartX(pt.x)}
+                  cy={chartY(pt.y)}
+                  r="3.5"
+                  fill={
+                    isEndpointPoint(pt) ? "var(--curve-endpoint)" : "var(--curve-point)"
+                  }
+                  pointer-events="none"
+                />
+              </>
+            ))}
+          </svg>
+          <div class="mt-1 flex justify-between px-1">
+            <span class="text-[10px] text-[var(--text-faint)]">Lum</span>
+            <span class="text-[10px] text-[var(--text-faint)]">Sat</span>
+          </div>
+        </div>
       </div>
     );
   };
@@ -1780,9 +2351,10 @@ export const Inspector: Component = () => {
   const resolvedLayerFocus = (idx: number): MobileLayerFocus =>
     idx === state.selectedLayerIdx && pendingAddedLayerFocus() !== null
       ? pendingAddedLayerFocus()!
-      : layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]);
+      : (layerFocusOverrides().get(idx) ?? inferFocus(state.layers[idx]));
 
-  const selectedFocus = (): MobileLayerFocus => resolvedLayerFocus(state.selectedLayerIdx);
+  const selectedFocus = (): MobileLayerFocus =>
+    resolvedLayerFocus(state.selectedLayerIdx);
 
   const displayedCrop = () =>
     selectedCropLayer()?.crop ?? {
@@ -1805,7 +2377,10 @@ export const Inspector: Component = () => {
       colorSpace: state.previewDisplayColorSpace,
     };
   };
-  const setCropField = (field: "x" | "y" | "width" | "height" | "rotation", value: number) => {
+  const setCropField = (
+    field: "x" | "y" | "width" | "height" | "rotation",
+    value: number,
+  ) => {
     if (!Number.isFinite(value)) {
       throw new Error(`crop ${field} must be a finite number`);
     }
@@ -1831,7 +2406,9 @@ export const Inspector: Component = () => {
       const newIdx =
         focus === "curves"
           ? await addLayer("curves", state.layers.length)
-          : await addLayer("adjustment", state.layers.length);
+          : focus === "ls_curve"
+            ? await addLayer("ls_curve", state.layers.length)
+            : await addLayer("adjustment", state.layers.length);
       setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
       selectLayer(newIdx);
       setIsDrawerOpen(true);
@@ -1843,7 +2420,14 @@ export const Inspector: Component = () => {
   const handleApplyLinearMask = async (idx: number) => {
     const w = state.canvasWidth;
     const h = state.canvasHeight;
-    await applyGradientMask({ kind: "linear", layer_idx: idx, x1: 0, y1: 0, x2: 0, y2: h });
+    await applyGradientMask({
+      kind: "linear",
+      layer_idx: idx,
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: h,
+    });
     setMaskPickerLayer(null);
   };
 
@@ -1992,6 +2576,9 @@ export const Inspector: Component = () => {
         <Match when={selectedFocus() === "curves"}>
           <CurvesEditor />
         </Match>
+        <Match when={selectedFocus() === "ls_curve"}>
+          <LsCurveEditor />
+        </Match>
         <Match when={selectedFocus() === "grain"}>
           <GrainSliders />
         </Match>
@@ -2057,7 +2644,9 @@ export const Inspector: Component = () => {
           <span class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4">
             <CropIcon />
           </span>
-          <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">Crop</span>
+          <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
+            Crop
+          </span>
           <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
             {crop().width} × {crop().height}
           </span>
@@ -2072,7 +2661,9 @@ export const Inspector: Component = () => {
                 disabled={!selectedCropLayer()}
                 min="0"
                 step="1"
-                onInput={(event) => setCropField(field, event.currentTarget.valueAsNumber)}
+                onInput={(event) =>
+                  setCropField(field, event.currentTarget.valueAsNumber)
+                }
                 class={INPUT_CLASS}
               />
             </label>
@@ -2085,7 +2676,10 @@ export const Inspector: Component = () => {
               disabled={!selectedCropLayer()}
               step="0.5"
               onInput={(event) =>
-                setCropField("rotation", (event.currentTarget.valueAsNumber * Math.PI) / 180)
+                setCropField(
+                  "rotation",
+                  (event.currentTarget.valueAsNumber * Math.PI) / 180,
+                )
               }
               class={INPUT_CLASS}
             />
@@ -2272,7 +2866,9 @@ export const Inspector: Component = () => {
                 </Show>
                 <Button
                   type="button"
-                  disabled={isPresetBusy() || state.canvasWidth <= 0 || snapshot.is_current}
+                  disabled={
+                    isPresetBusy() || state.canvasWidth <= 0 || snapshot.is_current
+                  }
                   onClick={() => void handleLoadSnapshot(snapshot.id)}
                   class={SECONDARY_BUTTON_CLASS}
                 >
@@ -2462,7 +3058,9 @@ export const Inspector: Component = () => {
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
-                        setMaskPickerLayer(maskPickerLayer() === realIdx ? null : realIdx);
+                        setMaskPickerLayer(
+                          maskPickerLayer() === realIdx ? null : realIdx,
+                        );
                       }}
                       class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                       title="Add gradient mask"
@@ -2527,8 +3125,9 @@ export const Inspector: Component = () => {
                 <CurvesEditor />
               </ControlSection>
               <ControlSection title="Color">
-                <SaturationSliders />
                 <WhiteBalanceSliders />
+                <SaturationSliders />
+                <LsCurveEditor />
               </ControlSection>
               <ControlSection title="HSL Color Balance">
                 <HslSection />
@@ -2611,7 +3210,9 @@ export const Inspector: Component = () => {
                         isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
                       }`}
                     >
-                      <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus()]()}</span>
+                      <span class="[&>svg]:h-5 [&>svg]:w-5">
+                        {focusGlyphs[focus()]()}
+                      </span>
                       <span>{focusLabels[focus()]}</span>
                     </Button>
                   );
@@ -2657,13 +3258,12 @@ export const Inspector: Component = () => {
 
   return (
     <aside class="lg:w-[340px] lg:flex-none lg:block">
-      <div class={`m-2 hidden h-[calc(100%-1rem)] lg:flex lg:flex-col ${PANEL_SHELL_CLASS}`}>
+      <div
+        class={`m-2 hidden h-[calc(100%-1rem)] lg:flex lg:flex-col ${PANEL_SHELL_CLASS}`}
+      >
         <div class="media-scroll flex-1 pr-5 overflow-y-auto">
           <InspectorTabs class="mb-5" />
-          <Show
-            when={inspectorTab() === "edit"}
-            fallback={<PresetsPanel />}
-          >
+          <Show when={inspectorTab() === "edit"} fallback={<PresetsPanel />}>
             <div class="flex flex-col gap-5">
               <DesktopLayerList />
               <DesktopSelectedLayerPanel />

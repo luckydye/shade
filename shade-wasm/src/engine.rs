@@ -93,6 +93,10 @@ impl WasmEngine {
                 per_channel: false,
                 control_points: None,
             }]),
+            "ls_curve" => self.stack.add_adjustment_layer(vec![AdjustmentOp::LsCurve {
+                lut: linear_lut(),
+                control_points: None,
+            }]),
             "crop" => self.stack.add_crop_layer(CropRect {
                 x: 0.0,
                 y: 0.0,
@@ -228,6 +232,31 @@ impl WasmEngine {
                 if let Some(op) = ops
                     .iter_mut()
                     .find(|o| matches!(o, AdjustmentOp::Curves { .. }))
+                {
+                    *op = new_op;
+                } else {
+                    ops.push(new_op);
+                }
+                self.stack.generation += 1;
+            }
+        }
+    }
+
+    pub fn apply_ls_curve(
+        &mut self,
+        layer_idx: usize,
+        control_points: Vec<CurveControlPoint>,
+    ) {
+        if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
+            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+                let lut = build_curve_lut_from_points(&control_points);
+                let new_op = AdjustmentOp::LsCurve {
+                    lut,
+                    control_points: Some(control_points),
+                };
+                if let Some(op) = ops
+                    .iter_mut()
+                    .find(|o| matches!(o, AdjustmentOp::LsCurve { .. }))
                 {
                     *op = new_op;
                 } else {
