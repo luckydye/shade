@@ -2782,7 +2782,7 @@ export const Inspector: Component = () => {
     >
       <div ref={desktopLayerListRef} class="relative flex flex-col gap-1">
         <div
-          class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)] transition-opacity"
+          class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)]"
           style={getDesktopDropCursorStyle()}
         />
         <Button
@@ -2827,34 +2827,44 @@ export const Inspector: Component = () => {
                     : "bg-[var(--surface-subtle)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface)]"
                 } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
               >
-                <Button
-                  type="button"
-                  onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
-                  class="inline-flex h-4 w-4 cursor-grab items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] active:cursor-grabbing"
-                  title="Reorder layer"
+                <Show
+                  when={layer.kind !== "image"}
+                  fallback={<span />}
                 >
-                  <span class="grid grid-cols-2 gap-[2px]">
-                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                    <span class="h-0.5 w-0.5 rounded-full bg-current" />
-                  </span>
-                </Button>
-                <button
-                  type="button"
-                  class={`inline-flex h-4 w-4 items-center justify-center text-xs leading-none transition-colors ${
-                    layer.visible ? "text-[var(--text)]" : "text-[var(--text-subtle)]"
-                  }`}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void setLayerVisible(realIdx, !layer.visible);
-                  }}
+                  <Button
+                    type="button"
+                    onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
+                    class="inline-flex h-4 w-4 cursor-grab items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] active:cursor-grabbing"
+                    title="Reorder layer"
+                  >
+                    <span class="grid grid-cols-2 gap-[2px]">
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                      <span class="h-0.5 w-0.5 rounded-full bg-current" />
+                    </span>
+                  </Button>
+                </Show>
+                <Show
+                  when={layer.kind !== "image"}
+                  fallback={<span />}
                 >
-                  {layer.visible ? "●" : "○"}
-                </button>
+                  <button
+                    type="button"
+                    class={`inline-flex h-4 w-4 items-center justify-center text-xs leading-none transition-colors ${
+                      layer.visible ? "text-[var(--text)]" : "text-[var(--text-subtle)]"
+                    }`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void setLayerVisible(realIdx, !layer.visible);
+                    }}
+                  >
+                    {layer.visible ? "●" : "○"}
+                  </button>
+                </Show>
                 <span class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4">
                   <LayerTypeIcon layer={layer} />
                 </span>
