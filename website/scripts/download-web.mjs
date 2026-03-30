@@ -22,29 +22,33 @@ if (!releaseRes.ok) {
   throw new Error(`GitHub API returned ${releaseRes.status}`);
 }
 
-const releases = await releaseRes.json();
-const release = releases[0];
-const asset = release.assets.find((a) => a.name === "shade-web.tar.gz");
+try {
+  const releases = await releaseRes.json();
+  const release = releases[0];
+  const asset = release.assets.find((a) => a.name === "shade-web.tar.gz");
 
-if (!asset) {
-  throw new Error("Could not find shade-web.tar.gz asset");
-}
+  if (!asset) {
+    throw new Error("Could not find shade-web.tar.gz asset");
+  }
 
-const archivePath = `${targetDir}/shade-web.tar.gz`;
-const file = Bun.file(
-  `https://api.github.com/repos/tihav/shade/releases/assets/${asset.id}`,
-  {
-    headers: {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
-      Accept: "application/octet-stream",
+  const archivePath = `${targetDir}/shade-web.tar.gz`;
+  const file = Bun.file(
+    `https://api.github.com/repos/tihav/shade/releases/assets/${asset.id}`,
+    {
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Accept: "application/octet-stream",
+      },
     },
-  },
-);
+  );
 
-await file.save(archivePath);
+  await file.save(archivePath);
 
-const tar = Bun.spawn(["tar", "-xz", "--strip-components=1", "-C", targetDir], {
-  stdin: "inherit",
-});
+  const tar = Bun.spawn(["tar", "-xz", "--strip-components=1", "-C", targetDir], {
+    stdin: "inherit",
+  });
 
-await tar.exited;
+  await tar.exited;
+} catch (err) {
+  console.warn(`Warning: Could not download shade-web: ${err.message}`);
+}
