@@ -23,7 +23,7 @@ export const GET: APIRoute = async ({ url }) => {
     const row = releaseResult.rows[0];
 
     const assetsResult = await db.execute({
-        sql: "SELECT name, browser_download_url FROM assets WHERE release_id = ?",
+        sql: "SELECT id, name FROM assets WHERE release_id = ?",
         args: [row.id as string],
     });
 
@@ -32,7 +32,7 @@ export const GET: APIRoute = async ({ url }) => {
         name: row.name,
         assets: assetsResult.rows.map((a) => ({
             name: a.name,
-            browser_download_url: a.browser_download_url,
+            browser_download_url: `/api/releases/assets/${a.id}`,
         })),
     };
 
