@@ -109,10 +109,20 @@ const MOBILE_LAYER_TAB_CLASS =
 
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   if (props.layer.kind === "crop") {
-    return <span innerHTML={cropSvg} />;
+    return (
+      <span
+        class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4"
+        innerHTML={cropSvg}
+      />
+    );
   }
   if (props.layer.kind === "adjustment") {
-    return <span innerHTML={sparkSvg} />;
+    return (
+      <span
+        class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4"
+        innerHTML={sparkSvg}
+      />
+    );
   }
   return (
     <span class="inline-block h-4 w-4 rounded-sm border border-[var(--border-medium)]" />
@@ -1488,9 +1498,7 @@ export const Inspector: Component = () => {
                     {layer.visible ? "●" : "○"}
                   </button>
                 </Show>
-                <span class="flex h-4 w-4 items-center justify-center text-[var(--text-dim)] [&>svg]:h-4 [&>svg]:w-4">
-                  <LayerTypeIcon layer={layer} />
-                </span>
+                <LayerTypeIcon layer={layer} />
                 <Show
                   when={editingLayerIdx() === realIdx}
                   fallback={
@@ -1541,7 +1549,10 @@ export const Inspector: Component = () => {
                     }}
                   />
                 </Show>
-                <Show when={layer.kind !== "crop"}>
+                <Show
+                  when={layer.kind !== "crop"}
+                  fallback={<span />}
+                >
                   {layer.has_mask ? (
                     <Button
                       type="button"
@@ -1583,7 +1594,10 @@ export const Inspector: Component = () => {
                     class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                     title="Delete layer"
                   >
-                    <span innerHTML={trashSvg} />
+                    <span
+                      class="flex h-4 w-4 items-center justify-center [&>svg]:h-4 [&>svg]:w-4"
+                      innerHTML={trashSvg}
+                    />
                   </Button>
                 </Show>
               </div>
@@ -1763,7 +1777,10 @@ export const Inspector: Component = () => {
                   onClick={() => void handleDeleteSelectedLayer()}
                   class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] [&>svg]:h-5 [&>svg]:w-5`}
                 >
-                  <span innerHTML={trashSvg} />
+                  <span
+                    class="flex h-5 w-5 items-center justify-center [&>svg]:h-5 [&>svg]:w-5"
+                    innerHTML={trashSvg}
+                  />
                   <span>Delete</span>
                 </Button>
               </Show>
