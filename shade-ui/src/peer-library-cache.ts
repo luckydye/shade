@@ -1,5 +1,12 @@
 import { getThumbnailBackend } from "./bridge/thumbnail-backend";
 import { listPeerPictures, type SharedPicture } from "./bridge/index";
+import {
+  abortError,
+  normalizeModifiedAt,
+  requestToPromise,
+  toBlobBuffer,
+  withStores,
+} from "./cache-utils";
 
 const DB_NAME = "shade-peer-cache";
 const DB_VERSION = 4;
@@ -25,12 +32,6 @@ type CachedPeerItem = {
   latest_snapshot_id: string | null;
 };
 
-function normalizeModifiedAt(modifiedAt: unknown) {
-  return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
-    ? modifiedAt
-    : null;
-}
-
 function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
   return {
     id: picture.id,
@@ -45,19 +46,6 @@ function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
 
 function thumbnailKey(peerId: string, pictureId: string) {
   return `${peerId}:${pictureId}`;
-}
-
-function abortError() {
-  if (typeof DOMException !== "undefined") {
-    return new DOMException("thumbnail load aborted", "AbortError");
-  }
-  return new Error("thumbnail load aborted");
-}
-
-function toBlobBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.length);
-  copy.set(bytes);
-  return copy.buffer;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -80,36 +68,6 @@ function openDb(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-  });
-}
-
-async function withStores<T>(
-  storeNames: string[],
-  mode: IDBTransactionMode,
-  run: (stores: Record<string, IDBObjectStore>) => Promise<T>,
-): Promise<T> {
-  const db = await openDb();
-  const tx = db.transaction(storeNames, mode);
-  const stores = Object.fromEntries(
-    storeNames.map((name) => [name, tx.objectStore(name)]),
-  ) as Record<string, IDBObjectStore>;
-  try {
-    const result = await run(stores);
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-    return result;
-  } finally {
-    db.close();
-  }
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
   });
 }
 
@@ -164,7 +122,7 @@ function toSharedPicture(item: CachedPeerItem): SharedPicture {
 }
 
 async function loadPeerLibraryItems(peerId: string) {
-  return withStores([ITEMS_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [ITEMS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(stores[ITEMS_STORE].getAll());
     return Array.isArray(result)
       ? result
@@ -176,7 +134,7 @@ async function loadPeerLibraryItems(peerId: string) {
 }
 
 async function savePeerLibraryItems(peerId: string, pictures: SharedPicture[]) {
-  await withStores([ITEMS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(
       keys
@@ -203,7 +161,7 @@ async function getCachedThumbnail(
   peerId: string,
   pictureId: string,
 ): Promise<Blob | null> {
-  return withStores([THUMBNAILS_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [THUMBNAILS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(
       stores[THUMBNAILS_STORE].get(thumbnailKey(peerId, pictureId)),
     );
@@ -216,7 +174,7 @@ async function putCachedThumbnail(
   pictureId: string,
   blob: Blob,
 ): Promise<void> {
-  await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [THUMBNAILS_STORE], "readwrite", async (stores) => {
     await requestToPromise(
       stores[THUMBNAILS_STORE].put(blob, thumbnailKey(peerId, pictureId)),
     );
@@ -224,7 +182,7 @@ async function putCachedThumbnail(
 }
 
 async function deleteCachedPeerThumbnails(peerId: string): Promise<void> {
-  await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [THUMBNAILS_STORE], "readwrite", async (stores) => {
     const keys = await requestToPromise(stores[THUMBNAILS_STORE].getAllKeys());
     await Promise.all(
       keys
@@ -268,7 +226,7 @@ export async function getCachedPeerLibraryItems(
 }
 
 export async function removePeerLibrary(peerId: string): Promise<void> {
-  await withStores([ITEMS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(
       keys

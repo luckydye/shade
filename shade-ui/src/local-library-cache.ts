@@ -5,6 +5,15 @@ import {
   type LibraryImage,
   type LibraryImageListing,
 } from "./bridge/index";
+import {
+  abortError,
+  normalizeModifiedAt,
+  normalizeRating,
+  normalizeTags,
+  requestToPromise,
+  toBlobBuffer,
+  withStores,
+} from "./cache-utils";
 
 const DB_NAME = "shade-local-library-cache";
 const DB_VERSION = 2;
@@ -27,27 +36,6 @@ type CachedLocalItem = {
 
 const failedThumbnailLoads: CachedFailures = new Map();
 const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
-
-function normalizeModifiedAt(modifiedAt: unknown) {
-  return typeof modifiedAt === "number" && Number.isFinite(modifiedAt)
-    ? modifiedAt
-    : null;
-}
-
-function normalizeRating(rating: unknown) {
-  return typeof rating === "number" &&
-    Number.isInteger(rating) &&
-    rating >= 1 &&
-    rating <= 5
-    ? rating
-    : null;
-}
-
-function normalizeTags(tags: unknown) {
-  return Array.isArray(tags)
-    ? tags.filter((tag): tag is string => typeof tag === "string" && tag.trim() !== "")
-    : [];
-}
 
 function normalizeSnapshotVersion(version: unknown) {
   return typeof version === "string" && version.length > 0 ? version : null;
@@ -100,24 +88,11 @@ function toLibraryImage(item: CachedLocalItem): LibraryImage {
   };
 }
 
-function toBlobBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.length);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
 function normalizeLibraryImageListing(listing: LibraryImageListing): LibraryImageListing {
   return {
     items: listing.items.map(normalizeLibraryImage),
     is_complete: listing.is_complete,
   };
-}
-
-function abortError() {
-  if (typeof DOMException !== "undefined") {
-    return new DOMException("thumbnail load aborted", "AbortError");
-  }
-  return new Error("thumbnail load aborted");
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -143,42 +118,12 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-async function withStores<T>(
-  storeNames: string[],
-  mode: IDBTransactionMode,
-  run: (stores: Record<string, IDBObjectStore>) => Promise<T>,
-): Promise<T> {
-  const db = await openDb();
-  const tx = db.transaction(storeNames, mode);
-  const stores = Object.fromEntries(
-    storeNames.map((name) => [name, tx.objectStore(name)]),
-  ) as Record<string, IDBObjectStore>;
-  try {
-    const result = await run(stores);
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-    return result;
-  } finally {
-    db.close();
-  }
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
 function localItemKey(libraryId: string, path: string) {
   return `${libraryId}:${path}`;
 }
 
 async function loadLocalLibraryListing(libraryId: string): Promise<LibraryImageListing> {
-  return withStores([ITEMS_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [ITEMS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(stores[ITEMS_STORE].getAll());
     const items = Array.isArray(result)
       ? result
@@ -197,7 +142,7 @@ async function saveLocalLibraryListing(
   libraryId: string,
   listing: LibraryImageListing,
 ): Promise<void> {
-  await withStores([ITEMS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(
       keys
@@ -225,7 +170,7 @@ async function getCachedThumbnail(
   path: string,
   latestSnapshotId: string | null,
 ): Promise<Blob | null> {
-  return withStores([THUMBNAILS_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [THUMBNAILS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(
       stores[THUMBNAILS_STORE].get(thumbnailKey(path, latestSnapshotId)),
     );
@@ -238,7 +183,7 @@ async function putCachedThumbnail(
   latestSnapshotId: string | null,
   blob: Blob,
 ): Promise<void> {
-  await withStores([THUMBNAILS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [THUMBNAILS_STORE], "readwrite", async (stores) => {
     await requestToPromise(
       stores[THUMBNAILS_STORE].put(blob, thumbnailKey(path, latestSnapshotId)),
     );

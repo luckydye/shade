@@ -1,27 +1,14 @@
 import {
   type Component,
   createEffect,
-  createMemo,
   createSignal,
   type JSX,
   Match,
   on,
-  onCleanup,
-  onMount,
   Show,
   Switch,
 } from "solid-js";
 import { Slider } from "./Slider";
-import sparkSvg from "../icons/spark.svg?raw";
-import circleSvg from "../icons/circle.svg?raw";
-import dropletSvg from "../icons/droplet.svg?raw";
-import grainSvg from "../icons/grain.svg?raw";
-import curveSvg from "../icons/curve.svg?raw";
-import toneSvg from "../icons/tone.svg?raw";
-import hslSvg from "../icons/hsl.svg?raw";
-import cropSvg from "../icons/crop.svg?raw";
-import trashSvg from "../icons/trash.svg?raw";
-import denoiseSvg from "../icons/denoise.svg?raw";
 import type { LayerInfo } from "../store/editor";
 import {
   activeAdjustmentSliderId,
@@ -29,7 +16,6 @@ import {
   applyEdit,
   applyGradientMask,
   createBrushMask,
-  backdropTile,
   deleteLayer,
   findCropLayerIdx,
   isAdjustmentSliderActive,
@@ -50,7 +36,6 @@ import {
   setIsDrawerOpen,
   setLayerVisible,
   state,
-  viewportToneSample,
 } from "../store/editor";
 import {
   type ArtboardSource,
@@ -59,20 +44,46 @@ import {
   getSelectedArtboard,
 } from "../store/editor-store";
 import { Button } from "./Button";
+import { CurvesEditor } from "./inspector/CurvesEditor";
+import { LsCurveEditor } from "./inspector/LsCurveEditor";
+import {
+  ADD_LAYER_FOCI,
+  DEFAULT_COLOR,
+  DEFAULT_CURVES,
+  DEFAULT_DENOISE,
+  DEFAULT_GLOW,
+  DEFAULT_GRAIN,
+  DEFAULT_HSL,
+  DEFAULT_SHARPEN,
+  DEFAULT_TONE,
+  DEFAULT_VIGNETTE,
+  focusLabels,
+  HSL_TAB_STYLES,
+  inferFocus,
+  type MobileLayerFocus,
+} from "./inspector/inspector-constants";
+import {
+  circleSvg,
+  cropSvg,
+  denoiseSvg,
+  dropletSvg,
+  focusGlyphs,
+  grainSvg,
+  hslSvg,
+  sparkSvg,
+  toneSvg,
+  trashSvg,
+} from "./inspector/inspector-icons";
+import {
+  CURVE_SAMPLE_INDICES,
+  IDENTITY_LUT,
+  LS_CURVE_IDENTITY,
+  normalizeLsPoints,
+  normalizePoints,
+  type ControlPoint,
+  valueLabel,
+} from "./inspector/curve-utils";
 
-type MobileLayerFocus =
-  | "light"
-  | "levels"
-  | "color"
-  | "wb"
-  | "curves"
-  | "ls_curve"
-  | "grain"
-  | "glow"
-  | "vignette"
-  | "sharpen"
-  | "hsl"
-  | "denoise";
 type InspectorTab = "edit" | "presets";
 type LayerDropTarget = { layerIdx: number; position: "before" | "after" };
 
@@ -97,415 +108,6 @@ const ADD_LAYER_ROW_CLASS =
   "grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
-const ADD_LAYER_FOCI = [
-  "light",
-  "levels",
-  "color",
-  "wb",
-  "curves",
-  "ls_curve",
-  "grain",
-  "glow",
-  "vignette",
-  "sharpen",
-  "hsl",
-  "denoise",
-] as const satisfies readonly MobileLayerFocus[];
-
-const CURVE_SAMPLE_INDICES = [64, 128, 192] as const;
-const CURVE_MIN_X = 0;
-const CURVE_MAX_X = 255;
-const IDENTITY_LUT = Array.from({ length: 256 }, (_, idx) => idx / 255);
-const LS_CURVE_IDENTITY = Array.from({ length: 256 }, () => 1.0);
-const DEFAULT_TONE = {
-  exposure: 0,
-  contrast: 0,
-  blacks: 0,
-  whites: 0,
-  highlights: 0,
-  shadows: 0,
-  gamma: 1,
-} as const;
-const DEFAULT_COLOR = {
-  saturation: 1,
-  vibrancy: 0,
-  temperature: 0,
-  tint: 0,
-} as const;
-const DEFAULT_VIGNETTE = { amount: 0 } as const;
-const DEFAULT_SHARPEN = { amount: 0 } as const;
-const DEFAULT_GRAIN = { amount: 0, size: 1 } as const;
-const DEFAULT_GLOW = { amount: 0 } as const;
-const DEFAULT_DENOISE = { luma_strength: 0, chroma_strength: 0, mode: 0 } as const;
-const DEFAULT_CURVES = {
-  lut_r: IDENTITY_LUT,
-  lut_g: IDENTITY_LUT,
-  lut_b: IDENTITY_LUT,
-  lut_master: IDENTITY_LUT,
-  per_channel: false,
-} as const;
-const DEFAULT_HSL = {
-  red_hue: 0,
-  red_sat: 0,
-  red_lum: 0,
-  green_hue: 0,
-  green_sat: 0,
-  green_lum: 0,
-  blue_hue: 0,
-  blue_sat: 0,
-  blue_lum: 0,
-} as const;
-const HSL_TAB_STYLES = {
-  red: { tabClass: "text-red-400 bg-red-500/15", accentColor: "#f87171" },
-  green: { tabClass: "text-green-400 bg-green-500/15", accentColor: "#4ade80" },
-  blue: { tabClass: "text-blue-400 bg-blue-500/15", accentColor: "#60a5fa" },
-} as const;
-
-interface ControlPoint {
-  x: number;
-  y: number;
-}
-
-interface EditableControlPoint extends ControlPoint {
-  id: number;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function normalizePoints(points: readonly ControlPoint[]): ControlPoint[] {
-  const normalized = [...points]
-    .map(normalizePoint)
-    .sort((a, b) => a.x - b.x)
-    .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
-  if (normalized[0]?.x !== CURVE_MIN_X) {
-    normalized.unshift({ x: CURVE_MIN_X, y: 0 });
-  }
-  if (normalized[normalized.length - 1]?.x !== CURVE_MAX_X) {
-    normalized.push({ x: CURVE_MAX_X, y: 1 });
-  }
-  return normalized;
-}
-
-function normalizeLsPoints(points: readonly ControlPoint[]): ControlPoint[] {
-  const normalized = [...points]
-    .map(normalizeLsPoint)
-    .sort((a, b) => a.x - b.x)
-    .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
-  if (normalized[0]?.x !== CURVE_MIN_X) {
-    normalized.unshift({ x: CURVE_MIN_X, y: 1 });
-  }
-  if (normalized[normalized.length - 1]?.x !== CURVE_MAX_X) {
-    normalized.push({ x: CURVE_MAX_X, y: 1 });
-  }
-  return normalized;
-}
-
-function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
-  const anchors = normalizePoints(points);
-  if (anchors.length < 2) {
-    throw new Error("curve requires explicit left and right endpoint clamps");
-  }
-  if (anchors[0]?.x !== CURVE_MIN_X) {
-    throw new Error("curve must include a left endpoint clamp at x=0");
-  }
-  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
-    throw new Error("curve must include a right endpoint clamp at x=255");
-  }
-  const lut = new Array<number>(256);
-  const delta = new Array<number>(anchors.length - 1);
-  const tangent = new Array<number>(anchors.length);
-  for (let i = 0; i < anchors.length - 1; i += 1) {
-    const span = anchors[i + 1].x - anchors[i].x;
-    if (span <= 0) throw new Error("curve anchors must be strictly increasing");
-    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
-  }
-  tangent[0] = delta[0];
-  tangent[anchors.length - 1] = delta[delta.length - 1];
-  for (let i = 1; i < anchors.length - 1; i += 1) {
-    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
-  }
-  for (let i = 0; i < delta.length; i += 1) {
-    if (delta[i] === 0) {
-      tangent[i] = 0;
-      tangent[i + 1] = 0;
-      continue;
-    }
-    const a = tangent[i] / delta[i];
-    const b = tangent[i + 1] / delta[i];
-    const norm = Math.hypot(a, b);
-    if (norm > 3) {
-      const scale = 3 / norm;
-      tangent[i] = scale * a * delta[i];
-      tangent[i + 1] = scale * b * delta[i];
-    }
-  }
-  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
-    const start = anchors[seg];
-    const end = anchors[seg + 1];
-    const span = end.x - start.x;
-    for (let x = start.x; x <= end.x; x += 1) {
-      const t = (x - start.x) / span;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + t;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-      lut[x] = clamp(
-        h00 * start.y +
-          h10 * span * tangent[seg] +
-          h01 * end.y +
-          h11 * span * tangent[seg + 1],
-        0,
-        1,
-      );
-    }
-  }
-  return lut;
-}
-
-function buildLsCurveLutFromPoints(points: readonly ControlPoint[]): number[] {
-  const anchors = normalizeLsPoints(points);
-  if (anchors.length < 2) {
-    throw new Error("curve requires explicit left and right endpoint clamps");
-  }
-  if (anchors[0]?.x !== CURVE_MIN_X) {
-    throw new Error("curve must include a left endpoint clamp at x=0");
-  }
-  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
-    throw new Error("curve must include a right endpoint clamp at x=255");
-  }
-  const lut = new Array<number>(256);
-  const delta = new Array<number>(anchors.length - 1);
-  const tangent = new Array<number>(anchors.length);
-  for (let i = 0; i < anchors.length - 1; i += 1) {
-    const span = anchors[i + 1].x - anchors[i].x;
-    if (span <= 0) throw new Error("curve anchors must be strictly increasing");
-    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
-  }
-  tangent[0] = delta[0];
-  tangent[anchors.length - 1] = delta[delta.length - 1];
-  for (let i = 1; i < anchors.length - 1; i += 1) {
-    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
-  }
-  for (let i = 0; i < delta.length; i += 1) {
-    if (delta[i] === 0) {
-      tangent[i] = 0;
-      tangent[i + 1] = 0;
-      continue;
-    }
-    const a = tangent[i] / delta[i];
-    const b = tangent[i + 1] / delta[i];
-    const norm = Math.hypot(a, b);
-    if (norm > 3) {
-      const scale = 3 / norm;
-      tangent[i] = scale * a * delta[i];
-      tangent[i + 1] = scale * b * delta[i];
-    }
-  }
-  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
-    const start = anchors[seg];
-    const end = anchors[seg + 1];
-    const span = end.x - start.x;
-    for (let x = start.x; x <= end.x; x += 1) {
-      const t = (x - start.x) / span;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + t;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-      lut[x] = clamp(
-        h00 * start.y +
-          h10 * span * tangent[seg] +
-          h01 * end.y +
-          h11 * span * tangent[seg + 1],
-        0,
-        2,
-      );
-    }
-  }
-  return lut;
-}
-
-function normalizePoint(point: ControlPoint): ControlPoint {
-  const roundedX = Math.round(point.x);
-  return {
-    x:
-      roundedX <= CURVE_MIN_X
-        ? CURVE_MIN_X
-        : roundedX >= CURVE_MAX_X
-          ? CURVE_MAX_X
-          : clamp(roundedX, 1, 254),
-    y: clamp(point.y, 0, 1),
-  };
-}
-
-function normalizeLsPoint(point: ControlPoint): ControlPoint {
-  const roundedX = Math.round(point.x);
-  return {
-    x:
-      roundedX <= CURVE_MIN_X
-        ? CURVE_MIN_X
-        : roundedX >= CURVE_MAX_X
-          ? CURVE_MAX_X
-          : clamp(roundedX, 1, 254),
-    y: clamp(point.y, 0, 2),
-  };
-}
-
-function normalizeInteriorPoint(point: ControlPoint): ControlPoint {
-  return {
-    x: clamp(Math.round(point.x), 1, 254),
-    y: clamp(point.y, 0, 1),
-  };
-}
-
-function normalizeLsInteriorPoint(point: ControlPoint): ControlPoint {
-  return {
-    x: clamp(Math.round(point.x), 1, 254),
-    y: clamp(point.y, 0, 2),
-  };
-}
-
-function isEndpointPoint(point: ControlPoint) {
-  return point.x === CURVE_MIN_X || point.x === CURVE_MAX_X;
-}
-
-function curvePath(lut: readonly number[]) {
-  return lut
-    .map((value, idx) => {
-      const x = (idx / 255) * 100;
-      const y = (1 - clamp(value, 0, 1)) * 100;
-      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-}
-
-function lsCurvePath(lut: readonly number[]) {
-  return lut
-    .map((value, idx) => {
-      const x = (idx / 255) * 100;
-      const y = ((2 - clamp(value, 0, 2)) / 2) * 100;
-      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-}
-
-function buildLuminanceHistogram(frame: ImageData, binCount = 64) {
-  const bins = new Array<number>(binCount).fill(0);
-  const { data } = frame;
-  for (let idx = 0; idx < data.length; idx += 4) {
-    const alpha = data[idx + 3] / 255;
-    if (alpha <= 0) continue;
-    const luminance =
-      ((data[idx] / 255) * 0.2126 +
-        (data[idx + 1] / 255) * 0.7152 +
-        (data[idx + 2] / 255) * 0.0722) *
-      alpha;
-    const binIdx = Math.min(binCount - 1, Math.floor(luminance * (binCount - 1)));
-    bins[binIdx] += 1;
-  }
-  return bins;
-}
-
-function histogramPath(bins: readonly number[]) {
-  const peak = Math.max(...bins, 0);
-  if (peak <= 0) return "";
-  const step = 100 / Math.max(1, bins.length - 1);
-  const points = bins.map((value, idx) => {
-    const x = idx * step;
-    const y = 100 - (value / peak) * 100;
-    return `${x} ${y}`;
-  });
-  return `M 0 100 L ${points.join(" L ")} L 100 100 Z`;
-}
-
-function remapPath(path: string, width: number, height: number, padding: number) {
-  const innerWidth = Math.max(1, width - padding * 2);
-  const innerHeight = Math.max(1, height - padding * 2);
-  return path.replace(/(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)/g, (_, x, y) => {
-    const nextX = padding + (parseFloat(x) / 100) * innerWidth;
-    const nextY = padding + (parseFloat(y) / 100) * innerHeight;
-    return `${nextX} ${nextY}`;
-  });
-}
-
-function sampleCurveValue(lut: readonly number[], x: number) {
-  const clampedX = clamp(x, 0, 255);
-  const lower = Math.floor(clampedX);
-  const upper = Math.ceil(clampedX);
-  const start = clamp(lut[lower] ?? 0, 0, 1);
-  const end = clamp(lut[upper] ?? start, 0, 1);
-  return start + (end - start) * (clampedX - lower);
-}
-
-function valueLabel(value: number, scale = 100) {
-  return `${Math.round(value * scale)}`;
-}
-
-const TONE_THRESHOLD_BOUNDARIES = [
-  { key: "shadows", label: "Shadows", value: 0.25 },
-  { key: "midtones", label: "Midtones", value: 0.5 },
-  { key: "highlights", label: "Highlights", value: 0.75 },
-] as const;
-
-const focusGlyphs: Record<MobileLayerFocus, string> = {
-  light: sparkSvg,
-  levels: toneSvg,
-  color: dropletSvg,
-  wb: toneSvg,
-  curves: curveSvg,
-  ls_curve: curveSvg,
-  grain: grainSvg,
-  glow: sparkSvg,
-  vignette: circleSvg,
-  sharpen: dropletSvg,
-  hsl: hslSvg,
-  denoise: denoiseSvg,
-};
-
-const focusLabels: Record<MobileLayerFocus, string> = {
-  light: "Light",
-  levels: "Levels",
-  color: "Color",
-  wb: "WB",
-  curves: "Curves",
-  ls_curve: "LS Curve",
-  grain: "Grain",
-  glow: "Glow",
-  vignette: "Vignette",
-  sharpen: "Sharpen",
-  hsl: "HSL",
-  denoise: "Denoise",
-};
-
-const ADJUSTMENT_FOCUS_MAP: readonly {
-  key: keyof NonNullable<LayerInfo["adjustments"]>;
-  focus: MobileLayerFocus;
-}[] = [
-  { key: "tone", focus: "light" },
-  { key: "color", focus: "color" },
-  { key: "curves", focus: "curves" },
-  { key: "ls_curve", focus: "ls_curve" },
-  { key: "grain", focus: "grain" },
-  { key: "glow", focus: "glow" },
-  { key: "vignette", focus: "vignette" },
-  { key: "sharpen", focus: "sharpen" },
-  { key: "hsl", focus: "hsl" },
-  { key: "denoise", focus: "denoise" },
-] as const;
-
-function inferFocus(layer: LayerInfo | undefined): MobileLayerFocus {
-  const adj = layer?.adjustments;
-  if (!adj) return "light";
-  for (const { key, focus } of ADJUSTMENT_FOCUS_MAP) {
-    if (adj[key] != null) return focus;
-  }
-  return "light";
-}
 
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   if (props.layer.kind === "crop") {
@@ -783,7 +385,7 @@ export const Inspector: Component = () => {
   };
 
   const applyLsCurve = (points: readonly ControlPoint[]) => {
-    const normalizedPoints = normalizePoints(points);
+    const normalizedPoints = normalizeLsPoints(points);
     setLsCurvePointCache((prev) =>
       new Map(prev).set(state.selectedLayerIdx, normalizedPoints),
     );
@@ -838,453 +440,6 @@ export const Inspector: Component = () => {
       temperature: overrides.temperature ?? c.temperature,
       tint: overrides.tint ?? c.tint,
     });
-  };
-
-  // Defined as a component (not a plain function) so SolidJS gives it a stable reactive
-  // boundary. Plain function calls like {renderFn()} are wrapped in a single reactive
-  // computation and replace their entire DOM subtree on any signal change — which kills
-  // an active drag. A component (<HslSection />) gets fine-grained in-place updates.
-  const CurvesEditor: Component = () => {
-    const [draggingId, setDraggingId] = createSignal<number | null>(null);
-    const [hoveredId, setHoveredId] = createSignal<number | null>(null);
-    const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
-    const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
-    const luminanceHistogram = createMemo(() => {
-      const frame = backdropTile();
-      return frame ? buildLuminanceHistogram(frame.image) : [];
-    });
-    let svgRef!: SVGSVGElement;
-    let nextId = 0;
-    let lastTapTime = 0;
-    let lastTapId = -1;
-    let activeTouchId: number | null = null;
-    let clearCurveDragListeners: (() => void) | null = null;
-
-    createEffect(
-      on(
-        () => state.selectedLayerIdx,
-        (layerIdx) => {
-          const layer = state.layers[layerIdx];
-          if (layer?.kind !== "adjustment") {
-            setPts([]);
-            setDraggingId(null);
-            setHoveredId(null);
-            return;
-          }
-          const points =
-            curvePointCache().get(layerIdx) ??
-            layer.adjustments?.curves?.control_points ??
-            defaultCurvePoints();
-          nextId = 0;
-          setPts(
-            normalizePoints(points.length === 0 ? defaultCurvePoints() : points).map(
-              (point) => ({
-                ...point,
-                id: nextId++,
-              }),
-            ),
-          );
-          setDraggingId(null);
-          setHoveredId(null);
-        },
-      ),
-    );
-
-    const lut = () => buildLutFromPoints(pts());
-    const graphPadding = 0;
-    const innerWidth = () => Math.max(1, svgSize().width - graphPadding * 2);
-    const innerHeight = () => Math.max(1, svgSize().height - graphPadding * 2);
-    const chartX = (value: number) => graphPadding + (value / 255) * innerWidth();
-    const chartY = (value: number) => graphPadding + (1 - value) * innerHeight();
-    const chartThresholdX = (value: number) => graphPadding + value * innerWidth();
-    const curveSvgPath = () =>
-      remapPath(curvePath(lut()), svgSize().width, svgSize().height, graphPadding);
-    const histogramSvgPath = () =>
-      remapPath(
-        histogramPath(luminanceHistogram()),
-        svgSize().width,
-        svgSize().height,
-        graphPadding,
-      );
-    const hoveredToneGuide = createMemo(() => {
-      const x = viewportToneSample();
-      if (x === null) {
-        return null;
-      }
-      return { x: x * 255, y: sampleCurveValue(lut(), x * 255) };
-    });
-
-    onMount(() => {
-      const updateSize = () => {
-        const width = Math.max(1, Math.round(svgRef.clientWidth));
-        const height = Math.max(1, Math.round(svgRef.clientHeight));
-        setSvgSize({ width, height });
-      };
-      updateSize();
-      const observer = new ResizeObserver(updateSize);
-      observer.observe(svgRef);
-      onCleanup(() => {
-        observer.disconnect();
-        clearCurveDragListeners?.();
-      });
-    });
-
-    const svgCoords = (event: { clientX: number; clientY: number }) => {
-      const point = svgRef.createSVGPoint();
-      point.x = event.clientX;
-      point.y = event.clientY;
-      const ctm = svgRef.getScreenCTM();
-      if (!ctm) throw new Error("missing SVG screen transform");
-      const local = point.matrixTransform(ctm.inverse());
-      return {
-        x: clamp(((local.x - graphPadding) / innerWidth()) * 255, 1, 254),
-        y: clamp(1 - (local.y - graphPadding) / innerHeight(), 0, 1),
-      };
-    };
-
-    const updateDraggingPoint = (clientX: number, clientY: number) => {
-      const id = draggingId();
-      if (id === null) {
-        return;
-      }
-      const current = pts().find((point) => point.id === id);
-      if (!current) {
-        throw new Error("dragged curve point not found");
-      }
-      const nextCoords = svgCoords({ clientX, clientY });
-      const { x, y } = isEndpointPoint(current)
-        ? { x: current.x, y: clamp(nextCoords.y, 0, 1) }
-        : normalizeInteriorPoint(nextCoords);
-      const next = pts()
-        .map((p) => (p.id === id ? { ...p, x, y } : p))
-        .sort((a, b) => a.x - b.x);
-      setPts(next);
-      selectedAdjustmentLayerOrThrow();
-      void applyCurves(next);
-    };
-
-    const finishDraggingPoint = () => {
-      clearCurveDragListeners?.();
-      clearCurveDragListeners = null;
-      activeTouchId = null;
-      setDraggingId(null);
-    };
-
-    const trackPointerDrag = (pointerId: number) => {
-      clearCurveDragListeners?.();
-      const onPointerMove = (event: PointerEvent) => {
-        if (event.pointerId !== pointerId) {
-          return;
-        }
-        updateDraggingPoint(event.clientX, event.clientY);
-      };
-      const onPointerUp = (event: PointerEvent) => {
-        if (event.pointerId !== pointerId) {
-          return;
-        }
-        finishDraggingPoint();
-      };
-      const onPointerCancel = (event: PointerEvent) => {
-        if (event.pointerId !== pointerId) {
-          return;
-        }
-        finishDraggingPoint();
-        setHoveredId(null);
-      };
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointercancel", onPointerCancel);
-      clearCurveDragListeners = () => {
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        window.removeEventListener("pointercancel", onPointerCancel);
-      };
-    };
-
-    const trackTouchDrag = (identifier: number) => {
-      clearCurveDragListeners?.();
-      const onTouchMove = (event: TouchEvent) => {
-        const touch = findTouch(event.touches, identifier);
-        if (!touch) {
-          return;
-        }
-        event.preventDefault();
-        updateDraggingPoint(touch.clientX, touch.clientY);
-      };
-      const onTouchEnd = (event: TouchEvent) => {
-        const touch = findTouch(event.changedTouches, identifier);
-        if (!touch) {
-          return;
-        }
-        event.preventDefault();
-        finishDraggingPoint();
-      };
-      const onTouchCancel = (event: TouchEvent) => {
-        const touch = findTouch(event.changedTouches, identifier);
-        if (!touch) {
-          return;
-        }
-        finishDraggingPoint();
-        setHoveredId(null);
-      };
-      window.addEventListener("touchmove", onTouchMove, { passive: false });
-      window.addEventListener("touchend", onTouchEnd);
-      window.addEventListener("touchcancel", onTouchCancel);
-      clearCurveDragListeners = () => {
-        window.removeEventListener("touchmove", onTouchMove);
-        window.removeEventListener("touchend", onTouchEnd);
-        window.removeEventListener("touchcancel", onTouchCancel);
-      };
-    };
-
-    const startNewPointDrag = (clientX: number, clientY: number) => {
-      const { x, y } = normalizeInteriorPoint(svgCoords({ clientX, clientY }));
-      const id = nextId++;
-      const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
-      setPts(next);
-      selectedAdjustmentLayerOrThrow();
-      void applyCurves(next);
-      setDraggingId(id);
-    };
-
-    const startExistingPointDrag = (id: number) => {
-      const point = pts().find((candidate) => candidate.id === id);
-      if (!point) {
-        throw new Error("curve point not found");
-      }
-      setHoveredId(id);
-      const now = Date.now();
-      if (now - lastTapTime < 300 && lastTapId === id) {
-        lastTapTime = 0;
-        if (isEndpointPoint(point)) {
-          const resetY = point.x === CURVE_MIN_X ? 0 : 1;
-          const next = pts()
-            .map((p) => (p.id === id ? { ...p, y: resetY } : p))
-            .sort((a, b) => a.x - b.x);
-          setPts(next);
-          selectedAdjustmentLayerOrThrow();
-          void applyCurves(next);
-        } else {
-          const next = pts().filter((p) => p.id !== id);
-          setPts(next);
-          selectedAdjustmentLayerOrThrow();
-          void applyCurves(next);
-        }
-        finishDraggingPoint();
-        setHoveredId(null);
-        return false;
-      }
-      lastTapTime = now;
-      lastTapId = id;
-      setDraggingId(id);
-      return true;
-    };
-
-    const findTouch = (touches: TouchList, identifier: number) => {
-      for (let index = 0; index < touches.length; index += 1) {
-        const touch = touches.item(index);
-        if (touch?.identifier === identifier) {
-          return touch;
-        }
-      }
-      return null;
-    };
-
-    return (
-      <div
-        data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-        class={`${PARAMETER_ROW_CLASS} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
-      >
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={curveSvg} />
-        <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
-          Curves
-        </span>
-        <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
-          Master
-        </span>
-        <div class="col-start-2 col-end-4 overflow-hidden">
-          <svg
-            ref={svgRef!}
-            viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
-            class="block h-36 min-h-[136px] w-full select-none"
-            style={{
-              cursor: draggingId() !== null ? "grabbing" : "crosshair",
-              "touch-action": "none",
-            }}
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              if (e.pointerType === "touch") return;
-              if (e.target !== svgRef) return;
-              e.preventDefault();
-              startNewPointDrag(e.clientX, e.clientY);
-              trackPointerDrag(e.pointerId);
-            }}
-            onPointerLeave={() => {
-              setHoveredId(null);
-            }}
-            onTouchStart={(e) => {
-              if (e.touches.length !== 1) {
-                finishDraggingPoint();
-                return;
-              }
-              const touch = e.touches.item(0);
-              if (!touch) {
-                throw new Error("curve touch interaction requires an active touch point");
-              }
-              activeTouchId = touch.identifier;
-              if (e.target === svgRef) {
-                e.preventDefault();
-                startNewPointDrag(touch.clientX, touch.clientY);
-                trackTouchDrag(touch.identifier);
-              }
-            }}
-          >
-            <rect
-              x={graphPadding}
-              y={graphPadding}
-              width={innerWidth()}
-              height={innerHeight()}
-              fill="var(--curve-bg)"
-              pointer-events="none"
-            />
-            {TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
-              <line
-                x1={chartThresholdX(boundary.value)}
-                y1={graphPadding}
-                x2={chartThresholdX(boundary.value)}
-                y2={graphPadding + innerHeight()}
-                stroke="var(--curve-guide)"
-                stroke-width="0.7"
-                stroke-dasharray="4 6"
-                opacity="0.5"
-                pointer-events="none"
-              />
-            ))}
-            <Show when={histogramSvgPath()}>
-              {(path) => (
-                <path
-                  d={path()}
-                  fill="var(--curve-stroke)"
-                  fill-opacity="0.12"
-                  stroke="none"
-                  pointer-events="none"
-                />
-              )}
-            </Show>
-            <path
-              d={`M ${graphPadding} ${graphPadding + innerHeight()} L ${
-                graphPadding + innerWidth()
-              } ${graphPadding}`}
-              stroke="var(--curve-mid-line)"
-              stroke-width="0.8"
-              fill="none"
-              pointer-events="none"
-            />
-            <path
-              d={curveSvgPath()}
-              stroke="var(--curve-stroke)"
-              stroke-width="1.5"
-              fill="none"
-              pointer-events="none"
-            />
-            <Show when={hoveredToneGuide()}>
-              {(guide) => (
-                <>
-                  <line
-                    x1={chartX(guide().x)}
-                    y1={graphPadding}
-                    x2={chartX(guide().x)}
-                    y2={graphPadding + innerHeight()}
-                    stroke="var(--curve-guide-mid)"
-                    stroke-width="1"
-                    stroke-dasharray="4 4"
-                    opacity="0.9"
-                    pointer-events="none"
-                  />
-                  <circle
-                    cx={chartX(guide().x)}
-                    cy={chartY(guide().y)}
-                    r="4"
-                    fill="var(--curve-guide-mid)"
-                    stroke="var(--curve-point-stroke)"
-                    stroke-width="1.5"
-                    pointer-events="none"
-                  />
-                </>
-              )}
-            </Show>
-            {pts().map((pt) => (
-              <>
-                <circle
-                  cx={chartX(pt.x)}
-                  cy={chartY(pt.y)}
-                  r="7"
-                  fill="none"
-                  stroke="var(--curve-stroke)"
-                  stroke-width="1.5"
-                  opacity={hoveredId() === pt.id ? "0.75" : "0"}
-                  pointer-events="none"
-                />
-                <circle
-                  cx={chartX(pt.x)}
-                  cy={chartY(pt.y)}
-                  r="14"
-                  fill="transparent"
-                  stroke="none"
-                  style={{
-                    cursor: draggingId() === pt.id ? "grabbing" : "grab",
-                  }}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    if (e.touches.length !== 1) {
-                      finishDraggingPoint();
-                      return;
-                    }
-                    const touch = e.touches.item(0);
-                    if (!touch) {
-                      throw new Error(
-                        "curve point touch interaction requires an active touch point",
-                      );
-                    }
-                    activeTouchId = touch.identifier;
-                    e.preventDefault();
-                    if (!startExistingPointDrag(pt.id)) {
-                      return;
-                    }
-                    trackTouchDrag(touch.identifier);
-                  }}
-                  onPointerDown={(e) => {
-                    if (e.pointerType === "touch") return;
-                    e.stopPropagation();
-                    e.preventDefault();
-                    if (!startExistingPointDrag(pt.id)) {
-                      return;
-                    }
-                    trackPointerDrag(e.pointerId);
-                  }}
-                />
-                <circle
-                  cx={chartX(pt.x)}
-                  cy={chartY(pt.y)}
-                  r="4.5"
-                  fill="var(--curve-stroke)"
-                  stroke="var(--curve-point-stroke)"
-                  stroke-width="1.5"
-                  style={{
-                    cursor: draggingId() === pt.id ? "grabbing" : "grab",
-                  }}
-                  onPointerEnter={() => setHoveredId(pt.id)}
-                  onPointerLeave={() =>
-                    setHoveredId((current) => (current === pt.id ? null : current))
-                  }
-                  pointer-events="none"
-                />
-              </>
-            ))}
-          </svg>
-        </div>
-      </div>
-    );
   };
 
   const HslSection: Component = () => {
@@ -1384,412 +539,6 @@ export const Inspector: Component = () => {
             );
           }}
         />
-      </div>
-    );
-  };
-
-  const LsCurveEditor: Component = () => {
-    const [draggingId, setDraggingId] = createSignal<number | null>(null);
-    const [hoveredId, setHoveredId] = createSignal<number | null>(null);
-    const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
-    const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
-    const luminanceHistogram = createMemo(() => {
-      const frame = backdropTile();
-      return frame ? buildLuminanceHistogram(frame.image) : [];
-    });
-    let svgRef!: SVGSVGElement;
-    let nextId = 0;
-    let lastTapTime = 0;
-    let lastTapId = -1;
-    let activeTouchId: number | null = null;
-    let clearCurveDragListeners: (() => void) | null = null;
-
-    createEffect(
-      on(
-        () => state.selectedLayerIdx,
-        (layerIdx) => {
-          const layer = state.layers[layerIdx];
-          if (layer?.kind !== "adjustment") {
-            setPts([]);
-            setDraggingId(null);
-            setHoveredId(null);
-            return;
-          }
-          const points =
-            lsCurvePointCache().get(layerIdx) ??
-            layer.adjustments?.ls_curve?.control_points ??
-            defaultLsCurvePoints();
-          nextId = 0;
-          setPts(
-            normalizeLsPoints(points.length === 0 ? defaultLsCurvePoints() : points).map(
-              (point) => ({
-                ...point,
-                id: nextId++,
-              }),
-            ),
-          );
-          setDraggingId(null);
-          setHoveredId(null);
-        },
-      ),
-    );
-
-    const lut = () => buildLsCurveLutFromPoints(pts());
-    const graphPadding = 0;
-    const innerWidth = () => Math.max(1, svgSize().width - graphPadding * 2);
-    const innerHeight = () => Math.max(1, svgSize().height - graphPadding * 2);
-    const chartX = (value: number) => graphPadding + (value / 255) * innerWidth();
-    const chartY = (value: number) => graphPadding + (2 - value) * innerHeight() * 0.5;
-    const chartThresholdX = (value: number) => graphPadding + value * innerWidth();
-    const curveSvgPath = () =>
-      remapPath(lsCurvePath(lut()), svgSize().width, svgSize().height, graphPadding);
-    const histogramSvgPath = () =>
-      remapPath(
-        histogramPath(luminanceHistogram()),
-        svgSize().width,
-        svgSize().height,
-        graphPadding,
-      );
-
-    onMount(() => {
-      const updateSize = () => {
-        const width = Math.max(1, Math.round(svgRef.clientWidth));
-        const height = Math.max(1, Math.round(svgRef.clientHeight));
-        setSvgSize({ width, height });
-      };
-      updateSize();
-      const observer = new ResizeObserver(updateSize);
-      observer.observe(svgRef);
-      onCleanup(() => {
-        observer.disconnect();
-        clearCurveDragListeners?.();
-      });
-    });
-
-    const svgCoords = (event: { clientX: number; clientY: number }) => {
-      const point = svgRef.createSVGPoint();
-      point.x = event.clientX;
-      point.y = event.clientY;
-      const ctm = svgRef.getScreenCTM();
-      if (!ctm) throw new Error("missing SVG screen transform");
-      const local = point.matrixTransform(ctm.inverse());
-      return {
-        x: clamp(((local.x - graphPadding) / innerWidth()) * 255, 1, 254),
-        y: clamp(2 - ((local.y - graphPadding) / innerHeight()) * 2, 0, 2),
-      };
-    };
-
-    const updateDraggingPoint = (clientX: number, clientY: number) => {
-      const id = draggingId();
-      if (id === null) {
-        return;
-      }
-      const current = pts().find((point) => point.id === id);
-      if (!current) {
-        throw new Error("dragged curve point not found");
-      }
-      const nextCoords = svgCoords({ clientX, clientY });
-      const { x, y } = isEndpointPoint(current)
-        ? { x: current.x, y: clamp(nextCoords.y, 0, 2) }
-        : normalizeLsInteriorPoint(nextCoords);
-      const next = pts()
-        .map((p) => (p.id === id ? { ...p, x, y } : p))
-        .sort((a, b) => a.x - b.x);
-      setPts(next);
-      selectedAdjustmentLayerOrThrow();
-      void applyLsCurve(next);
-    };
-
-    const finishDraggingPoint = () => {
-      clearCurveDragListeners?.();
-      clearCurveDragListeners = null;
-      activeTouchId = null;
-      setDraggingId(null);
-    };
-
-    const trackPointerDrag = (pointerId: number) => {
-      clearCurveDragListeners?.();
-      const onPointerMove = (event: PointerEvent) => {
-        if (event.pointerId !== pointerId) {
-          return;
-        }
-        updateDraggingPoint(event.clientX, event.clientY);
-      };
-      const onPointerUp = (event: PointerEvent) => {
-        if (event.pointerId !== pointerId) {
-          return;
-        }
-        finishDraggingPoint();
-      };
-      const onPointerCancel = (event: PointerEvent) => {
-        if (event.pointerId !== pointerId) {
-          return;
-        }
-        finishDraggingPoint();
-        setHoveredId(null);
-      };
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointercancel", onPointerCancel);
-      clearCurveDragListeners = () => {
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        window.removeEventListener("pointercancel", onPointerCancel);
-      };
-    };
-
-    const trackTouchDrag = (identifier: number) => {
-      clearCurveDragListeners?.();
-      const onTouchMove = (event: TouchEvent) => {
-        const touch = findTouch(event.touches, identifier);
-        if (!touch) {
-          return;
-        }
-        event.preventDefault();
-        updateDraggingPoint(touch.clientX, touch.clientY);
-      };
-      const onTouchEnd = (event: TouchEvent) => {
-        const touch = findTouch(event.changedTouches, identifier);
-        if (!touch) {
-          return;
-        }
-        event.preventDefault();
-        finishDraggingPoint();
-      };
-      const onTouchCancel = (event: TouchEvent) => {
-        const touch = findTouch(event.changedTouches, identifier);
-        if (!touch) {
-          return;
-        }
-        finishDraggingPoint();
-        setHoveredId(null);
-      };
-      window.addEventListener("touchmove", onTouchMove, { passive: false });
-      window.addEventListener("touchend", onTouchEnd);
-      window.addEventListener("touchcancel", onTouchCancel);
-      clearCurveDragListeners = () => {
-        window.removeEventListener("touchmove", onTouchMove);
-        window.removeEventListener("touchend", onTouchEnd);
-        window.removeEventListener("touchcancel", onTouchCancel);
-      };
-    };
-
-    const startNewPointDrag = (clientX: number, clientY: number) => {
-      const { x, y } = normalizeLsInteriorPoint(svgCoords({ clientX, clientY }));
-      const id = nextId++;
-      const next = [...pts(), { x, y, id }].sort((a, b) => a.x - b.x);
-      setPts(next);
-      selectedAdjustmentLayerOrThrow();
-      void applyLsCurve(next);
-      setDraggingId(id);
-    };
-
-    const startExistingPointDrag = (id: number) => {
-      const point = pts().find((candidate) => candidate.id === id);
-      if (!point) {
-        throw new Error("curve point not found");
-      }
-      setHoveredId(id);
-      const now = Date.now();
-      if (now - lastTapTime < 300 && lastTapId === id) {
-        lastTapTime = 0;
-        if (isEndpointPoint(point)) {
-          const next = pts()
-            .map((p) => (p.id === id ? { ...p, y: 1 } : p))
-            .sort((a, b) => a.x - b.x);
-          setPts(next);
-          selectedAdjustmentLayerOrThrow();
-          void applyLsCurve(next);
-        } else {
-          const next = pts().filter((p) => p.id !== id);
-          setPts(next);
-          selectedAdjustmentLayerOrThrow();
-          void applyLsCurve(next);
-        }
-        finishDraggingPoint();
-        setHoveredId(null);
-        return false;
-      }
-      lastTapTime = now;
-      lastTapId = id;
-      setDraggingId(id);
-      return true;
-    };
-
-    const findTouch = (touches: TouchList, identifier: number) => {
-      for (let index = 0; index < touches.length; index += 1) {
-        const touch = touches.item(index);
-        if (touch?.identifier === identifier) {
-          return touch;
-        }
-      }
-      return null;
-    };
-
-    return (
-      <div
-        data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-        class={`${PARAMETER_ROW_CLASS} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
-      >
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={curveSvg} />
-        <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
-          LS Curve
-        </span>
-        <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
-          Lum-Sat
-        </span>
-        <div class="col-start-2 col-end-4 overflow-hidden">
-          <svg
-            ref={svgRef!}
-            viewBox={`0 0 ${svgSize().width} ${svgSize().height}`}
-            class="block h-36 min-h-[136px] w-full select-none"
-            style={{
-              cursor: draggingId() !== null ? "grabbing" : "crosshair",
-              "touch-action": "none",
-            }}
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              if (e.pointerType === "touch") return;
-              if (e.target !== svgRef) return;
-              e.preventDefault();
-              startNewPointDrag(e.clientX, e.clientY);
-              trackPointerDrag(e.pointerId);
-            }}
-            onPointerLeave={() => {
-              setHoveredId(null);
-            }}
-            onTouchStart={(e) => {
-              if (e.touches.length !== 1) {
-                finishDraggingPoint();
-                return;
-              }
-              const touch = e.touches.item(0);
-              if (!touch) {
-                throw new Error("curve touch interaction requires an active touch point");
-              }
-              activeTouchId = touch.identifier;
-              if (e.target === svgRef) {
-                e.preventDefault();
-                startNewPointDrag(touch.clientX, touch.clientY);
-                trackTouchDrag(touch.identifier);
-              }
-            }}
-          >
-            <rect
-              x={graphPadding}
-              y={graphPadding}
-              width={innerWidth()}
-              height={innerHeight()}
-              fill="var(--curve-bg)"
-              pointer-events="none"
-            />
-            {TONE_THRESHOLD_BOUNDARIES.map((boundary) => (
-              <line
-                x1={chartThresholdX(boundary.value)}
-                y1={graphPadding}
-                x2={chartThresholdX(boundary.value)}
-                y2={graphPadding + innerHeight()}
-                stroke="var(--curve-guide)"
-                stroke-width="0.7"
-                stroke-dasharray="4 6"
-                opacity="0.5"
-                pointer-events="none"
-              />
-            ))}
-            <Show when={histogramSvgPath()}>
-              {(path) => (
-                <path
-                  d={path()}
-                  fill="var(--curve-stroke)"
-                  fill-opacity="0.12"
-                  stroke="none"
-                  pointer-events="none"
-                />
-              )}
-            </Show>
-            <path
-              d={`M ${graphPadding} ${graphPadding + innerHeight() * 0.5} L ${
-                graphPadding + innerWidth()
-              } ${graphPadding + innerHeight() * 0.5}`}
-              stroke="var(--curve-mid-line)"
-              stroke-width="0.8"
-              fill="none"
-              pointer-events="none"
-            />
-            <path
-              d={curveSvgPath()}
-              stroke="var(--curve-stroke)"
-              stroke-width="1.5"
-              fill="none"
-              pointer-events="none"
-            />
-            {pts().map((pt) => (
-              <>
-                <circle
-                  cx={chartX(pt.x)}
-                  cy={chartY(pt.y)}
-                  r="7"
-                  fill="none"
-                  stroke="var(--curve-stroke)"
-                  stroke-width="1.5"
-                  opacity={hoveredId() === pt.id ? "0.75" : "0"}
-                  pointer-events="none"
-                />
-                <circle
-                  cx={chartX(pt.x)}
-                  cy={chartY(pt.y)}
-                  r="14"
-                  fill="transparent"
-                  stroke="none"
-                  style={{
-                    cursor: draggingId() === pt.id ? "grabbing" : "grab",
-                  }}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    if (e.touches.length !== 1) {
-                      finishDraggingPoint();
-                      return;
-                    }
-                    const touch = e.touches.item(0);
-                    if (!touch) {
-                      throw new Error(
-                        "curve point touch interaction requires an active touch point",
-                      );
-                    }
-                    activeTouchId = touch.identifier;
-                    e.preventDefault();
-                    if (!startExistingPointDrag(pt.id)) {
-                      return;
-                    }
-                    trackTouchDrag(touch.identifier);
-                  }}
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    if (e.pointerType === "touch") return;
-                    e.stopPropagation();
-                    if (!startExistingPointDrag(pt.id)) {
-                      return;
-                    }
-                    trackPointerDrag(e.pointerId);
-                  }}
-                />
-                <circle
-                  cx={chartX(pt.x)}
-                  cy={chartY(pt.y)}
-                  r="3.5"
-                  fill={
-                    isEndpointPoint(pt) ? "var(--curve-endpoint)" : "var(--curve-point)"
-                  }
-                  pointer-events="none"
-                />
-              </>
-            ))}
-          </svg>
-          <div class="mt-1 flex justify-between px-1">
-            <span class="text-[10px] text-[var(--text-faint)]">Lum</span>
-            <span class="text-[10px] text-[var(--text-faint)]">Sat</span>
-          </div>
-        </div>
       </div>
     );
   };
@@ -2304,10 +1053,20 @@ export const Inspector: Component = () => {
           <WhiteBalanceSliders />
         </Match>
         <Match when={selectedFocus() === "curves"}>
-          <CurvesEditor />
+          <CurvesEditor
+            curvePointCache={curvePointCache}
+            defaultCurvePoints={defaultCurvePoints}
+            onApplyCurves={applyCurves}
+            parameterRowClass={PARAMETER_ROW_CLASS}
+          />
         </Match>
         <Match when={selectedFocus() === "ls_curve"}>
-          <LsCurveEditor />
+          <LsCurveEditor
+            lsCurvePointCache={lsCurvePointCache}
+            defaultLsCurvePoints={defaultLsCurvePoints}
+            onApplyLsCurve={applyLsCurve}
+            parameterRowClass={PARAMETER_ROW_CLASS}
+          />
         </Match>
         <Match when={selectedFocus() === "grain"}>
           <GrainSliders />
@@ -2875,12 +1634,22 @@ export const Inspector: Component = () => {
               <ControlSection title="Light">
                 <LightSliders />
                 <LevelSliders />
-                <CurvesEditor />
+                <CurvesEditor
+                  curvePointCache={curvePointCache}
+                  defaultCurvePoints={defaultCurvePoints}
+                  onApplyCurves={applyCurves}
+                  parameterRowClass={PARAMETER_ROW_CLASS}
+                />
               </ControlSection>
               <ControlSection title="Color">
                 <WhiteBalanceSliders />
                 <SaturationSliders />
-                <LsCurveEditor />
+                <LsCurveEditor
+                  lsCurvePointCache={lsCurvePointCache}
+                  defaultLsCurvePoints={defaultLsCurvePoints}
+                  onApplyLsCurve={applyLsCurve}
+                  parameterRowClass={PARAMETER_ROW_CLASS}
+                />
               </ControlSection>
               <ControlSection title="HSL Color Balance">
                 <HslSection />
