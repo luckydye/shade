@@ -3,11 +3,14 @@ import { db, initSchema } from "../../../lib/db";
 
 export const prerender = false;
 
-export const GET: APIRoute = async () => {
+export const GET: APIRoute = async ({ url }) => {
     await initSchema();
 
+    const includePrerelease = url.searchParams.get("prerelease") === "1";
+    const whereClause = includePrerelease ? "" : "WHERE prerelease = 0";
+
     const releaseResult = await db.execute(
-        "SELECT id, tag_name, name, published_at, html_url FROM releases WHERE prerelease = 0 ORDER BY published_at DESC LIMIT 1",
+        `SELECT id, tag_name, name, published_at, html_url FROM releases ${whereClause} ORDER BY published_at DESC LIMIT 1`,
     );
 
     if (releaseResult.rows.length === 0) {

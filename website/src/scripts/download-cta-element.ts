@@ -31,7 +31,8 @@ type NavigatorWithUserAgentData = Navigator & {
     };
 };
 
-const RELEASE_URL = "/api/releases/latest";
+const IS_PRERELEASE = new URLSearchParams(window.location.search).get("release") === "pre";
+const RELEASE_URL = IS_PRERELEASE ? "/api/releases/latest?prerelease=1" : "/api/releases/latest";
 
 const PLATFORM_LABELS: Record<Os, string> = {
     linux: "Linux",
@@ -255,7 +256,10 @@ class DownloadCtaElement extends HTMLElement {
             }
 
             this.link.href = asset.browser_download_url;
-            this.link.textContent = `Download for ${PLATFORM_LABELS[target.os]}`;
+            const label = IS_PRERELEASE
+                ? `Download ${release.tag_name} for ${PLATFORM_LABELS[target.os]}`
+                : `Download for ${PLATFORM_LABELS[target.os]}`;
+            this.link.textContent = label;
             this.link.style.display = "";
             this.fallback.style.display = "none";
         } catch (error) {
