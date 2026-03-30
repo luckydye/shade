@@ -26,7 +26,7 @@ export const GET: APIRoute = async ({ params }) => {
 
     const upstream = await fetch(asset.browser_download_url as string, {
         headers: {
-            Authorization: `token ${GITHUB_TOKEN}`,
+            Authorization: `Bearer ${GITHUB_TOKEN}`,
             Accept: "application/octet-stream",
         },
         redirect: "follow",
