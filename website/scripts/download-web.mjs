@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
-import { pipeline } from "node:pipeline";
+import { mkdirSync } from "node:fs";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
@@ -34,22 +32,13 @@ if (!asset) {
   throw new Error("Could not find shade-web.tar.gz asset");
 }
 
-const assetRes = await fetch(
-  `https://api.github.com/repos/tihav/shade/releases/assets/${asset.id}`,
-  {
-    headers: {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
-      Accept: "application/octet-stream",
-    },
-  },
-);
+const archivePath = `${targetDir}/shade-web.tar.gz`;
+const file = Bun.file(asset.browser_download_url);
 
-if (!assetRes.ok) {
-  throw new Error(`Asset download returned ${assetRes.status}`);
-}
+await file.save(archivePath);
 
-const tar = spawn("tar", ["-xz", "--strip-components=1", "-C", targetDir], {
-  stdio: ["pipe", "inherit", "inherit"],
+const tar = Bun.spawn(["tar", "-xz", "--strip-components=1", "-C", targetDir], {
+  stdin: "inherit",
 });
 
-await pipeline(assetRes.body, tar.stdin);
+await tar.exited;
