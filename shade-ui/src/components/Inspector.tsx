@@ -1436,7 +1436,7 @@ export const Inspector: Component = () => {
       <div class="space-y-3">
         <div
           data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-          class={`${SEGMENTED_CONTROL_CLASS} mobile-slider-fade grid-cols-3 transition-opacity duration-150`}
+          class={`${SEGMENTED_CONTROL_CLASS} mobile-slider-fade ml-4 grid-cols-3 transition-opacity duration-150`}
         >
           {(["red", "green", "blue"] as const).map((c) => (
             <Button
