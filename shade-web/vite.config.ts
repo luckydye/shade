@@ -9,7 +9,7 @@ export default defineConfig({
     dedupe: ["solid-js"],
   },
   clearScreen: false,
-  base: "/shade/",
+  base: "/app/",
   server: {
     port: 4173,
     strictPort: true,

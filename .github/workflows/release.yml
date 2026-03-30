@@ -68,3 +68,40 @@ jobs:
           releaseName: Shade ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
+
+  release-web:
+    needs: release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.5"
+
+      - name: Install frontend dependencies
+        run: bun install
+        working-directory: shade-web
+
+      - name: Build wasm
+        run: bun run build:wasm
+        working-directory: shade-web
+
+      - name: Build web
+        run: bun run build
+        working-directory: shade-web
+
+      - name: Create archive
+        run: tar -czf shade-web.tar.gz -C shade-web/dist .
+        working-directory: shade-web
+
+      - name: Upload web assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+          files: shade-web/shade-web.tar.gz
+          generate_release_notes: false
