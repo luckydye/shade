@@ -11,7 +11,7 @@ if (!GITHUB_TOKEN) {
 const targetDir = "public/app";
 mkdirSync(targetDir, { recursive: true });
 
-const releaseRes = await fetch("https://api.github.com/repos/tihav/shade/releases", {
+const releaseRes = await fetch(`https://api.github.com/repos/luckydye/shade/releases`, {
   headers: {
     Authorization: `Bearer ${GITHUB_TOKEN}`,
     Accept: "application/vnd.github+json",
