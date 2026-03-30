@@ -33,7 +33,15 @@ if (!asset) {
 }
 
 const archivePath = `${targetDir}/shade-web.tar.gz`;
-const file = Bun.file(asset.browser_download_url);
+const file = Bun.file(
+  `https://api.github.com/repos/tihav/shade/releases/assets/${asset.id}`,
+  {
+    headers: {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Accept: "application/octet-stream",
+    },
+  },
+);
 
 await file.save(archivePath);
 
