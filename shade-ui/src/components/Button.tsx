@@ -1,5 +1,18 @@
 import { createSignal, JSX, mergeProps, splitProps } from "solid-js";
 
+function callHandler<T extends Event>(
+  handler: JSX.EventHandlerUnion<HTMLButtonElement, T> | undefined,
+  event: T & { currentTarget: HTMLButtonElement },
+) {
+  if (!handler) return;
+  const e = event as T & { currentTarget: HTMLButtonElement; target: Element };
+  if (typeof handler === "function") {
+    handler(e);
+  } else {
+    handler[1](handler[0], e);
+  }
+}
+
 const BUTTON_MOVE_THRESHOLD_PX = 10;
 const SYNTHETIC_CLICK_SUPPRESSION_MS = 750;
 
@@ -60,7 +73,7 @@ export function Button(props: ButtonProps) {
       disabled={local.disabled}
       data-pressed={pressed() ? "true" : undefined}
       onTouchStart={(event) => {
-        local.onTouchStart?.(event);
+        callHandler(local.onTouchStart, event);
         if (event.defaultPrevented || local.disabled || event.touches.length !== 1) {
           clearPressed();
           return;
@@ -77,7 +90,7 @@ export function Button(props: ButtonProps) {
         setPressed(true);
       }}
       onTouchMove={(event) => {
-        local.onTouchMove?.(event);
+        callHandler(local.onTouchMove, event);
         if (!activeTouch) {
           return;
         }
@@ -95,7 +108,7 @@ export function Button(props: ButtonProps) {
         }
       }}
       onTouchEnd={(event) => {
-        local.onTouchEnd?.(event);
+        callHandler(local.onTouchEnd, event);
         if (!activeTouch) {
           return;
         }
@@ -119,27 +132,27 @@ export function Button(props: ButtonProps) {
         event.preventDefault();
       }}
       onTouchCancel={(event) => {
-        local.onTouchCancel?.(event);
+        callHandler(local.onTouchCancel, event);
         clearPressed();
       }}
       onMouseDown={(event) => {
-        local.onMouseDown?.(event);
+        callHandler(local.onMouseDown, event);
         if (event.defaultPrevented || local.disabled || event.button !== 0) {
           return;
         }
         setPressed(true);
       }}
       onMouseUp={(event) => {
-        local.onMouseUp?.(event);
+        callHandler(local.onMouseUp, event);
         setPressed(false);
       }}
       onMouseLeave={(event) => {
-        local.onMouseLeave?.(event);
+        callHandler(local.onMouseLeave, event);
         clearPressed();
       }}
       onClick={(event) => {
         if (dispatchingSyntheticClick) {
-          local.onClick?.(event);
+          callHandler(local.onClick, event);
           return;
         }
         if (suppressNativeClickUntil >= performance.now()) {
@@ -147,7 +160,7 @@ export function Button(props: ButtonProps) {
           event.stopPropagation();
           return;
         }
-        local.onClick?.(event);
+        callHandler(local.onClick, event);
       }}
     />
   );

@@ -519,18 +519,24 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   );
 };
 
-const SectionHeader: Component<{ title: string; detail?: string }> = (props) => (
+const SectionHeader: Component<{ title: string; detail?: string | (() => string) }> = (props) => (
   <div
     data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
     class="mobile-slider-fade mt-2 flex items-center justify-between gap-3 transition-opacity duration-150"
   >
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
     <Show when={props.detail}>
-      {(detail) => (
-        <div class="text-xs font-medium tabular-nums text-[var(--text-value)]">
-          {detail()}
-        </div>
-      )}
+      {(detail) => {
+        const value = () => {
+          const d = detail();
+          return typeof d === "function" ? d() : d;
+        };
+        return (
+          <div class="text-xs font-medium tabular-nums text-[var(--text-value)]">
+            {value()}
+          </div>
+        );
+      }}
     </Show>
   </div>
 );
@@ -599,7 +605,7 @@ export const Inspector: Component = () => {
   const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
   const [presets, setPresets] = createSignal<{ name: string }[]>([]);
   const [snapshots, setSnapshots] = createSignal<
-    { version: number; created_at: number; is_current: boolean }[]
+    { id: string; display_index: number; created_at: number; is_current: boolean }[]
   >([]);
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);

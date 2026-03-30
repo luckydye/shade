@@ -272,7 +272,7 @@ self.onmessage = async (e: MessageEvent) => {
             width: frame.width,
             height: frame.height,
           },
-          [pixels.buffer],
+          { transfer: [pixels.buffer as ArrayBuffer] },
         );
         break;
       }

@@ -615,7 +615,7 @@ const MediaTile: Component<{
     }
   });
 
-  function handleClick(event: JSX.MouseEventHandler<HTMLButtonElement, MouseEvent>) {
+  function handleClick(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
     if (event.metaKey || event.ctrlKey) {
       props.onToggleSelection();
       return;
@@ -674,9 +674,9 @@ const MediaTile: Component<{
                 class="h-8 w-8"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
               >
                 <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
                 <path d="M8 14.5 10.5 12l2 2 2-2 2.5 2.5" />
@@ -822,7 +822,7 @@ export const MediaView: Component = () => {
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
-  let scrollRef: HTMLDivElement | undefined;
+  let scrollRef!: HTMLDivElement;
   let libraryTabsRef: HTMLDivElement | undefined;
   let libraryActionsRef: HTMLDivElement | undefined;
   let addDropdownRef: HTMLDivElement | undefined;
@@ -1668,7 +1668,7 @@ export const MediaView: Component = () => {
     appendTimestampOnConflict = false,
   ) {
     const library = selectedLibrary();
-    if (!libraryIsWritable(library)) {
+    if (!library || !libraryIsWritable(library)) {
       throw new Error("selected library is readonly");
     }
     if (files.length === 0) {
@@ -1708,7 +1708,7 @@ export const MediaView: Component = () => {
 
   async function handleUploadLibraryPaths(paths: string[]) {
     const library = selectedLibrary();
-    if (!libraryIsWritable(library)) {
+    if (!library || !libraryIsWritable(library)) {
       throw new Error("selected library is readonly");
     }
     if (paths.length === 0) {
@@ -2041,7 +2041,7 @@ export const MediaView: Component = () => {
                   class="fixed z-50 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
                   style={{
                     left: `${addDropdownPosition()?.left}px`,
-                    top: `${addDropdownPosition()?.top + 8}px`,
+                    top: `${(addDropdownPosition()?.top ?? 0) + 8}px`,
                   }}
                 >
                   <Button
@@ -2366,9 +2366,9 @@ export const MediaView: Component = () => {
                         class="h-7 w-7"
                         fill="none"
                         stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
+                        stroke-width="1.7"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
                       >
                         <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
                         <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />

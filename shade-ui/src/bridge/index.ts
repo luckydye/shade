@@ -141,7 +141,7 @@ function previewFrameToImageData(frame: PreviewFrame) {
   }
   return new ImageData(
     new Uint8ClampedArray(
-      frame.pixels.buffer,
+      frame.pixels.buffer as ArrayBuffer,
       frame.pixels.byteOffset,
       frame.pixels.byteLength,
     ),
