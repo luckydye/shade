@@ -70,6 +70,7 @@ const ARTBOARD_CLOSE_SIZE = 18;
 const ARTBOARD_CLOSE_MARGIN = 6;
 const ARTBOARD_CHROME_FADE = 0;
 const ARTBOARD_DRAG_THRESHOLD = 6;
+const CROP_ROTATION_SNAP_STEP = Math.PI / 36;
 
 function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
   if (!artboard) {
@@ -1448,7 +1449,10 @@ export const Viewport: Component = () => {
       const rect = stageRef.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const angle = Math.atan2(mx - center.x, -(my - center.y));
+      const rawAngle = Math.atan2(mx - center.x, -(my - center.y));
+      const angle = e.shiftKey
+        ? Math.round(rawAngle / CROP_ROTATION_SNAP_STEP) * CROP_ROTATION_SNAP_STEP
+        : rawAngle;
       setDraftCrop({ ...start, rotation: angle });
       drawFrame();
       return;

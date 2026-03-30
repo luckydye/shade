@@ -4,6 +4,7 @@ export type CropAspectRatioPreset =
   | "free"
   | "original"
   | "1:1"
+  | "2.35"
   | "2:1"
   | "1:2"
   | "4:5"
@@ -30,6 +31,7 @@ export const CROP_ASPECT_RATIO_OPTIONS: readonly {
   { value: "free", label: "Free" },
   { value: "original", label: "Original" },
   { value: "1:1", label: "1:1" },
+  { value: "2.35", label: "2.35" },
   { value: "2:1", label: "2:1" },
   { value: "1:2", label: "1:2" },
   { value: "4:5", label: "4:5" },
@@ -63,6 +65,8 @@ export function resolveCropAspectRatio(
       return canvasWidth / canvasHeight;
     case "1:1":
       return 1;
+    case "2.35":
+      return 2.35;
     case "2:1":
       return 2;
     case "1:2":
