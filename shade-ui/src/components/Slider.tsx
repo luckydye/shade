@@ -1,4 +1,4 @@
-import { type Component, createSignal, createUniqueId, type JSX, onCleanup, Show } from "solid-js";
+import { type Component, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 import { clamp } from "../store/editor-store";
 import {
   activeAdjustmentSliderId,
@@ -11,7 +11,8 @@ const PARAMETER_ROW_CLASS = "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 ga
 
 export const Slider: Component<{
   label: string;
-  icon?: JSX.Element;
+  /** Raw SVG markup string rendered via innerHTML */
+  icon?: string;
   value: number;
   defaultValue: number;
   min: number;
@@ -91,9 +92,7 @@ export const Slider: Component<{
       class={`${props.containerClass ?? PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150`}
     >
       <Show when={props.icon !== undefined}>
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
-          {props.icon}
-        </span>
+        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={props.icon} />
       </Show>
       <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
         {props.label}

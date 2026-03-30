@@ -12,6 +12,16 @@ import {
   Switch,
 } from "solid-js";
 import { Slider } from "./Slider";
+import sparkSvg from "../icons/spark.svg?raw";
+import circleSvg from "../icons/circle.svg?raw";
+import dropletSvg from "../icons/droplet.svg?raw";
+import grainSvg from "../icons/grain.svg?raw";
+import curveSvg from "../icons/curve.svg?raw";
+import toneSvg from "../icons/tone.svg?raw";
+import hslSvg from "../icons/hsl.svg?raw";
+import cropSvg from "../icons/crop.svg?raw";
+import trashSvg from "../icons/trash.svg?raw";
+import denoiseSvg from "../icons/denoise.svg?raw";
 import type { LayerInfo } from "../store/editor";
 import {
   activeAdjustmentSliderId,
@@ -442,163 +452,19 @@ const TONE_THRESHOLD_BOUNDARIES = [
   { key: "highlights", label: "Highlights", value: 0.75 },
 ] as const;
 
-const SparkIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" />
-  </svg>
-);
-
-const CircleIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <circle cx="12" cy="12" r="7" />
-  </svg>
-);
-
-const DropletIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <path d="M12 3.5c3.6 4 5.4 6.8 5.4 9a5.4 5.4 0 1 1-10.8 0c0-2.2 1.8-5 5.4-9Z" />
-  </svg>
-);
-
-const GrainIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <circle cx="8" cy="8" r="1.4" />
-    <circle cx="15.5" cy="7.5" r="1.4" />
-    <circle cx="11" cy="12.5" r="1.4" />
-    <circle cx="7.5" cy="16" r="1.4" />
-    <circle cx="16" cy="16.5" r="1.4" />
-  </svg>
-);
-
-const CurveIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <path d="M4 16c3-6 5.5-8 8-8s4 1.5 8 8" />
-  </svg>
-);
-
-const ToneIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <path d="M12 4v16" />
-    <path d="M4 12h16" />
-  </svg>
-);
-
-const HslIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <circle cx="9" cy="9" r="4" />
-    <circle cx="15" cy="15" r="4" />
-  </svg>
-);
-
-const CropIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <path d="M8 4v12a2 2 0 0 0 2 2h10" />
-    <path d="M4 8h12a2 2 0 0 1 2 2v10" />
-  </svg>
-);
-
-const TrashIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-  >
-    <path d="M4 7h16" />
-    <path d="M9 7V5.5c0-.8.7-1.5 1.5-1.5h3c.8 0 1.5.7 1.5 1.5V7" />
-    <path d="M7.5 7 8.2 18c.1 1.1 1 2 2.1 2h3.4c1.1 0 2-.9 2.1-2L16.5 7" />
-    <path d="M10 11v5" />
-    <path d="M14 11v5" />
-  </svg>
-);
-
-const DenoiseIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3z" />
-    <path d="M9 9h.01M15 9h.01M9 15h.01M15 15h.01M12 12h.01" />
-  </svg>
-);
-
-const focusGlyphs: Record<MobileLayerFocus, () => JSX.Element> = {
-  light: () => <SparkIcon />,
-  levels: () => <ToneIcon />,
-  color: () => <DropletIcon />,
-  wb: () => <ToneIcon />,
-  curves: () => <CurveIcon />,
-  ls_curve: () => <CurveIcon />,
-  grain: () => <GrainIcon />,
-  glow: () => <SparkIcon />,
-  vignette: () => <CircleIcon />,
-  sharpen: () => <DropletIcon />,
-  hsl: () => <HslIcon />,
-  denoise: () => <DenoiseIcon />,
+const focusGlyphs: Record<MobileLayerFocus, string> = {
+  light: sparkSvg,
+  levels: toneSvg,
+  color: dropletSvg,
+  wb: toneSvg,
+  curves: curveSvg,
+  ls_curve: curveSvg,
+  grain: grainSvg,
+  glow: sparkSvg,
+  vignette: circleSvg,
+  sharpen: dropletSvg,
+  hsl: hslSvg,
+  denoise: denoiseSvg,
 };
 
 const focusLabels: Record<MobileLayerFocus, string> = {
@@ -643,10 +509,10 @@ function inferFocus(layer: LayerInfo | undefined): MobileLayerFocus {
 
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   if (props.layer.kind === "crop") {
-    return <CropIcon />;
+    return <span innerHTML={cropSvg} />;
   }
   if (props.layer.kind === "adjustment") {
-    return <SparkIcon />;
+    return <span innerHTML={sparkSvg} />;
   }
   return (
     <span class="inline-block h-4 w-4 rounded-sm border border-[var(--border-medium)]" />
@@ -1223,9 +1089,7 @@ export const Inspector: Component = () => {
         data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
         class={`${PARAMETER_ROW_CLASS} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
       >
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
-          <CurveIcon />
-        </span>
+        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={curveSvg} />
         <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
           Curves
         </span>
@@ -1456,7 +1320,7 @@ export const Inspector: Component = () => {
         </div>
         <Slider
           label="Hue"
-          icon={<HslIcon />}
+          icon={hslSvg}
           value={hue()}
           defaultValue={0}
           min={-1}
@@ -1476,7 +1340,7 @@ export const Inspector: Component = () => {
         />
         <Slider
           label="Saturation"
-          icon={<DropletIcon />}
+          icon={dropletSvg}
           value={sat()}
           defaultValue={0}
           min={-1}
@@ -1496,7 +1360,7 @@ export const Inspector: Component = () => {
         />
         <Slider
           label="Luminance"
-          icon={<ToneIcon />}
+          icon={toneSvg}
           value={lum()}
           defaultValue={0}
           min={-1}
@@ -1761,9 +1625,7 @@ export const Inspector: Component = () => {
         data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
         class={`${PARAMETER_ROW_CLASS} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
       >
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4">
-          <CurveIcon />
-        </span>
+        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={curveSvg} />
         <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
           LS Curve
         </span>
@@ -1930,7 +1792,7 @@ export const Inspector: Component = () => {
     <>
       <Slider
         label="Exposure"
-        icon={<SparkIcon />}
+        icon={sparkSvg}
         value={tone().exposure}
         defaultValue={DEFAULT_TONE.exposure}
         min={-5}
@@ -1940,7 +1802,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Gamma"
-        icon={<ToneIcon />}
+        icon={toneSvg}
         value={tone().gamma}
         defaultValue={DEFAULT_TONE.gamma}
         min={0.1}
@@ -1949,7 +1811,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Contrast"
-        icon={<CircleIcon />}
+        icon={circleSvg}
         value={tone().contrast}
         defaultValue={DEFAULT_TONE.contrast}
         min={-1.0}
@@ -1964,7 +1826,7 @@ export const Inspector: Component = () => {
     <>
       <Slider
         label="Blacks"
-        icon={<ToneIcon />}
+        icon={toneSvg}
         value={tone().blacks}
         defaultValue={DEFAULT_TONE.blacks}
         min={-0.05}
@@ -1974,7 +1836,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Whites"
-        icon={<ToneIcon />}
+        icon={toneSvg}
         value={tone().whites}
         defaultValue={DEFAULT_TONE.whites}
         min={-0.1}
@@ -1989,7 +1851,7 @@ export const Inspector: Component = () => {
     <>
       <Slider
         label="Saturation"
-        icon={<DropletIcon />}
+        icon={dropletSvg}
         value={color().saturation}
         defaultValue={DEFAULT_COLOR.saturation}
         valueLabel={valueLabel(color().saturation)}
@@ -1999,7 +1861,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Vibrancy"
-        icon={<DropletIcon />}
+        icon={dropletSvg}
         value={color().vibrancy}
         defaultValue={DEFAULT_COLOR.vibrancy}
         valueLabel={valueLabel(color().vibrancy)}
@@ -2014,7 +1876,7 @@ export const Inspector: Component = () => {
     <>
       <Slider
         label="Temperature"
-        icon={<ToneIcon />}
+        icon={toneSvg}
         value={color().temperature}
         defaultValue={DEFAULT_COLOR.temperature}
         valueLabel={valueLabel(color().temperature)}
@@ -2024,7 +1886,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Tint"
-        icon={<ToneIcon />}
+        icon={toneSvg}
         value={color().tint}
         defaultValue={DEFAULT_COLOR.tint}
         valueLabel={valueLabel(color().tint)}
@@ -2039,7 +1901,7 @@ export const Inspector: Component = () => {
     <>
       <Slider
         label="Grain"
-        icon={<GrainIcon />}
+        icon={grainSvg}
         value={grain().amount}
         defaultValue={DEFAULT_GRAIN.amount}
         valueLabel={valueLabel(grain().amount)}
@@ -2056,7 +1918,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Size"
-        icon={<GrainIcon />}
+        icon={grainSvg}
         value={grain().size ?? DEFAULT_GRAIN.size}
         defaultValue={DEFAULT_GRAIN.size}
         valueLabel={`${(grain().size ?? DEFAULT_GRAIN.size).toFixed(1)}`}
@@ -2078,7 +1940,7 @@ export const Inspector: Component = () => {
   const VignetteSlider: Component = () => (
     <Slider
       label="Vignette"
-      icon={<CircleIcon />}
+      icon={circleSvg}
       value={vignette().amount}
       defaultValue={DEFAULT_VIGNETTE.amount}
       valueLabel={valueLabel(vignette().amount)}
@@ -2098,7 +1960,7 @@ export const Inspector: Component = () => {
   const GlowSlider: Component = () => (
     <Slider
       label="Glow"
-      icon={<SparkIcon />}
+      icon={sparkSvg}
       value={glow().amount}
       defaultValue={DEFAULT_GLOW.amount}
       valueLabel={valueLabel(glow().amount)}
@@ -2118,7 +1980,7 @@ export const Inspector: Component = () => {
   const SharpenSlider: Component = () => (
     <Slider
       label="Sharpen"
-      icon={<DropletIcon />}
+      icon={dropletSvg}
       value={sharpen().amount}
       defaultValue={DEFAULT_SHARPEN.amount}
       valueLabel={valueLabel(sharpen().amount)}
@@ -2139,7 +2001,7 @@ export const Inspector: Component = () => {
     <>
       <Slider
         label="Luminance"
-        icon={<DenoiseIcon />}
+        icon={denoiseSvg}
         value={denoise().luma_strength}
         defaultValue={DEFAULT_DENOISE.luma_strength}
         valueLabel={valueLabel(denoise().luma_strength)}
@@ -2158,7 +2020,7 @@ export const Inspector: Component = () => {
       />
       <Slider
         label="Color"
-        icon={<DenoiseIcon />}
+        icon={denoiseSvg}
         value={denoise().chroma_strength}
         defaultValue={DEFAULT_DENOISE.chroma_strength}
         valueLabel={valueLabel(denoise().chroma_strength)}
@@ -2503,9 +2365,7 @@ export const Inspector: Component = () => {
     return (
       <div class="flex flex-col gap-3">
         <div class={`${PARAMETER_ROW_CLASS} py-0`}>
-          <span class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4">
-            <CropIcon />
-          </span>
+          <span class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={cropSvg} />
           <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
             Crop
           </span>
@@ -2960,7 +2820,7 @@ export const Inspector: Component = () => {
                     class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                     title="Delete layer"
                   >
-                    <TrashIcon />
+                    <span innerHTML={trashSvg} />
                   </Button>
                 </Show>
               </div>
@@ -3072,7 +2932,7 @@ export const Inspector: Component = () => {
                   onClick={() => void handleAddLayer(focus)}
                   class="flex min-w-[5.5rem] flex-shrink-0 flex-col items-center gap-1 rounded-lg border border-[var(--border-medium)] bg-[var(--surface)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
                 >
-                  <span class="[&>svg]:h-5 [&>svg]:w-5">{focusGlyphs[focus]()}</span>
+                  <span class="[&>svg]:h-5 [&>svg]:w-5" innerHTML={focusGlyphs[focus]} />
                   <span>{focusLabels[focus]}</span>
                 </Button>
               ))}
@@ -3097,9 +2957,7 @@ export const Inspector: Component = () => {
                         isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
                       }`}
                     >
-                      <span class="[&>svg]:h-5 [&>svg]:w-5">
-                        {focusGlyphs[focus()]()}
-                      </span>
+                      <span class="[&>svg]:h-5 [&>svg]:w-5" innerHTML={focusGlyphs[focus()]} />
                       <span>{focusLabels[focus()]}</span>
                     </Button>
                   );
@@ -3132,7 +2990,7 @@ export const Inspector: Component = () => {
                   onClick={() => void handleDeleteSelectedLayer()}
                   class={`${MOBILE_LAYER_TAB_CLASS} min-w-[2.75rem] [&>svg]:h-5 [&>svg]:w-5`}
                 >
-                  <TrashIcon />
+                  <span innerHTML={trashSvg} />
                   <span>Delete</span>
                 </Button>
               </Show>
