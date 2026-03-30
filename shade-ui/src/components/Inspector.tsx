@@ -2,6 +2,7 @@ import {
   type Component,
   createEffect,
   createSignal,
+  For,
   type JSX,
   Match,
   on,
@@ -15,6 +16,7 @@ import {
   applyEdit,
   applyGradientMask,
   createBrushMask,
+  cropAspectRatioPreset,
   deleteLayer,
   findCropLayerIdx,
   isAdjustmentSliderActive,
@@ -30,6 +32,7 @@ import {
   savePreset,
   saveSnapshot,
   selectLayer,
+  setCropAspectRatioPreset,
   setIsAdjustmentSliderActive,
   setIsDrawerOpen,
   setLayerVisible,
@@ -42,6 +45,13 @@ import {
   getSelectedArtboard,
 } from "../store/editor-store";
 import { Button } from "./Button";
+import {
+  clampAspectSize,
+  CROP_ASPECT_RATIO_OPTIONS,
+  fitCropRectToAspectRatio,
+  resolveCropAspectRatio,
+  type CropAspectRatioPreset,
+} from "../crop-aspect";
 import { CurvesEditor } from "./inspector/CurvesEditor";
 import { LsCurveEditor } from "./inspector/LsCurveEditor";
 import {
@@ -824,6 +834,8 @@ export const Inspector: Component = () => {
       height: state.canvasHeight,
       rotation: 0,
     };
+  const selectedCropAspectRatio = () =>
+    resolveCropAspectRatio(cropAspectRatioPreset(), state.canvasWidth, state.canvasHeight);
   const imageDetails = () => {
     const artboard = selectedArtboard();
     if (!artboard) {
@@ -848,14 +860,79 @@ export const Inspector: Component = () => {
     if (!selectedCropLayer()) {
       throw new Error("crop controls require a selected crop layer");
     }
+    const aspectRatio = selectedCropAspectRatio();
+    const maxWidth = state.canvasWidth - crop.x;
+    const maxHeight = state.canvasHeight - crop.y;
+    if (maxWidth <= 0 || maxHeight <= 0) {
+      throw new Error("crop bounds exceed canvas dimensions");
+    }
+    let nextWidth = crop.width;
+    let nextHeight = crop.height;
+    if (aspectRatio && (field === "width" || field === "height")) {
+      if (field === "width") {
+        const size = clampAspectSize(
+          value,
+          value / aspectRatio,
+          aspectRatio,
+          maxWidth,
+          maxHeight,
+          "width",
+        );
+        nextWidth = size.width;
+        nextHeight = size.height;
+      } else {
+        const size = clampAspectSize(
+          value * aspectRatio,
+          value,
+          aspectRatio,
+          maxWidth,
+          maxHeight,
+          "height",
+        );
+        nextWidth = size.width;
+        nextHeight = size.height;
+      }
+    }
     void applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "crop",
       crop_x: field === "x" ? value : crop.x,
       crop_y: field === "y" ? value : crop.y,
-      crop_width: field === "width" ? value : crop.width,
-      crop_height: field === "height" ? value : crop.height,
+      crop_width:
+        field === "width" || field === "height" ? nextWidth : crop.width,
+      crop_height:
+        field === "width" || field === "height" ? nextHeight : crop.height,
       crop_rotation: field === "rotation" ? value : crop.rotation,
+    });
+  };
+  const applyCropAspectRatioPreset = async (preset: CropAspectRatioPreset) => {
+    setCropAspectRatioPreset(preset);
+    const cropLayer = selectedCropLayer();
+    if (!cropLayer?.crop) {
+      return;
+    }
+    const ratio = resolveCropAspectRatio(
+      preset,
+      state.canvasWidth,
+      state.canvasHeight,
+    );
+    if (!ratio) {
+      return;
+    }
+    const nextCrop = fitCropRectToAspectRatio(
+      cropLayer.crop,
+      ratio,
+      state.canvasWidth,
+      state.canvasHeight,
+    );
+    await applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "crop",
+      crop_x: nextCrop.x,
+      crop_y: nextCrop.y,
+      crop_width: nextCrop.width,
+      crop_height: nextCrop.height,
+      crop_rotation: nextCrop.rotation,
     });
   };
 
@@ -1146,6 +1223,23 @@ export const Inspector: Component = () => {
             {crop().width} × {crop().height}
           </span>
         </div>
+        <label class="flex flex-col gap-1">
+          <span class={SECTION_TITLE_CLASS}>Aspect Ratio</span>
+          <select
+            value={cropAspectRatioPreset()}
+            disabled={!selectedCropLayer()}
+            onChange={(event) =>
+              void applyCropAspectRatioPreset(
+                event.currentTarget.value as CropAspectRatioPreset,
+              )
+            }
+            class={INPUT_CLASS}
+          >
+            <For each={CROP_ASPECT_RATIO_OPTIONS}>
+              {(option) => <option value={option.value}>{option.label}</option>}
+            </For>
+          </select>
+        </label>
         <div class="grid grid-cols-2 gap-2">
           {(["x", "y", "width", "height"] as const).map((field) => (
             <label class="flex flex-col gap-1">

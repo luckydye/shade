@@ -1,8 +1,9 @@
-import { Component, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { Component, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   applyEdit,
   applyGradientMask,
   closeArtboard,
+  cropAspectRatioPreset,
   getSelectedArtboard,
   getCommittedCropRect,
   getViewportZoomPercent,
@@ -15,6 +16,7 @@ import {
   refreshPreview,
   resetViewport,
   selectArtboard,
+  setCropAspectRatioPreset,
   setViewportScreenSize,
   setViewportToneSample,
   stampBrushMask,
@@ -28,6 +30,16 @@ import { getViewportFitRef } from "../viewport/preview";
 import { makeBrushCursor } from "../viewport/brush-cursor";
 import type { WorldTransform } from "../viewport/transform";
 import { clamp, setState, type ArtboardState } from "../store/editor-store";
+import {
+  clampAspectSize,
+  constrainCropDragToAspectRatio,
+  CROP_ASPECT_RATIO_OPTIONS,
+  fitCropRectToAspectRatio,
+  resizeCropFromHandle,
+  resolveCropAspectRatio,
+  type CropAspectRatioPreset,
+  type CropResizeHandle,
+} from "../crop-aspect";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import { Slider } from "./Slider";
@@ -173,6 +185,8 @@ export const Viewport: Component = () => {
   };
 
   const activeCrop = () => draftCrop() ?? selectedCropLayer()?.crop ?? null;
+  const selectedCropAspectRatio = () =>
+    resolveCropAspectRatio(cropAspectRatioPreset(), state.canvasWidth, state.canvasHeight);
 
   const selectedMaskParams = (): MaskParamsInfo | null => {
     const layer = state.layers[state.selectedLayerIdx];
@@ -187,6 +201,35 @@ export const Viewport: Component = () => {
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
   const selectedArtboard = () => getSelectedArtboard();
+
+  async function applyCropAspectRatioPreset(preset: CropAspectRatioPreset) {
+    setCropAspectRatioPreset(preset);
+    const cropLayer = selectedCropLayer();
+    const crop = activeCrop();
+    if (!cropLayer || !crop) {
+      return;
+    }
+    const ratio = resolveCropAspectRatio(preset, state.canvasWidth, state.canvasHeight);
+    if (!ratio) {
+      return;
+    }
+    const nextCrop = fitCropRectToAspectRatio(
+      crop,
+      ratio,
+      state.canvasWidth,
+      state.canvasHeight,
+    );
+    setDraftCrop(nextCrop);
+    await applyEdit({
+      layer_idx: state.selectedLayerIdx,
+      op: "crop",
+      crop_x: nextCrop.x,
+      crop_y: nextCrop.y,
+      crop_width: nextCrop.width,
+      crop_height: nextCrop.height,
+      crop_rotation: nextCrop.rotation,
+    });
+  }
 
   const brushCursorStyle = createMemo((): string | undefined => {
     if (activeMask()?.kind !== "brush") return undefined;
@@ -1136,7 +1179,7 @@ export const Viewport: Component = () => {
     const clickedArtboard = artboardAtPoint(e.clientX - rect.left, e.clientY - rect.top);
     lastStagePointer = { x: e.clientX, y: e.clientY };
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (selectedCropLayer()) {
+    if (selectedCropLayer() && e.button === 0) {
       const handle = cropHandleAtPoint(e.clientX - rect.left, e.clientY - rect.top);
       if (!handle) return;
       const crop = activeCrop();
@@ -1414,77 +1457,37 @@ export const Viewport: Component = () => {
     const rawDy = (e.clientY - gesture.startY) / t.scale;
     const cos = Math.cos(-start.rotation);
     const sin = Math.sin(-start.rotation);
-    const deltaX = Math.round(rawDx * cos - rawDy * sin);
-    const deltaY = Math.round(rawDx * sin + rawDy * cos);
+    const deltaX = rawDx * cos - rawDy * sin;
+    const deltaY = rawDx * sin + rawDy * cos;
     let next = start;
-    switch (gesture.handle) {
-      case "move":
-        next = {
-          ...start,
-          x: Math.min(Math.max(0, start.x + deltaX), state.canvasWidth - start.width),
-          y: Math.min(Math.max(0, start.y + deltaY), state.canvasHeight - start.height),
-        };
-        break;
-      case "top-left":
-        next = {
-          ...start,
-          x: start.x + deltaX,
-          y: start.y + deltaY,
-          width: start.width - deltaX,
-          height: start.height - deltaY,
-        };
-        break;
-      case "top":
-        next = { ...start, y: start.y + deltaY, height: start.height - deltaY };
-        break;
-      case "top-right":
-        next = {
-          ...start,
-          x: start.x,
-          y: start.y + deltaY,
-          width: start.width + deltaX,
-          height: start.height - deltaY,
-        };
-        break;
-      case "right":
-        next = { ...start, width: start.width + deltaX };
-        break;
-      case "bottom-right":
-        next = {
-          ...start,
-          width: start.width + deltaX,
-          height: start.height + deltaY,
-        };
-        break;
-      case "bottom":
-        next = { ...start, height: start.height + deltaY };
-        break;
-      case "bottom-left":
-        next = {
-          ...start,
-          x: start.x + deltaX,
-          y: start.y,
-          width: start.width - deltaX,
-          height: start.height + deltaY,
-        };
-        break;
-      case "left":
-        next = {
-          ...start,
-          x: start.x + deltaX,
-          y: start.y,
-          width: start.width - deltaX,
-          height: start.height,
-        };
-        break;
+    const aspectRatio = selectedCropAspectRatio();
+    if (gesture.handle === "move") {
+      next = {
+        ...start,
+        x: Math.min(Math.max(0, start.x + rawDx), state.canvasWidth - start.width),
+        y: Math.min(Math.max(0, start.y + rawDy), state.canvasHeight - start.height),
+      };
+    } else if (aspectRatio) {
+      next = constrainCropDragToAspectRatio(
+        start,
+        gesture.handle as CropResizeHandle,
+        deltaX,
+        deltaY,
+        aspectRatio,
+        state.canvasWidth,
+        state.canvasHeight,
+      );
+    } else {
+      next = resizeCropFromHandle(
+        start,
+        gesture.handle as CropResizeHandle,
+        deltaX,
+        deltaY,
+        state.canvasWidth,
+        state.canvasHeight,
+      );
     }
-    setDraftCrop({
-      x: Math.max(0, next.x),
-      y: Math.max(0, next.y),
-      width: Math.max(1, next.width),
-      height: Math.max(1, next.height),
-      rotation: next.rotation,
-    });
+    setDraftCrop(next);
     drawFrame();
   };
 
@@ -1680,13 +1683,21 @@ export const Viewport: Component = () => {
           />
 
           {selectedCropLayer() && activeCrop() && (
-            <div class="pointer-events-none absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
+            <div class="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur">
               <span>Crop</span>
-              <span class="text-white/35">
-                {activeCrop()!.width} × {activeCrop()!.height}
-                {Math.abs(activeCrop()!.rotation) > 0.001 &&
-                  ` ${Math.round((activeCrop()!.rotation * 180) / Math.PI)}°`}
-              </span>
+              <select
+                value={cropAspectRatioPreset()}
+                onChange={(event) =>
+                  void applyCropAspectRatioPreset(
+                    event.currentTarget.value as CropAspectRatioPreset,
+                  )
+                }
+                class="pointer-events-auto rounded-full border border-white/10 bg-black/30 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 outline-none transition-colors hover:border-white/20 focus-visible:border-white/30"
+              >
+                <For each={CROP_ASPECT_RATIO_OPTIONS}>
+                  {(option) => <option value={option.value}>{option.label}</option>}
+                </For>
+              </select>
             </div>
           )}
           {activeMask() && (

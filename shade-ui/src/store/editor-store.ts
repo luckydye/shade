@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as bridge from "../bridge/index";
 import type { RenderedTile } from "../viewport/types";
+import type { CropAspectRatioPreset } from "../crop-aspect";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop";
@@ -115,6 +116,8 @@ export const [isAdjustmentSliderActive, setIsAdjustmentSliderActive] =
 export const [activeAdjustmentSliderId, setActiveAdjustmentSliderId] =
   createSignal<string | null>(null);
 export const [viewportToneSample, setViewportToneSample] = createSignal<number | null>(null);
+export const [cropAspectRatioPreset, setCropAspectRatioPreset] =
+  createSignal<CropAspectRatioPreset>("free");
 
 export function getSelectedArtboard() {
   if (!state.selectedArtboardId) {

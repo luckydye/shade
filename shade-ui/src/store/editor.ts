@@ -2,7 +2,9 @@ export type { CropRect, EditorState, LayerInfo } from "./editor-store";
 
 export {
   activeAdjustmentSliderId,
+  cropAspectRatioPreset,
   setActiveAdjustmentSliderId,
+  setCropAspectRatioPreset,
   isAdjustmentSliderActive,
   setIsAdjustmentSliderActive,
   isDrawerOpen,
