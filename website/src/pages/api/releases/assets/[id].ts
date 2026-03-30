@@ -23,10 +23,11 @@ export const GET: APIRoute = async ({ params }) => {
     }
 
     const asset = result.rows[0];
+    const assetUrl = `https://api.github.com/repos/luckydye/shade/releases/assets/${asset.id}`;
 
-    console.log('Asset download', asset.browser_download_url);
+    console.log('Asset do', assetUrl);
     
-    const upstream = await fetch(asset.browser_download_url as string, {
+    const upstream = await fetch(assetUrl, {
         headers: {
             Authorization: `Bearer ${GITHUB_TOKEN}`,
             Accept: "application/octet-stream",
