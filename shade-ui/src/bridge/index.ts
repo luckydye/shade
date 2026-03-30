@@ -20,6 +20,7 @@ import {
   type BrowserPresetLayer,
   listBrowserPresets,
   loadBrowserPreset,
+  renameBrowserPreset,
   saveBrowserPreset,
 } from "../browser-presets";
 import {
@@ -1168,6 +1169,14 @@ export async function savePreset(name: string): Promise<PresetInfo> {
     version: 1,
     layers: serializeBrowserPresetLayers(stack.layers),
   } satisfies BrowserPresetFile);
+}
+
+export async function renamePreset(oldName: string, newName: string): Promise<PresetInfo> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("rename_preset", { oldName, newName }) as Promise<PresetInfo>;
+  }
+  return renameBrowserPreset(oldName, newName);
 }
 
 export async function loadPreset(name: string): Promise<void> {

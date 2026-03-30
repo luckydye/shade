@@ -111,6 +111,7 @@ pub fn run() {
             commands::remove_media_library,
             commands::list_presets,
             commands::save_preset,
+            commands::rename_preset,
             commands::load_preset,
             commands::save_snapshot,
             commands::list_snapshots,

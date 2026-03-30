@@ -127,6 +127,35 @@ export async function saveBrowserPreset(
   return { name: normalizedName };
 }
 
+export async function renameBrowserPreset(
+  oldName: string,
+  newName: string,
+): Promise<PresetInfo> {
+  const normalizedOld = normalizePresetName(oldName);
+  const normalizedNew = normalizePresetName(newName);
+  if (normalizedOld === normalizedNew) {
+    return { name: normalizedOld };
+  }
+  return withStore("readwrite", async (store) => {
+    const result = await requestToPromise(store.get(normalizedOld));
+    if (typeof result !== "object" || result === null) {
+      throw new Error(`preset not found: ${normalizedOld}`);
+    }
+    const record = result as Partial<BrowserPresetRecord>;
+    if (!record.file) {
+      throw new Error(`invalid preset record: ${normalizedOld}`);
+    }
+    await requestToPromise(
+      store.put(
+        { name: normalizedNew, file: record.file } satisfies BrowserPresetRecord,
+        normalizedNew,
+      ),
+    );
+    await requestToPromise(store.delete(normalizedOld));
+    return { name: normalizedNew };
+  });
+}
+
 export async function loadBrowserPreset(name: string): Promise<BrowserPresetFile> {
   const normalizedName = normalizePresetName(name);
   const result = await withStore("readonly", async (store) =>

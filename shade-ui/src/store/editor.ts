@@ -38,6 +38,7 @@ export {
   saveSnapshot,
   refreshLayerStack,
   resetCrop,
+  renamePreset,
   savePreset,
   selectLayer,
   setLayerOpacity,

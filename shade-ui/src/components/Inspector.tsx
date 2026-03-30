@@ -31,6 +31,7 @@ import {
   moveLayer,
   removeMask,
   renameLayer,
+  renamePreset,
   savePreset,
   saveSnapshot,
   selectLayer,
@@ -734,9 +735,10 @@ export const Inspector: Component = () => {
   const [snapshots, setSnapshots] = createSignal<
     { version: number; created_at: number; is_current: boolean }[]
   >([]);
-  const [presetName, setPresetName] = createSignal("");
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);
+  const [editingPresetName, setEditingPresetName] = createSignal<string | null>(null);
+  const [editingPresetValue, setEditingPresetValue] = createSignal("");
   const [editingLayerIdx, setEditingLayerIdx] = createSignal<number | null>(null);
   const [editingLayerName, setEditingLayerName] = createSignal("");
   const [draggedLayerIdx, setDraggedLayerIdx] = createSignal<number | null>(null);
@@ -2339,17 +2341,21 @@ export const Inspector: Component = () => {
     void refreshPresetList();
   });
 
+  const nextPresetName = () => {
+    const existing = new Set(presets().map((p) => p.name));
+    let idx = existing.size + 1;
+    while (existing.has(`Preset ${idx}`)) idx++;
+    return `Preset ${idx}`;
+  };
+
   const handleSavePreset = async () => {
-    const name = presetName().trim();
-    if (!name) {
-      setPresetStatus("Preset name cannot be empty");
-      return;
-    }
+    const name = nextPresetName();
     setIsPresetBusy(true);
     try {
       await savePreset(name);
-      setPresetStatus(`Saved ${name}`);
       await refreshPresetList();
+      setEditingPresetName(name);
+      setEditingPresetValue(name);
     } catch (error) {
       setPresetStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2367,6 +2373,24 @@ export const Inspector: Component = () => {
       setPresetStatus(error instanceof Error ? error.message : String(error));
     } finally {
       setIsPresetBusy(false);
+    }
+  };
+
+  const handleRenamePreset = async (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) {
+      setEditingPresetName(null);
+      return;
+    }
+    setIsPresetBusy(true);
+    try {
+      await renamePreset(oldName, trimmed);
+      await refreshPresetList();
+    } catch (error) {
+      setPresetStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsPresetBusy(false);
+      setEditingPresetName(null);
     }
   };
 
@@ -2604,36 +2628,18 @@ export const Inspector: Component = () => {
   const PresetsPanel: Component = () => (
     <div class="flex flex-col gap-5 pt-1">
       <section class="flex flex-col gap-3">
-        <div class="flex items-center justify-between gap-3">
-          <SectionHeader
-            title="Presets"
-            detail={presets().length > 0 ? () => `${presets().length}` : undefined}
-          />
-          <Button
-            type="button"
-            onClick={() => void refreshPresetList()}
-            class="h-8 px-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
-          >
-            Refresh
-          </Button>
-        </div>
-        <div class="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
-          <input
-            type="text"
-            value={presetName()}
-            onInput={(event) => setPresetName(event.currentTarget.value)}
-            placeholder="Preset name"
-            class={`min-w-0 ${INPUT_CLASS}`}
-          />
-          <Button
-            type="button"
-            disabled={isPresetBusy() || state.canvasWidth <= 0}
-            onClick={() => void handleSavePreset()}
-            class={SECONDARY_BUTTON_CLASS}
-          >
-            Save
-          </Button>
-        </div>
+        <SectionHeader
+          title="Presets"
+          detail={presets().length > 0 ? () => `${presets().length}` : undefined}
+        />
+        <Button
+          type="button"
+          disabled={isPresetBusy() || state.canvasWidth <= 0}
+          onClick={() => void handleSavePreset()}
+          class={SECONDARY_BUTTON_CLASS}
+        >
+          Save Preset
+        </Button>
         <Show when={presetStatus()}>
           {(status) => (
             <div class="rounded-md bg-[var(--surface-subtle)] px-2 py-2 text-xs font-medium text-[var(--text-value)] shadow-[inset_0_0_0_1px_var(--border-subtle)]">
@@ -2649,10 +2655,36 @@ export const Inspector: Component = () => {
             {presets().map((preset) => (
               <div class="grid min-h-8 grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-md bg-[var(--surface-subtle)] px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
                 <div class="min-w-0">
-                  <div class="truncate text-[13px] font-medium text-[var(--text-strong)]">
-                    {preset.name}
-                  </div>
-                  <div class="text-[11px] text-[var(--text-dim)]">Saved preset</div>
+                  <Show
+                    when={editingPresetName() === preset.name}
+                    fallback={
+                      <div
+                        class="truncate text-[13px] font-medium text-[var(--text-strong)] cursor-default"
+                        onDblClick={() => {
+                          setEditingPresetName(preset.name);
+                          setEditingPresetValue(preset.name);
+                        }}
+                      >
+                        {preset.name}
+                      </div>
+                    }
+                  >
+                    <input
+                      ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
+                      type="text"
+                      value={editingPresetValue()}
+                      onInput={(e) => setEditingPresetValue(e.currentTarget.value)}
+                      onBlur={() => void handleRenamePreset(preset.name, editingPresetValue())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        } else if (e.key === "Escape") {
+                          setEditingPresetName(null);
+                        }
+                      }}
+                      class={`min-w-0 ${INPUT_CLASS}`}
+                    />
+                  </Show>
                 </div>
                 <Button
                   type="button"

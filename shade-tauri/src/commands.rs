@@ -4640,6 +4640,27 @@ pub async fn save_preset(
 }
 
 #[tauri::command]
+pub async fn rename_preset(old_name: String, new_name: String) -> Result<PresetInfo, String> {
+    let old_path = preset_file_path(&old_name)?;
+    let new_path = preset_file_path(&new_name)?;
+    if old_path == new_path {
+        return Ok(PresetInfo {
+            name: new_name.trim().to_string(),
+        });
+    }
+    if !old_path.exists() {
+        return Err(format!("preset not found: {}", old_name.trim()));
+    }
+    if new_path.exists() {
+        return Err(format!("preset already exists: {}", new_name.trim()));
+    }
+    std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
+    Ok(PresetInfo {
+        name: new_name.trim().to_string(),
+    })
+}
+
+#[tauri::command]
 pub async fn load_preset(
     name: String,
     state: tauri::State<'_, Mutex<EditorState>>,
