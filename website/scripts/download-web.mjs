@@ -12,7 +12,7 @@ const targetDir = "public/app";
 mkdirSync(targetDir, { recursive: true });
 
 const releaseRes = await fetch(
-  "https://api.github.com/repos/tihav/shade/releases/latest",
+  "https://api.github.com/repos/luckydye/shade/releases/latest",
   {
     headers: {
       Authorization: `Bearer ${GITHUB_TOKEN}`,
