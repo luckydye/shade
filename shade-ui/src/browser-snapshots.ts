@@ -1,5 +1,6 @@
 import type { EditSnapshotInfo, SnapshotInfo } from "./bridge/index";
 import type { BrowserPresetLayer } from "./browser-presets";
+import { requestToPromise } from "./cache-utils";
 
 const DB_NAME = "shade-browser-snapshots";
 const DB_VERSION = 1;
@@ -28,13 +29,6 @@ function openDb(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-  });
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
   });
 }
 

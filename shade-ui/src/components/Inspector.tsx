@@ -11,7 +11,6 @@ import {
 import { Slider } from "./Slider";
 import type { LayerInfo } from "../store/editor";
 import {
-  activeAdjustmentSliderId,
   addLayer,
   applyEdit,
   applyGradientMask,
@@ -31,7 +30,6 @@ import {
   savePreset,
   saveSnapshot,
   selectLayer,
-  setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
   setIsDrawerOpen,
   setLayerVisible,

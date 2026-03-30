@@ -4,6 +4,7 @@ import type {
   MaskParamsInfo,
   PresetInfo,
 } from "./bridge/index";
+import { requestToPromise } from "./cache-utils";
 
 const DB_NAME = "shade-browser-presets";
 const DB_VERSION = 1;
@@ -28,13 +29,6 @@ type BrowserPresetRecord = {
   name: string;
   file: BrowserPresetFile;
 };
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
 
 function openDb(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") {

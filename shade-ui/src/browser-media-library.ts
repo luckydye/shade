@@ -4,6 +4,7 @@ import type {
   MediaLibrary,
 } from "./bridge/index";
 import { getBrowserSnapshotPathMap } from "./browser-snapshots";
+import { requestToPromise, withStores } from "./cache-utils";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;
@@ -115,36 +116,6 @@ function openDb(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => resolve(request.result);
   });
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withStores<T>(
-  storeNames: string[],
-  mode: IDBTransactionMode,
-  run: (stores: Record<string, IDBObjectStore>) => Promise<T>,
-): Promise<T> {
-  const db = await openDb();
-  const tx = db.transaction(storeNames, mode);
-  const stores = Object.fromEntries(
-    storeNames.map((name) => [name, tx.objectStore(name)]),
-  ) as Record<string, IDBObjectStore>;
-  try {
-    const result = await run(stores);
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-    return result;
-  } finally {
-    db.close();
-  }
 }
 
 function isDirectoryHandle(value: unknown): value is BrowserDirectoryHandle {
@@ -261,7 +232,7 @@ function isSupportedImageFile(name: string) {
 }
 
 async function listLibraryRecords(): Promise<BrowserMediaLibraryRecord[]> {
-  return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [LIBRARIES_STORE], "readonly", async (stores) => {
     const records = await requestToPromise(stores[LIBRARIES_STORE].getAll());
     if (!Array.isArray(records)) {
       return [];
@@ -277,14 +248,14 @@ async function getLibraryRecord(
   if (cached) {
     return cached;
   }
-  return withStores([LIBRARIES_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [LIBRARIES_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(stores[LIBRARIES_STORE].get(id));
     return result ? cacheLibraryRecord(result as BrowserMediaLibraryRecord) : null;
   });
 }
 
 async function getItemRecord(path: string): Promise<BrowserMediaItemRecord | null> {
-  return withStores([ITEMS_STORE], "readonly", async (stores) => {
+  return withStores(openDb, [ITEMS_STORE], "readonly", async (stores) => {
     const result = await requestToPromise(stores[ITEMS_STORE].get(itemKey(path)));
     return result ? (result as BrowserMediaItemRecord) : null;
   });
@@ -346,7 +317,7 @@ async function replaceLibraryItems(
   library: BrowserMediaLibraryRecord,
   items: BrowserMediaItemRecord[],
 ) {
-  await withStores([LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
     await requestToPromise(stores[LIBRARIES_STORE].put(library, library.id));
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(
@@ -465,7 +436,7 @@ export async function addBrowserMediaLibrary(
 }
 
 export async function removeBrowserMediaLibrary(id: string): Promise<void> {
-  await withStores([LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
+  await withStores(openDb, [LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
     await requestToPromise(stores[LIBRARIES_STORE].delete(id));
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
     await Promise.all(
