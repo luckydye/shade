@@ -214,7 +214,7 @@ async function fetchLatestRelease(): Promise<Release> {
 }
 
 const BUTTON_CLASS =
-    "inline-flex leading-10 gap-2 rounded-full border px-8 text-[14px] font-semibold transition-colors";
+    "inline-flex leading-10 gap-2 rounded-full border px-8 text-[14px] font-semibold transition-colors backdrop-blur-sm";
 
 class DownloadCtaElement extends HTMLElement {
     link: HTMLAnchorElement;

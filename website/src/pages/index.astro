@@ -12,7 +12,7 @@ const features = [
     },
     {
         icon: "🎚️",
-        title: "Full Tone Control",
+        title: "32-bit color pipeline",
         description:
             "Exposure, contrast, highlights, shadows, whites, blacks, and a proper curve editor. The whole toolkit.",
     },
@@ -24,9 +24,15 @@ const features = [
     },
     {
         icon: "🌐",
-        title: "No Install Required",
+        title: "No Install Required. No cloud required.",
         description:
             "Opens in your browser. Nothing to download, nothing to update, nothing to maintain.",
+    },
+    {
+        icon: "🔄",
+        title: "Sync presets and edits",
+        description:
+            "Easily syncs your presets and edits across devices.",
     },
 ];
 ---
@@ -74,23 +80,29 @@ const features = [
                 </div>
 
                 <h1
-                    class="text-6xl md:text-7xl font-black uppercase leading-none tracking-tight max-w-2xl -mb-[10px]"
+                    class="text-6xl md:text-7xl font-black uppercase leading-none tracking-tight max-w-[700px] -mb-[10px]"
                 >
-                    Raw Editing,<br />Front And Center.
+                    <span class="opacity-65 font-normal">No limits.<br/></span>
+                    <span class="opacity-65 font-normal">No uploads.<br/></span>
+                    Just RAW editing.
                 </h1>
             </div>
 
             <div
                 class="md:aspect-4/1 flex justify-start items-center flex-col text-center gap-10 pt-10 pb-20"
             >
-                <p class="text-neutral-500 text-lg max-w-[400px]">
-                    A focused RAW editor with GPU speed, layered adjustments,
-                    and a canvas that stays out of your way.
+                <p class="text-neutral-300 text-lg max-w-[550px]">
+                    Edit full-resolution 16-bit RAW photos on any device. 
+                    Instantly access your library across devices with peer-to-peer sync—no cloud, no waiting.
                 </p>
 
                 <div class="flex items-center gap-4">
                     <download-cta></download-cta>
                 </div>
+                
+                <!-- <div>
+                    Try it in your browser
+                </div> -->
             </div>
         </section>
 
@@ -159,7 +171,7 @@ const features = [
                     Media Management
                 </h3>
                 <p class="mb-16 text-center text-[15px] text-white/80">
-                    Uploading, Starring, Browsing.
+                    Your photos stay where they are and are instantly available everywhere you need them.
                 </p>
             </div>
         </section>
