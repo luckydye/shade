@@ -11,7 +11,7 @@ export const GET: APIRoute = async ({ params }) => {
     await initSchema();
 
     const result = await db.execute({
-        sql: "SELECT name, content_type, browser_download_url FROM assets WHERE id = ?",
+        sql: "SELECT id, name, content_type, browser_download_url FROM assets WHERE id = ?",
         args: [params.id!],
     });
 
