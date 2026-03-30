@@ -24,6 +24,8 @@ export const GET: APIRoute = async ({ params }) => {
 
     const asset = result.rows[0];
 
+    console.log('Asset download', asset.browser_download_url);
+    
     const upstream = await fetch(asset.browser_download_url as string, {
         headers: {
             Authorization: `Bearer ${GITHUB_TOKEN}`,
