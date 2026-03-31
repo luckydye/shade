@@ -1,6 +1,7 @@
 import {
   type Component,
   createEffect,
+  createMemo,
   createSignal,
   For,
   type JSX,
@@ -37,6 +38,7 @@ import {
   setIsDrawerOpen,
   setLayerVisible,
   state,
+  backdropTile,
 } from "../store/editor";
 import {
   type ArtboardSource,
@@ -52,6 +54,11 @@ import {
   resolveCropAspectRatio,
   type CropAspectRatioPreset,
 } from "../crop-aspect";
+import {
+  buildVectorScope,
+  type WheelPoint,
+  VectorScope,
+} from "./ColorWheel";
 import { CurvesEditor } from "./inspector/CurvesEditor";
 import { LsCurveEditor } from "./inspector/LsCurveEditor";
 import {
@@ -116,6 +123,32 @@ const ADD_LAYER_ROW_CLASS =
   "grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+const VECTORSCOPE_TOGGLE_SVG = `
+<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <circle cx="8" cy="8" r="5.5" />
+  <circle cx="8" cy="8" r="1.5" />
+  <line x1="8" y1="2.5" x2="8" y2="13.5" />
+  <line x1="2.5" y1="8" x2="13.5" y2="8" />
+  <line x1="8" y1="8" x2="11.8" y2="4.8" />
+</svg>`;
+const HSL_WHEEL_BASE_ANGLES = {
+  red: 0,
+  green: 120,
+  blue: 240,
+} as const;
+
+function clampHslWheelValue(value: number) {
+  return Math.max(-1, Math.min(1, value));
+}
+
+function wrapDegrees(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function shortestAngleDelta(from: number, to: number) {
+  const delta = wrapDegrees(to - from);
+  return delta > 180 ? delta - 360 : delta;
+}
 
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   if (props.layer.kind === "crop") {
@@ -222,6 +255,9 @@ export const Inspector: Component = () => {
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);
   const [maskPickerLayer, setMaskPickerLayer] = createSignal<number | null>(null);
   const [hslTab, setHslTab] = createSignal<"red" | "green" | "blue">("red");
+  const [hslControlMode, setHslControlMode] = createSignal<"sliders" | "scope">(
+    "sliders",
+  );
   const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
   const [presets, setPresets] = createSignal<{ name: string }[]>([]);
   const [snapshots, setSnapshots] = createSignal<
@@ -272,6 +308,10 @@ export const Inspector: Component = () => {
   const hsl = () => selectedAdjustmentLayer()?.adjustments?.hsl ?? DEFAULT_HSL;
   const denoise = () =>
     selectedAdjustmentLayer()?.adjustments?.denoise ?? DEFAULT_DENOISE;
+  const vectorScope = createMemo(() => {
+    const tile = backdropTile();
+    return tile ? buildVectorScope(tile.image) : null;
+  });
 
   const clearLayerDragState = () => {
     setDraggedLayerIdx(null);
@@ -462,6 +502,71 @@ export const Inspector: Component = () => {
 
   const HslSection: Component = () => {
     const accentColor = () => HSL_TAB_STYLES[hslTab()].accentColor;
+    const huePoints = createMemo<WheelPoint[]>(() => [
+      {
+        id: 0,
+        angle: wrapDegrees(HSL_WHEEL_BASE_ANGLES.red + hsl().red_hue * 180),
+        radius: Math.max(0, Math.min(2, hsl().red_sat + 1)),
+        color: HSL_TAB_STYLES.red.accentColor,
+      },
+      {
+        id: 1,
+        angle: wrapDegrees(HSL_WHEEL_BASE_ANGLES.green + hsl().green_hue * 180),
+        radius: Math.max(0, Math.min(2, hsl().green_sat + 1)),
+        color: HSL_TAB_STYLES.green.accentColor,
+      },
+      {
+        id: 2,
+        angle: wrapDegrees(HSL_WHEEL_BASE_ANGLES.blue + hsl().blue_hue * 180),
+        radius: Math.max(0, Math.min(2, hsl().blue_sat + 1)),
+        color: HSL_TAB_STYLES.blue.accentColor,
+      },
+    ]);
+    const activePointId = () =>
+      hslTab() === "red" ? 0 : hslTab() === "green" ? 1 : 2;
+    const applyHueWheel = (points: WheelPoint[]) => {
+      const findPoint = (id: number) => {
+        const point = points.find((candidate) => candidate.id === id);
+        if (!point) {
+          throw new Error(`missing hue wheel point ${id}`);
+        }
+        return point;
+      };
+      const redPoint = findPoint(0);
+      const greenPoint = findPoint(1);
+      const bluePoint = findPoint(2);
+      selectedAdjustmentLayerOrThrow();
+      void applyHsl({
+        red_hue: clampHslWheelValue(
+          shortestAngleDelta(HSL_WHEEL_BASE_ANGLES.red, redPoint.angle) / 180,
+        ),
+        red_sat: clampHslWheelValue(redPoint.radius - 1),
+        green_hue: clampHslWheelValue(
+          shortestAngleDelta(HSL_WHEEL_BASE_ANGLES.green, greenPoint.angle) / 180,
+        ),
+        green_sat: clampHslWheelValue(greenPoint.radius - 1),
+        blue_hue: clampHslWheelValue(
+          shortestAngleDelta(HSL_WHEEL_BASE_ANGLES.blue, bluePoint.angle) / 180,
+        ),
+        blue_sat: clampHslWheelValue(bluePoint.radius - 1),
+      });
+    };
+    const resetHueWheelPoint = (id: number) => {
+      selectedAdjustmentLayerOrThrow();
+      if (id === 0) {
+        void applyHsl({ red_hue: 0, red_sat: 0 });
+        return;
+      }
+      if (id === 1) {
+        void applyHsl({ green_hue: 0, green_sat: 0 });
+        return;
+      }
+      if (id === 2) {
+        void applyHsl({ blue_hue: 0, blue_sat: 0 });
+        return;
+      }
+      throw new Error(`unknown hue wheel point ${id}`);
+    };
     const hue = () => {
       const t = hslTab(),
         h = hsl();
@@ -479,64 +584,103 @@ export const Inspector: Component = () => {
     };
     return (
       <div class="space-y-3">
-        <div
-          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-          class={`${SEGMENTED_CONTROL_CLASS} mobile-slider-fade ml-4 grid-cols-3 transition-opacity duration-150`}
-        >
-          {(["red", "green", "blue"] as const).map((c) => (
+        <div class="mobile-slider-fade flex gap-2">
+          <div
+            data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+            class="flex justify-end transition-opacity duration-150"
+          >
             <Button
               type="button"
-              onClick={() => setHslTab(c)}
-              class={`${SEGMENT_BUTTON_CLASS} ${
-                hslTab() === c
-                  ? `bg-[var(--surface-active)] ${HSL_TAB_STYLES[c].tabClass}`
-                  : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+              onClick={() =>
+                setHslControlMode((mode) => (mode === "scope" ? "sliders" : "scope"))
+              }
+              aria-pressed={hslControlMode() === "scope"}
+              title={hslControlMode() === "scope" ? "Show HSL sliders" : "Show vectorscope"}
+              class={`flex h-8 w-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+                hslControlMode() === "scope"
+                  ? "bg-[var(--surface-active)] text-[var(--text-strong)]"
+                  : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text-strong)]"
               }`}
             >
-              {c}
+              <span class="flex h-4 w-4 items-center justify-center [&>svg]:h-4 [&>svg]:w-4" innerHTML={VECTORSCOPE_TOGGLE_SVG} />
             </Button>
-          ))}
+          </div>
+          <div
+            data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
+            class={`${SEGMENTED_CONTROL_CLASS} grid-cols-3 transition-opacity duration-150 flex-1`}
+          >
+            {(["red", "green", "blue"] as const).map((c) => (
+              <Button
+                type="button"
+                onClick={() => setHslTab(c)}
+                class={`${SEGMENT_BUTTON_CLASS} ${
+                  hslTab() === c
+                    ? `bg-[var(--surface-active)] ${HSL_TAB_STYLES[c].tabClass}`
+                    : "text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                }`}
+              >
+                {c}
+              </Button>
+            ))}
+          </div>
         </div>
-        <Slider
-          label="Hue"
-          icon={hslSvg}
-          value={hue()}
-          defaultValue={0}
-          min={-1}
-          max={1}
-          step={0.01}
-          accentColor={accentColor()}
-          onChange={(v) => {
-            selectedAdjustmentLayerOrThrow();
-            void applyHsl(
-              hslTab() === "red"
-                ? { red_hue: v }
-                : hslTab() === "green"
-                  ? { green_hue: v }
-                  : { blue_hue: v },
-            );
-          }}
-        />
-        <Slider
-          label="Saturation"
-          icon={dropletSvg}
-          value={sat()}
-          defaultValue={0}
-          min={-1}
-          max={1}
-          step={0.01}
-          accentColor={accentColor()}
-          onChange={(v) => {
-            selectedAdjustmentLayerOrThrow();
-            void applyHsl(
-              hslTab() === "red"
-                ? { red_sat: v }
-                : hslTab() === "green"
-                  ? { green_sat: v }
-                  : { blue_sat: v },
-            );
-          }}
-        />
+        <Show
+          when={hslControlMode() === "scope"}
+          fallback={
+            <>
+              <Slider
+                label="Hue"
+                icon={hslSvg}
+                value={hue()}
+                defaultValue={0}
+                min={-1}
+                max={1}
+                step={0.01}
+                accentColor={accentColor()}
+                onChange={(v) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyHsl(
+                    hslTab() === "red"
+                      ? { red_hue: v }
+                      : hslTab() === "green"
+                        ? { green_hue: v }
+                        : { blue_hue: v },
+                  );
+                }}
+              />
+              <Slider
+                label="Saturation"
+                icon={dropletSvg}
+                value={sat()}
+                defaultValue={0}
+                min={-1}
+                max={1}
+                step={0.01}
+                accentColor={accentColor()}
+                onChange={(v) => {
+                  selectedAdjustmentLayerOrThrow();
+                  void applyHsl(
+                    hslTab() === "red"
+                      ? { red_sat: v }
+                      : hslTab() === "green"
+                        ? { green_sat: v }
+                        : { blue_sat: v },
+                  );
+                }}
+              />
+            </>
+          }
+        >
+          <div class="px-4">
+            <VectorScope
+              activePointId={activePointId()}
+              onChange={applyHueWheel}
+              onResetPoint={resetHueWheelPoint}
+              points={huePoints()}
+              scope={vectorScope()}
+            />
+          </div>
+        </Show>
         <Slider
           label="Luminance"
           icon={toneSvg}
