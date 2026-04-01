@@ -4,6 +4,9 @@
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let wasm: any = null;
+
+let offscreenCanvas: OffscreenCanvas | null = null;
+let offscreenCtx: OffscreenCanvasRenderingContext2D | null = null;
 let initPromise: Promise<void> | null = null;
 let rendererPromise: Promise<void> | null = null;
 
@@ -55,6 +58,12 @@ self.onmessage = async (e: MessageEvent) => {
     switch (msg.type) {
       case "init": {
         await ensureWasmReady();
+        break;
+      }
+
+      case "set_canvas": {
+        offscreenCanvas = msg.canvas as OffscreenCanvas;
+        offscreenCtx = offscreenCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
         break;
       }
 
@@ -274,6 +283,83 @@ self.onmessage = async (e: MessageEvent) => {
           },
           { transfer: [pixels.buffer as ArrayBuffer] },
         );
+        break;
+      }
+
+      case "render_frame": {
+        await ensureRendererReady();
+        if (!offscreenCanvas || !offscreenCtx) {
+          throw new Error("offscreen canvas not initialised — call set_canvas first");
+        }
+        const dpr = (msg.devicePixelRatio as number) || 1;
+        const canvasPixelWidth = msg.canvasPixelWidth as number;
+        const canvasPixelHeight = msg.canvasPixelHeight as number;
+
+        if (offscreenCanvas.width !== canvasPixelWidth) {
+          offscreenCanvas.width = canvasPixelWidth;
+        }
+        if (offscreenCanvas.height !== canvasPixelHeight) {
+          offscreenCanvas.height = canvasPixelHeight;
+        }
+
+        // Reset to identity and clear
+        offscreenCtx.setTransform(1, 0, 0, 1, 0, 0);
+        offscreenCtx.clearRect(0, 0, canvasPixelWidth, canvasPixelHeight);
+
+        // Scale context so we can draw in CSS pixel coordinates
+        offscreenCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        offscreenCtx.save();
+
+        // Apply committed-crop clip (axis-aligned clip + optional counter-rotation)
+        const clip = msg.clip as {
+          x: number; y: number; w: number; h: number; rotation: number;
+        } | null;
+        if (clip) {
+          const clipPath = new Path2D();
+          clipPath.rect(clip.x, clip.y, clip.w, clip.h);
+          offscreenCtx.clip(clipPath);
+          if (clip.rotation !== 0) {
+            const scx = clip.x + clip.w / 2;
+            const scy = clip.y + clip.h / 2;
+            offscreenCtx.translate(scx, scy);
+            offscreenCtx.rotate(-clip.rotation);
+            offscreenCtx.translate(-scx, -scy);
+          }
+        }
+
+        // Renders one WASM tile and blits it onto offscreenCtx at the given CSS-pixel destination.
+        const renderTile = async (tile: {
+          request: unknown;
+          destX: number;
+          destY: number;
+          destW: number;
+          destH: number;
+        }) => {
+          const frame = await wasm.render_preview_rgba(tile.request ?? null);
+          const pixels: Uint8Array =
+            frame.pixels instanceof Uint8Array
+              ? frame.pixels
+              : Uint8Array.from(frame.pixels);
+          const clamped = new Uint8ClampedArray(
+            pixels.buffer,
+            pixels.byteOffset,
+            pixels.byteLength,
+          );
+          const imageData = new ImageData(clamped, frame.width, frame.height);
+          const tmp = new OffscreenCanvas(frame.width, frame.height);
+          const tmpCtx = tmp.getContext("2d")!;
+          tmpCtx.putImageData(imageData, 0, 0);
+          offscreenCtx!.imageSmoothingEnabled = true;
+          offscreenCtx!.imageSmoothingQuality = "high";
+          offscreenCtx!.drawImage(tmp, tile.destX, tile.destY, tile.destW, tile.destH);
+        };
+
+        if (msg.backdrop) await renderTile(msg.backdrop as Parameters<typeof renderTile>[0]);
+        if (msg.preview) await renderTile(msg.preview as Parameters<typeof renderTile>[0]);
+
+        offscreenCtx.restore();
+        self.postMessage({ type: "frame_rendered", requestId });
         break;
       }
 

@@ -349,6 +349,54 @@ export interface PreviewRequest {
   ignore_crop_layers?: boolean;
 }
 
+// ── OffscreenCanvas render API (browser path only) ───────────────────────────
+
+export interface RenderFrameTile {
+  request: PreviewRequest;
+  /** Destination rectangle in CSS pixels on the OffscreenCanvas. */
+  destX: number;
+  destY: number;
+  destW: number;
+  destH: number;
+}
+
+export interface RenderFrameClip {
+  /** Axis-aligned clip rect in CSS pixels. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Counter-rotation applied after clipping (radians). */
+  rotation: number;
+}
+
+export interface RenderFrameParams {
+  /** Physical (device) pixel dimensions of the OffscreenCanvas. */
+  canvasPixelWidth: number;
+  canvasPixelHeight: number;
+  devicePixelRatio: number;
+  backdrop: RenderFrameTile | null;
+  preview: RenderFrameTile | null;
+  /** Committed crop clip, or null when in crop-edit mode / no crop. */
+  clip: RenderFrameClip | null;
+}
+
+/**
+ * Transfer an OffscreenCanvas to the worker so that subsequent renderFrame()
+ * calls draw directly onto it — no pixel data ever crosses the thread boundary.
+ */
+export function setRenderCanvas(canvas: OffscreenCanvas): void {
+  getWorker().postMessage({ type: "set_canvas", canvas }, [canvas]);
+}
+
+/**
+ * Render a full viewport frame (backdrop + preview) directly onto the
+ * transferred OffscreenCanvas.  Browser path only; no-op on Tauri.
+ */
+export async function renderFrame(params: RenderFrameParams): Promise<void> {
+  await workerCall<object>({ type: "render_frame", ...params }, "frame_rendered");
+}
+
 type Float16ArrayCtor = new (
   buffer: ArrayBufferLike,
   byteOffset?: number,

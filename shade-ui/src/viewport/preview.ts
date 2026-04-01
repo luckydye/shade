@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import * as bridge from "../bridge/index";
+import type { RenderFrameParams } from "../bridge/index";
 import {
   fullCanvasCrop,
   getCommittedCropRect,
@@ -10,10 +11,28 @@ import {
   state,
 } from "../store/editor-store";
 import type { FitReference, RenderedTile } from "./types";
-import { computeFitScale } from "./transform";
+import { buildTransform, computeFitScale } from "./transform";
 
 export const [previewTile, setPreviewTile] = createSignal<RenderedTile | null>(null);
 export const [backdropTile, setBackdropTile] = createSignal<RenderedTile | null>(null);
+
+/**
+ * Incremented each time the worker finishes rendering a frame onto the
+ * transferred OffscreenCanvas.  Used to trigger overlay redraws.
+ */
+export const [frameRenderedVersion, setFrameRenderedVersion] = createSignal(0);
+
+/** True once transferControlToOffscreen() canvas has been sent to the worker. */
+let offscreenCanvasActive = false;
+
+export function isOffscreenCanvasActive(): boolean {
+  return offscreenCanvasActive;
+}
+
+export function initOffscreenCanvas(canvas: OffscreenCanvas): void {
+  bridge.setRenderCanvas(canvas);
+  offscreenCanvasActive = true;
+}
 
 const INTERACTIVE_SCALE = 0.33;
 const THROTTLE_MS = 16;
@@ -374,12 +393,120 @@ function canReuseRenderedPreview(
   );
 }
 
+function buildRenderFrameParams(quality: "interactive" | "final"): RenderFrameParams | null {
+  const previewReq = buildPreviewRequest(quality);
+  const backdropReq = buildBackdropRequest(quality);
+  if (!previewReq || !backdropReq) return null;
+
+  const { viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
+  if (sw <= 0 || sh <= 0) return null;
+
+  const dpr = window.devicePixelRatio || 1;
+  const fit = getViewportFitRef();
+  const t = buildTransform(
+    { centerX: state.viewportCenterX, centerY: state.viewportCenterY, zoom: state.viewportZoom },
+    { width: sw, height: sh },
+    fit,
+  );
+
+  // Preview tile destination (CSS pixels)
+  const pvCrop = previewReq.crop!;
+  const previewDest = {
+    request: previewReq,
+    destX: pvCrop.x * t.scale + t.dx,
+    destY: pvCrop.y * t.scale + t.dy,
+    destW: pvCrop.width * t.scale,
+    destH: pvCrop.height * t.scale,
+  };
+
+  // Backdrop tile destination (CSS pixels)
+  const bdCrop = backdropReq.crop;
+  const bdBaseX = bdCrop?.x ?? 0;
+  const bdBaseY = bdCrop?.y ?? 0;
+  const bdBaseW = bdCrop?.width ?? state.canvasWidth;
+  const bdBaseH = bdCrop?.height ?? state.canvasHeight;
+  const backdropDest = {
+    request: backdropReq,
+    destX: bdBaseX * t.scale + t.dx,
+    destY: bdBaseY * t.scale + t.dy,
+    destW: bdBaseW * t.scale,
+    destH: bdBaseH * t.scale,
+  };
+
+  // Committed-crop clip — mirrors compositor.ts compositeArtboard logic
+  const inCropEdit = selectedLayerIsCrop();
+  const committedCrop = inCropEdit ? null : getCommittedCropRect();
+  const clip: RenderFrameParams["clip"] = committedCrop
+    ? {
+        x: committedCrop.x * t.scale + t.dx,
+        y: committedCrop.y * t.scale + t.dy,
+        w: committedCrop.width * t.scale,
+        h: committedCrop.height * t.scale,
+        rotation: committedCrop.rotation,
+      }
+    : null;
+
+  return {
+    canvasPixelWidth: Math.max(1, Math.round(sw * dpr)),
+    canvasPixelHeight: Math.max(1, Math.round(sh * dpr)),
+    devicePixelRatio: dpr,
+    backdrop: backdropDest,
+    preview: previewDest,
+    clip,
+  };
+}
+
 async function performRefresh() {
   const queued = refreshQueued;
   if (!queued) return;
   if (previewSuspended) return;
   refreshQueued = null;
   const snapshot = captureRefreshSnapshot();
+
+  // ── OffscreenCanvas path (browser) ──────────────────────────────────────────
+  // The worker renders directly onto the transferred canvas; no pixel data
+  // is sent back across the thread boundary.
+  if (offscreenCanvasActive) {
+    const frameParams = buildRenderFrameParams(queued.quality);
+    if (!frameParams) return;
+    if (
+      canReuseRenderedPreview(
+        lastRenderedPreview,
+        queued.quality,
+        snapshot,
+        frameParams.preview!.request,
+        frameRenderedVersion() > 0,
+      )
+    ) {
+      return;
+    }
+    const elapsed = performance.now() - refreshLastStartAt;
+    if (elapsed < THROTTLE_MS) {
+      await new Promise<void>((r) => setTimeout(r, THROTTLE_MS - elapsed));
+    }
+    refreshLastStartAt = performance.now();
+    const renderStartedAt = performance.now();
+    await bridge.renderFrame(frameParams);
+    const elapsedMs = performance.now() - renderStartedAt;
+    if (queued.quality === "final") {
+      recordFinalPreviewLatency(elapsedMs);
+      setState({
+        previewDisplayColorSpace: "sRGB",
+        previewRenderWidth: frameParams.preview!.request.target_width,
+        previewRenderHeight: frameParams.preview!.request.target_height,
+      });
+    }
+    if (!refreshSnapshotMatches(snapshot)) return;
+    lastRenderedPreview = {
+      quality: queued.quality,
+      snapshot,
+      request: frameParams.preview!.request,
+    };
+    setFrameRenderedVersion((v) => v + 1);
+    return;
+  }
+
+  // ── Tile path (Tauri / fallback) ─────────────────────────────────────────────
   const previewReq = buildPreviewRequest(queued.quality);
   const backdropReq = buildBackdropRequest(queued.quality);
   if (!previewReq || !backdropReq) return;

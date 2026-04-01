@@ -26,7 +26,7 @@ import {
 import { getMaskThumbnail, setMediaRating, type MaskParamsInfo } from "../bridge/index";
 import { compositeArtboard } from "../viewport/compositor";
 import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
-import { getViewportFitRef } from "../viewport/preview";
+import { frameRenderedVersion, getViewportFitRef, initOffscreenCanvas, isOffscreenCanvasActive } from "../viewport/preview";
 import { makeBrushCursor } from "../viewport/brush-cursor";
 import type { WorldTransform } from "../viewport/transform";
 import { clamp, setState, type ArtboardState } from "../store/editor-store";
@@ -105,6 +105,7 @@ function isMissingArtboardError(error: unknown) {
 
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
+  let imageCanvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   const [dragging, setDragging] = createSignal(false);
@@ -911,21 +912,29 @@ export const Viewport: Component = () => {
         const sy = worldArtboard.worldY * t.scale + t.dy;
         const sw = worldArtboard.width * t.scale;
         const sh = worldArtboard.height * t.scale;
-        if (!visibleBackdrop && !visiblePreview) {
-          ctx.fillStyle = getArtboardPlaceholderFill(isSelected && state.isLoading);
-          ctx.fillRect(sx, sy, sw, sh);
+        if (isOffscreenCanvasActive()) {
+          // Image content is rendered directly onto imageCanvasRef by the worker;
+          // only draw UI chrome on the overlay canvas.
           if (isSelected && state.isLoading && state.loadingMediaSrc) {
             drawLoadingImageOnArtboard(ctx, artboard, t);
           }
+        } else {
+          if (!visibleBackdrop && !visiblePreview) {
+            ctx.fillStyle = getArtboardPlaceholderFill(isSelected && state.isLoading);
+            ctx.fillRect(sx, sy, sw, sh);
+            if (isSelected && state.isLoading && state.loadingMediaSrc) {
+              drawLoadingImageOnArtboard(ctx, artboard, t);
+            }
+          }
+          compositeArtboard(
+            ctx,
+            worldArtboard,
+            visibleBackdrop,
+            visiblePreview,
+            t,
+            clip,
+          );
         }
-        compositeArtboard(
-          ctx,
-          worldArtboard,
-          visibleBackdrop,
-          visiblePreview,
-          t,
-          clip,
-        );
         ctx.save();
         ctx.globalAlpha = shouldFadeChrome ? ARTBOARD_CHROME_FADE : 1;
         ctx.strokeStyle = "rgba(148, 148, 148, 0.7)";
@@ -995,6 +1004,7 @@ export const Viewport: Component = () => {
     backdropTile();
     previewTile();
     loadingArtboardImage();
+    frameRenderedVersion(); // OffscreenCanvas path: redraw overlays after worker renders
     drawFrame();
   });
 
@@ -1047,6 +1057,17 @@ export const Viewport: Component = () => {
     });
     observer.observe(container);
     onCleanup(() => observer.disconnect());
+
+    // Transfer the dedicated image canvas to the worker so it renders directly
+    // onto it — no pixel data ever crosses the thread boundary.
+    if (imageCanvasRef && typeof OffscreenCanvas !== "undefined") {
+      try {
+        const offscreen = imageCanvasRef.transferControlToOffscreen();
+        initOffscreenCanvas(offscreen);
+      } catch {
+        // transferControlToOffscreen not supported — fall back to tile path
+      }
+    }
   });
 
   const onDragOver = (e: DragEvent) => {
@@ -1672,17 +1693,26 @@ export const Viewport: Component = () => {
           ref={containerRef}
           class="relative flex h-full w-full items-center justify-center lg:h-full"
         >
+          {/* Image layer — control is transferred to the worker via OffscreenCanvas */}
+          <canvas
+            ref={imageCanvasRef}
+            width="1"
+            height="1"
+            class={`absolute inset-0 h-full w-full ${
+              state.artboards.length === 0 && !state.isLoading ? "opacity-0" : "opacity-100"
+            }`}
+          />
+
+          {/* Overlay layer — drawn on the main thread (UI chrome, handles, etc.) */}
           <canvas
             ref={canvasRef}
             width="800"
             height="600"
             onDblClick={() => resetViewport()}
-            style={{
-              width: "100%",
-              height: "100%",
-            }}
-            class={`${
-              state.artboards.length === 0 && !state.isLoading ? "opacity-0" : "opacity-100"
+            class={`absolute inset-0 h-full w-full ${
+              !isOffscreenCanvasActive() && state.artboards.length === 0 && !state.isLoading
+                ? "opacity-0"
+                : "opacity-100"
             }`}
           />
 
