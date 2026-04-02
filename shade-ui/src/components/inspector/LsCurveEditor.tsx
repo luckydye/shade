@@ -411,8 +411,10 @@ export const LsCurveEditor: Component<LsCurveEditorProps> = (props) => {
               <circle
                 cx={chartX(point.x)}
                 cy={chartY(point.y)}
-                r="3.5"
-                fill={isEndpointPoint(point) ? "var(--curve-endpoint)" : "var(--curve-point)"}
+                r="4.5"
+                fill="var(--curve-stroke)"
+                stroke="var(--curve-point-stroke)"
+                stroke-width="1.5"
                 pointer-events="none"
               />
             </>

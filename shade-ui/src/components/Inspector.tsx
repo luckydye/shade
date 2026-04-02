@@ -671,7 +671,7 @@ export const Inspector: Component = () => {
             </>
           }
         >
-          <div class="px-4">
+          <div class="pl-6">
             <VectorScope
               activePointId={activePointId()}
               onChange={applyHueWheel}

@@ -262,7 +262,7 @@ export function histogramPath(bins: readonly number[]) {
   }
   const step = bins.length === 1 ? 0 : 100 / (bins.length - 1);
   const top = bins
-    .map((value, idx) => `${idx === 0 ? "M" : "L"} ${idx * step} ${(1 - value) * 100}`)
+    .map((value, idx) => `L ${idx * step} ${(1 - value) * 100}`)
     .join(" ");
   return `M 0 100 ${top} L 100 100 Z`;
 }
