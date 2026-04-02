@@ -344,7 +344,7 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
   const ringInner = () => svgSize() / 2 - SCOPE_MARGIN - HUE_RING_WIDTH;
   const ringOuter = () => svgSize() / 2 - SCOPE_MARGIN;
   const scopeRadius = () => ringInner() - 4;
-  const zeroRing = () => scopeRadius() * 0.2;
+  const zeroRing = () => scopeRadius() * 0.14;
   const radiusToSvg = (radius: number) =>
     zeroRing() + (radius / 2) * (scopeRadius() - zeroRing());
   const svgToRadius = (distance: number) =>
@@ -590,18 +590,15 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
             pointer-events="none"
           />
         ))}
-        {[0.25, 0.5, 0.75, 1].map((ratio) => (
-          <circle
-            cx={center()}
-            cy={center()}
-            r={scopeRadius() * ratio}
-            fill="none"
-            stroke="rgba(255,255,255,0.14)"
-            stroke-width={ratio === 1 ? "1.1" : "1"}
-            stroke-dasharray={ratio === 1 ? undefined : "4 5"}
-            pointer-events="none"
-          />
-        ))}
+        <circle
+          cx={center()}
+          cy={center()}
+          r={scopeRadius()}
+          fill="none"
+          stroke="rgba(255,255,255,0.14)"
+          stroke-width="1.1"
+          pointer-events="none"
+        />
         <line
           x1={center() - scopeRadius()}
           y1={center()}
@@ -665,7 +662,7 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
                 height="10"
                 fill="none"
                 stroke={target.color}
-                stroke-width="1.5"
+                stroke-width="1"
                 opacity="0.5"
                 pointer-events="none"
               />
