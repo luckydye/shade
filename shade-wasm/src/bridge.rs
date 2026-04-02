@@ -367,6 +367,26 @@ pub fn remove_mask(layer_idx: usize) {
 }
 
 #[wasm_bindgen]
+pub fn create_brush_mask(layer_idx: usize) {
+    ENGINE.with(|e| e.borrow_mut().create_brush_mask(layer_idx));
+}
+
+#[wasm_bindgen]
+pub fn stamp_brush_mask(
+    layer_idx: usize,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    softness: f32,
+    erase: bool,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut()
+            .stamp_brush_mask(layer_idx, cx, cy, radius, softness, erase)
+    });
+}
+
+#[wasm_bindgen]
 pub fn apply_crop(
     layer_idx: usize,
     crop_x: f32,
@@ -422,6 +442,16 @@ pub fn get_stack_json() -> String {
                             "cx": cx,
                             "cy": cy,
                             "radius": radius,
+                        }),
+                        MaskParams::Brush { .. } => serde_json::json!({
+                            "kind": "brush",
+                            "x1": serde_json::Value::Null,
+                            "y1": serde_json::Value::Null,
+                            "x2": serde_json::Value::Null,
+                            "y2": serde_json::Value::Null,
+                            "cx": serde_json::Value::Null,
+                            "cy": serde_json::Value::Null,
+                            "radius": serde_json::Value::Null,
                         }),
                     });
                 let adjustments = match &l.layer {

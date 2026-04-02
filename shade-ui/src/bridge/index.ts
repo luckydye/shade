@@ -1130,7 +1130,7 @@ async function applyBrowserPresetLayer(layer: BrowserPresetLayer) {
         x2: requiredNumber(layer.mask_params.x2, "x2"),
         y2: requiredNumber(layer.mask_params.y2, "y2"),
       });
-    } else {
+    } else if (layer.mask_params.kind === "radial") {
       await applyGradientMask({
         kind: "radial",
         layer_idx: layerIdx,
@@ -1138,6 +1138,8 @@ async function applyBrowserPresetLayer(layer: BrowserPresetLayer) {
         cy: requiredNumber(layer.mask_params.cy, "cy"),
         radius: requiredNumber(layer.mask_params.radius, "radius"),
       });
+    } else {
+      throw new Error("browser presets do not support brush masks");
     }
   }
   if (layer.name !== null) {
@@ -1424,7 +1426,8 @@ export async function createBrushMask(layerIdx: number): Promise<void> {
     await inv("create_brush_mask", { params: { layer_idx: layerIdx } });
     return;
   }
-  throw new Error("createBrushMask is only implemented for Tauri");
+  await ensureWorkerReady();
+  await workerCall({ type: "create_brush_mask", layerIdx }, "mask_applied");
 }
 
 export async function stampBrushMask(
@@ -1442,7 +1445,11 @@ export async function stampBrushMask(
     });
     return;
   }
-  throw new Error("stampBrushMask is only implemented for Tauri");
+  await ensureWorkerReady();
+  await workerCall(
+    { type: "stamp_brush_mask", layerIdx, cx, cy, radius, softness, erase },
+    "mask_applied",
+  );
 }
 
 export interface MaskThumbnail {

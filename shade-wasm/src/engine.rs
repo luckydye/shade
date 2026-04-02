@@ -145,8 +145,67 @@ impl WasmEngine {
             MaskParams::Radial { cx, cy, radius } => {
                 mask.fill_radial_gradient(*cx, *cy, *radius);
             }
+            MaskParams::Brush { .. } => {
+                panic!("brush masks must be created via create_brush_mask");
+            }
         }
         self.stack.set_mask_with_params(layer_idx, mask, params);
+    }
+
+    pub fn create_brush_mask(&mut self, layer_idx: usize) {
+        assert!(
+            layer_idx < self.stack.layers.len(),
+            "layer index out of bounds"
+        );
+        let mask = MaskData::new_empty(self.canvas_width, self.canvas_height);
+        let params = MaskParams::Brush {
+            width: self.canvas_width,
+            height: self.canvas_height,
+            pixels: mask.pixels.clone(),
+        };
+        self.stack.set_mask_with_params(layer_idx, mask, params);
+    }
+
+    pub fn stamp_brush_mask(
+        &mut self,
+        layer_idx: usize,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        softness: f32,
+        erase: bool,
+    ) {
+        assert!(
+            layer_idx < self.stack.layers.len(),
+            "layer index out of bounds"
+        );
+        let mask_id = self.stack.layers[layer_idx]
+            .mask
+            .expect("layer has no mask");
+        let mask = self
+            .stack
+            .masks
+            .get_mut(&mask_id)
+            .expect("mask data missing");
+        mask.stamp_brush(cx, cy, radius, softness, erase);
+        let params = self
+            .stack
+            .mask_params
+            .get_mut(&mask_id)
+            .expect("mask params missing");
+        match params {
+            MaskParams::Brush {
+                width,
+                height,
+                pixels,
+            } => {
+                *width = mask.width;
+                *height = mask.height;
+                *pixels = mask.pixels.clone();
+            }
+            _ => panic!("brush mask stamp requires a brush mask"),
+        }
+        self.stack.generation += 1;
     }
 
     pub fn remove_mask(&mut self, layer_idx: usize) {
@@ -455,6 +514,7 @@ mod tests {
                 assert_eq!((*x1, *y1, *x2, *y2), (0.0, 0.0, 0.0, 2.0));
             }
             MaskParams::Radial { .. } => panic!("expected a linear mask"),
+            MaskParams::Brush { .. } => panic!("expected a linear mask"),
         }
     }
 
@@ -474,5 +534,61 @@ mod tests {
 
         assert!(engine.stack.layers[1].mask.is_none());
         assert!(engine.stack.mask_params.is_empty());
+    }
+
+    #[test]
+    fn create_brush_mask_stores_brush_params() {
+        let mut engine = create_engine();
+
+        engine.create_brush_mask(1);
+
+        let mask_id = engine.stack.layers[1]
+            .mask
+            .expect("mask should be attached");
+        let params = engine
+            .stack
+            .mask_params
+            .get(&mask_id)
+            .expect("mask params should be stored");
+        match params {
+            MaskParams::Brush {
+                width,
+                height,
+                pixels,
+            } => {
+                assert_eq!((*width, *height), (1, 2));
+                assert_eq!(pixels, &vec![0, 0]);
+            }
+            _ => panic!("expected a brush mask"),
+        }
+    }
+
+    #[test]
+    fn stamp_brush_mask_updates_mask_params_pixels() {
+        let mut engine = create_engine();
+        engine.create_brush_mask(1);
+
+        engine.stamp_brush_mask(1, 0.5, 0.5, 1.0, 0.0, false);
+
+        let mask_id = engine.stack.layers[1]
+            .mask
+            .expect("mask should be attached");
+        let mask = engine
+            .stack
+            .masks
+            .get(&mask_id)
+            .expect("mask data should be stored");
+        let params = engine
+            .stack
+            .mask_params
+            .get(&mask_id)
+            .expect("mask params should be stored");
+        match params {
+            MaskParams::Brush { pixels, .. } => {
+                assert_eq!(pixels, &mask.pixels);
+                assert!(pixels.iter().any(|value| *value > 0));
+            }
+            _ => panic!("expected a brush mask"),
+        }
     }
 }

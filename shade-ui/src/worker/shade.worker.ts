@@ -236,6 +236,27 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case "create_brush_mask": {
+        await ensureWasmReady();
+        wasm.create_brush_mask(msg.layerIdx);
+        self.postMessage({ type: "mask_applied", requestId });
+        break;
+      }
+
+      case "stamp_brush_mask": {
+        await ensureWasmReady();
+        wasm.stamp_brush_mask(
+          msg.layerIdx,
+          msg.cx,
+          msg.cy,
+          msg.radius,
+          msg.softness,
+          msg.erase,
+        );
+        self.postMessage({ type: "mask_applied", requestId });
+        break;
+      }
+
       case "get_stack": {
         await ensureWasmReady();
         const json = wasm.get_stack_json();
