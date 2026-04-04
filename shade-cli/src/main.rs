@@ -962,8 +962,80 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{resolve_served_picture_path, ServePeerProvider};
+    use anyhow::Result;
+    use image::{ImageBuffer, Rgba};
+    use shade_p2p::{
+        AwarenessState, LocalPeerDiscovery, PeerProvider, PictureMetadata,
+        SharedPicture, SyncSnapshotInfo,
+    };
+    use std::sync::Arc;
     use std::fs;
     use tempfile::tempdir;
+    use tokio::time::{sleep, timeout, Duration};
+
+    struct EmptyPeerProvider;
+
+    #[async_trait::async_trait]
+    impl PeerProvider for EmptyPeerProvider {
+        async fn authorize_peer(&self, _peer_endpoint_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_pictures(&self) -> Result<Vec<SharedPicture>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_thumbnail(&self, _picture_id: &str) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_image_bytes(&self, _picture_id: &str) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_awareness(&self) -> Result<AwarenessState> {
+            Ok(AwarenessState::default())
+        }
+
+        async fn list_snapshots(
+            &self,
+            _file_hash: &str,
+        ) -> Result<Vec<SyncSnapshotInfo>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_snapshot_data(&self, _id: &str) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_metadata(
+            &self,
+            _file_hashes: &[String],
+        ) -> Result<Vec<PictureMetadata>> {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn wait_for_peer(
+        discovery: &LocalPeerDiscovery,
+        expected_peer_id: &str,
+    ) -> Result<()> {
+        timeout(Duration::from_secs(15), async {
+            loop {
+                let snapshot = discovery.snapshot().await;
+                if snapshot
+                    .peers
+                    .iter()
+                    .any(|peer| peer.endpoint_id == expected_peer_id)
+                {
+                    return Ok(());
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("peer discovery timed out")
+    }
 
     #[test]
     fn serve_provider_lists_supported_images_recursively() {
@@ -1010,5 +1082,77 @@ mod tests {
             error.to_string().contains("outside served root"),
             "unexpected error: {error}"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn serve_provider_is_browsable_over_p2p() {
+        let dir = tempdir().expect("failed to create temp dir");
+        let image_path = dir.path().join("peer.png");
+        let image = ImageBuffer::<Rgba<u8>, _>::from_pixel(
+            2,
+            2,
+            Rgba([32, 128, 224, 255]),
+        );
+        image
+            .save(&image_path)
+            .expect("failed to write test image");
+        let expected_bytes = fs::read(&image_path).expect("failed to read test image");
+
+        let server_provider = Arc::new(
+            ServePeerProvider::new(dir.path().to_path_buf())
+                .expect("failed to create serve provider"),
+        );
+        let server = LocalPeerDiscovery::bind_with_name(
+            "serve-provider-test".to_string(),
+            None,
+            server_provider,
+        )
+        .await
+        .expect("failed to bind server discovery");
+        let client = LocalPeerDiscovery::bind_with_name(
+            "serve-provider-client".to_string(),
+            None,
+            Arc::new(EmptyPeerProvider),
+        )
+        .await
+        .expect("failed to bind client discovery");
+
+        let server_id = server.snapshot().await.local_endpoint_id;
+        let client_id = client.snapshot().await.local_endpoint_id;
+        wait_for_peer(&server, &client_id)
+            .await
+            .expect("server did not discover client");
+        wait_for_peer(&client, &server_id)
+            .await
+            .expect("client did not discover server");
+
+        let pictures = client
+            .list_peer_pictures(&server_id)
+            .await
+            .expect("failed to list peer pictures");
+        assert_eq!(pictures.len(), 1);
+        let picture = &pictures[0];
+        assert_eq!(picture.name, "peer.png");
+        let picture_path = std::path::Path::new(&picture.id)
+            .canonicalize()
+            .expect("picture id should resolve to a canonical path");
+        assert_eq!(
+            picture_path,
+            image_path
+                .canonicalize()
+                .expect("image path should resolve to a canonical path")
+        );
+
+        let thumbnail = client
+            .get_peer_thumbnail(&server_id, &picture.id)
+            .await
+            .expect("failed to fetch peer thumbnail");
+        assert!(!thumbnail.is_empty(), "thumbnail should not be empty");
+
+        let image_bytes = client
+            .get_peer_image_bytes(&server_id, &picture.id)
+            .await
+            .expect("failed to fetch peer image bytes");
+        assert_eq!(image_bytes, expected_bytes);
     }
 }
