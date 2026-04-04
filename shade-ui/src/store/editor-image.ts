@@ -89,6 +89,18 @@ function isWebGpuAdapterError(message: string) {
   return message.includes("No suitable wgpu adapter found");
 }
 
+async function cloneBlobUrl(url: string) {
+  if (!url.startsWith("blob:")) {
+    return url;
+  }
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`failed to clone blob url: ${response.status}`);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
 function getPendingArtboardSize() {
   const selectedArtboard = state.artboards.find(
     (artboard) => artboard.id === state.selectedArtboardId,
@@ -287,12 +299,15 @@ async function openImageFrom(
   } | null,
   mode: OpenImageMode,
 ) {
+  const ownedLoadingMediaSrc = loadingMediaSrc
+    ? await cloneBlobUrl(loadingMediaSrc)
+    : null;
   const existingArtboard = state.artboards.find((artboard) =>
     artboardSourceMatches(artboard.source, source),
   );
   if (existingArtboard) {
-    if (loadingMediaSrc?.startsWith("blob:")) {
-      URL.revokeObjectURL(loadingMediaSrc);
+    if (ownedLoadingMediaSrc?.startsWith("blob:")) {
+      URL.revokeObjectURL(ownedLoadingMediaSrc);
     }
     await focusExistingArtboard(existingArtboard.id);
     return;
@@ -304,9 +319,9 @@ async function openImageFrom(
       : null;
   const previousSelectedArtboardId = state.selectedArtboardId;
   let pendingSize: { width: number; height: number };
-  if (mode === "replace" && loadingMediaSrc) {
+  if (mode === "replace" && ownedLoadingMediaSrc) {
     try {
-      const dims = await getImageDimensions(loadingMediaSrc);
+      const dims = await getImageDimensions(ownedLoadingMediaSrc);
       pendingSize = dims;
     } catch {
       pendingSize = {
@@ -352,7 +367,7 @@ async function openImageFrom(
     pendingSize.height,
     "Loading",
     activeMediaSelection,
-    loadingMediaSrc,
+    ownedLoadingMediaSrc,
   );
   try {
     if (source.kind === "path") {
@@ -422,8 +437,8 @@ async function openImageFrom(
     }
     throw error;
   } finally {
-    if (loadingMediaSrc?.startsWith("blob:")) {
-      URL.revokeObjectURL(loadingMediaSrc);
+    if (ownedLoadingMediaSrc?.startsWith("blob:")) {
+      URL.revokeObjectURL(ownedLoadingMediaSrc);
     }
     if (isActiveLoadToken(loadToken)) {
       setState({
