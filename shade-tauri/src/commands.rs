@@ -2535,6 +2535,48 @@ impl EditorState {
             source_bit_depth,
         }
     }
+
+    pub fn replace_with_linear_image(
+        &mut self,
+        pixels: Vec<f32>,
+        width: u32,
+        height: u32,
+        source_bit_depth: String,
+    ) -> LayerInfoResponse {
+        let texture_id = self.next_texture_id;
+        self.next_texture_id += 1;
+        self.stack = LayerStack::new();
+        self.image_sources = Arc::new(std::collections::HashMap::from([(
+            texture_id,
+            FloatImage {
+                pixels: pixels.into(),
+                width,
+                height,
+            },
+        )]));
+        self.canvas_width = width;
+        self.canvas_height = height;
+        self.source_bit_depth = source_bit_depth.clone();
+        self.current_image_hash = None;
+        self.current_image_source = None;
+        self.current_snapshot_id = None;
+        self.stack.add_image_layer(texture_id, width, height);
+        self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
+            exposure: 0.0,
+            contrast: 0.0,
+            blacks: 0.0,
+            whites: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+            gamma: 1.0,
+        }]);
+        LayerInfoResponse {
+            layer_count: self.stack.layers.len(),
+            canvas_width: width,
+            canvas_height: height,
+            source_bit_depth,
+        }
+    }
 }
 
 // Commands return Result<T, String> where Err is displayed to the user
@@ -2859,12 +2901,11 @@ pub async fn open_peer_image(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_image(
+        let response = st.replace_with_linear_image(
             image.pixels.to_vec(),
             image.width,
             image.height,
             info.bit_depth,
-            info.color_space,
         );
         restore_persisted_layers(&mut st, file_hash, Some(picture_id), persisted)?;
         response
@@ -2908,12 +2949,11 @@ pub async fn open_image<R: tauri::Runtime>(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_image(
+        let response = st.replace_with_linear_image(
             opened.image.pixels.to_vec(),
             opened.image.width,
             opened.image.height,
             opened.info.bit_depth,
-            opened.info.color_space,
         );
         restore_persisted_layers(&mut st, file_hash, opened.source_name, persisted)?;
         response
@@ -2943,12 +2983,11 @@ pub async fn open_image_encoded_bytes(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_image(
+        let response = st.replace_with_linear_image(
             image.pixels.to_vec(),
             image.width,
             image.height,
             info.bit_depth,
-            info.color_space,
         );
         restore_persisted_layers(&mut st, file_hash, file_name, persisted)?;
         response
@@ -3212,10 +3251,8 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
     let Some(persisted) = load_latest_edit_version(&opened.file_hash).await? else {
         return Ok(None);
     };
-    let mut linearized_pixels = opened.image.pixels.to_vec();
-    to_linear_srgb_f32(&mut linearized_pixels, &opened.info.color_space);
     let image = FloatImage {
-        pixels: linearized_pixels.into(),
+        pixels: opened.image.pixels.clone(),
         width: opened.image.width,
         height: opened.image.height,
     };

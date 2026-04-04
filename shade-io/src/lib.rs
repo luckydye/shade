@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use exif::{In, Tag};
 use exr::meta::{attribute::SampleType, MetaData};
 use exr::prelude::{ReadChannels, ReadLayers};
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
+use image::{ColorType, DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use rawler::{
     decoders::{Orientation as RawOrientation, RawDecodeParams},
     imgop::develop::RawDevelop,
@@ -277,11 +277,13 @@ pub fn load_image_bytes_f32_with_info(
             develop_raw_image(&raw_image)?,
             raw_orientation_to_exif(raw_image.orientation),
         )
-        .to_rgba32f();
+        .into_rgba32f();
         let (width, height) = rgba.dimensions();
+        let mut pixels = rgba.into_raw();
+        to_linear_srgb_f32(&mut pixels, &ColorSpace::Srgb);
         return Ok((
             FloatImage {
-                pixels: rgba.into_raw().into(),
+                pixels: pixels.into(),
                 width,
                 height,
             },
@@ -309,19 +311,14 @@ pub fn load_image_bytes_f32_with_info(
         .context("Failed to guess image format")?
         .into_decoder()
         .context("Failed to create image decoder")?;
-    let bit_depth = decoder_color_type_label(decoder.color_type());
-    let rgba = apply_orientation(
+    let color_type = decoder.color_type();
+    let bit_depth = decoder_color_type_label(color_type);
+    let image = apply_orientation(
         image::load_from_memory(bytes).context("Failed to decode image bytes")?,
         read_orientation(&mut Cursor::new(bytes))?,
-    )
-    .to_rgba32f();
-    let (width, height) = rgba.dimensions();
+    );
     Ok((
-        FloatImage {
-            pixels: rgba.into_raw().into(),
-            width,
-            height,
-        },
+        into_linear_float_image(image, color_type, &color_space),
         SourceImageInfo {
             bit_depth: bit_depth.to_string(),
             color_space,
@@ -758,6 +755,86 @@ fn decode_camera_raw_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatI
         width,
         height,
     })
+}
+
+fn into_linear_float_image(
+    image: DynamicImage,
+    color_type: ColorType,
+    color_space: &ColorSpace,
+) -> FloatImage {
+    match (color_type, color_space) {
+        (
+            ColorType::L8 | ColorType::La8 | ColorType::Rgb8 | ColorType::Rgba8,
+            ColorSpace::Srgb | ColorSpace::Unknown | ColorSpace::Custom(_),
+        ) => rgba8_to_linear_float_image(image.into_rgba8()),
+        (
+            ColorType::L16 | ColorType::La16 | ColorType::Rgb16 | ColorType::Rgba16,
+            ColorSpace::Srgb | ColorSpace::Unknown | ColorSpace::Custom(_),
+        ) => rgba16_to_linear_float_image(image.into_rgba16(), color_space),
+        _ => {
+            let rgba = image.into_rgba32f();
+            let (width, height) = rgba.dimensions();
+            let mut pixels = rgba.into_raw();
+            to_linear_srgb_f32(&mut pixels, color_space);
+            FloatImage {
+                pixels: pixels.into(),
+                width,
+                height,
+            }
+        }
+    }
+}
+
+fn rgba8_to_linear_float_image(image: image::RgbaImage) -> FloatImage {
+    let (width, height) = image.dimensions();
+    let linear_lut = linear_srgb_lut_u8();
+    let pixels = image
+        .into_raw()
+        .chunks_exact(4)
+        .flat_map(|rgba| {
+            [
+                linear_lut[rgba[0] as usize],
+                linear_lut[rgba[1] as usize],
+                linear_lut[rgba[2] as usize],
+                rgba[3] as f32 / 255.0,
+            ]
+        })
+        .collect::<Vec<_>>();
+    FloatImage {
+        pixels: pixels.into(),
+        width,
+        height,
+    }
+}
+
+fn rgba16_to_linear_float_image(
+    image: image::ImageBuffer<image::Rgba<u16>, Vec<u16>>,
+    color_space: &ColorSpace,
+) -> FloatImage {
+    let (width, height) = image.dimensions();
+    let mut pixels = image
+        .into_raw()
+        .chunks_exact(4)
+        .flat_map(|rgba| {
+            [
+                rgba[0] as f32 / 65535.0,
+                rgba[1] as f32 / 65535.0,
+                rgba[2] as f32 / 65535.0,
+                rgba[3] as f32 / 65535.0,
+            ]
+        })
+        .collect::<Vec<_>>();
+    to_linear_srgb_f32(&mut pixels, color_space);
+    FloatImage {
+        pixels: pixels.into(),
+        width,
+        height,
+    }
+}
+
+fn linear_srgb_lut_u8() -> &'static [f32; 256] {
+    static LUT: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| std::array::from_fn(|idx| srgb_to_linear(idx as f32 / 255.0)))
 }
 
 fn develop_raw_image(raw_image: &RawImage) -> Result<DynamicImage> {
