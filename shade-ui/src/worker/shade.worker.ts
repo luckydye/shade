@@ -43,7 +43,7 @@ function ensureRendererReady() {
 
 // Message protocol:
 // { type: "init" } → { type: "ready" }
-// { type: "load_image_encoded", bytes: Uint8Array, fileName?: string } → { type: "image_loaded", layerCount: number, canvasWidth: number, canvasHeight: number }
+// { type: "load_image_encoded", bytes: ArrayBuffer, fileName?: string } → { type: "image_loaded", layerCount: number, canvasWidth: number, canvasHeight: number }
 // { type: "apply_tone", layerIdx: number, exposure: number, ... } → { type: "tone_applied" }
 // { type: "get_stack" } → { type: "stack", data: string }
 
@@ -60,7 +60,13 @@ self.onmessage = async (e: MessageEvent) => {
 
       case "load_image_encoded": {
         await ensureWasmReady();
-        const info = await wasm.load_image_encoded(msg.bytes, msg.fileName ?? null);
+        if (!(msg.bytes instanceof ArrayBuffer)) {
+          throw new Error("load_image_encoded expects an ArrayBuffer payload");
+        }
+        const info = await wasm.load_image_encoded(
+          new Uint8Array(msg.bytes),
+          msg.fileName ?? null,
+        );
         self.postMessage({
           type: "image_loaded",
           requestId,

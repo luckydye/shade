@@ -467,8 +467,8 @@ export async function listBrowserLibraryImages(
   };
 }
 
-export async function openBrowserMountedImage(path: string): Promise<Uint8Array> {
-  return new Uint8Array(await (await loadItemFile(path)).arrayBuffer());
+export async function openBrowserMountedImage(path: string): Promise<ArrayBuffer> {
+  return (await loadItemFile(path)).arrayBuffer();
 }
 
 export async function getBrowserMountedThumbnailBytes(

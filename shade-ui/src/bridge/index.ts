@@ -114,6 +114,7 @@ function getWorker(): Worker {
 function workerCall<T>(
   message: Record<string, unknown>,
   responseType: string,
+  transfer: Transferable[] = [],
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const requestId = nextWorkerRequestId;
@@ -123,7 +124,7 @@ function workerCall<T>(
       resolve: resolve as (v: unknown) => void,
       reject,
     });
-    getWorker().postMessage({ ...message, requestId });
+    getWorker().postMessage({ ...message, requestId }, transfer);
   });
 }
 
@@ -473,7 +474,7 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
   }
   await ensureWorkerReady();
   const response = await fetch(path);
-  return _loadEncodedBytes(new Uint8Array(await response.arrayBuffer()), path);
+  return _loadEncodedBytes(await response.arrayBuffer(), path);
 }
 
 export function prepareImageOpen(path: string): Promise<void> {
@@ -617,11 +618,11 @@ export async function openImageFile(file: File): Promise<OpenImageInfo> {
       file_name: file.name,
     }) as Promise<any>;
   }
-  return _loadEncodedBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+  return _loadEncodedBytes(await file.arrayBuffer(), file.name);
 }
 
 async function _loadEncodedBytes(
-  bytes: Uint8Array,
+  bytes: ArrayBuffer,
   fileName?: string,
 ): Promise<OpenImageInfo> {
   const result = await workerCall<{
@@ -629,7 +630,7 @@ async function _loadEncodedBytes(
     canvasWidth: number;
     canvasHeight: number;
     source_bit_depth: string;
-  }>({ type: "load_image_encoded", bytes, fileName }, "image_loaded");
+  }>({ type: "load_image_encoded", bytes, fileName }, "image_loaded", [bytes]);
   return {
     layer_count: result.layerCount,
     canvas_width: result.canvasWidth,
