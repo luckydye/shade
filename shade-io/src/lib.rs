@@ -16,6 +16,8 @@ use std::{convert::TryFrom, io::Cursor};
 #[cfg(feature = "native")]
 pub mod app_config;
 #[cfg(feature = "native")]
+pub mod ccapi;
+#[cfg(feature = "native")]
 pub mod camera_services;
 #[cfg(feature = "native")]
 pub mod image_loader;

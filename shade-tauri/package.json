@@ -1,5 +1,5 @@
 {
-  "name": "web",
+  "name": "shade-tauri-ui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
-    "shade-wasm": "../shade-wasm",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
     "shade-ui": "../shade-ui",
     "solid-js": "^1.8.0"
   },

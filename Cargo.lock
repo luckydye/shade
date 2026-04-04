@@ -893,19 +893,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ccapi"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "log",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "cesu8"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7731,12 +7718,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
+ "bytes",
  "chrono",
  "exr",
  "hex",
  "image",
  "kamadak-exif",
  "libsql",
+ "log",
  "ndarray 0.16.1",
  "notify",
  "percent-encoding",
@@ -7789,7 +7778,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blake3",
- "ccapi",
  "chrono",
  "crossbeam-channel",
  "env_logger",

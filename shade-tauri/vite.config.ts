@@ -2,20 +2,21 @@ import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
-import terminal from "vite-plugin-terminal";
 
 export default defineConfig({
-  plugins: [solid(), tailwindcss(), terminal({ output: ["terminal", "console"] })],
+  plugins: [solid(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 5173,
     strictPort: true,
     fs: {
-      allow: [resolve(__dirname, ".")],
+      allow: [
+        resolve(__dirname, "."),
+        resolve(__dirname, "../shade-ui"),
+        resolve(__dirname, "../shade-wasm"),
+      ],
     },
-    watch: { ignored: ["**/src-tauri/**"] },
     headers: {
-      // Required for SharedArrayBuffer (used by wgpu/WASM threading)
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
@@ -27,7 +28,7 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
   },
   optimizeDeps: {
-    exclude: [],
+    exclude: ["shade-ui", "shade-wasm"],
   },
   worker: {
     format: "es",

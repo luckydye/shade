@@ -3,21 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "vite --host",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
-    "shade-wasm": "../shade-wasm",
     "solid-js": "^1.8.0",
     "vite-plugin-terminal": "^1.4.0",
-    "yjs": "^13.6.30"
-  },
-  "devDependencies": {
+    "yjs": "^13.6.30",
     "@types/node": "^20.0.0",
     "tailwindcss": "^4",
     "typescript": "^5.0.0",

@@ -6,7 +6,7 @@ import type {
   LibraryImageListing,
   MediaLibrary,
 } from "shade-ui/src/bridge/index";
-import { getBrowserSnapshotsPlatform } from "shade-ui/src/bridge/index";
+import { getBrowserPlatform } from "shade-ui/src/bridge/index";
 import { requestToPromise, withStores } from "shade-ui/src/cache-utils";
 import {
   fileNameFromPath,
@@ -417,7 +417,7 @@ async function listBrowserLibraryImages(
   await assertReadable(library.rootHandle);
   const [items, snapshotMap] = await Promise.all([
     scanDirectory(library.rootHandle, library.id),
-    getBrowserSnapshotsPlatform().getSnapshotPathMap(),
+    getBrowserPlatform().snapshots.getSnapshotPathMap(),
   ]);
   await replaceLibraryItems(library, items);
   return {

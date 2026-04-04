@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.shade.editor",
   "build": {
-    "beforeDevCommand": "task ui:dev",
+    "beforeDevCommand": "bunx vite",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "task ui:build",
-    "frontendDist": "../shade-ui/dist"
+    "beforeBuildCommand": "bunx vite build",
+    "frontendDist": "./dist"
   },
   "app": {
     "windows": [

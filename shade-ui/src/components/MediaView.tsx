@@ -17,6 +17,8 @@ import {
   addS3MediaLibrary,
   deleteMediaLibraryItem,
   isTauriRuntime,
+  listenNativeDragDrop,
+  listenPeerPaired,
   listMediaLibraries,
   pairPeerDevice,
   pickDirectory,
@@ -756,13 +758,9 @@ export const MediaView: Component = () => {
       if (!isTauri) {
         return;
       }
-      const { listen } = await import("@tauri-apps/api/event");
-      const unlisten = await listen<{ peer_endpoint_id: string }>(
-        "peer-paired",
-        async () => {
-          await refetchLibraries();
-        },
-      );
+      const unlisten = await listenPeerPaired(async () => {
+        await refetchLibraries();
+      });
       onCleanup(() => {
         void unlisten();
       });
@@ -830,32 +828,31 @@ export const MediaView: Component = () => {
         return;
       }
       setUsesNativeDragDrop(true);
-      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-      unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+      unlisten = await listenNativeDragDrop((payload) => {
         if (!canWriteSelectedLibrary()) {
           setUploadDragFeedback(null);
           return;
         }
-        if (event.payload.type === "leave") {
+        if (payload.type === "leave") {
           setUploadDragFeedback(null);
           return;
         }
-        if (event.payload.type === "enter") {
+        if (payload.type === "enter") {
           setUploadDragFeedback({
-            itemCount: draggedPathCount(event.payload.paths),
+            itemCount: draggedPathCount(payload.paths),
           });
           return;
         }
-        if (event.payload.type === "over") {
+        if (payload.type === "over") {
           setUploadDragFeedback((current) => current ?? { itemCount: null });
           return;
         }
         setUploadDragFeedback(null);
-        if (event.payload.paths.length === 0) {
+        if (payload.paths.length === 0) {
           setError("drop did not contain files");
           return;
         }
-        void handleUploadLibraryPaths(event.payload.paths);
+        void handleUploadLibraryPaths(payload.paths);
       });
     });
     onCleanup(() => {

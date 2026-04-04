@@ -3,21 +3,7 @@
  * falls back to a browser worker when running on the web.
  */
 
-import { createShadeWorker } from "shade-wasm";
-import { getThumbnailBackend } from "./thumbnail-backend";
-
-// ── Tauri path ──────────────────────────────────────────────────────────────
-type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-type IsTauriFn = () => boolean;
-let _invoke: InvokeFn | null = null;
-let _isTauri: IsTauriFn | null = null;
-
-export async function isTauriRuntime() {
-  if (_isTauri) return _isTauri();
-  const { isTauri } = await import("@tauri-apps/api/core");
-  _isTauri = isTauri as IsTauriFn;
-  return _isTauri();
-}
+import type { ThumbnailBackend } from "./thumbnail-backend";
 
 export type FileSystemPermissionMode = "read" | "readwrite";
 export type FileSystemPermissionState = "granted" | "denied" | "prompt";
@@ -44,12 +30,37 @@ export interface BrowserDirectoryHandle extends BrowserFileSystemHandle {
   values(): AsyncIterable<BrowserFileHandle | BrowserDirectoryHandle>;
 }
 
-async function getTauriInvoke() {
-  if (!_invoke) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    _invoke = invoke as unknown as InvokeFn;
-  }
-  return _invoke!;
+export interface NativeDragDropPayload {
+  type: "enter" | "over" | "drop" | "leave";
+  paths: string[];
+}
+
+export interface TauriPlatform {
+  kind: "tauri";
+  thumbnailBackend: ThumbnailBackend;
+  isTauri(): boolean;
+  invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
+  pickDirectory(): Promise<string | null>;
+  pickExportTarget(): Promise<string | null>;
+  listenPeerPaired(listener: () => void): Promise<() => void>;
+  listenNativeDragDrop(
+    listener: (payload: NativeDragDropPayload) => void,
+  ): Promise<() => void>;
+}
+
+export interface BrowserPlatform {
+  kind: "browser";
+  thumbnailBackend: ThumbnailBackend;
+  createWorker(): Worker;
+  media: BrowserMediaPlatform;
+  presets: BrowserPresetsPlatform;
+  snapshots: BrowserSnapshotsPlatform;
+}
+
+export type Platform = BrowserPlatform | TauriPlatform;
+
+export async function isTauriRuntime() {
+  return getPlatform().kind === "tauri";
 }
 
 // ── Browser worker path ──────────────────────────────────────────────────────
@@ -71,7 +82,7 @@ const workerReadyPromise = new Promise<void>((res) => {
 
 function getWorker(): Worker {
   if (!worker) {
-    worker = createShadeWorker();
+    worker = getBrowserPlatform().createWorker();
     worker.onmessage = (e: MessageEvent) => {
       const msg = e.data;
       if (msg.type === "ready") {
@@ -466,12 +477,17 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
     const inv = await getTauriInvoke();
     return inv("open_image", { path }) as Promise<any>;
   }
-  const source = await getBrowserMediaPlatform().getImageSource(path);
+  const source = await getBrowserPlatform().media.getImageSource(path);
   return _loadEncodedBytes(source.bytes, source.fileName ?? path);
 }
 
 export function prepareImageOpen(path: string): Promise<void> {
-  return getBrowserMediaPlatform().prepareImageOpen(path);
+  return isTauriRuntime().then((isTauri) => {
+    if (isTauri) {
+      return;
+    }
+    return getBrowserPlatform().media.prepareImageOpen(path);
+  });
 }
 
 export async function exportImage(path: string): Promise<void> {
@@ -503,34 +519,34 @@ export async function exportImage(path: string): Promise<void> {
 
 export async function pickDirectory(): Promise<string | BrowserDirectoryHandle | null> {
   if (!(await isTauriRuntime())) {
-    return getBrowserMediaPlatform().pickDirectory();
+    return getBrowserPlatform().media.pickDirectory();
   }
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const selectedPath = await open({
-    directory: true,
-    multiple: false,
-  });
-  if (selectedPath === null) {
-    return null;
-  }
-  if (Array.isArray(selectedPath)) {
-    throw new Error("expected a single directory path");
-  }
-  return selectedPath;
+  return getTauriPlatform().pickDirectory();
 }
 
 export async function pickExportTarget(): Promise<string | null> {
   if (!(await isTauriRuntime())) {
     return "shade-export.png";
   }
-  const { save } = await import("@tauri-apps/plugin-dialog");
-  return save({
-    title: "Export Render",
-    filters: [
-      { name: "PNG Image", extensions: ["png"] },
-      { name: "JPEG Image", extensions: ["jpg", "jpeg"] },
-    ],
-  });
+  return getTauriPlatform().pickExportTarget();
+}
+
+export async function listenPeerPaired(
+  listener: () => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) {
+    return () => {};
+  }
+  return getTauriPlatform().listenPeerPaired(listener);
+}
+
+export async function listenNativeDragDrop(
+  listener: (payload: NativeDragDropPayload) => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) {
+    return () => {};
+  }
+  return getTauriPlatform().listenNativeDragDrop(listener);
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
@@ -571,7 +587,10 @@ export async function getPeerThumbnailBytes(
   peer_endpoint_id: string,
   picture_id: string,
 ): Promise<Uint8Array> {
-  return getThumbnailBackend().getPeerThumbnailBytes(peer_endpoint_id, picture_id);
+  return getPlatform().thumbnailBackend.getPeerThumbnailBytes(
+    peer_endpoint_id,
+    picture_id,
+  );
 }
 
 export async function getPeerThumbnail(
@@ -608,7 +627,7 @@ export async function openImageFile(file: File): Promise<OpenImageInfo> {
       file_name: file.name,
     }) as Promise<any>;
   }
-  const source = await getBrowserMediaPlatform().getImageFileSource(file, file.name);
+  const source = await getBrowserPlatform().media.getImageFileSource(file, file.name);
   return _loadEncodedBytes(source.bytes, source.fileName ?? file.name);
 }
 
@@ -783,7 +802,7 @@ export async function moveLayer(fromIdx: number, toIdx: number): Promise<number>
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
 export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
-  return getThumbnailBackend().getThumbnailBytes(path);
+  return getPlatform().thumbnailBackend.getThumbnailBytes(path);
 }
 
 /** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
@@ -873,41 +892,38 @@ export interface BrowserSnapshotsPlatform {
   markSnapshotCurrent(id: string): Promise<void>;
 }
 
-let _browserMediaPlatform: BrowserMediaPlatform | null = null;
-let _browserPresetsPlatform: BrowserPresetsPlatform | null = null;
-let _browserSnapshotsPlatform: BrowserSnapshotsPlatform | null = null;
+let _platform: Platform | null = null;
 
-export function setBrowserMediaPlatform(platform: BrowserMediaPlatform): void {
-  _browserMediaPlatform = platform;
+async function getTauriInvoke() {
+  const platform = getTauriPlatform();
+  return platform.invoke.bind(platform);
 }
 
-export function setBrowserPresetsPlatform(platform: BrowserPresetsPlatform): void {
-  _browserPresetsPlatform = platform;
+export function setPlatform(platform: Platform): void {
+  _platform = platform;
 }
 
-export function setBrowserSnapshotsPlatform(platform: BrowserSnapshotsPlatform): void {
-  _browserSnapshotsPlatform = platform;
-}
-
-export function getBrowserMediaPlatform(): BrowserMediaPlatform {
-  if (!_browserMediaPlatform) {
-    throw new Error("browser media platform not initialized");
+export function getPlatform(): Platform {
+  if (!_platform) {
+    throw new Error("platform not initialized");
   }
-  return _browserMediaPlatform;
+  return _platform;
 }
 
-export function getBrowserPresetsPlatform(): BrowserPresetsPlatform {
-  if (!_browserPresetsPlatform) {
-    throw new Error("browser presets platform not initialized");
+export function getBrowserPlatform(): BrowserPlatform {
+  const platform = getPlatform();
+  if (platform.kind !== "browser") {
+    throw new Error("browser platform not initialized");
   }
-  return _browserPresetsPlatform;
+  return platform;
 }
 
-export function getBrowserSnapshotsPlatform(): BrowserSnapshotsPlatform {
-  if (!_browserSnapshotsPlatform) {
-    throw new Error("browser snapshots platform not initialized");
+export function getTauriPlatform(): TauriPlatform {
+  const platform = getPlatform();
+  if (platform.kind !== "tauri") {
+    throw new Error("tauri platform not initialized");
   }
-  return _browserSnapshotsPlatform;
+  return platform;
 }
 
 export interface S3MediaLibraryInput {
@@ -946,7 +962,7 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
     const inv = await getTauriInvoke();
     return inv("list_media_libraries") as Promise<MediaLibrary[]>;
   }
-  return getBrowserMediaPlatform().listMediaLibraries();
+  return getBrowserPlatform().media.listMediaLibraries();
 }
 
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
@@ -956,7 +972,7 @@ export async function listLibraryImages(libraryId: string): Promise<LibraryImage
       libraryId,
     }) as Promise<LibraryImageListing>;
   }
-  return getBrowserMediaPlatform().listLibraryImages(libraryId);
+  return getBrowserPlatform().media.listLibraryImages(libraryId);
 }
 
 export async function addMediaLibrary(
@@ -972,7 +988,7 @@ export async function addMediaLibrary(
   if (typeof path === "string") {
     throw new Error("expected a directory handle in the browser runtime");
   }
-  return getBrowserMediaPlatform().addMediaLibrary(path);
+  return getBrowserPlatform().media.addMediaLibrary(path);
 }
 
 export async function addS3MediaLibrary(
@@ -1033,7 +1049,7 @@ export async function removeMediaLibrary(id: string): Promise<void> {
     await inv("remove_media_library", { id });
     return;
   }
-  await getBrowserMediaPlatform().removeMediaLibrary(id);
+  await getBrowserPlatform().media.removeMediaLibrary(id);
 }
 
 export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
@@ -1245,7 +1261,7 @@ export async function listPresets(): Promise<PresetInfo[]> {
     const inv = await getTauriInvoke();
     return inv("list_presets") as Promise<PresetInfo[]>;
   }
-  return getBrowserPresetsPlatform().listPresets();
+  return getBrowserPlatform().presets.listPresets();
 }
 
 export async function savePreset(name: string): Promise<PresetInfo> {
@@ -1254,7 +1270,7 @@ export async function savePreset(name: string): Promise<PresetInfo> {
     return inv("save_preset", { name }) as Promise<PresetInfo>;
   }
   const stack = await getLayerStack();
-  return getBrowserPresetsPlatform().savePreset(name, {
+  return getBrowserPlatform().presets.savePreset(name, {
     version: 1,
     layers: serializeBrowserPresetLayers(stack.layers),
   } satisfies BrowserPresetFile);
@@ -1265,7 +1281,7 @@ export async function renamePreset(oldName: string, newName: string): Promise<Pr
     const inv = await getTauriInvoke();
     return inv("rename_preset", { oldName, newName }) as Promise<PresetInfo>;
   }
-  return getBrowserPresetsPlatform().renamePreset(oldName, newName);
+  return getBrowserPlatform().presets.renamePreset(oldName, newName);
 }
 
 export async function loadPreset(name: string): Promise<void> {
@@ -1274,7 +1290,7 @@ export async function loadPreset(name: string): Promise<void> {
     await inv("load_preset", { name });
     return;
   }
-  const preset = await getBrowserPresetsPlatform().loadPreset(name);
+  const preset = await getBrowserPlatform().presets.loadPreset(name);
   const stack = await getLayerStack();
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot load a preset without a loaded image");
@@ -1298,7 +1314,7 @@ export async function saveSnapshot(imagePath?: string | null): Promise<EditSnaps
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot save a snapshot without a loaded image");
   }
-  return getBrowserSnapshotsPlatform().saveSnapshot(
+  return getBrowserPlatform().snapshots.saveSnapshot(
     serializeBrowserPresetLayers(stack.layers),
     imagePath ?? null,
   );
@@ -1309,7 +1325,7 @@ export async function listSnapshots(imagePath?: string | null): Promise<Snapshot
     const inv = await getTauriInvoke();
     return inv("list_snapshots") as Promise<SnapshotInfo[]>;
   }
-  return getBrowserSnapshotsPlatform().listSnapshots(imagePath ?? null);
+  return getBrowserPlatform().snapshots.listSnapshots(imagePath ?? null);
 }
 
 export async function listMediaRatings(
@@ -1343,7 +1359,7 @@ export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<
   if (await isTauriRuntime()) {
     return false;
   }
-  const snapshot = await getBrowserSnapshotsPlatform().getCurrentSnapshot(imagePath);
+  const snapshot = await getBrowserPlatform().snapshots.getCurrentSnapshot(imagePath);
   if (!snapshot) {
     return false;
   }
@@ -1359,7 +1375,7 @@ export async function loadSnapshot(id: string): Promise<void> {
     await inv("load_snapshot", { params: { id } });
     return;
   }
-  const record = await getBrowserSnapshotsPlatform().getSnapshot(id);
+  const record = await getBrowserPlatform().snapshots.getSnapshot(id);
   const stack = await getLayerStack();
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot load a snapshot without a loaded image");
@@ -1372,7 +1388,7 @@ export async function loadSnapshot(id: string): Promise<void> {
   for (const layer of record.layers) {
     await applyBrowserPresetLayer(layer);
   }
-  await getBrowserSnapshotsPlatform().markSnapshotCurrent(id);
+  await getBrowserPlatform().snapshots.markSnapshotCurrent(id);
 }
 
 export async function getStackSnapshot(): Promise<string> {

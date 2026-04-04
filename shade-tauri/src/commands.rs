@@ -1463,7 +1463,7 @@ fn s3_upload_object_key(config: &shade_io::S3LibraryConfig, file_name: &str) -> 
 }
 
 async fn ccapi_host_is_online(host: &str) -> bool {
-    let api = ccapi::CCAPI::new(host);
+    let api = shade_io::ccapi::CCAPI::new(host);
     tokio::time::timeout(std::time::Duration::from_millis(1200), api.probe())
         .await
         .is_ok_and(|result| result)
@@ -1947,7 +1947,7 @@ fn ccapi_rating(value: &str) -> Result<Option<u8>, String> {
 }
 
 async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, String> {
-    let api = ccapi::CCAPI::new(host);
+    let api = shade_io::ccapi::CCAPI::new(host);
     let storage = api.storage().await.map_err(|e| e.to_string())?;
     let mut items = Vec::new();
     for storage in storage.storagelist {
@@ -2078,7 +2078,7 @@ async fn load_camera_thumbnail_from_tauri<R: tauri::Runtime>(
         .0
         .acquire(host)
         .await?;
-    ccapi::CCAPI::new(host)
+    shade_io::ccapi::CCAPI::new(host)
         .thumbnail(file_path)
         .await
         .map(|bytes| bytes.to_vec())
@@ -2150,7 +2150,7 @@ async fn load_camera_image_from_tauri(
     host: &str,
     file_path: &str,
 ) -> Result<Vec<u8>, String> {
-    ccapi::CCAPI::new(host)
+    shade_io::ccapi::CCAPI::new(host)
         .original(file_path)
         .await
         .map(|bytes| bytes.to_vec())
