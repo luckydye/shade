@@ -18,6 +18,7 @@ html {
   background-color: #050505;
   color: #f5f5f4;
   scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
 }
 
 body {

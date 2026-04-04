@@ -26,6 +26,12 @@ tasks:
     dir: shade-web
     cmd: bun run build:wasm
 
+  website:dev:
+    desc: Dev the website
+    dir: website
+    cmds: 
+      - bun run dev
+
   website:build:
     desc: Build the website
     dir: website

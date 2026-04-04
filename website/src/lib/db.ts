@@ -23,6 +23,25 @@ export async function initSchema(): Promise<void> {
             content_type TEXT NOT NULL,
             size INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS waitlist_signups (
+            email TEXT PRIMARY KEY,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'unsubscribed')),
+            opt_in_label TEXT NOT NULL,
+            signup_ip TEXT NOT NULL,
+            signup_requested_at TEXT NOT NULL,
+            confirmation_token_hash TEXT NOT NULL,
+            confirmation_sent_at TEXT NOT NULL,
+            confirmed_at TEXT,
+            confirmed_ip TEXT,
+            unsubscribe_token_hash TEXT NOT NULL,
+            unsubscribed_at TEXT,
+            unsubscribed_ip TEXT,
+            CHECK (email = lower(email))
+        );
+        CREATE INDEX IF NOT EXISTS idx_waitlist_confirmation_token_hash
+            ON waitlist_signups (confirmation_token_hash);
+        CREATE INDEX IF NOT EXISTS idx_waitlist_unsubscribe_token_hash
+            ON waitlist_signups (unsubscribe_token_hash);
     `);
 
     try {

@@ -1,0 +1,62 @@
+<section id="waitlist" class="mx-auto w-full max-w-6xl scroll-mt-20 pb-28">
+    <div class="rounded-[2rem] border border-white/[0.08] bg-white/[0.03] p-6 backdrop-blur-sm md:p-10">
+        <div class="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
+            <div>
+                <h2 class="mb-5 text-[clamp(2.2rem,6vw,4rem)] font-black uppercase leading-none tracking-[-0.04em] text-white">
+                    Get the launch email.
+                </h2>
+                <p class="max-w-xl text-[15px] leading-relaxed text-white/68">
+                    Join the waitlist if you want a product launch reminder in your inbox.
+                </p>
+            </div>
+
+            <div>
+                <form data-waitlist-form class="space-y-4" novalidate>
+                    <label class="block">
+                        <span class="mb-2 block text-[12px] font-semibold uppercase tracking-[0.22em] text-white/40">
+                            Email
+                        </span>
+                        <input
+                            type="email"
+                            name="email"
+                            autocomplete="email"
+                            required
+                            placeholder="you@example.com"
+                            class="w-full rounded-2xl border border-white/[0.1] bg-white/[0.03] px-4 py-3 text-[15px] text-white outline-none transition focus:border-white/[0.28] focus:bg-white/[0.06]"
+                        />
+                    </label>
+
+                    <label class="flex items-start gap-3 rounded-2xl px-2 text-left">
+                        <input
+                            type="checkbox"
+                            name="productLaunchOptIn"
+                            value="Ich möchte per E-Mail über den Produktstart informiert werden."
+                            required
+                            class="mt-1 h-4 w-4 rounded border-white/20 bg-transparent"
+                        />
+                        <span class="text-[14px] leading-relaxed text-white/74">
+                            Ich möchte per E-Mail über den Produktstart informiert werden.
+                        </span>
+                    </label>
+
+                    <button
+                        type="submit"
+                        class="inline-flex w-full items-center justify-center rounded-full bg-white px-5 py-3 text-[14px] font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Join the waitlist
+                    </button>
+
+                    <p class="text-[12px] leading-relaxed text-white/42">
+                        Double opt-in required. The confirmation email includes an unsubscribe link and impressum.
+                        Details in
+                        <a href="/datenschutz" class="text-white underline decoration-white/30 underline-offset-3">
+                            Impressum & Datenschutzerklärung
+                        </a>
+                        .
+                    </p>
+                    <p data-waitlist-feedback class="min-h-6 text-[13px] leading-relaxed text-white/70" aria-live="polite"></p>
+                </form>
+            </div>
+        </div>
+    </div>
+</section>

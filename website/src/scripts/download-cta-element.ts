@@ -225,7 +225,7 @@ const BUTTON_CLASS =
 
 class DownloadCtaElement extends HTMLElement {
   link: HTMLAnchorElement;
-  fallback: HTMLSpanElement;
+  fallback: HTMLAnchorElement;
 
   constructor() {
     super();
@@ -237,9 +237,9 @@ class DownloadCtaElement extends HTMLElement {
     this.link.target = "_blank";
     this.link.textContent = "Download";
 
-    this.fallback = document.createElement("span");
-    this.fallback.className = `${BUTTON_CLASS} cursor-not-allowed border-white/12 bg-white/[0.08] text-white/45`;
-    this.fallback.setAttribute("aria-disabled", "true");
+    this.fallback = document.createElement("a");
+    this.fallback.className = `${BUTTON_CLASS} border-white/12 bg-white/[0.08] text-white/72 hover:bg-white/[0.12]`;
+    this.fallback.href = "#waitlist";
     this.fallback.textContent =
       this.getAttribute("unavailable-label") ?? "Coming soon";
 
