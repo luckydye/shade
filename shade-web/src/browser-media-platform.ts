@@ -10,7 +10,7 @@ import { getBrowserPlatform } from "shade-ui/src/bridge/index";
 import { requestToPromise, withStores } from "shade-ui/src/cache-utils";
 import {
   fileNameFromPath,
-  loadBrowserDisplayBytes,
+  loadBrowserEncodedBytes,
   loadBrowserThumbnailBytes,
 } from "./browser-image-preview";
 
@@ -473,12 +473,12 @@ export const browserMediaPlatform: BrowserMediaPlatform & {
   async getImageSource(path) {
     if (isBrowserMountedPath(path)) {
       const file = await loadItemFile(path);
-      return loadBrowserDisplayBytes(file.name, file);
+      return loadBrowserEncodedBytes(file.name, file);
     }
-    return loadBrowserDisplayBytes(fileNameFromPath(path), await fetchFile(path));
+    return loadBrowserEncodedBytes(fileNameFromPath(path), await fetchFile(path));
   },
   getImageFileSource(file, fileName) {
-    return loadBrowserDisplayBytes(fileName, file);
+    return loadBrowserEncodedBytes(fileName, file);
   },
   async getThumbnailBytes(path) {
     if (isBrowserMountedPath(path)) {

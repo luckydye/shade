@@ -160,6 +160,16 @@ export async function loadBrowserDisplayBytes(
   };
 }
 
+export async function loadBrowserEncodedBytes(
+  fileName: string,
+  blob: Blob,
+): Promise<{ bytes: ArrayBuffer; fileName: string }> {
+  return {
+    bytes: await blob.arrayBuffer(),
+    fileName,
+  };
+}
+
 export async function loadBrowserThumbnailBytes(
   fileName: string,
   blob: Blob,
