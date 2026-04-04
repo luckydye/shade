@@ -177,7 +177,7 @@ export const MediaView: Component = () => {
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
-  let scrollRef!: HTMLDivElement;
+  const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | null>(null);
   let libraryTabsRef: HTMLDivElement | undefined;
   let libraryActionsRef: HTMLDivElement | undefined;
   let addDropdownRef: HTMLDivElement | undefined;
@@ -402,45 +402,6 @@ export const MediaView: Component = () => {
     );
     return p2pState.peers.filter((peer) => !addedPeerIds.has(peer.endpoint_id));
   });
-
-  createEffect(() => {
-    const availableLibraries = orderedLibraryEntries();
-    if (!availableLibraries.length) {
-      setSelectedLibraryId(null);
-      return;
-    }
-    const current = selectedLibraryId();
-    if (current && availableLibraries.some((library) => library.id === current)) {
-      return;
-    }
-    const firstLocalLibrary = availableLibraries.find(
-      (library) => !isPeerLibrary(library),
-    );
-    setSelectedLibraryId(firstLocalLibrary?.id ?? null);
-  });
-
-  createEffect(() => {
-    if (canWriteSelectedLibrary()) {
-      return;
-    }
-    setUploadDragFeedback(null);
-  });
-
-  createEffect(() => {
-    const entries = libraryEntries();
-    const nextOrder = mergeLibraryOrder(
-      libraryOrder(),
-      entries.map((library) => library.id),
-    );
-    if (
-      nextOrder.length === libraryOrder().length &&
-      nextOrder.every((id, index) => id === libraryOrder()[index])
-    ) {
-      return;
-    }
-    setLibraryOrder(nextOrder);
-  });
-
   const selectedLibrary = createMemo(
     () =>
       orderedLibraryEntries().find((library) => library.id === selectedLibraryId()) ??
@@ -534,6 +495,44 @@ export const MediaView: Component = () => {
       return 0;
     }
     return Math.round((progress.completedFiles / progress.totalFiles) * 100);
+  });
+
+  createEffect(() => {
+    const availableLibraries = orderedLibraryEntries();
+    if (!availableLibraries.length) {
+      setSelectedLibraryId(null);
+      return;
+    }
+    const current = selectedLibraryId();
+    if (current && availableLibraries.some((library) => library.id === current)) {
+      return;
+    }
+    const firstLocalLibrary = availableLibraries.find(
+      (library) => !isPeerLibrary(library),
+    );
+    setSelectedLibraryId(firstLocalLibrary?.id ?? null);
+  });
+
+  createEffect(() => {
+    if (canWriteSelectedLibrary()) {
+      return;
+    }
+    setUploadDragFeedback(null);
+  });
+
+  createEffect(() => {
+    const entries = libraryEntries();
+    const nextOrder = mergeLibraryOrder(
+      libraryOrder(),
+      entries.map((library) => library.id),
+    );
+    if (
+      nextOrder.length === libraryOrder().length &&
+      nextOrder.every((id, index) => id === libraryOrder()[index])
+    ) {
+      return;
+    }
+    setLibraryOrder(nextOrder);
   });
   const tileMinWidth = createMemo(() => {
     if (viewportWidth() < 640) {
@@ -663,7 +662,11 @@ export const MediaView: Component = () => {
         const row = rows[i];
         if (row.kind === "items" && row.ids.includes(anchor)) {
           const newTop = offsets[i] + Math.min(offset, rowHeight - 1);
-          scrollRef.scrollTop = newTop;
+          const element = scrollRef();
+          if (!element) {
+            return;
+          }
+          element.scrollTop = newTop;
           setScrollTop(newTop);
           break;
         }
@@ -768,17 +771,9 @@ export const MediaView: Component = () => {
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
     }, 3000);
-    const updateViewport = () => {
-      setViewportHeight(scrollRef.clientHeight);
-      setViewportWidth(scrollRef.clientWidth - 48);
-    };
-    updateViewport();
-    const observer = new ResizeObserver(updateViewport);
-    observer.observe(scrollRef);
     onCleanup(() => {
       isDisposed = true;
       window.clearInterval(libraryRefreshTimer);
-      observer.disconnect();
       stopP2pPolling();
       for (const src of thumbnailMemoryBuffer.values()) {
         if (src !== state.loadingMediaSrc) {
@@ -786,6 +781,23 @@ export const MediaView: Component = () => {
         }
       }
       thumbnailMemoryBuffer.clear();
+    });
+  });
+
+  createEffect(() => {
+    const element = scrollRef();
+    if (!(element instanceof HTMLDivElement)) {
+      return;
+    }
+    const updateViewport = () => {
+      setViewportHeight(element.clientHeight);
+      setViewportWidth(element.clientWidth - 48);
+    };
+    updateViewport();
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(element);
+    onCleanup(() => {
+      observer.disconnect();
     });
   });
 
@@ -868,8 +880,9 @@ export const MediaView: Component = () => {
     setAnchorRowOffset(0);
     setSelectedMediaItemIds([]);
     setShowLibraryActions(false);
-    if (scrollRef) {
-      scrollRef.scrollTop = 0;
+    const element = scrollRef();
+    if (element) {
+      element.scrollTop = 0;
     }
   });
 
@@ -878,8 +891,9 @@ export const MediaView: Component = () => {
     setScrollTop(0);
     setAnchorItemId(null);
     setAnchorRowOffset(0);
-    if (scrollRef) {
-      scrollRef.scrollTop = 0;
+    const element = scrollRef();
+    if (element) {
+      element.scrollTop = 0;
     }
   });
 
@@ -1695,7 +1709,7 @@ export const MediaView: Component = () => {
         </Show>
       
         <div
-          ref={scrollRef}
+          ref={setScrollRef}
           class={scrollClass()}
           onScroll={(event) => {
             const top = event.currentTarget.scrollTop;
