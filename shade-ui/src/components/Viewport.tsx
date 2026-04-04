@@ -1643,7 +1643,7 @@ export const Viewport: Component = () => {
   });
 
   return (
-    <section class="relative flex min-h-[42vh] flex-1 overflow-hidden lg:min-h-0">
+    <section class="relative flex min-h-0 flex-1 overflow-hidden touch-compact:min-h-[42vh]">
       <div
         ref={stageRef}
         class="relative flex-1 overflow-hidden bg-[var(--canvas-bg)]"

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+@custom-variant touch-mobile (@media (max-width: 767px) and (hover: none) and (pointer: coarse));
+@custom-variant touch-compact (@media (max-width: 1023px) and (hover: none) and (pointer: coarse));
+
 /* ─── Design tokens ──────────────────────────────────────────────────────── */
 
 :root {
@@ -161,7 +164,7 @@ button[data-pressed="true"] {
   transform: scale(0.99);
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 1023px) and (hover: none) and (pointer: coarse) {
   .mobile-slider-drawer {
     transition:
       transform 300ms ease-out,

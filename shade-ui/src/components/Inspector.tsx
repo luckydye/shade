@@ -2030,9 +2030,9 @@ export const Inspector: Component = () => {
   );
 
   return (
-    <aside class="lg:w-[340px] lg:flex-none lg:block">
+    <aside class="block w-[340px] flex-none touch-compact:w-auto">
       <div
-        class={`m-2 hidden h-[calc(100%-1rem)] lg:flex lg:flex-col ${PANEL_SHELL_CLASS}`}
+        class={`m-2 flex h-[calc(100%-1rem)] flex-col touch-compact:hidden ${PANEL_SHELL_CLASS}`}
       >
         <div class="media-scroll flex-1 pr-5 overflow-y-auto">
           <InspectorTabs class="mb-5" />
@@ -2045,10 +2045,10 @@ export const Inspector: Component = () => {
         </div>
       </div>
 
-      {/* Mobile: drawer overlay */}
+      {/* Touch compact: drawer overlay */}
       <div
         data-mobile-slider-active={isAdjustmentSliderActive() ? "true" : undefined}
-        class={`mobile-slider-drawer fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--border)] bg-[var(--panel-bg)] transition-transform duration-300 ease-out lg:hidden ${
+        class={`mobile-slider-drawer fixed bottom-0 left-0 right-0 z-30 hidden border-t border-[var(--border)] bg-[var(--panel-bg)] transition-transform duration-300 ease-out touch-compact:block ${
           isDrawerOpen() ? "translate-y-0" : "translate-y-[calc(100%-4.5rem)]"
         }`}
       >

@@ -109,7 +109,7 @@ const App: Component = () => {
       <div class="flex min-h-0 flex-1">
         <MediaView />
         <div
-          class={`min-h-0 flex-1 flex-col lg:flex-row ${showEditor() ? "flex" : "hidden"}`}
+          class={`min-h-0 flex-1 flex-row touch-compact:flex-col ${showEditor() ? "flex" : "hidden"}`}
         >
           <Viewport />
           <Inspector />

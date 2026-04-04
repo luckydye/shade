@@ -89,7 +89,7 @@ const MENU_ITEM_BUTTON_CLASS =
 const MENU_DANGER_ITEM_BUTTON_CLASS =
   "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
 const INPUT_CLASS =
-  "h-10 md:h-8 w-full rounded-full md:rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-4 md:px-2 text-base md:text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+  "h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)] touch-mobile:h-10 touch-mobile:rounded-full touch-mobile:px-4 touch-mobile:text-base";
 const EMPTY_STATE_CLASS =
   "px-3 py-4 text-sm text-[var(--text-faint)]";
 const EMPTY_STATE_PANEL_CLASS =
@@ -1320,15 +1320,15 @@ export const MediaView: Component = () => {
   }
 
   const isEditorStrip = () => state.currentView === "editor";
-  const mediaVisibleClass = () => (isEditorStrip() ? "hidden lg:flex" : "flex");
+  const mediaVisibleClass = () => (isEditorStrip() ? "flex touch-compact:hidden" : "flex");
   const shellClass = () =>
     isEditorStrip()
-      ? "hidden w-[112px] shrink-0 border-r border-[var(--border)] bg-[var(--panel-bg)] lg:flex lg:flex-col"
-      : "flex flex-1 flex-col overflow-hidden pt-[calc(env(safe-area-inset-top)+3.5rem)] lg:pt-0";
+      ? "flex w-[112px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel-bg)] touch-compact:hidden"
+      : "flex flex-1 flex-col overflow-hidden pt-0 touch-compact:pt-[calc(env(safe-area-inset-top)+3.5rem)]";
   const scrollClass = () =>
     isEditorStrip()
       ? "media-scroll h-full overflow-y-auto px-2 py-3"
-      : "media-scroll h-full overflow-y-auto p-4 md:p-6";
+      : "media-scroll h-full overflow-y-auto p-6 touch-mobile:p-4";
 
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   
@@ -1365,7 +1365,7 @@ export const MediaView: Component = () => {
       </Show>
       <Show when={!isEditorStrip()}>
         <div
-          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-4 md:px-6`}
+          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4 touch-mobile:px-4`}
         >
           <div class="flex w-full flex-wrap items-center gap-3">
             <div
@@ -1436,7 +1436,7 @@ export const MediaView: Component = () => {
                 {(peer) => (
                   <Button
                     type="button"
-                    class={`${LIBRARY_TAB_BASE_CLASS} w-full border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] md:w-auto`}
+                    class={`${LIBRARY_TAB_BASE_CLASS} w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full`}
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
@@ -1444,10 +1444,10 @@ export const MediaView: Component = () => {
                   </Button>
                 )}
               </For>
-              <div class="hidden md:flex relative shrink-0 items-center" ref={addDropdownRef}>
+              <div class="relative flex shrink-0 items-center touch-mobile:hidden" ref={addDropdownRef}>
                 <Button
                   type="button"
-                  class={`${LIBRARY_TAB_BASE_CLASS} w-full border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] md:w-auto`}
+                  class={`${LIBRARY_TAB_BASE_CLASS} w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full`}
                   disabled={isSubmitting()}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -1509,7 +1509,7 @@ export const MediaView: Component = () => {
             </Show>
             <div class="relative flex items-center" ref={libraryActionsRef}>
               <Show when={selectedLibrary()}>
-                <label class="hidden md:block w-full w-56">
+                <label class="block w-full w-56 touch-mobile:hidden">
                   <input
                     type="text"
                     value={filenameFilter()}
@@ -1565,8 +1565,8 @@ export const MediaView: Component = () => {
               </Show>
             </div>
             <Show when={showS3Form()}>
-              <div class="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 md:grid-cols-3">
-                <div class="md:col-span-3">
+              <div class="grid grid-cols-3 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 touch-mobile:grid-cols-1">
+                <div class="col-span-3 touch-mobile:col-span-1">
                   <div class={PANEL_SECTION_TITLE_CLASS}>S3 Library</div>
                 </div>
                 <label class="flex flex-col gap-1">
@@ -1578,7 +1578,7 @@ export const MediaView: Component = () => {
                     class={INPUT_CLASS}
                   />
                 </label>
-                <label class="flex flex-col gap-1 md:col-span-2">
+                <label class="col-span-2 flex flex-col gap-1 touch-mobile:col-span-1">
                   <span class={PANEL_SECTION_TITLE_CLASS}>Endpoint</span>
                   <input
                     type="text"
@@ -1635,7 +1635,7 @@ export const MediaView: Component = () => {
                     class={INPUT_CLASS}
                   />
                 </label>
-                <label class="flex flex-col gap-1 md:col-span-2">
+                <label class="col-span-2 flex flex-col gap-1 touch-mobile:col-span-1">
                   <span class={PANEL_SECTION_TITLE_CLASS}>Secret Access Key</span>
                   <input
                     type="password"
@@ -1646,7 +1646,7 @@ export const MediaView: Component = () => {
                     class={INPUT_CLASS}
                   />
                 </label>
-                <div class="flex items-end gap-2 md:col-span-3">
+                <div class="col-span-3 flex items-end gap-2 touch-mobile:col-span-1">
                   <Button
                     type="button"
                     class={SURFACE_BUTTON_CLASS}
@@ -1944,9 +1944,7 @@ export const MediaView: Component = () => {
       </div>
 
       <div
-        class={`hidden flex-col gap-2 border-t border-[var(--border)] ${
-          isEditorStrip() ? "" : "md:flex px-4 py-3 md:px-6"
-        }`}
+        class={`${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 py-3 touch-mobile:hidden lg:px-6`}
       >
         {displayedError() && (
           <p class="text-sm text-[var(--danger-text)]">{displayedError()}</p>
@@ -1998,7 +1996,7 @@ export const MediaView: Component = () => {
       </div>
       
       <Show when={selectedLibrary()}>
-        <div class="fixed left-0 right-0 w-auto bottom-[env(safe-area-inset-bottom)] px-7 md:hidden">
+        <div class="fixed bottom-[env(safe-area-inset-bottom)] left-0 right-0 hidden w-auto px-7 touch-mobile:block">
           <input
             type="text"
             value={filenameFilter()}
