@@ -564,7 +564,12 @@ export async function selectArtboard(artboardId: string) {
 }
 
 export async function exportImage(path: string) {
-  await bridge.exportImage(path);
+  setState("loadError", null);
+  try {
+    await bridge.exportImage(path);
+  } catch (error) {
+    setState("loadError", describeImageLoadError(error));
+  }
 }
 
 export async function pickExportTarget() {

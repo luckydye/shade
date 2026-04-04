@@ -2213,6 +2213,14 @@ pub enum RenderJob {
         response:
             tokio::sync::oneshot::Sender<Result<PreviewFrameFloat16Response, String>>,
     },
+    Export {
+        stack: LayerStack,
+        sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+        canvas_width: u32,
+        canvas_height: u32,
+        request: PreviewRenderRequest,
+        response: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+    },
 }
 
 pub struct ThumbnailRenderJob {
@@ -2257,10 +2265,35 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                 }
             };
             eprintln!("render worker: ready");
-            while let Ok(mut job) = receiver.recv() {
-                while let Ok(next_job) = receiver.try_recv() {
-                    drop(job);
-                    job = next_job;
+            let mut deferred_job = None;
+            loop {
+                let mut job = match deferred_job.take() {
+                    Some(job) => job,
+                    None => match receiver.recv() {
+                        Ok(job) => job,
+                        Err(_) => break,
+                    },
+                };
+                if matches!(
+                    job,
+                    RenderJob::Preview { .. } | RenderJob::PreviewFloat16 { .. }
+                ) {
+                    loop {
+                        match receiver.try_recv() {
+                            Ok(next_job) => match next_job {
+                                RenderJob::Preview { .. }
+                                | RenderJob::PreviewFloat16 { .. } => {
+                                    job = next_job;
+                                }
+                                _ => {
+                                    deferred_job = Some(next_job);
+                                    break;
+                                }
+                            },
+                            Err(crossbeam_channel::TryRecvError::Empty) => break,
+                            Err(crossbeam_channel::TryRecvError::Disconnected) => break,
+                        }
+                    }
                 }
                 match job {
                     RenderJob::Preview {
@@ -2329,6 +2362,37 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                                         width: request.target_width,
                                         height: request.target_height,
                                     })
+                                    .map_err(|e| e.to_string())
+                            }),
+                        )
+                        .unwrap_or_else(|e| Err(panic_to_string(e)));
+                        let _ = response.send(result);
+                    }
+                    RenderJob::Export {
+                        stack,
+                        sources,
+                        canvas_width,
+                        canvas_height,
+                        request,
+                        response,
+                    } => {
+                        let result = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| {
+                                runtime
+                                    .block_on(renderer.render_stack_preview(
+                                        &stack,
+                                        sources.as_ref(),
+                                        canvas_width,
+                                        canvas_height,
+                                        request.target_width,
+                                        request.target_height,
+                                        request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                            x: crop.x,
+                                            y: crop.y,
+                                            width: crop.width,
+                                            height: crop.height,
+                                        }),
+                                    ))
                                     .map_err(|e| e.to_string())
                             }),
                         )
@@ -3241,6 +3305,7 @@ pub async fn render_preview_float16(
 #[tauri::command]
 pub async fn export_image(
     path: String,
+    render_service: tauri::State<'_, crate::RenderService>,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
     let export_path = PathBuf::from(&path);
@@ -3254,40 +3319,24 @@ pub async fn export_image(
     }
     let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
     let request = export_render_request(&stack, canvas_width, canvas_height)?;
+    let export_width = request.target_width;
+    let export_height = request.target_height;
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    render_service
+        .0
+        .send(RenderJob::Export {
+            stack,
+            sources,
+            canvas_width,
+            canvas_height,
+            request,
+            response: response_tx,
+        })
+        .map_err(|e| e.to_string())?;
+    let pixels = response_rx.await.map_err(|e| e.to_string())??;
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-        let pixels = runtime.block_on(async {
-            let renderer = shade_gpu::Renderer::new()
-                .await
-                .map_err(|e| e.to_string())?;
-            renderer
-                .render_stack_preview(
-                    &stack,
-                    &sources,
-                    canvas_width,
-                    canvas_height,
-                    request.target_width,
-                    request.target_height,
-                    request.crop.as_ref().map(|crop| shade_gpu::PreviewCrop {
-                        x: crop.x,
-                        y: crop.y,
-                        width: crop.width,
-                        height: crop.height,
-                    }),
-                )
-                .await
-                .map_err(|e| e.to_string())
-        })?;
-        shade_io::save_image(
-            &export_path,
-            &pixels,
-            request.target_width,
-            request.target_height,
-        )
-        .map_err(|e| e.to_string())
+        shade_io::save_image(&export_path, &pixels, export_width, export_height)
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())??;
