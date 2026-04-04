@@ -65,6 +65,7 @@ export {
   panViewport,
   offsetViewportCenter,
   previewTile,
+  refreshFinalPreview,
   refreshPreview,
   resetViewport,
   setViewportScreenSize,

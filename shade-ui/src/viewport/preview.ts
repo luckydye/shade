@@ -481,7 +481,7 @@ export function refreshPreview() {
   return requestPreviewRefresh("auto");
 }
 
-function refreshFinalPreview() {
+export function refreshFinalPreview() {
   return requestPreviewRefresh("final-only");
 }
 
@@ -539,7 +539,7 @@ export function resetViewport() {
     viewportCenterX: fit.x + fit.width * 0.5,
     viewportCenterY: fit.y + fit.height * 0.5,
   });
-  refreshPreview();
+  refreshFinalPreview();
 }
 
 export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anchorY: number) {
@@ -581,7 +581,7 @@ export function panViewport(deltaX: number, deltaY: number, shouldRefresh = true
     viewportCenterY: state.viewportCenterY - deltaY / imageScale,
   });
   if (shouldRefresh) {
-    refreshPreview();
+    refreshFinalPreview();
   }
 }
 

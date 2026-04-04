@@ -13,6 +13,7 @@ import {
   panViewport,
   backdropTile,
   previewTile,
+  refreshFinalPreview,
   refreshPreview,
   resetViewport,
   selectArtboard,
@@ -1596,7 +1597,7 @@ export const Viewport: Component = () => {
       return;
     }
     if (gesture?.kind === "pinch") {
-      void refreshPreview();
+      void refreshFinalPreview();
       if (activePointers.size === 1) {
         const [p] = [...activePointers.values()];
         gesture = {
@@ -1615,7 +1616,7 @@ export const Viewport: Component = () => {
     }
     if (gesture?.kind === "pan") {
       const tappedArtboardId = !gesture.moved ? gesture.tapArtboardId : null;
-      void refreshPreview();
+      void refreshFinalPreview();
       gesture = null;
       if (tappedArtboardId && tappedArtboardId !== state.selectedArtboardId) {
         requestArtboardSelection(tappedArtboardId);
