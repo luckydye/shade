@@ -273,20 +273,13 @@ pub fn load_image_bytes_f32_with_info(
         let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
             .context("RAW decode failed")?;
         let bit_depth = format!("{}-bit RAW", raw_image.bps);
-        let rgba = apply_orientation(
+        let image = apply_orientation(
             develop_raw_image(&raw_image)?,
             raw_orientation_to_exif(raw_image.orientation),
-        )
-        .into_rgba32f();
-        let (width, height) = rgba.dimensions();
-        let mut pixels = rgba.into_raw();
-        to_linear_srgb_f32(&mut pixels, &ColorSpace::Srgb);
+        );
+        let color_type = image.color();
         return Ok((
-            FloatImage {
-                pixels: pixels.into(),
-                width,
-                height,
-            },
+            into_linear_float_image(image, color_type, &ColorSpace::Srgb),
             SourceImageInfo {
                 bit_depth,
                 color_space: ColorSpace::Srgb,
