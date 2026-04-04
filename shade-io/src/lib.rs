@@ -807,19 +807,39 @@ fn rgba16_to_linear_float_image(
     color_space: &ColorSpace,
 ) -> FloatImage {
     let (width, height) = image.dimensions();
-    let mut pixels = image
-        .into_raw()
-        .chunks_exact(4)
-        .flat_map(|rgba| {
-            [
-                rgba[0] as f32 / 65535.0,
-                rgba[1] as f32 / 65535.0,
-                rgba[2] as f32 / 65535.0,
-                rgba[3] as f32 / 65535.0,
-            ]
-        })
-        .collect::<Vec<_>>();
-    to_linear_srgb_f32(&mut pixels, color_space);
+    let pixels = match color_space {
+        ColorSpace::Srgb | ColorSpace::Unknown | ColorSpace::Custom(_) => {
+            let linear_lut = linear_srgb_lut_u16();
+            image
+                .into_raw()
+                .chunks_exact(4)
+                .flat_map(|rgba| {
+                    [
+                        linear_lut[rgba[0] as usize],
+                        linear_lut[rgba[1] as usize],
+                        linear_lut[rgba[2] as usize],
+                        rgba[3] as f32 / 65535.0,
+                    ]
+                })
+                .collect::<Vec<_>>()
+        }
+        _ => {
+            let mut pixels = image
+                .into_raw()
+                .chunks_exact(4)
+                .flat_map(|rgba| {
+                    [
+                        rgba[0] as f32 / 65535.0,
+                        rgba[1] as f32 / 65535.0,
+                        rgba[2] as f32 / 65535.0,
+                        rgba[3] as f32 / 65535.0,
+                    ]
+                })
+                .collect::<Vec<_>>();
+            to_linear_srgb_f32(&mut pixels, color_space);
+            pixels
+        }
+    };
     FloatImage {
         pixels: pixels.into(),
         width,
@@ -830,6 +850,15 @@ fn rgba16_to_linear_float_image(
 fn linear_srgb_lut_u8() -> &'static [f32; 256] {
     static LUT: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
     LUT.get_or_init(|| std::array::from_fn(|idx| srgb_to_linear(idx as f32 / 255.0)))
+}
+
+fn linear_srgb_lut_u16() -> &'static [f32; 65536] {
+    static LUT: std::sync::OnceLock<Box<[f32; 65536]>> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| {
+        Box::new(std::array::from_fn(|idx| {
+            srgb_to_linear(idx as f32 / 65535.0)
+        }))
+    })
 }
 
 fn develop_raw_image(raw_image: &RawImage) -> Result<DynamicImage> {
@@ -924,8 +953,36 @@ fn apply_linear_matrix_and_gamma_f32(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_image, load_image_f32_with_info};
+    use super::{
+        apply_orientation, develop_raw_image, into_linear_float_image, load_image,
+        load_image_f32_with_info, raw_orientation_to_exif,
+    };
+    use image::DynamicImage;
+    use rawler::{decoders::RawDecodeParams, rawsource::RawSource};
+    use shade_core::ColorSpace;
     use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    fn format_duration(duration: Duration) -> String {
+        format!("{:.2}ms", duration.as_secs_f64() * 1000.0)
+    }
+
+    fn legacy_rgba16_to_linear_float_image(image: DynamicImage) {
+        let rgba = image.into_rgba16();
+        let mut pixels = rgba
+            .into_raw()
+            .chunks_exact(4)
+            .flat_map(|rgba| {
+                [
+                    rgba[0] as f32 / 65535.0,
+                    rgba[1] as f32 / 65535.0,
+                    rgba[2] as f32 / 65535.0,
+                    rgba[3] as f32 / 65535.0,
+                ]
+            })
+            .collect::<Vec<_>>();
+        super::to_linear_srgb_f32(&mut pixels, &ColorSpace::Srgb);
+    }
 
     #[test]
     fn applies_orientation_to_cr3_fixture() {
@@ -949,6 +1006,56 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/Desk.exr");
         let (_, info) = load_image_f32_with_info(&path).expect("fixture should decode");
         assert_eq!(info.bit_depth, "16-bit float");
+    }
+
+    #[test]
+    #[ignore = "benchmark helper"]
+    fn benchmark_cr3_wasm_open_path() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/_MGC3030.CR3");
+        let bytes = std::fs::read(&path).expect("fixture bytes");
+
+        let decode_start = Instant::now();
+        let raw_source = RawSource::new_from_slice(&bytes).with_path("_MGC3030.CR3");
+        let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
+            .expect("RAW decode");
+        let decode_duration = decode_start.elapsed();
+
+        let develop_start = Instant::now();
+        let developed = develop_raw_image(&raw_image).expect("RAW develop");
+        let develop_duration = develop_start.elapsed();
+
+        let orient_start = Instant::now();
+        let oriented = apply_orientation(
+            developed,
+            raw_orientation_to_exif(raw_image.orientation),
+        );
+        let orient_duration = orient_start.elapsed();
+
+        let color_type = oriented.color();
+        let legacy_source = oriented.clone();
+        let legacy_convert_start = Instant::now();
+        legacy_rgba16_to_linear_float_image(legacy_source);
+        let legacy_convert_duration = legacy_convert_start.elapsed();
+        let convert_start = Instant::now();
+        let image = into_linear_float_image(oriented, color_type, &ColorSpace::Srgb);
+        let convert_duration = convert_start.elapsed();
+
+        let total = decode_duration + develop_duration + orient_duration + convert_duration;
+
+        eprintln!(
+            "cr3 wasm-open benchmark: decode={} develop={} orient={} to_float={} legacy_to_float={} total={} size={}x{}",
+            format_duration(decode_duration),
+            format_duration(develop_duration),
+            format_duration(orient_duration),
+            format_duration(convert_duration),
+            format_duration(legacy_convert_duration),
+            format_duration(total),
+            image.width,
+            image.height,
+        );
+
+        assert_eq!((image.width, image.height), (3648, 5472));
     }
 }
 
