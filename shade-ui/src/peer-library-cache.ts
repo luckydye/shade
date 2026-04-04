@@ -266,7 +266,7 @@ export async function resolvePeerThumbnailSrc(
   if (cached) {
     return URL.createObjectURL(cached);
   }
-  const bytes = await getThumbnailBackend().getPeerThumbnailBytes(peerId,pictureId);
+  const bytes = await getThumbnailBackend().getPeerThumbnailBytes(peerId, pictureId);
   if (signal.aborted) {
     throw abortError();
   }

@@ -2,13 +2,13 @@ import type { Component } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { resetCameraThumbnailFailure } from "../../camera-library-cache";
 import { resetLocalThumbnailFailure } from "../../local-library-cache";
-import { state } from "../../store/editor";
 import { Button } from "../Button";
 import { MediaRating } from "../MediaRating";
 import { loadItemSrc, type MediaItem } from "./media-utils";
 
 type MediaTileProps = {
   item: MediaItem;
+  cachedSrc?: string;
   compact?: boolean;
   active?: boolean;
   selected?: boolean;
@@ -16,6 +16,7 @@ type MediaTileProps = {
   offline?: boolean;
   disableThumbnailLoad?: boolean;
   onActivate: (src: string | null) => void;
+  onThumbnailLoaded?: (src: string) => void;
   onToggleSelection: () => void;
 };
 
@@ -41,15 +42,33 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
   });
 
   createEffect(() => {
+    const cachedSrc = props.cachedSrc;
+    if (!cachedSrc || src() === cachedSrc) {
+      return;
+    }
+    setLoadError(false);
+    setSrc(cachedSrc);
+  });
+
+  createEffect(() => {
     loadRequestVersion();
-    if (props.disableThumbnailLoad || !isIntersecting() || src() || isLoadingSrc) {
+    if (
+      props.disableThumbnailLoad ||
+      !isIntersecting() ||
+      props.cachedSrc ||
+      src() ||
+      isLoadingSrc
+    ) {
       return;
     }
     const controller = new AbortController();
     setLoadError(false);
     isLoadingSrc = true;
     void loadItemSrc(props.item, controller.signal)
-      .then((nextSrc) => setSrc(nextSrc))
+      .then((nextSrc) => {
+        setSrc(nextSrc);
+        props.onThumbnailLoaded?.(nextSrc);
+      })
       .catch(() => {
         if (controller.signal.aborted || props.offline) {
           return;
@@ -64,14 +83,6 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
       isLoadingSrc = false;
     });
   });
-
-  onCleanup(() => {
-    const url = src();
-    if (url?.startsWith("blob:") && url !== state.loadingMediaSrc) {
-      URL.revokeObjectURL(url);
-    }
-  });
-
   function handleClick(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
     if (event.metaKey || event.ctrlKey) {
       props.onToggleSelection();

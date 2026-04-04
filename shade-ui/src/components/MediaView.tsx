@@ -96,6 +96,7 @@ const EMPTY_STATE_PANEL_CLASS =
   "mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-6 py-8 text-center";
 const LIBRARY_TAB_BASE_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
 
 export const MediaView: Component = () => {
   const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
@@ -183,6 +184,44 @@ export const MediaView: Component = () => {
     left: number;
     top: number;
   } | null>(null);
+  const thumbnailMemoryBuffer = new Map<string, string>();
+
+  const thumbnailBufferKey = (item: MediaItem) =>
+    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}`;
+
+  const getBufferedThumbnailSrc = (item: MediaItem) => {
+    const key = thumbnailBufferKey(item);
+    const url = thumbnailMemoryBuffer.get(key);
+    if (!url) {
+      return undefined;
+    }
+    thumbnailMemoryBuffer.delete(key);
+    thumbnailMemoryBuffer.set(key, url);
+    return url;
+  };
+
+  const rememberThumbnailSrc = (item: MediaItem, src: string) => {
+    if (!src.startsWith("blob:")) {
+      return;
+    }
+    const key = thumbnailBufferKey(item);
+    thumbnailMemoryBuffer.delete(key);
+    thumbnailMemoryBuffer.set(key, src);
+    while (thumbnailMemoryBuffer.size > THUMBNAIL_MEMORY_BUFFER_SIZE) {
+      const oldestKey = thumbnailMemoryBuffer.keys().next().value;
+      if (typeof oldestKey !== "string") {
+        throw new Error("thumbnail memory buffer is out of sync");
+      }
+      const oldestSrc = thumbnailMemoryBuffer.get(oldestKey);
+      if (!oldestSrc) {
+        throw new Error("thumbnail memory buffer entry is missing");
+      }
+      thumbnailMemoryBuffer.delete(oldestKey);
+      if (oldestSrc !== state.loadingMediaSrc) {
+        URL.revokeObjectURL(oldestSrc);
+      }
+    }
+  };
 
   const clearLibraryDragState = () => {
     libraryDragState = null;
@@ -743,6 +782,12 @@ export const MediaView: Component = () => {
       window.clearInterval(libraryRefreshTimer);
       observer.disconnect();
       stopP2pPolling();
+      for (const src of thumbnailMemoryBuffer.values()) {
+        if (src !== state.loadingMediaSrc) {
+          URL.revokeObjectURL(src);
+        }
+      }
+      thumbnailMemoryBuffer.clear();
     });
   });
 
@@ -880,6 +925,43 @@ export const MediaView: Component = () => {
       });
     }, 300);
     onCleanup(() => clearTimeout(timer));
+  });
+
+  createEffect(() => {
+    const library = selectedLibrary();
+    if (
+      state.currentView !== "media" ||
+      !library ||
+      isPeerLibrary(library) ||
+      isCameraLibrary(library) ||
+      isS3Library(library)
+    ) {
+      return;
+    }
+    let isPollingStopped = false;
+    let isRefreshing = false;
+    const poll = async () => {
+      if (isPollingStopped || isRefreshing || items.loading) {
+        return;
+      }
+      isRefreshing = true;
+      try {
+        await refetchItems();
+      } catch (error) {
+        if (!isPollingStopped) {
+          setError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        isRefreshing = false;
+      }
+    };
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 750);
+    onCleanup(() => {
+      isPollingStopped = true;
+      window.clearInterval(timer);
+    });
   });
 
   async function handleAddLibrary() {
@@ -1766,12 +1848,16 @@ export const MediaView: Component = () => {
                                 item && (
                                   <MediaTile
                                     item={item}
+                                    cachedSrc={getBufferedThumbnailSrc(item)}
                                     compact
                                     offline={selectedLibraryIsOffline()}
                                     disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
                                     active={activeMediaItemId() === id}
                                     selected={selectedMediaItemIdSet().has(id)}
                                     showSelectionControls={showSelectionControls()}
+                                    onThumbnailLoaded={(src) =>
+                                      rememberThumbnailSrc(item, src)
+                                    }
                                     onActivate={(src) => {
                                       const libraryId = selectedLibraryId();
                                       if (!libraryId) {
@@ -1814,10 +1900,14 @@ export const MediaView: Component = () => {
                               item && (
                                 <MediaTile
                                   item={item}
+                                  cachedSrc={getBufferedThumbnailSrc(item)}
                                   offline={selectedLibraryIsOffline()}
                                   active={activeMediaItemId() === id}
                                   selected={selectedMediaItemIdSet().has(id)}
                                   showSelectionControls={showSelectionControls()}
+                                  onThumbnailLoaded={(src) =>
+                                    rememberThumbnailSrc(item, src)
+                                  }
                                   onActivate={(src) => {
                                     const libraryId = selectedLibraryId();
                                     if (!libraryId) {
