@@ -29,6 +29,7 @@ let refreshLastStartAt = 0;
 let refreshWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
 let previewSuspended = false;
 let finalPreviewLatencyEstimateMs: number | null = null;
+let refreshMode: "auto" | "final-only" = "auto";
 let lastRenderedPreview:
   | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
   | null = null;
@@ -57,6 +58,7 @@ type RefreshSnapshot = {
 export function clearPreviewTiles() {
   refreshVersion += 1;
   refreshQueued = null;
+  refreshMode = "auto";
   setPreviewTile(null);
   setBackdropTile(null);
   lastRenderedPreview = null;
@@ -70,6 +72,7 @@ export function suspendPreview() {
 
 export function resumePreview() {
   previewSuspended = false;
+  refreshMode = "auto";
 }
 
 export function resetPreviewLatencyEstimate() {
@@ -475,10 +478,19 @@ async function performRefresh() {
 }
 
 export function refreshPreview() {
+  return requestPreviewRefresh("auto");
+}
+
+function refreshFinalPreview() {
+  return requestPreviewRefresh("final-only");
+}
+
+function requestPreviewRefresh(mode: "auto" | "final-only") {
   if (previewSuspended) {
     return Promise.resolve();
   }
   refreshVersion += 1;
+  refreshMode = mode;
   const completion = new Promise<void>((resolve, reject) => {
     refreshWaiters.push({ resolve, reject });
   });
@@ -487,7 +499,8 @@ export function refreshPreview() {
     try {
       while (true) {
         const version = refreshVersion;
-        if (shouldRenderInteractivePreview()) {
+        const mode = refreshMode;
+        if (mode === "auto" && shouldRenderInteractivePreview()) {
           refreshQueued = { version, quality: "interactive" };
           await performRefresh();
           if (version !== refreshVersion) continue;
@@ -554,7 +567,7 @@ export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anc
     viewportCenterX: anchoredX - (anchorX - vcx) / newScale,
     viewportCenterY: anchoredY - (anchorY - vcy) / newScale,
   });
-  refreshPreview();
+  refreshFinalPreview();
 }
 
 export function panViewport(deltaX: number, deltaY: number, shouldRefresh = true) {
