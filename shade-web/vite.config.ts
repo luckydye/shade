@@ -14,7 +14,11 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
     fs: {
-      allow: [resolve(__dirname, "."), resolve(__dirname, "../shade-ui")],
+      allow: [
+        resolve(__dirname, "."),
+        resolve(__dirname, "../shade-ui"),
+        resolve(__dirname, "../shade-wasm"),
+      ],
     },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
@@ -25,6 +29,9 @@ export default defineConfig({
     outDir: "dist/shade",
     target: ["es2021", "chrome100", "safari13"],
     minify: false
+  },
+  optimizeDeps: {
+    exclude: ["shade-ui", "shade-wasm"],
   },
   worker: {
     format: "es",

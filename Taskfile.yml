@@ -23,8 +23,8 @@ tasks:
 
   web:wasm:
     desc: Build the wasm bundle consumed by the web UI
-    dir: shade-web
-    cmd: bun run build:wasm
+    dir: shade-wasm
+    cmd: bun run build
 
   website:dev:
     desc: Dev the website

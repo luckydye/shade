@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { resolve } from "node:path";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 import terminal from "vite-plugin-terminal";
@@ -9,6 +10,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    fs: {
+      allow: [resolve(__dirname, "."), resolve(__dirname, "../shade-wasm")],
+    },
     watch: { ignored: ["**/src-tauri/**"] },
     headers: {
       // Required for SharedArrayBuffer (used by wgpu/WASM threading)
@@ -23,12 +27,9 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
   },
   optimizeDeps: {
-    exclude: ["shade_wasm"], // Don't pre-bundle the WASM module
+    exclude: ["shade-wasm"],
   },
   worker: {
     format: "es",
-    rollupOptions: {
-      external: [/shade_wasm/],
-    },
   },
 });

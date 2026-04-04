@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:wasm": "../scripts/build-wasm.sh",
-    "build:wasm:dev": "../scripts/build-wasm-dev.sh",
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview"

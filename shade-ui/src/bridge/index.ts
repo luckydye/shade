@@ -1,9 +1,10 @@
 /**
  * Unified bridge: uses Tauri IPC when running as a desktop app,
- * falls back to WASM worker when running in the browser.
+ * falls back to a browser worker when running on the web.
  */
 
 import type { BrowserDirectoryHandle } from "../browser-media-library";
+import { createShadeWorker } from "shade-wasm";
 import {
   addBrowserMediaLibrary,
   isBrowserMountedLibrary,
@@ -53,7 +54,7 @@ async function getTauriInvoke() {
   return _invoke!;
 }
 
-// ── WASM worker path ─────────────────────────────────────────────────────────
+// ── Browser worker path ──────────────────────────────────────────────────────
 let worker: Worker | null = null;
 let nextWorkerRequestId = 1;
 const pendingRequests = new Map<
@@ -72,9 +73,7 @@ const workerReadyPromise = new Promise<void>((res) => {
 
 function getWorker(): Worker {
   if (!worker) {
-    worker = new Worker(new URL("../worker/shade.worker.ts", import.meta.url), {
-      type: "module",
-    });
+    worker = createShadeWorker();
     worker.onmessage = (e: MessageEvent) => {
       const msg = e.data;
       if (msg.type === "ready") {

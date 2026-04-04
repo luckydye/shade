@@ -1,54 +1,37 @@
-// This worker loads the Shade WASM module and processes commands
-// from the main thread. The OffscreenCanvas is transferred here.
-// The WASM module is built separately via `scripts/build-wasm.sh` (wasm-pack).
+import init, * as wasm from "../pkg/shade_wasm.js";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let wasm: any = null;
 let initPromise: Promise<void> | null = null;
 let rendererPromise: Promise<void> | null = null;
 
 function ensureWasmReady() {
-  if (wasm) {
-    return Promise.resolve();
-  }
   if (!initPromise) {
-    initPromise = (async () => {
-      // Dynamic import of the WASM module (built via scripts/build-wasm.sh).
-      // @vite-ignore suppresses Vite's static resolution — the file is generated at build time.
-      wasm = await import(/* @vite-ignore */ "../../wasm/shade_wasm.js");
-      await wasm.default?.();
-      self.postMessage({ type: "ready" });
-    })().catch((error) => {
-      initPromise = null;
-      wasm = null;
-      throw error;
-    });
+    initPromise = init()
+      .then(() => {
+        self.postMessage({ type: "ready" });
+      })
+      .catch((error) => {
+        initPromise = null;
+        throw error;
+      });
   }
   return initPromise;
 }
 
 function ensureRendererReady() {
-  if (rendererPromise) {
-    return rendererPromise;
+  if (!rendererPromise) {
+    rendererPromise = ensureWasmReady()
+      .then(() => wasm.init_renderer())
+      .then(() => undefined)
+      .catch((error) => {
+        rendererPromise = null;
+        throw error;
+      });
   }
-  rendererPromise = ensureWasmReady()
-    .then(() => wasm.init_renderer())
-    .then(() => undefined)
-    .catch((error) => {
-      rendererPromise = null;
-      throw error;
-    });
   return rendererPromise;
 }
 
-// Message protocol:
-// { type: "init" } → { type: "ready" }
-// { type: "load_image_encoded", bytes: ArrayBuffer, fileName?: string } → { type: "image_loaded", layerCount: number, canvasWidth: number, canvasHeight: number }
-// { type: "apply_tone", layerIdx: number, exposure: number, ... } → { type: "tone_applied" }
-// { type: "get_stack" } → { type: "stack", data: string }
-
-self.onmessage = async (e: MessageEvent) => {
-  const msg = e.data;
+self.onmessage = async (event: MessageEvent) => {
+  const msg = event.data;
   const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
 
   try {
@@ -304,8 +287,9 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
 
-      default:
-        throw new Error(`unknown message type: ${msg.type}`);
+      default: {
+        throw new Error(`unsupported worker message: ${String(msg.type)}`);
+      }
     }
   } catch (error) {
     self.postMessage({

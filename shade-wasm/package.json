@@ -1,0 +1,13 @@
+{
+  "name": "shade-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "../scripts/build-wasm.sh",
+    "build:dev": "../scripts/build-wasm-dev.sh"
+  },
+  "exports": {
+    ".": "./web/index.ts"
+  }
+}
