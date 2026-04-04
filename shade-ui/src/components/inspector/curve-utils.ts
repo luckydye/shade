@@ -3,6 +3,9 @@ export const CURVE_MIN_X = 0;
 export const CURVE_MAX_X = 255;
 export const IDENTITY_LUT = Array.from({ length: 256 }, (_, idx) => idx / 255);
 export const LS_CURVE_IDENTITY = Array.from({ length: 256 }, () => 1.0);
+export const HISTOGRAM_SCALE_CLIP_PERCENTILE = 0.95;
+export const HISTOGRAM_SCALE_CLIP_MIN_BINS = 8;
+export const HISTOGRAM_CLIPPING_EPSILON = 1 / 255;
 
 export const TONE_THRESHOLD_BOUNDARIES = [
   { key: "shadows", label: "Shadows", value: 0.25 },
@@ -17,6 +20,12 @@ export interface ControlPoint {
 
 export interface EditableControlPoint extends ControlPoint {
   id: number;
+}
+
+export interface LuminanceHistogram {
+  bins: number[];
+  shadowsClipping: boolean;
+  highlightsClipping: boolean;
 }
 
 export function clamp(value: number, min: number, max: number) {
@@ -237,23 +246,51 @@ export function lsCurvePath(lut: readonly number[]) {
     .join(" ");
 }
 
-export function buildLuminanceHistogram(frame: ImageData, binCount = 64) {
+export function buildLuminanceHistogram(
+  frame: ImageData,
+  binCount = 64,
+): LuminanceHistogram {
   if (binCount <= 0) {
     throw new Error("histogram bin count must be greater than zero");
   }
   const bins = new Array<number>(binCount).fill(0);
   const { data } = frame;
+  const channelScale = data instanceof Uint8ClampedArray ? 255 : 1;
+  let shadowsClipping = false;
+  let highlightsClipping = false;
   for (let idx = 0; idx < data.length; idx += 4) {
-    const lum =
-      (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) / 255;
+    const alpha = data[idx + 3] / channelScale;
+    if (alpha <= 0) {
+      continue;
+    }
+    const lum = clamp(
+      (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) / channelScale,
+      0,
+      1,
+    );
     const bin = clamp(Math.floor(lum * (binCount - 1)), 0, binCount - 1);
     bins[bin] += 1;
+    shadowsClipping ||= lum <= HISTOGRAM_CLIPPING_EPSILON;
+    highlightsClipping ||= lum >= 1 - HISTOGRAM_CLIPPING_EPSILON;
   }
   const peak = Math.max(...bins, 0);
   if (peak === 0) {
-    return bins;
+    return {
+      bins,
+      shadowsClipping: false,
+      highlightsClipping: false,
+    };
   }
-  return bins.map((value) => value / peak);
+  const nonZeroBins = bins.filter((value) => value > 0).sort((left, right) => left - right);
+  const clipPeak =
+    nonZeroBins.length < HISTOGRAM_SCALE_CLIP_MIN_BINS
+      ? peak
+      : nonZeroBins[Math.floor((nonZeroBins.length - 1) * HISTOGRAM_SCALE_CLIP_PERCENTILE)];
+  return {
+    bins: bins.map((value) => Math.min(value / clipPeak, 1)),
+    shadowsClipping,
+    highlightsClipping,
+  };
 }
 
 export function histogramPath(bins: readonly number[]) {

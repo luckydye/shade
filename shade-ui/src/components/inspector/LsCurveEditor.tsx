@@ -32,7 +32,7 @@ export const LsCurveEditor: Component<LsCurveEditorProps> = (props) => {
   const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
   const luminanceHistogram = createMemo(() => {
     const frame = backdropTile();
-    return frame ? buildLuminanceHistogram(frame.image) : [];
+    return frame ? buildLuminanceHistogram(frame.image) : null;
   });
   let svgRef!: SVGSVGElement;
   let nextId = 0;
@@ -81,7 +81,7 @@ export const LsCurveEditor: Component<LsCurveEditorProps> = (props) => {
     remapPath(lsCurvePath(lut()), svgSize().width, svgSize().height, graphPadding);
   const histogramSvgPath = () =>
     remapPath(
-      histogramPath(luminanceHistogram()),
+      histogramPath(luminanceHistogram()?.bins ?? []),
       svgSize().width,
       svgSize().height,
       graphPadding,
@@ -341,6 +341,30 @@ export const LsCurveEditor: Component<LsCurveEditorProps> = (props) => {
                 pointer-events="none"
               />
             )}
+          </Show>
+          <Show when={luminanceHistogram()?.shadowsClipping}>
+            <line
+              x1={graphPadding + 0.5}
+              y1={graphPadding}
+              x2={graphPadding + 0.5}
+              y2={graphPadding + innerHeight()}
+              stroke="#fff"
+              stroke-width="1"
+              opacity="0.55"
+              pointer-events="none"
+            />
+          </Show>
+          <Show when={luminanceHistogram()?.highlightsClipping}>
+            <line
+              x1={graphPadding + innerWidth() - 0.5}
+              y1={graphPadding}
+              x2={graphPadding + innerWidth() - 0.5}
+              y2={graphPadding + innerHeight()}
+              stroke="#fff"
+              stroke-width="1"
+              opacity="0.55"
+              pointer-events="none"
+            />
           </Show>
           <path
             d={`M ${graphPadding} ${graphPadding + innerHeight() * 0.5} L ${
