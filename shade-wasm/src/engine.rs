@@ -460,6 +460,58 @@ impl WasmEngine {
         }
     }
 
+    pub fn replace_non_image_layers(
+        &mut self,
+        layers: Vec<shade_core::LayerEntry>,
+        saved_mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    ) {
+        let image_layers: Vec<_> = self
+            .stack
+            .layers
+            .iter()
+            .filter(|l| matches!(l.layer, Layer::Image { .. }))
+            .cloned()
+            .collect();
+        assert!(!image_layers.is_empty(), "no image layers to preserve");
+        self.stack.layers = image_layers;
+        self.stack.masks.clear();
+        self.stack.mask_params.clear();
+        let base_idx = self.stack.layers.len();
+        self.stack.layers.extend(layers);
+        for i in base_idx..self.stack.layers.len() {
+            let Some(old_id) = self.stack.layers[i].mask else {
+                continue;
+            };
+            let Some(params) = saved_mask_params.get(&old_id) else {
+                self.stack.layers[i].mask = None;
+                continue;
+            };
+            let mask = match params {
+                MaskParams::Linear { x1, y1, x2, y2 } => {
+                    let mut m = MaskData::new_empty(self.canvas_width, self.canvas_height);
+                    m.fill_linear_gradient(*x1, *y1, *x2, *y2);
+                    m
+                }
+                MaskParams::Radial { cx, cy, radius } => {
+                    let mut m = MaskData::new_empty(self.canvas_width, self.canvas_height);
+                    m.fill_radial_gradient(*cx, *cy, *radius);
+                    m
+                }
+                MaskParams::Brush {
+                    width,
+                    height,
+                    pixels,
+                } => MaskData {
+                    width: *width,
+                    height: *height,
+                    pixels: pixels.clone(),
+                },
+            };
+            self.stack.set_mask_with_params(i, mask, params.clone());
+        }
+        self.stack.generation += 1;
+    }
+
     pub fn layer_count(&self) -> usize {
         self.stack.layers.len()
     }

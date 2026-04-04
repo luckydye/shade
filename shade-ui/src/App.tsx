@@ -6,6 +6,7 @@ import { MediaView } from "./components/MediaView";
 import { checkWebGPU } from "./bridge/webgpu-check";
 import { showEditorView, showMediaView } from "./store/editor";
 import { setState, state } from "./store/editor-store";
+import { undo, redo } from "./store/history";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };
@@ -40,6 +41,20 @@ const App: Component = () => {
         webgpuReason: webgpu.available ? null : (webgpu.reason ?? "WebGPU unavailable"),
       });
     })();
+  });
+
+  onMount(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      e.preventDefault();
+      if (e.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => document.removeEventListener("keydown", handleKeyDown));
   });
 
   onMount(() => {

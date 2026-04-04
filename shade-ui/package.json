@@ -14,7 +14,8 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "shade-wasm": "../shade-wasm",
     "solid-js": "^1.8.0",
-    "vite-plugin-terminal": "^1.4.0"
+    "vite-plugin-terminal": "^1.4.0",
+    "yjs": "^13.6.30"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

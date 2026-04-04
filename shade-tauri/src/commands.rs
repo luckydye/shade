@@ -4791,6 +4791,69 @@ pub async fn load_preset(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+struct StackSnapshot {
+    layers: Vec<shade_core::LayerEntry>,
+    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+}
+
+#[tauri::command]
+pub fn get_stack_snapshot(
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<String, String> {
+    let st = lock_editor_state(&state)?;
+    let non_image: Vec<_> = st
+        .stack
+        .layers
+        .iter()
+        .filter(|l| !matches!(l.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    let mut mp = HashMap::new();
+    for layer in &non_image {
+        if let Some(mask_id) = layer.mask {
+            if let Some(params) = st.stack.mask_params.get(&mask_id) {
+                mp.insert(mask_id, params.clone());
+            }
+        }
+    }
+    serde_json::to_string(&StackSnapshot {
+        layers: non_image,
+        mask_params: mp,
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn replace_stack(
+    layers_json: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<(), String> {
+    let snap: StackSnapshot =
+        serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+    let mut st = lock_editor_state(&state)?;
+    let image_layers: Vec<_> = st
+        .stack
+        .layers
+        .iter()
+        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .cloned()
+        .collect();
+    if image_layers.is_empty() {
+        return Err("no image layers to preserve".into());
+    }
+    st.stack.layers = image_layers;
+    st.stack.masks.clear();
+    st.stack.mask_params.clear();
+    let base_idx = st.stack.layers.len();
+    st.stack.layers.extend(snap.layers);
+    let w = st.canvas_width;
+    let h = st.canvas_height;
+    restore_masks_from_params(&mut st.stack, base_idx, &snap.mask_params, w, h);
+    st.stack.generation += 1;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn save_snapshot(
     state: tauri::State<'_, Mutex<EditorState>>,

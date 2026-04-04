@@ -113,6 +113,8 @@ pub fn run() {
             commands::save_preset,
             commands::rename_preset,
             commands::load_preset,
+            commands::get_stack_snapshot,
+            commands::replace_stack,
             commands::save_snapshot,
             commands::list_snapshots,
             commands::load_snapshot,

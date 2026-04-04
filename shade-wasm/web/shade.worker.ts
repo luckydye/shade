@@ -246,6 +246,20 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
 
+      case "replace_stack": {
+        await ensureWasmReady();
+        wasm.replace_stack_json(msg.data);
+        self.postMessage({ type: "stack_replaced", requestId });
+        break;
+      }
+
+      case "get_stack_snapshot": {
+        await ensureWasmReady();
+        const json = wasm.get_stack_snapshot_json();
+        self.postMessage({ type: "stack_snapshot", requestId, data: json });
+        break;
+      }
+
       case "get_stack": {
         await ensureWasmReady();
         const json = wasm.get_stack_json();

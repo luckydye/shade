@@ -9,6 +9,18 @@ import {
   setState,
   state,
 } from "./editor-store";
+import { onRestore, recordSnapshot } from "./history";
+
+onRestore(async (data) => {
+  await bridge.replaceStack(data);
+  await refreshLayerStack();
+  await refreshPreview();
+});
+
+async function captureAndRecordSnapshot() {
+  const data = await bridge.getStackSnapshot();
+  recordSnapshot(data);
+}
 
 let pendingEdits = new Map<string, Record<string, unknown>>();
 let editFlushPromise: Promise<void> | null = null;
@@ -45,6 +57,8 @@ async function flushPendingEdits() {
   await refreshPreview();
   if (pendingEdits.size > 0) {
     await flushPendingEdits();
+  } else {
+    void captureAndRecordSnapshot();
   }
 }
 
@@ -132,6 +146,7 @@ export async function deleteLayer(idx: number) {
     clearPreviewTiles();
   }
   await refreshPreview();
+  void captureAndRecordSnapshot();
 }
 
 function getMovedLayerIndex(idx: number, fromIdx: number, toIdx: number) {
@@ -397,6 +412,7 @@ export async function addLayer(kind: string, position: number) {
   }
   setState("selectedLayerIdx", idx);
   await refreshPreview();
+  void captureAndRecordSnapshot();
   return idx;
 }
 
@@ -420,6 +436,7 @@ export async function moveLayer(fromIdx: number, toIdx: number) {
     setState("selectedLayerIdx", nextSelectedIdx);
   }
   await refreshPreview();
+  void captureAndRecordSnapshot();
 }
 
 export async function listPresets() {
@@ -444,6 +461,7 @@ export async function loadPreset(name: string) {
   await bridge.loadPreset(name);
   await refreshLayerStack();
   await refreshPreview();
+  void captureAndRecordSnapshot();
 }
 
 export async function saveSnapshot() {
@@ -456,4 +474,5 @@ export async function loadSnapshot(id: string) {
   await bridge.loadSnapshot(id);
   await refreshLayerStack();
   await refreshPreview();
+  void captureAndRecordSnapshot();
 }

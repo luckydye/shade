@@ -8,6 +8,7 @@ import {
   suspendPreview,
 } from "../viewport/preview";
 import { refreshLayerStack } from "./editor-layers";
+import { resetHistory } from "./history";
 import {
   type ArtboardSource,
   type ArtboardState,
@@ -195,6 +196,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
         await refreshLayerStack();
       }
     }
+    resetHistory();
     resumePreview();
     await refreshPreview();
   } catch (error) {
@@ -404,6 +406,7 @@ async function openImageFrom(
         await refreshLayerStack();
       }
     }
+    resetHistory();
     resumePreview();
     await refreshPreview();
   } catch (error) {

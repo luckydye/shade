@@ -6,6 +6,7 @@ use shade_core::{
 };
 use shade_io::load_image_bytes_f32_with_info;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
@@ -604,6 +605,50 @@ pub fn get_stack_json() -> String {
         })
         .to_string()
     })
+}
+
+#[derive(Serialize, Deserialize)]
+struct StackSnapshot {
+    layers: Vec<shade_core::LayerEntry>,
+    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+}
+
+#[wasm_bindgen]
+pub fn get_stack_snapshot_json() -> String {
+    ENGINE.with(|e| {
+        let eng = e.borrow();
+        let non_image: Vec<_> = eng
+            .stack
+            .layers
+            .iter()
+            .filter(|l| !matches!(l.layer, shade_core::Layer::Image { .. }))
+            .cloned()
+            .collect();
+        let mut mp = HashMap::new();
+        for layer in &non_image {
+            if let Some(mask_id) = layer.mask {
+                if let Some(params) = eng.stack.mask_params.get(&mask_id) {
+                    mp.insert(mask_id, params.clone());
+                }
+            }
+        }
+        serde_json::to_string(&StackSnapshot {
+            layers: non_image,
+            mask_params: mp,
+        })
+        .expect("stack snapshot serialization failed")
+    })
+}
+
+#[wasm_bindgen]
+pub fn replace_stack_json(json: &str) -> Result<(), JsValue> {
+    let snap: StackSnapshot =
+        serde_json::from_str(json).map_err(|err| JsValue::from_str(&err.to_string()))?;
+    ENGINE.with(|e| {
+        e.borrow_mut()
+            .replace_non_image_layers(snap.layers, snap.mask_params);
+    });
+    Ok(())
 }
 
 #[wasm_bindgen]

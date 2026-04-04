@@ -1288,6 +1288,29 @@ export async function loadSnapshot(id: string): Promise<void> {
   await markBrowserSnapshotCurrent(id);
 }
 
+export async function getStackSnapshot(): Promise<string> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("get_stack_snapshot") as Promise<string>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ data: string }>(
+    { type: "get_stack_snapshot" },
+    "stack_snapshot",
+  );
+  return result.data;
+}
+
+export async function replaceStack(layersJson: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("replace_stack", { layersJson });
+    return;
+  }
+  await ensureWorkerReady();
+  await workerCall({ type: "replace_stack", data: layersJson }, "stack_replaced");
+}
+
 export async function addLayer(kind: string): Promise<number> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
