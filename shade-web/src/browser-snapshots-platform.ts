@@ -1,19 +1,15 @@
-import type { EditSnapshotInfo, SnapshotInfo } from "./bridge/index";
-import type { BrowserPresetLayer } from "./browser-presets";
-import { requestToPromise } from "./cache-utils";
+import type {
+  BrowserPresetLayer,
+  BrowserSnapshotRecord,
+  BrowserSnapshotsPlatform,
+  EditSnapshotInfo,
+  SnapshotInfo,
+} from "shade-ui/src/bridge/index";
+import { requestToPromise } from "shade-ui/src/cache-utils";
 
 const DB_NAME = "shade-browser-snapshots";
 const DB_VERSION = 1;
 const STORE = "snapshots";
-
-interface BrowserSnapshotRecord {
-  id: string;
-  image_path: string | null;
-  display_index: number;
-  created_at: number;
-  is_current: boolean;
-  layers: BrowserPresetLayer[];
-}
 
 function openDb(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") {
@@ -44,7 +40,7 @@ async function withReadStore<T>(run: (store: IDBObjectStore) => IDBRequest<T>): 
 }
 
 /** Returns snapshots for the given imagePath, ordered by display_index. */
-export async function listBrowserSnapshots(imagePath: string | null): Promise<SnapshotInfo[]> {
+async function listBrowserSnapshots(imagePath: string | null): Promise<SnapshotInfo[]> {
   const all = (await withReadStore((store) => store.getAll())) as BrowserSnapshotRecord[];
   return all
     .filter((r) => (r.image_path ?? null) === imagePath)
@@ -59,7 +55,7 @@ export async function listBrowserSnapshots(imagePath: string | null): Promise<Sn
 }
 
 /** Returns a map from image path to the ID of the most recently created snapshot for that path. */
-export async function getBrowserSnapshotPathMap(): Promise<Map<string, string>> {
+async function getBrowserSnapshotPathMap(): Promise<Map<string, string>> {
   const all = (await withReadStore((store) => store.getAll())) as BrowserSnapshotRecord[];
   const latestByPath = new Map<string, { id: string; created_at: number }>();
   for (const record of all) {
@@ -73,7 +69,7 @@ export async function getBrowserSnapshotPathMap(): Promise<Map<string, string>> 
   return new Map([...latestByPath.entries()].map(([path, { id }]) => [path, id]));
 }
 
-export async function getBrowserSnapshot(id: string): Promise<BrowserSnapshotRecord> {
+async function getBrowserSnapshot(id: string): Promise<BrowserSnapshotRecord> {
   const result = await withReadStore((store) => store.get(id));
   if (!result || typeof result !== "object") {
     throw new Error(`snapshot not found: ${id}`);
@@ -82,7 +78,7 @@ export async function getBrowserSnapshot(id: string): Promise<BrowserSnapshotRec
 }
 
 /** Returns the current snapshot for the given image path, or null if none exists. */
-export async function getBrowserCurrentSnapshot(
+async function getBrowserCurrentSnapshot(
   imagePath: string | null,
 ): Promise<{ id: string; layers: BrowserPresetLayer[] } | null> {
   const all = (await withReadStore((store) => store.getAll())) as BrowserSnapshotRecord[];
@@ -92,7 +88,7 @@ export async function getBrowserCurrentSnapshot(
   return current ? { id: current.id, layers: current.layers } : null;
 }
 
-export async function saveBrowserSnapshot(
+async function saveBrowserSnapshot(
   layers: BrowserPresetLayer[],
   imagePath: string | null,
 ): Promise<EditSnapshotInfo> {
@@ -130,7 +126,7 @@ export async function saveBrowserSnapshot(
   });
 }
 
-export async function markBrowserSnapshotCurrent(id: string): Promise<void> {
+async function markBrowserSnapshotCurrent(id: string): Promise<void> {
   const db = await openDb();
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction([STORE], "readwrite");
@@ -168,3 +164,12 @@ export async function markBrowserSnapshotCurrent(id: string): Promise<void> {
     };
   });
 }
+
+export const browserSnapshotsPlatform: BrowserSnapshotsPlatform = {
+  listSnapshots: listBrowserSnapshots,
+  getSnapshotPathMap: getBrowserSnapshotPathMap,
+  getSnapshot: getBrowserSnapshot,
+  getCurrentSnapshot: getBrowserCurrentSnapshot,
+  saveSnapshot: saveBrowserSnapshot,
+  markSnapshotCurrent: markBrowserSnapshotCurrent,
+};

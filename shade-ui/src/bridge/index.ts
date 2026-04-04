@@ -4,21 +4,6 @@
  */
 
 import { createShadeWorker } from "shade-wasm";
-import {
-  type BrowserPresetFile,
-  type BrowserPresetLayer,
-  listBrowserPresets,
-  loadBrowserPreset,
-  renameBrowserPreset,
-  saveBrowserPreset,
-} from "../browser-presets";
-import {
-  getBrowserCurrentSnapshot,
-  getBrowserSnapshot,
-  listBrowserSnapshots,
-  markBrowserSnapshotCurrent,
-  saveBrowserSnapshot,
-} from "../browser-snapshots";
 import { getThumbnailBackend } from "./thumbnail-backend";
 
 // ── Tauri path ──────────────────────────────────────────────────────────────
@@ -827,6 +812,21 @@ export interface MediaLibrary {
   is_refreshing?: boolean | null;
 }
 
+export interface BrowserPresetLayer {
+  kind: "adjustment" | "crop";
+  name: string | null;
+  visible: boolean;
+  opacity: number;
+  adjustments: AdjustmentValues | null;
+  crop: CropValues | null;
+  mask_params: MaskParamsInfo | null;
+}
+
+export interface BrowserPresetFile {
+  version: number;
+  layers: BrowserPresetLayer[];
+}
+
 export interface BrowserMediaPlatform {
   pickDirectory(): Promise<BrowserDirectoryHandle | null>;
   listMediaLibraries(): Promise<MediaLibrary[]>;
@@ -843,10 +843,50 @@ export interface BrowserMediaPlatform {
   ): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
 }
 
+export interface BrowserPresetsPlatform {
+  listPresets(): Promise<PresetInfo[]>;
+  savePreset(name: string, file: BrowserPresetFile): Promise<PresetInfo>;
+  renamePreset(oldName: string, newName: string): Promise<PresetInfo>;
+  loadPreset(name: string): Promise<BrowserPresetFile>;
+}
+
+export interface BrowserSnapshotRecord {
+  id: string;
+  image_path: string | null;
+  display_index: number;
+  created_at: number;
+  is_current: boolean;
+  layers: BrowserPresetLayer[];
+}
+
+export interface BrowserSnapshotsPlatform {
+  listSnapshots(imagePath: string | null): Promise<SnapshotInfo[]>;
+  getSnapshotPathMap(): Promise<Map<string, string>>;
+  getSnapshot(id: string): Promise<BrowserSnapshotRecord>;
+  getCurrentSnapshot(
+    imagePath: string | null,
+  ): Promise<{ id: string; layers: BrowserPresetLayer[] } | null>;
+  saveSnapshot(
+    layers: BrowserPresetLayer[],
+    imagePath: string | null,
+  ): Promise<EditSnapshotInfo>;
+  markSnapshotCurrent(id: string): Promise<void>;
+}
+
 let _browserMediaPlatform: BrowserMediaPlatform | null = null;
+let _browserPresetsPlatform: BrowserPresetsPlatform | null = null;
+let _browserSnapshotsPlatform: BrowserSnapshotsPlatform | null = null;
 
 export function setBrowserMediaPlatform(platform: BrowserMediaPlatform): void {
   _browserMediaPlatform = platform;
+}
+
+export function setBrowserPresetsPlatform(platform: BrowserPresetsPlatform): void {
+  _browserPresetsPlatform = platform;
+}
+
+export function setBrowserSnapshotsPlatform(platform: BrowserSnapshotsPlatform): void {
+  _browserSnapshotsPlatform = platform;
 }
 
 export function getBrowserMediaPlatform(): BrowserMediaPlatform {
@@ -854,6 +894,20 @@ export function getBrowserMediaPlatform(): BrowserMediaPlatform {
     throw new Error("browser media platform not initialized");
   }
   return _browserMediaPlatform;
+}
+
+export function getBrowserPresetsPlatform(): BrowserPresetsPlatform {
+  if (!_browserPresetsPlatform) {
+    throw new Error("browser presets platform not initialized");
+  }
+  return _browserPresetsPlatform;
+}
+
+export function getBrowserSnapshotsPlatform(): BrowserSnapshotsPlatform {
+  if (!_browserSnapshotsPlatform) {
+    throw new Error("browser snapshots platform not initialized");
+  }
+  return _browserSnapshotsPlatform;
 }
 
 export interface S3MediaLibraryInput {
@@ -1191,7 +1245,7 @@ export async function listPresets(): Promise<PresetInfo[]> {
     const inv = await getTauriInvoke();
     return inv("list_presets") as Promise<PresetInfo[]>;
   }
-  return listBrowserPresets();
+  return getBrowserPresetsPlatform().listPresets();
 }
 
 export async function savePreset(name: string): Promise<PresetInfo> {
@@ -1200,7 +1254,7 @@ export async function savePreset(name: string): Promise<PresetInfo> {
     return inv("save_preset", { name }) as Promise<PresetInfo>;
   }
   const stack = await getLayerStack();
-  return saveBrowserPreset(name, {
+  return getBrowserPresetsPlatform().savePreset(name, {
     version: 1,
     layers: serializeBrowserPresetLayers(stack.layers),
   } satisfies BrowserPresetFile);
@@ -1211,7 +1265,7 @@ export async function renamePreset(oldName: string, newName: string): Promise<Pr
     const inv = await getTauriInvoke();
     return inv("rename_preset", { oldName, newName }) as Promise<PresetInfo>;
   }
-  return renameBrowserPreset(oldName, newName);
+  return getBrowserPresetsPlatform().renamePreset(oldName, newName);
 }
 
 export async function loadPreset(name: string): Promise<void> {
@@ -1220,7 +1274,7 @@ export async function loadPreset(name: string): Promise<void> {
     await inv("load_preset", { name });
     return;
   }
-  const preset = await loadBrowserPreset(name);
+  const preset = await getBrowserPresetsPlatform().loadPreset(name);
   const stack = await getLayerStack();
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot load a preset without a loaded image");
@@ -1244,7 +1298,7 @@ export async function saveSnapshot(imagePath?: string | null): Promise<EditSnaps
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot save a snapshot without a loaded image");
   }
-  return saveBrowserSnapshot(
+  return getBrowserSnapshotsPlatform().saveSnapshot(
     serializeBrowserPresetLayers(stack.layers),
     imagePath ?? null,
   );
@@ -1255,7 +1309,7 @@ export async function listSnapshots(imagePath?: string | null): Promise<Snapshot
     const inv = await getTauriInvoke();
     return inv("list_snapshots") as Promise<SnapshotInfo[]>;
   }
-  return listBrowserSnapshots(imagePath ?? null);
+  return getBrowserSnapshotsPlatform().listSnapshots(imagePath ?? null);
 }
 
 export async function listMediaRatings(
@@ -1289,7 +1343,7 @@ export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<
   if (await isTauriRuntime()) {
     return false;
   }
-  const snapshot = await getBrowserCurrentSnapshot(imagePath);
+  const snapshot = await getBrowserSnapshotsPlatform().getCurrentSnapshot(imagePath);
   if (!snapshot) {
     return false;
   }
@@ -1305,7 +1359,7 @@ export async function loadSnapshot(id: string): Promise<void> {
     await inv("load_snapshot", { params: { id } });
     return;
   }
-  const record = await getBrowserSnapshot(id);
+  const record = await getBrowserSnapshotsPlatform().getSnapshot(id);
   const stack = await getLayerStack();
   if (!stack.layers.some((layer) => layer.kind === "image")) {
     throw new Error("cannot load a snapshot without a loaded image");
@@ -1318,7 +1372,7 @@ export async function loadSnapshot(id: string): Promise<void> {
   for (const layer of record.layers) {
     await applyBrowserPresetLayer(layer);
   }
-  await markBrowserSnapshotCurrent(id);
+  await getBrowserSnapshotsPlatform().markSnapshotCurrent(id);
 }
 
 export async function getStackSnapshot(): Promise<string> {

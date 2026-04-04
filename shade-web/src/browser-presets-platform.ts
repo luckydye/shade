@@ -1,29 +1,17 @@
 import type {
   AdjustmentValues,
+  BrowserPresetFile,
+  BrowserPresetLayer,
+  BrowserPresetsPlatform,
   CropValues,
   MaskParamsInfo,
   PresetInfo,
-} from "./bridge/index";
-import { requestToPromise } from "./cache-utils";
+} from "shade-ui/src/bridge/index";
+import { requestToPromise } from "shade-ui/src/cache-utils";
 
 const DB_NAME = "shade-browser-presets";
 const DB_VERSION = 1;
 const PRESETS_STORE = "presets";
-
-export interface BrowserPresetLayer {
-  kind: "adjustment" | "crop";
-  name: string | null;
-  visible: boolean;
-  opacity: number;
-  adjustments: AdjustmentValues | null;
-  crop: CropValues | null;
-  mask_params: MaskParamsInfo | null;
-}
-
-export interface BrowserPresetFile {
-  version: number;
-  layers: BrowserPresetLayer[];
-}
 
 type BrowserPresetRecord = {
   name: string;
@@ -88,7 +76,7 @@ function assertPresetFile(file: BrowserPresetFile, name: string): BrowserPresetF
   return file;
 }
 
-export async function listBrowserPresets(): Promise<PresetInfo[]> {
+async function listBrowserPresets(): Promise<PresetInfo[]> {
   const records = await withStore("readonly", async (store) => {
     const result = await requestToPromise(store.getAll());
     if (!Array.isArray(result)) {
@@ -101,7 +89,7 @@ export async function listBrowserPresets(): Promise<PresetInfo[]> {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-export async function saveBrowserPreset(
+async function saveBrowserPreset(
   name: string,
   file: BrowserPresetFile,
 ): Promise<PresetInfo> {
@@ -121,7 +109,7 @@ export async function saveBrowserPreset(
   return { name: normalizedName };
 }
 
-export async function renameBrowserPreset(
+async function renameBrowserPreset(
   oldName: string,
   newName: string,
 ): Promise<PresetInfo> {
@@ -150,7 +138,7 @@ export async function renameBrowserPreset(
   });
 }
 
-export async function loadBrowserPreset(name: string): Promise<BrowserPresetFile> {
+async function loadBrowserPreset(name: string): Promise<BrowserPresetFile> {
   const normalizedName = normalizePresetName(name);
   const result = await withStore("readonly", async (store) =>
     requestToPromise(store.get(normalizedName)),
@@ -164,3 +152,10 @@ export async function loadBrowserPreset(name: string): Promise<BrowserPresetFile
   }
   return assertPresetFile(record.file, normalizedName);
 }
+
+export const browserPresetsPlatform: BrowserPresetsPlatform = {
+  listPresets: listBrowserPresets,
+  savePreset: saveBrowserPreset,
+  renamePreset: renameBrowserPreset,
+  loadPreset: loadBrowserPreset,
+};
