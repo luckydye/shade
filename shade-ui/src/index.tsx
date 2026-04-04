@@ -1,10 +1,6 @@
 import { render } from "solid-js/web";
 import App from "./App";
-import {
-  browserThumbnailBackend,
-  setThumbnailBackend,
-  tauriThumbnailBackend,
-} from "./bridge/thumbnail-backend";
+import { setThumbnailBackend, tauriThumbnailBackend } from "./bridge/thumbnail-backend";
 
 async function init() {
   const { isTauri } = await import("@tauri-apps/api/core");
@@ -14,7 +10,7 @@ async function init() {
     }
     setThumbnailBackend(tauriThumbnailBackend);
   } else {
-    setThumbnailBackend(browserThumbnailBackend);
+    throw new Error("browser runtime is only supported via shade-web");
   }
   render(() => <App />, document.getElementById("root")!);
 }

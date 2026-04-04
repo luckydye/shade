@@ -1,8 +1,3 @@
-import {
-  getBrowserMountedThumbnailBytes,
-  isBrowserMountedPath,
-} from "../browser-media-library";
-
 export interface ThumbnailBackend {
   getThumbnailBytes(path: string): Promise<Uint8Array>;
   getPeerThumbnailBytes(peerId: string, pictureId: string): Promise<Uint8Array>;
@@ -55,18 +50,5 @@ export const tauriThumbnailBackend: ThumbnailBackend = {
         pictureId,
       })) as number[] | Uint8Array | ArrayBuffer,
     );
-  },
-};
-
-export const browserThumbnailBackend: ThumbnailBackend = {
-  async getThumbnailBytes(path) {
-    if (await isBrowserMountedPath(path)) {
-      return getBrowserMountedThumbnailBytes(path);
-    }
-    const response = await fetch(path);
-    return new Uint8Array(await response.arrayBuffer());
-  },
-  async getPeerThumbnailBytes() {
-    return new Uint8Array();
   },
 };

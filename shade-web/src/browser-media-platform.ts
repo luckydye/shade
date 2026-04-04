@@ -1,10 +1,18 @@
 import type {
+  BrowserDirectoryHandle,
+  BrowserFileHandle,
+  BrowserMediaPlatform,
   LibraryImage,
   LibraryImageListing,
   MediaLibrary,
-} from "./bridge/index";
-import { getBrowserSnapshotPathMap } from "./browser-snapshots";
-import { requestToPromise, withStores } from "./cache-utils";
+} from "shade-ui/src/bridge/index";
+import { getBrowserSnapshotPathMap } from "shade-ui/src/browser-snapshots";
+import { requestToPromise, withStores } from "shade-ui/src/cache-utils";
+import {
+  fileNameFromPath,
+  loadBrowserDisplayBytes,
+  loadBrowserThumbnailBytes,
+} from "./browser-image-preview";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;
@@ -51,7 +59,6 @@ const IMAGE_EXTENSIONS = new Set([
   ".srw",
   ".x3f",
 ]);
-const THUMBNAIL_SIZE = 512;
 const MOUNTED_IMAGE_PERMISSION_ERROR =
   "read permission is required to open this mounted image";
 
@@ -69,31 +76,6 @@ type BrowserMediaItemRecord = {
   name: string;
   modified_at: number | null;
   fileHandle: BrowserFileHandle;
-};
-
-type FileSystemPermissionMode = "read" | "readwrite";
-type FileSystemPermissionState = "granted" | "denied" | "prompt";
-
-type BrowserFileSystemHandle = {
-  kind: "file" | "directory";
-  name: string;
-  queryPermission(descriptor?: {
-    mode?: FileSystemPermissionMode;
-  }): Promise<FileSystemPermissionState>;
-  requestPermission(descriptor?: {
-    mode?: FileSystemPermissionMode;
-  }): Promise<FileSystemPermissionState>;
-  isSameEntry(other: BrowserFileSystemHandle): Promise<boolean>;
-};
-
-export type BrowserFileHandle = BrowserFileSystemHandle & {
-  kind: "file";
-  getFile(): Promise<File>;
-};
-
-export type BrowserDirectoryHandle = BrowserFileSystemHandle & {
-  kind: "directory";
-  values(): AsyncIterable<BrowserFileHandle | BrowserDirectoryHandle>;
 };
 
 const libraryRecordCache = new Map<string, BrowserMediaLibraryRecord>();
@@ -370,30 +352,7 @@ async function loadItemFile(path: string): Promise<File> {
   }
 }
 
-async function imageFileToThumbnailBytes(file: File): Promise<Uint8Array> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, THUMBNAIL_SIZE / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("2d canvas context is unavailable");
-  }
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, "image/jpeg", 0.82);
-  });
-  if (!blob) {
-    throw new Error(`failed to create thumbnail for ${file.name}`);
-  }
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-export async function pickBrowserDirectory(): Promise<BrowserDirectoryHandle | null> {
+async function pickBrowserDirectory(): Promise<BrowserDirectoryHandle | null> {
   assertDirectoryPicker();
   try {
     const pick = directoryPicker();
@@ -409,11 +368,11 @@ export async function pickBrowserDirectory(): Promise<BrowserDirectoryHandle | n
   }
 }
 
-export async function listBrowserMediaLibraries(): Promise<MediaLibrary[]> {
+async function listBrowserMediaLibraries(): Promise<MediaLibrary[]> {
   return (await listLibraryRecords()).map(toMediaLibrary);
 }
 
-export async function addBrowserMediaLibrary(
+async function addBrowserMediaLibrary(
   selection: BrowserDirectoryHandle,
 ): Promise<MediaLibrary> {
   if (!isDirectoryHandle(selection)) {
@@ -435,7 +394,7 @@ export async function addBrowserMediaLibrary(
   return toMediaLibrary(cacheLibraryRecord(record));
 }
 
-export async function removeBrowserMediaLibrary(id: string): Promise<void> {
+async function removeBrowserMediaLibrary(id: string): Promise<void> {
   await withStores(openDb, [LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
     await requestToPromise(stores[LIBRARIES_STORE].delete(id));
     const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
@@ -448,7 +407,7 @@ export async function removeBrowserMediaLibrary(id: string): Promise<void> {
   clearCachedLibraryRecord(id);
 }
 
-export async function listBrowserLibraryImages(
+async function listBrowserLibraryImages(
   libraryId: string,
 ): Promise<LibraryImageListing> {
   const library = await getLibraryRecord(libraryId);
@@ -467,26 +426,11 @@ export async function listBrowserLibraryImages(
   };
 }
 
-export async function openBrowserMountedImage(path: string): Promise<ArrayBuffer> {
-  return (await loadItemFile(path)).arrayBuffer();
-}
-
-export async function getBrowserMountedThumbnailBytes(
-  path: string,
-): Promise<Uint8Array> {
-  const file = await loadItemFile(path);
-  return imageFileToThumbnailBytes(file);
-}
-
-export async function isBrowserMountedLibrary(id: string): Promise<boolean> {
-  return (await getLibraryRecord(id)) !== null;
-}
-
-export async function isBrowserMountedPath(path: string): Promise<boolean> {
+function isBrowserMountedPath(path: string): boolean {
   return path.startsWith(ITEM_PATH_PREFIX);
 }
 
-export function requestBrowserMountedImageReadPermission(path: string): Promise<void> {
+function requestBrowserMountedImageReadPermission(path: string): Promise<void> {
   const { libraryId } = parseItemPath(path);
   const library = libraryRecordCache.get(libraryId);
   if (!library) {
@@ -503,3 +447,44 @@ export function requestBrowserMountedImageReadPermission(path: string): Promise<
       throw normalizeMountedImageAccessError(error);
     });
 }
+
+async function fetchFile(path: string): Promise<Blob> {
+  const response = await fetch(path);
+  if (!response.ok) {
+    throw new Error(`failed to fetch ${path}: ${response.status}`);
+  }
+  return response.blob();
+}
+
+export const browserMediaPlatform: BrowserMediaPlatform & {
+  getThumbnailBytes(path: string): Promise<Uint8Array>;
+} = {
+  pickDirectory: pickBrowserDirectory,
+  listMediaLibraries: listBrowserMediaLibraries,
+  listLibraryImages: listBrowserLibraryImages,
+  addMediaLibrary: addBrowserMediaLibrary,
+  removeMediaLibrary: removeBrowserMediaLibrary,
+  prepareImageOpen(path) {
+    if (!isBrowserMountedPath(path)) {
+      return Promise.resolve();
+    }
+    return requestBrowserMountedImageReadPermission(path);
+  },
+  async getImageSource(path) {
+    if (isBrowserMountedPath(path)) {
+      const file = await loadItemFile(path);
+      return loadBrowserDisplayBytes(file.name, file);
+    }
+    return loadBrowserDisplayBytes(fileNameFromPath(path), await fetchFile(path));
+  },
+  getImageFileSource(file, fileName) {
+    return loadBrowserDisplayBytes(fileName, file);
+  },
+  async getThumbnailBytes(path) {
+    if (isBrowserMountedPath(path)) {
+      const file = await loadItemFile(path);
+      return loadBrowserThumbnailBytes(file.name, file);
+    }
+    return loadBrowserThumbnailBytes(fileNameFromPath(path), await fetchFile(path));
+  },
+};

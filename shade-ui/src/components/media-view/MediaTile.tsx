@@ -23,10 +23,19 @@ type MediaTileProps = {
 export const MediaTile: Component<MediaTileProps> = (props) => {
   const [isIntersecting, setIsIntersecting] = createSignal(false);
   const [src, setSrc] = createSignal<string | undefined>(undefined);
-  const [loadError, setLoadError] = createSignal(false);
+  const [loadError, setLoadError] = createSignal<string | null>(null);
   const [loadRequestVersion, setLoadRequestVersion] = createSignal(0);
   let containerRef: HTMLDivElement | undefined;
   let isLoadingSrc = false;
+
+  const loadErrorSummary = () => {
+    const error = loadError();
+    if (!error) {
+      return null;
+    }
+    const normalized = error.replace(/\s+/g, " ").trim();
+    return normalized.length > 96 ? `${normalized.slice(0, 93)}...` : normalized;
+  };
 
   onMount(() => {
     const observer = new IntersectionObserver(
@@ -46,7 +55,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
     if (!cachedSrc || src() === cachedSrc) {
       return;
     }
-    setLoadError(false);
+    setLoadError(null);
     setSrc(cachedSrc);
   });
 
@@ -62,18 +71,19 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
       return;
     }
     const controller = new AbortController();
-    setLoadError(false);
+    setLoadError(null);
     isLoadingSrc = true;
     void loadItemSrc(props.item, controller.signal)
       .then((nextSrc) => {
         setSrc(nextSrc);
         props.onThumbnailLoaded?.(nextSrc);
       })
-      .catch(() => {
+      .catch((error) => {
         if (controller.signal.aborted || props.offline) {
           return;
         }
-        setLoadError(true);
+        console.error("thumbnail load failed", props.item, error);
+        setLoadError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         isLoadingSrc = false;
@@ -96,7 +106,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
           resetLocalThumbnailFailure(props.item.path);
         }
       }
-      setLoadError(false);
+      setLoadError(null);
       setLoadRequestVersion((current) => current + 1);
     }
     props.onActivate(src() ?? null);
@@ -132,6 +142,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
         class={buttonClass()}
         onClick={handleClick}
         aria-pressed={isHighlighted() ? "true" : "false"}
+        title={loadError() ?? undefined}
       >
         <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
           {!src() && !loadError() && props.offline && (
@@ -164,8 +175,11 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
             />
           )}
           {loadError() && (
-            <div class="absolute inset-0 flex items-end justify-center rounded-lg bg-gradient-to-t from-black/80 to-transparent pb-3">
+            <div class="absolute inset-0 flex flex-col items-center justify-end rounded-lg bg-gradient-to-t from-black/90 via-black/70 to-transparent px-2 pb-2 text-center">
               <span class="text-[11px] font-medium text-red-400">Thumbnail failed</span>
+              <span class="mt-1 line-clamp-3 text-[10px] leading-4 text-red-200/90">
+                {loadErrorSummary()}
+              </span>
             </div>
           )}
           <Show when={props.item.metadata.rating !== null}>

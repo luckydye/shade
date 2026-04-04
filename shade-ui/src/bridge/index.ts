@@ -3,19 +3,7 @@
  * falls back to a browser worker when running on the web.
  */
 
-import type { BrowserDirectoryHandle } from "../browser-media-library";
 import { createShadeWorker } from "shade-wasm";
-import {
-  addBrowserMediaLibrary,
-  isBrowserMountedLibrary,
-  isBrowserMountedPath,
-  listBrowserLibraryImages,
-  listBrowserMediaLibraries,
-  openBrowserMountedImage,
-  pickBrowserDirectory,
-  removeBrowserMediaLibrary,
-  requestBrowserMountedImageReadPermission,
-} from "../browser-media-library";
 import {
   type BrowserPresetFile,
   type BrowserPresetLayer,
@@ -44,6 +32,31 @@ export async function isTauriRuntime() {
   const { isTauri } = await import("@tauri-apps/api/core");
   _isTauri = isTauri as IsTauriFn;
   return _isTauri();
+}
+
+export type FileSystemPermissionMode = "read" | "readwrite";
+export type FileSystemPermissionState = "granted" | "denied" | "prompt";
+
+export interface BrowserFileSystemHandle {
+  kind: "file" | "directory";
+  name: string;
+  queryPermission(descriptor?: {
+    mode?: FileSystemPermissionMode;
+  }): Promise<FileSystemPermissionState>;
+  requestPermission(descriptor?: {
+    mode?: FileSystemPermissionMode;
+  }): Promise<FileSystemPermissionState>;
+  isSameEntry(other: BrowserFileSystemHandle): Promise<boolean>;
+}
+
+export interface BrowserFileHandle extends BrowserFileSystemHandle {
+  kind: "file";
+  getFile(): Promise<File>;
+}
+
+export interface BrowserDirectoryHandle extends BrowserFileSystemHandle {
+  kind: "directory";
+  values(): AsyncIterable<BrowserFileHandle | BrowserDirectoryHandle>;
 }
 
 async function getTauriInvoke() {
@@ -468,19 +481,12 @@ export async function openImage(path: string): Promise<OpenImageInfo> {
     const inv = await getTauriInvoke();
     return inv("open_image", { path }) as Promise<any>;
   }
-  if (await isBrowserMountedPath(path)) {
-    return _loadEncodedBytes(await openBrowserMountedImage(path), path);
-  }
-  await ensureWorkerReady();
-  const response = await fetch(path);
-  return _loadEncodedBytes(await response.arrayBuffer(), path);
+  const source = await getBrowserMediaPlatform().getImageSource(path);
+  return _loadEncodedBytes(source.bytes, source.fileName ?? path);
 }
 
 export function prepareImageOpen(path: string): Promise<void> {
-  if (!path.startsWith("browser-library://")) {
-    return Promise.resolve();
-  }
-  return requestBrowserMountedImageReadPermission(path);
+  return getBrowserMediaPlatform().prepareImageOpen(path);
 }
 
 export async function exportImage(path: string): Promise<void> {
@@ -512,7 +518,7 @@ export async function exportImage(path: string): Promise<void> {
 
 export async function pickDirectory(): Promise<string | BrowserDirectoryHandle | null> {
   if (!(await isTauriRuntime())) {
-    return pickBrowserDirectory();
+    return getBrowserMediaPlatform().pickDirectory();
   }
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selectedPath = await open({
@@ -617,7 +623,8 @@ export async function openImageFile(file: File): Promise<OpenImageInfo> {
       file_name: file.name,
     }) as Promise<any>;
   }
-  return _loadEncodedBytes(await file.arrayBuffer(), file.name);
+  const source = await getBrowserMediaPlatform().getImageFileSource(file, file.name);
+  return _loadEncodedBytes(source.bytes, source.fileName ?? file.name);
 }
 
 async function _loadEncodedBytes(
@@ -820,6 +827,35 @@ export interface MediaLibrary {
   is_refreshing?: boolean | null;
 }
 
+export interface BrowserMediaPlatform {
+  pickDirectory(): Promise<BrowserDirectoryHandle | null>;
+  listMediaLibraries(): Promise<MediaLibrary[]>;
+  listLibraryImages(libraryId: string): Promise<LibraryImageListing>;
+  addMediaLibrary(handle: BrowserDirectoryHandle): Promise<MediaLibrary>;
+  removeMediaLibrary(id: string): Promise<void>;
+  prepareImageOpen(path: string): Promise<void>;
+  getImageSource(
+    path: string,
+  ): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
+  getImageFileSource(
+    file: Blob,
+    fileName: string,
+  ): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
+}
+
+let _browserMediaPlatform: BrowserMediaPlatform | null = null;
+
+export function setBrowserMediaPlatform(platform: BrowserMediaPlatform): void {
+  _browserMediaPlatform = platform;
+}
+
+export function getBrowserMediaPlatform(): BrowserMediaPlatform {
+  if (!_browserMediaPlatform) {
+    throw new Error("browser media platform not initialized");
+  }
+  return _browserMediaPlatform;
+}
+
 export interface S3MediaLibraryInput {
   name?: string | null;
   endpoint: string;
@@ -856,7 +892,7 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
     const inv = await getTauriInvoke();
     return inv("list_media_libraries") as Promise<MediaLibrary[]>;
   }
-  return listBrowserMediaLibraries();
+  return getBrowserMediaPlatform().listMediaLibraries();
 }
 
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
@@ -866,10 +902,7 @@ export async function listLibraryImages(libraryId: string): Promise<LibraryImage
       libraryId,
     }) as Promise<LibraryImageListing>;
   }
-  if (!(await isBrowserMountedLibrary(libraryId))) {
-    throw new Error(`browser media library not found: ${libraryId}`);
-  }
-  return listBrowserLibraryImages(libraryId);
+  return getBrowserMediaPlatform().listLibraryImages(libraryId);
 }
 
 export async function addMediaLibrary(
@@ -885,7 +918,7 @@ export async function addMediaLibrary(
   if (typeof path === "string") {
     throw new Error("expected a directory handle in the browser runtime");
   }
-  return addBrowserMediaLibrary(path);
+  return getBrowserMediaPlatform().addMediaLibrary(path);
 }
 
 export async function addS3MediaLibrary(
@@ -946,7 +979,7 @@ export async function removeMediaLibrary(id: string): Promise<void> {
     await inv("remove_media_library", { id });
     return;
   }
-  await removeBrowserMediaLibrary(id);
+  await getBrowserMediaPlatform().removeMediaLibrary(id);
 }
 
 export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
