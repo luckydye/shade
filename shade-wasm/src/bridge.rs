@@ -2,9 +2,8 @@ use crate::engine::WasmEngine;
 use serde::{Deserialize, Serialize};
 use shade_core::{
     ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, MaskParams,
-    ToneParams,
+    PreviewCrop as GpuPreviewCrop, Renderer, ToneParams,
 };
-use shade_gpu::{PreviewCrop as GpuPreviewCrop, Renderer};
 use shade_io::{load_image_bytes_f32_with_info, to_linear_srgb_f32};
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -14,7 +14,6 @@ blake3 = "1"
 crossbeam-channel = "0.5"
 iroh = { version = "0.96.1", features = ["address-lookup-mdns"] }
 shade-core = { path = "../shade-core" }
-shade-gpu = { path = "../shade-gpu" }
 shade-io = { path = "../shade-io" }
 shade-p2p = { path = "../shade-p2p" }
 image = { workspace = true }

@@ -13,7 +13,6 @@ video = ["shade-io/ffmpeg"]
 
 [dependencies]
 shade-core = { path = "../shade-core" }
-shade-gpu = { path = "../shade-gpu" }
 shade-io = { path = "../shade-io" }
 shade-p2p = { path = "../shade-p2p" }
 clap = { workspace = true }

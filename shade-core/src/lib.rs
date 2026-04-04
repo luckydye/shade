@@ -1,6 +1,39 @@
+extern crate self as shade_core;
+
+pub mod color_transform;
+pub mod composite;
+mod context;
+pub mod denoise;
+mod pipeline;
+pub mod pipelines;
+pub mod profiler;
+mod renderer;
+pub mod sharpen2;
+pub mod texture_cache;
+pub mod timestamp;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+pub const INTERNAL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};
+pub use composite::{
+    create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
+    CompositePipeline, CompositeUniform,
+};
+pub use context::GpuContext;
+pub use denoise::DenoisePipeline;
+pub use pipeline::TonePipeline;
+pub use pipelines::{
+    ColorPipeline, CropPipeline, CropUniform, CurvesPipeline, GlowPipeline,
+    GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
+};
+pub use profiler::{GpuProfiler, PassTiming};
+pub use renderer::{PreviewCrop, Renderer};
+pub use sharpen2::SharpenTwoPassPipeline;
+pub use texture_cache::TextureCache;
 
 /// Tone adjustment parameters — must match the WGSL uniform struct layout.
 #[repr(C)]
@@ -331,8 +364,8 @@ pub struct FloatImage {
 pub type MaskId = u64;
 
 mod base64_serde {
-    use serde::{Deserialize, Deserializer, Serializer};
     use base64::Engine;
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
@@ -340,7 +373,9 @@ mod base64_serde {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
         let s = String::deserialize(d)?;
-        base64::engine::general_purpose::STANDARD.decode(&s).map_err(serde::de::Error::custom)
+        base64::engine::general_purpose::STANDARD
+            .decode(&s)
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -349,8 +384,17 @@ mod base64_serde {
 /// For brush masks, stores the serialized pixel data for persistence.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MaskParams {
-    Linear { x1: f32, y1: f32, x2: f32, y2: f32 },
-    Radial { cx: f32, cy: f32, radius: f32 },
+    Linear {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+    },
+    Radial {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+    },
     Brush {
         width: u32,
         height: u32,
@@ -423,7 +467,14 @@ impl MaskData {
     /// softness=0 → hard edge; softness=1 → smooth cosine falloff to edge.
     /// Pixels are set to the maximum of their current value and the brush alpha.
     /// erase=false → max-blend (paint); erase=true → min-blend (erase).
-    pub fn stamp_brush(&mut self, cx: f32, cy: f32, radius: f32, softness: f32, erase: bool) {
+    pub fn stamp_brush(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        softness: f32,
+        erase: bool,
+    ) {
         assert!(radius > 0.0, "brush radius must be positive");
         let r_ceil = radius.ceil() as i32;
         let w = self.width as i32;
@@ -469,7 +520,8 @@ impl MaskData {
             for tx in 0..tw {
                 let sx = (tx as f32 / tw as f32 * self.width as f32) as u32;
                 let sy = (ty as f32 / th as f32 * self.height as f32) as u32;
-                out[(ty * tw + tx) as usize] = self.pixels[(sy * self.width + sx) as usize];
+                out[(ty * tw + tx) as usize] =
+                    self.pixels[(sy * self.width + sx) as usize];
             }
         }
         (out, tw, th)

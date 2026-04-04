@@ -1,11 +1,11 @@
 /// End-to-end test that replicates the frontend viewport pipeline (editor-preview.ts)
 /// in Rust, then renders through the full GPU pipeline and saves PNGs.
 ///
-/// Run with:  cargo test -p shade-gpu --test crop_rotation_e2e -- --nocapture
+/// Run with:  cargo test -p shade-core --test crop_rotation_e2e -- --nocapture
 ///
 /// Produces PNGs in /tmp/shade_e2e_*.png for visual inspection.
 use shade_core::{CropRect, FloatImage, LayerStack};
-use shade_gpu::{PreviewCrop, Renderer};
+use shade_core::{PreviewCrop, Renderer};
 use std::collections::HashMap;
 use std::path::Path;
 

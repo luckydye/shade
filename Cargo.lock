@@ -7701,7 +7701,6 @@ dependencies = [
  "image",
  "log",
  "shade-core",
- "shade-gpu",
  "shade-io",
  "shade-p2p",
  "tempfile",
@@ -7712,23 +7711,15 @@ dependencies = [
 name = "shade-core"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
- "bytemuck",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "shade-gpu"
-version = "0.1.0"
-dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytemuck",
  "futures-channel",
  "half",
  "image",
  "log",
- "shade-core",
+ "serde",
+ "serde_json",
  "shade-io",
  "tokio",
  "wgpu",
@@ -7810,7 +7801,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shade-core",
- "shade-gpu",
  "shade-io",
  "shade-p2p",
  "shade-tagging",
@@ -7835,7 +7825,6 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "shade-core",
- "shade-gpu",
  "shade-io",
  "uuid",
  "wasm-bindgen",

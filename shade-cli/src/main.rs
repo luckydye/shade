@@ -3,9 +3,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use shade_core::{
     AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect, FloatImage, GrainParams,
-    LayerStack, MaskData, MaskParams, SharpenParams, ToneParams, VignetteParams,
+    LayerStack, MaskData, MaskParams, PreviewCrop, Renderer, SharpenParams, ToneParams,
+    VignetteParams,
 };
-use shade_gpu::{PreviewCrop, Renderer};
 use shade_io::{
     from_linear_srgb_f32, generate_desktop_thumbnail, load_image,
     load_image_f32_with_colorspace, quantize_rgba_f32, save_image, scan_directory_images,

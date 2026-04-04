@@ -7,4 +7,14 @@ edition = "2021"
 serde = { workspace = true }
 serde_json = { workspace = true }
 bytemuck = { workspace = true }
+wgpu = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+half = { workspace = true }
 base64 = "0.22"
+futures-channel = "0.3"
+
+[dev-dependencies]
+shade-io = { path = "../shade-io" }
+image = { workspace = true }
+tokio = { workspace = true }

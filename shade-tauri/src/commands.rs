@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use shade_core::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
     CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
-    LayerStack, MaskData, MaskParams, SharpenParams, VignetteParams,
+    LayerStack, MaskData, MaskParams, PreviewCrop as GpuPreviewCrop, Renderer,
+    SharpenParams, VignetteParams,
 };
 use shade_io::{
     delete_persisted_library_index, has_persisted_library_index,
@@ -525,9 +526,15 @@ fn restore_masks_from_params(
                 m.fill_radial_gradient(*cx, *cy, *radius);
                 m
             }
-            shade_core::MaskParams::Brush { width: bw, height: bh, pixels } => {
-                shade_core::MaskData { width: *bw, height: *bh, pixels: pixels.clone() }
-            }
+            shade_core::MaskParams::Brush {
+                width: bw,
+                height: bh,
+                pixels,
+            } => shade_core::MaskData {
+                width: *bw,
+                height: *bh,
+                pixels: pixels.clone(),
+            },
         };
         stack.set_mask_with_params(i, mask, params.clone());
     }
@@ -2257,7 +2264,7 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                     return;
                 }
             };
-            let renderer = match runtime.block_on(shade_gpu::Renderer::new()) {
+            let renderer = match runtime.block_on(Renderer::new()) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("render worker: Renderer::new() failed: {e}");
@@ -2314,7 +2321,7 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                                         canvas_height,
                                         request.target_width,
                                         request.target_height,
-                                        request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        request.crop.map(|crop| GpuPreviewCrop {
                                             x: crop.x,
                                             y: crop.y,
                                             width: crop.width,
@@ -2350,7 +2357,7 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                                         canvas_height,
                                         request.target_width,
                                         request.target_height,
-                                        request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        request.crop.map(|crop| GpuPreviewCrop {
                                             x: crop.x,
                                             y: crop.y,
                                             width: crop.width,
@@ -2386,7 +2393,7 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                                         canvas_height,
                                         request.target_width,
                                         request.target_height,
-                                        request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                        request.crop.map(|crop| GpuPreviewCrop {
                                             x: crop.x,
                                             y: crop.y,
                                             width: crop.width,
@@ -2415,9 +2422,7 @@ pub fn spawn_thumbnail_render_worker() -> crossbeam_channel::Sender<ThumbnailRen
                 .enable_all()
                 .build()
                 .expect("failed to create thumbnail render runtime");
-            let renderer = runtime
-                .block_on(shade_gpu::Renderer::new())
-                .map_err(|e| e.to_string());
+            let renderer = runtime.block_on(Renderer::new()).map_err(|e| e.to_string());
             while let Ok(job) = receiver.recv() {
                 let result = match &renderer {
                     Ok(renderer) => {
@@ -2430,7 +2435,7 @@ pub fn spawn_thumbnail_render_worker() -> crossbeam_channel::Sender<ThumbnailRen
                                     job.canvas_height,
                                     job.request.target_width,
                                     job.request.target_height,
-                                    job.request.crop.map(|crop| shade_gpu::PreviewCrop {
+                                    job.request.crop.map(|crop| GpuPreviewCrop {
                                         x: crop.x,
                                         y: crop.y,
                                         width: crop.width,
@@ -4689,7 +4694,10 @@ pub async fn save_preset(
 }
 
 #[tauri::command]
-pub async fn rename_preset(old_name: String, new_name: String) -> Result<PresetInfo, String> {
+pub async fn rename_preset(
+    old_name: String,
+    new_name: String,
+) -> Result<PresetInfo, String> {
     let old_path = preset_file_path(&old_name)?;
     let new_path = preset_file_path(&new_name)?;
     if old_path == new_path {
@@ -5272,7 +5280,11 @@ pub async fn create_brush_mask(
         let w = st.canvas_width;
         let h = st.canvas_height;
         let mask = shade_core::MaskData::new_empty(w, h);
-        let mp = shade_core::MaskParams::Brush { width: w, height: h, pixels: vec![0u8; (w * h) as usize] };
+        let mp = shade_core::MaskParams::Brush {
+            width: w,
+            height: h,
+            pixels: vec![0u8; (w * h) as usize],
+        };
         st.stack.set_mask_with_params(params.layer_idx, mask, mp);
     }
     persist_current_edit_version(&state).await?;
@@ -5302,8 +5314,18 @@ pub async fn stamp_brush_mask(
         let mask_id = st.stack.layers[params.layer_idx]
             .mask
             .ok_or("layer has no mask")?;
-        let data = st.stack.masks.get_mut(&mask_id).ok_or("mask data missing")?;
-        data.stamp_brush(params.cx, params.cy, params.radius, params.softness, params.erase);
+        let data = st
+            .stack
+            .masks
+            .get_mut(&mask_id)
+            .ok_or("mask data missing")?;
+        data.stamp_brush(
+            params.cx,
+            params.cy,
+            params.radius,
+            params.softness,
+            params.erase,
+        );
         st.stack.generation += 1;
     }
     Ok(())
@@ -5337,7 +5359,11 @@ pub async fn get_mask_thumbnail(
         .ok_or("layer has no mask")?;
     let data = st.stack.masks.get(&mask_id).ok_or("mask data missing")?;
     let (pixels, width, height) = data.get_thumbnail(params.max_w, params.max_h);
-    Ok(MaskThumbnail { pixels, width, height })
+    Ok(MaskThumbnail {
+        pixels,
+        width,
+        height,
+    })
 }
 
 fn normalize_crop_rect(
