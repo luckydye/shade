@@ -107,7 +107,7 @@ function isMissingArtboardError(error: unknown) {
 export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
-  let containerRef: HTMLDivElement | undefined;
+  const [containerRef, setContainerRef] = createSignal<HTMLDivElement | null>(null);
   const [dragging, setDragging] = createSignal(false);
   const [pressedArtboardChrome, setPressedArtboardChrome] =
     createSignal<PressedArtboardChrome>(null);
@@ -828,10 +828,11 @@ export const Viewport: Component = () => {
   }
 
   function getArtboardPlaceholderFill(isLoading: boolean) {
-    if (!containerRef) {
+    const container = containerRef();
+    if (!container) {
       return isLoading ? "rgba(128, 128, 128, 0.32)" : "rgba(128, 128, 128, 0.18)";
     }
-    const styles = getComputedStyle(containerRef);
+    const styles = getComputedStyle(container);
     const fill = styles
       .getPropertyValue(isLoading ? "--surface-active" : "--surface")
       .trim();
@@ -865,11 +866,12 @@ export const Viewport: Component = () => {
   }
 
   function drawFrame() {
-    if (!canvasRef || !containerRef) return;
+    const container = containerRef();
+    if (!canvasRef || !container) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
-    const cssWidth = Math.max(1, Math.floor(containerRef.clientWidth));
-    const cssHeight = Math.max(1, Math.floor(containerRef.clientHeight));
+    const cssWidth = Math.max(1, Math.floor(container.clientWidth));
+    const cssHeight = Math.max(1, Math.floor(container.clientHeight));
     const devicePixelRatio = window.devicePixelRatio || 1;
     const pixelWidth = Math.max(1, Math.floor(cssWidth * devicePixelRatio));
     const pixelHeight = Math.max(1, Math.floor(cssHeight * devicePixelRatio));
@@ -1040,9 +1042,12 @@ export const Viewport: Component = () => {
     setDraftCrop(cropLayer?.crop ?? null);
   });
 
-  onMount(() => {
-    const container = containerRef;
-    if (!container) return;
+  createEffect(() => {
+    const container = containerRef();
+    if (!(container instanceof HTMLDivElement)) {
+      return;
+    }
+    setViewportScreenSize(container.clientWidth, container.clientHeight);
     const observer = new ResizeObserver(([entry]) => {
       setViewportScreenSize(entry.contentRect.width, entry.contentRect.height);
     });
@@ -1670,7 +1675,7 @@ export const Viewport: Component = () => {
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_45%)]" />
 
         <div
-          ref={containerRef}
+          ref={setContainerRef}
           class="relative flex h-full w-full items-center justify-center lg:h-full"
         >
           <canvas
