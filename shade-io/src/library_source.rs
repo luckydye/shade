@@ -106,6 +106,7 @@ struct SignedRequest {
     authorization: String,
     amz_date: String,
     content_sha256: String,
+    extra_headers: Vec<(String, String)>,
 }
 
 pub fn local_library_id(path: &Path) -> String {
@@ -236,7 +237,7 @@ pub async fn list_s3_objects_page(
     if let Some(token) = continuation_token {
         query.push(("continuation-token", token.to_string()));
     }
-    let request = signed_request("GET", config, None, &query, EMPTY_SHA256_HEX)?;
+    let request = signed_request("GET", config, None, &query, EMPTY_SHA256_HEX, &[])?;
     let response = client
         .get(&request.url)
         .header("authorization", request.authorization)
@@ -277,7 +278,7 @@ pub async fn get_s3_object_bytes(
     key: &str,
 ) -> Result<Vec<u8>, String> {
     let client = http_client()?;
-    let request = signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX)?;
+    let request = signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
     let response = client
         .get(&request.url)
         .header("authorization", request.authorization)
@@ -306,14 +307,30 @@ pub async fn put_s3_object_bytes(
     key: &str,
     bytes: &[u8],
 ) -> Result<(), String> {
+    put_s3_object_bytes_with_modified(config, key, bytes, None).await
+}
+
+pub async fn put_s3_object_bytes_with_modified(
+    config: &S3LibraryConfig,
+    key: &str,
+    bytes: &[u8],
+    modified_at: Option<u64>,
+) -> Result<(), String> {
     let client = http_client()?;
     let content_sha256 = sha256_hex(bytes);
-    let request = signed_request("PUT", config, Some(key), &[], &content_sha256)?;
-    client
+    let extra: Vec<(String, String)> = modified_at
+        .map(|ms| vec![("x-amz-meta-modified-at".to_string(), ms.to_string())])
+        .unwrap_or_default();
+    let request = signed_request("PUT", config, Some(key), &[], &content_sha256, &extra)?;
+    let mut builder = client
         .put(&request.url)
         .header("authorization", request.authorization)
         .header("x-amz-content-sha256", request.content_sha256)
-        .header("x-amz-date", request.amz_date)
+        .header("x-amz-date", request.amz_date);
+    for (name, value) in &request.extra_headers {
+        builder = builder.header(name, value);
+    }
+    builder
         .body(bytes.to_vec())
         .send()
         .await
@@ -335,7 +352,7 @@ pub async fn put_s3_object_bytes(
 
 pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(), String> {
     let client = http_client()?;
-    let request = signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX)?;
+    let request = signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
     client
         .delete(&request.url)
         .header("authorization", request.authorization)
@@ -453,6 +470,7 @@ fn signed_request(
     key: Option<&str>,
     query: &[(&str, String)],
     content_sha256: &str,
+    extra_headers: &[(String, String)],
 ) -> Result<SignedRequest, String> {
     let endpoint = reqwest::Url::parse(&config.endpoint)
         .map_err(|error| format!("invalid S3 endpoint `{}`: {error}", config.endpoint))?;
@@ -468,13 +486,28 @@ fn signed_request(
     let now = chrono::Utc::now();
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = now.format("%Y%m%d").to_string();
-    let canonical_headers = format!(
-        "host:{authority}\nx-amz-content-sha256:{content_sha256}\nx-amz-date:{amz_date}\n"
-    );
-    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    let mut header_entries = vec![
+        ("host".to_string(), authority.clone()),
+        ("x-amz-content-sha256".to_string(), content_sha256.to_string()),
+        ("x-amz-date".to_string(), amz_date.clone()),
+    ];
+    for (name, value) in extra_headers {
+        header_entries.push((name.to_lowercase(), value.clone()));
+    }
+    header_entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let canonical_headers = header_entries
+        .iter()
+        .map(|(k, v)| format!("{k}:{v}\n"))
+        .collect::<String>();
+    let signed_headers = header_entries
+        .iter()
+        .map(|(k, _)| k.as_str())
+        .collect::<Vec<_>>()
+        .join(";");
     let canonical_request = format!(
         "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{content_sha256}"
     );
+    let extra_headers_out: Vec<(String, String)> = extra_headers.to_vec();
     let credential_scope = format!("{date_stamp}/{}/s3/aws4_request", config.region);
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{}",
@@ -502,6 +535,7 @@ fn signed_request(
         authorization,
         amz_date,
         content_sha256: content_sha256.to_string(),
+        extra_headers: extra_headers_out,
     })
 }
 

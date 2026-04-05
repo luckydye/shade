@@ -20,6 +20,7 @@ type MediaTileProps = {
   onActivate: (src: string | null) => void;
   onThumbnailLoaded?: (src: string) => void;
   onToggleSelection: () => void;
+  onShiftSelect: () => void;
 };
 
 export const MediaTile: Component<MediaTileProps> = (props) => {
@@ -106,6 +107,10 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
     });
   });
   function handleClick(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
+    if (event.shiftKey) {
+      props.onShiftSelect();
+      return;
+    }
     if (event.metaKey || event.ctrlKey) {
       props.onToggleSelection();
       return;
@@ -228,7 +233,11 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            props.onToggleSelection();
+            if (event.shiftKey) {
+              props.onShiftSelect();
+            } else {
+              props.onToggleSelection();
+            }
           }}
         >
           <span class="text-[9px] font-semibold leading-none">✓</span>

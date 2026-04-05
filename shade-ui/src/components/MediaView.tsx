@@ -153,6 +153,7 @@ export const MediaView: Component = () => {
   const [showLibraryActions, setShowLibraryActions] = createSignal(false);
   const [showAddDropdown, setShowAddDropdown] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
+  const [lastSelectedMediaItemId, setLastSelectedMediaItemId] = createSignal<string | null>(null);
   const [filenameFilter, setFilenameFilter] = createSignal("");
   const [libraryOrder, setLibraryOrder] = createSignal<string[]>([]);
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
@@ -1310,11 +1311,33 @@ export const MediaView: Component = () => {
   }
 
   function toggleMediaSelection(itemId: string) {
+    setLastSelectedMediaItemId(itemId);
     setSelectedMediaItemIds((current) =>
       current.includes(itemId)
         ? current.filter((candidate) => candidate !== itemId)
         : [...current, itemId],
     );
+  }
+
+  function rangeSelectMedia(itemId: string) {
+    const lastId = lastSelectedMediaItemId();
+    const allIds = stableGridRows()
+      .filter((row): row is Extract<MediaGridRow, { kind: "items" }> => row.kind === "items")
+      .flatMap((row) => row.ids);
+    const fromIndex = lastId != null ? allIds.indexOf(lastId) : -1;
+    const toIndex = allIds.indexOf(itemId);
+    if (fromIndex === -1 || toIndex === -1) {
+      toggleMediaSelection(itemId);
+      return;
+    }
+    const [start, end] = fromIndex <= toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+    const rangeIds = allIds.slice(start, end + 1);
+    setSelectedMediaItemIds((current) => {
+      const result = new Set(current);
+      for (const id of rangeIds) result.add(id);
+      return [...result];
+    });
+    setLastSelectedMediaItemId(itemId);
   }
 
   async function handleOpenItem(item: MediaItem, libraryId: string, src: string | null) {
@@ -2139,6 +2162,7 @@ export const MediaView: Component = () => {
                                         void handleOpenItem(currentItem(), libraryId, src);
                                       }}
                                       onToggleSelection={() => toggleMediaSelection(id)}
+                                      onShiftSelect={() => rangeSelectMedia(id)}
                                     />
                                   )}
                                 </Show>
@@ -2191,6 +2215,7 @@ export const MediaView: Component = () => {
                                       void handleOpenItem(currentItem(), libraryId, src);
                                     }}
                                     onToggleSelection={() => toggleMediaSelection(id)}
+                                    onShiftSelect={() => rangeSelectMedia(id)}
                                   />
                                 )}
                               </Show>

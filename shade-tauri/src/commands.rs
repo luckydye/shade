@@ -1983,7 +1983,7 @@ async fn sync_upload_local<R: tauri::Runtime>(
         );
         let bytes = std::fs::read(local_path).map_err(|e| e.to_string())?;
         let key = s3_upload_object_key(&target, file_name);
-        shade_io::put_s3_object_bytes(&target, &key, &bytes).await?;
+        shade_io::put_s3_object_bytes_with_modified(&target, &key, &bytes, local_file.modified_at).await?;
         completed += 1;
     }
     emit_sync_complete(app, library_id, total);
