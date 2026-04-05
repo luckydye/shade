@@ -204,7 +204,12 @@ export function clipboardImageFiles(dataTransfer: DataTransfer | null | undefine
   if (!dataTransfer?.items || dataTransfer.items.length === 0) {
     return [];
   }
-  const createdAt = Date.now();
+  const now = new Date();
+  const createdAt = now
+    .toISOString()
+    .replace(/T/, "-")
+    .replace(/:/g, "-")
+    .replace(/\.\d+Z$/, "");
   let generatedCount = 0;
   const files: File[] = [];
   for (const item of Array.from(dataTransfer.items)) {
@@ -213,10 +218,6 @@ export function clipboardImageFiles(dataTransfer: DataTransfer | null | undefine
     }
     const file = item.getAsFile();
     if (!file || !file.type.toLowerCase().startsWith("image/")) {
-      continue;
-    }
-    if (file.name) {
-      files.push(file);
       continue;
     }
     const extension = clipboardImageExtension(file.type);

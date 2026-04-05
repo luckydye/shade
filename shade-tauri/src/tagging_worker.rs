@@ -120,24 +120,42 @@ pub fn spawn_thumbnail_tagging_worker(
                 .enable_all()
                 .build()
                 .expect("failed to create thumbnail tagging runtime");
-            let mut config =
-                shade_tagging::Siglip2TaggerConfig::base_patch16_224(&model_dir);
-            config.acceptance_threshold = 0.03;
-            log::info!("thumbnail tagging constructing tagger pid={pid}");
-            let mut tagger = match shade_tagging::Siglip2Tagger::new(config) {
-                Ok(tagger) => tagger,
-                Err(error) => {
-                    log::error!(
-                        "failed to initialize SigLIP2 thumbnail tagging model pid={pid}: {error}"
-                    );
-                    return;
+            let mut tagger: Option<shade_tagging::Siglip2Tagger> = None;
+            log::info!("thumbnail tagging worker ready (lazy load) pid={pid}");
+            loop {
+                let entry = match receiver.recv_timeout(std::time::Duration::from_secs(60)) {
+                    Ok(entry) => entry,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        if tagger.is_some() {
+                            log::info!("thumbnail tagging idle, unloading model pid={pid}");
+                            tagger = None;
+                        }
+                        match receiver.recv() {
+                            Ok(entry) => entry,
+                            Err(_) => return,
+                        }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+                };
+                if tagger.is_none() {
+                    let mut config =
+                        shade_tagging::Siglip2TaggerConfig::base_patch16_224(&model_dir);
+                    config.acceptance_threshold = 0.03;
+                    log::info!("thumbnail tagging loading model pid={pid}");
+                    match shade_tagging::Siglip2Tagger::new(config) {
+                        Ok(t) => tagger = Some(t),
+                        Err(error) => {
+                            log::error!(
+                                "failed to initialize SigLIP2 thumbnail tagging model pid={pid}: {error}"
+                            );
+                            return;
+                        }
+                    }
+                    log::info!("thumbnail tagging model loaded pid={pid}");
                 }
-            };
-            log::info!("thumbnail tagging constructed tagger pid={pid}");
-            while let Ok(entry) = receiver.recv() {
                 let file_hash = entry.file_hash.clone();
                 if let Err(error) =
-                    process_thumbnail_tagging_entry(&runtime, &mut tagger, &vocabulary, entry)
+                    process_thumbnail_tagging_entry(&runtime, tagger.as_mut().expect("tagger loaded above"), &vocabulary, entry)
                 {
                     eprintln!("thumbnail tagging failed for {file_hash}: {error}");
                 }
