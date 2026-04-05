@@ -578,25 +578,6 @@ fn detect_exr_bit_depth(bytes: &[u8]) -> Result<String> {
     })
 }
 
-fn decode_camera_raw_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatImage> {
-    let raw_source = match name_hint {
-        Some(name) => RawSource::new_from_slice(bytes).with_path(name),
-        None => RawSource::new_from_slice(bytes),
-    };
-    let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
-        .context("RAW decode failed")?;
-    let rgba = apply_orientation(
-        develop_raw_image(&raw_image)?,
-        raw_orientation_to_exif(raw_image.orientation),
-    )
-    .to_rgba32f();
-    let (width, height) = rgba.dimensions();
-    Ok(FloatImage {
-        pixels: rgba.into_raw().into(),
-        width,
-        height,
-    })
-}
 
 fn into_linear_float_image(
     image: DynamicImage,
