@@ -296,7 +296,7 @@ async fn sync_peer_snapshots_for_file_hash(
         return Ok(Vec::new());
     }
 
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT id FROM edit_versions WHERE file_hash = ?1",
@@ -417,8 +417,8 @@ fn preset_file_path(name: &str) -> Result<PathBuf, String> {
     Ok(presets_dir_path()?.join(format!("{trimmed}.json")))
 }
 
-fn edits_db_path() -> Result<PathBuf, String> {
-    Ok(app_config_dir()?.join("edits.db"))
+fn library_db_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("library.db"))
 }
 
 fn library_index_db_path() -> Result<PathBuf, String> {
@@ -540,11 +540,11 @@ fn restore_masks_from_params(
     }
 }
 
-pub async fn open_edits_db() -> Result<libsql::Connection, String> {
-    let path = edits_db_path()?;
+pub async fn open_library_db() -> Result<libsql::Connection, String> {
+    let path = library_db_path()?;
     let parent = path
         .parent()
-        .ok_or_else(|| format!("invalid edits db path: {}", path.display()))?;
+        .ok_or_else(|| format!("invalid library db path: {}", path.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let db = libsql::Builder::new_local(path)
         .build()
@@ -630,6 +630,7 @@ pub async fn open_edits_db() -> Result<libsql::Connection, String> {
     )
     .await
     .map_err(|e| e.to_string())?;
+    shade_io::create_collections_tables(&conn).await?;
     Ok(conn)
 }
 
@@ -670,7 +671,7 @@ async fn load_media_ratings_map(
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query("SELECT media_id, rating FROM media_ratings", ())
         .await
@@ -691,7 +692,7 @@ async fn load_media_ratings_map(
 }
 
 async fn snapshot_ids_by_source_name() -> Result<HashMap<String, String>, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT i.source_name, ev.id
@@ -735,7 +736,7 @@ async fn load_media_tags_map(
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query("SELECT media_id, tag FROM media_tags ORDER BY tag ASC", ())
         .await
@@ -757,7 +758,7 @@ async fn load_media_tags_map(
 
 async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     if let Some(value) = normalized {
         conn.execute(
             "INSERT INTO media_ratings (media_id, rating, updated_at)
@@ -778,7 +779,7 @@ async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), 
 
 pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
@@ -814,7 +815,7 @@ pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), S
 }
 
 pub async fn persist_media_tags_empty(media_id: &str) -> Result<(), String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
@@ -847,7 +848,7 @@ pub async fn persist_media_tags_empty(media_id: &str) -> Result<(), String> {
 }
 
 pub async fn max_media_tag_updated_at() -> Result<i64, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query("SELECT MAX(updated_at) FROM media_tags", ())
         .await
@@ -863,7 +864,7 @@ pub async fn max_media_tag_updated_at() -> Result<i64, String> {
 }
 
 pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT 1 FROM media_tags WHERE media_id = ?1 LIMIT 1",
@@ -881,7 +882,7 @@ pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
 async fn load_latest_edit_version(
     file_hash: &str,
 ) -> Result<Option<PersistedEditVersion>, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT id, layers_json
@@ -904,7 +905,7 @@ async fn load_latest_edit_version(
 }
 
 async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT 1
@@ -930,7 +931,7 @@ async fn persist_snapshot(
     data: &PersistedLayerData,
 ) -> Result<String, String> {
     ensure_non_image_layers(&data.layers)?;
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let now = unix_timestamp_millis()?;
     conn.execute(
         "INSERT INTO images (file_hash, source_name, created_at)
@@ -1040,7 +1041,7 @@ async fn persist_current_edit_version(
     let id = if let Some(existing_id) = current_snapshot_id {
         // Update the existing snapshot in place.
         ensure_non_image_layers(&data.layers)?;
-        let conn = open_edits_db().await?;
+        let conn = open_library_db().await?;
         conn.execute(
             "UPDATE edit_versions SET layers_json = ?1 WHERE id = ?2",
             libsql::params![
@@ -1084,7 +1085,7 @@ async fn list_snapshots_for_file(
     file_hash: &str,
     current_snapshot_id: Option<&str>,
 ) -> Result<Vec<SnapshotInfo>, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     // ROW_NUMBER ordered by created_at gives a stable display index.
     let mut rows = conn
         .query(
@@ -1118,7 +1119,7 @@ async fn load_snapshot_by_id(
     file_hash: &str,
     id: &str,
 ) -> Result<PersistedEditVersion, String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT layers_json
@@ -2774,7 +2775,7 @@ pub async fn apply_peer_metadata(
         });
     }
 
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut ratings_updated: u32 = 0;
     let mut tags_added: u32 = 0;
 
@@ -4231,7 +4232,7 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 async fn enrich_listing_metadata(
     listing: &mut LibraryImageListing,
 ) -> Result<(), String> {
-    let conn = open_edits_db().await?;
+    let conn = open_library_db().await?;
     let mut rows = conn
         .query(
             "SELECT i.source_name, ev.id
@@ -5005,7 +5006,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         &self,
         file_hash: &str,
     ) -> anyhow::Result<Vec<shade_p2p::SyncSnapshotInfo>> {
-        let conn = open_edits_db().await.map_err(anyhow::Error::msg)?;
+        let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
         let mut rows = conn
             .query(
                 "SELECT id, created_at FROM edit_versions WHERE file_hash = ?1 ORDER BY created_at DESC",
@@ -5031,7 +5032,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
     }
 
     async fn get_snapshot_data(&self, id: &str) -> anyhow::Result<Vec<u8>> {
-        let conn = open_edits_db().await.map_err(anyhow::Error::msg)?;
+        let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
         let mut rows = conn
             .query(
                 "SELECT layers_json FROM edit_versions WHERE id = ?1 LIMIT 1",
@@ -5059,7 +5060,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         if file_hashes.is_empty() {
             return Ok(Vec::new());
         }
-        let conn = open_edits_db().await.map_err(anyhow::Error::msg)?;
+        let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
         let mut result = Vec::new();
         for file_hash in file_hashes {
             // rating
@@ -5491,13 +5492,10 @@ fn normalize_crop_rect(
 
 // ── Collections ──────────────────────────────────────────────────────────────
 
-fn collections_db_path() -> Result<PathBuf, String> {
-    Ok(app_config_dir()?.join("collections.db"))
-}
-
 #[tauri::command]
 pub async fn list_collections(library_id: String) -> Result<Vec<shade_io::Collection>, String> {
-    shade_io::list_collections(&collections_db_path()?, &library_id).await
+    let conn = open_library_db().await?;
+    shade_io::list_collections(&conn, &library_id).await
 }
 
 #[tauri::command]
@@ -5505,29 +5503,34 @@ pub async fn create_collection(
     library_id: String,
     name: String,
 ) -> Result<shade_io::Collection, String> {
-    shade_io::create_collection(&collections_db_path()?, &library_id, &name).await
+    let conn = open_library_db().await?;
+    shade_io::create_collection(&conn, &library_id, &name).await
 }
 
 #[tauri::command]
 pub async fn rename_collection(collection_id: String, name: String) -> Result<(), String> {
-    shade_io::rename_collection(&collections_db_path()?, &collection_id, &name).await
+    let conn = open_library_db().await?;
+    shade_io::rename_collection(&conn, &collection_id, &name).await
 }
 
 #[tauri::command]
 pub async fn delete_collection(collection_id: String) -> Result<(), String> {
-    shade_io::delete_collection(&collections_db_path()?, &collection_id).await
+    let conn = open_library_db().await?;
+    shade_io::delete_collection(&conn, &collection_id).await
 }
 
 #[tauri::command]
 pub async fn reorder_collection(collection_id: String, new_position: i64) -> Result<(), String> {
-    shade_io::reorder_collection(&collections_db_path()?, &collection_id, new_position).await
+    let conn = open_library_db().await?;
+    shade_io::reorder_collection(&conn, &collection_id, new_position).await
 }
 
 #[tauri::command]
 pub async fn list_collection_items(
     collection_id: String,
 ) -> Result<Vec<shade_io::CollectionItem>, String> {
-    shade_io::list_collection_items(&collections_db_path()?, &collection_id).await
+    let conn = open_library_db().await?;
+    shade_io::list_collection_items(&conn, &collection_id).await
 }
 
 #[tauri::command]
@@ -5535,7 +5538,8 @@ pub async fn add_to_collection(
     collection_id: String,
     image_paths: Vec<String>,
 ) -> Result<(), String> {
-    shade_io::add_collection_items(&collections_db_path()?, &collection_id, image_paths).await
+    let conn = open_library_db().await?;
+    shade_io::add_collection_items(&conn, &collection_id, image_paths).await
 }
 
 #[tauri::command]
@@ -5543,7 +5547,8 @@ pub async fn remove_from_collection(
     collection_id: String,
     image_paths: Vec<String>,
 ) -> Result<(), String> {
-    shade_io::remove_collection_items(&collections_db_path()?, &collection_id, image_paths).await
+    let conn = open_library_db().await?;
+    shade_io::remove_collection_items(&conn, &collection_id, image_paths).await
 }
 
 #[cfg(test)]

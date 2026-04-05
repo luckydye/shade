@@ -48,9 +48,9 @@ pub use app_config::{
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
 #[cfg(feature = "native")]
 pub use collections::{
-    add_collection_items, create_collection, delete_collection, list_collection_items,
-    list_collections, remove_collection_items, rename_collection, reorder_collection,
-    Collection, CollectionItem,
+    add_collection_items, create_collection, create_collections_tables, delete_collection,
+    list_collection_items, list_collections, remove_collection_items, rename_collection,
+    reorder_collection, Collection, CollectionItem,
 };
 #[cfg(feature = "native")]
 pub use image_loader::{load_picture_bytes, open_image, OpenedImage};

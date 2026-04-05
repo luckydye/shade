@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Collection {
@@ -18,16 +17,9 @@ pub struct CollectionItem {
     pub added_at: u64,
 }
 
-pub async fn open_collections_db(db_path: &Path) -> Result<libsql::Connection, String> {
-    let parent = db_path
-        .parent()
-        .ok_or_else(|| format!("invalid collections db path: {}", db_path.display()))?;
-    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let db = libsql::Builder::new_local(db_path)
-        .build()
-        .await
-        .map_err(|e| e.to_string())?;
-    let conn = db.connect().map_err(|e| e.to_string())?;
+/// Create the collections tables on an already-open connection.
+/// Called as part of the unified library DB setup.
+pub async fn create_collections_tables(conn: &libsql::Connection) -> Result<(), String> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS collections (
             id TEXT PRIMARY KEY NOT NULL,
@@ -64,14 +56,13 @@ pub async fn open_collections_db(db_path: &Path) -> Result<libsql::Connection, S
     )
     .await
     .map_err(|e| e.to_string())?;
-    Ok(conn)
+    Ok(())
 }
 
 pub async fn list_collections(
-    db_path: &Path,
+    conn: &libsql::Connection,
     library_id: &str,
 ) -> Result<Vec<Collection>, String> {
-    let conn = open_collections_db(db_path).await?;
     let mut rows = conn
         .query(
             "SELECT c.id, c.library_id, c.name, c.position, c.created_at,
@@ -98,11 +89,10 @@ pub async fn list_collections(
 }
 
 pub async fn create_collection(
-    db_path: &Path,
+    conn: &libsql::Connection,
     library_id: &str,
     name: &str,
 ) -> Result<Collection, String> {
-    let conn = open_collections_db(db_path).await?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -137,11 +127,10 @@ pub async fn create_collection(
 }
 
 pub async fn rename_collection(
-    db_path: &Path,
+    conn: &libsql::Connection,
     collection_id: &str,
     name: &str,
 ) -> Result<(), String> {
-    let conn = open_collections_db(db_path).await?;
     conn.execute(
         "UPDATE collections SET name = ?1 WHERE id = ?2",
         libsql::params![name, collection_id],
@@ -151,8 +140,10 @@ pub async fn rename_collection(
     Ok(())
 }
 
-pub async fn delete_collection(db_path: &Path, collection_id: &str) -> Result<(), String> {
-    let conn = open_collections_db(db_path).await?;
+pub async fn delete_collection(
+    conn: &libsql::Connection,
+    collection_id: &str,
+) -> Result<(), String> {
     conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| e.to_string())?;
     let result = async {
         conn.execute(
@@ -180,11 +171,10 @@ pub async fn delete_collection(db_path: &Path, collection_id: &str) -> Result<()
 }
 
 pub async fn reorder_collection(
-    db_path: &Path,
+    conn: &libsql::Connection,
     collection_id: &str,
     new_position: i64,
 ) -> Result<(), String> {
-    let conn = open_collections_db(db_path).await?;
     conn.execute(
         "UPDATE collections SET position = ?1 WHERE id = ?2",
         libsql::params![new_position, collection_id],
@@ -195,10 +185,9 @@ pub async fn reorder_collection(
 }
 
 pub async fn list_collection_items(
-    db_path: &Path,
+    conn: &libsql::Connection,
     collection_id: &str,
 ) -> Result<Vec<CollectionItem>, String> {
-    let conn = open_collections_db(db_path).await?;
     let mut rows = conn
         .query(
             "SELECT image_path, position, added_at FROM collection_items
@@ -220,11 +209,10 @@ pub async fn list_collection_items(
 }
 
 pub async fn add_collection_items(
-    db_path: &Path,
+    conn: &libsql::Connection,
     collection_id: &str,
     image_paths: Vec<String>,
 ) -> Result<(), String> {
-    let conn = open_collections_db(db_path).await?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -268,11 +256,10 @@ pub async fn add_collection_items(
 }
 
 pub async fn remove_collection_items(
-    db_path: &Path,
+    conn: &libsql::Connection,
     collection_id: &str,
     image_paths: Vec<String>,
 ) -> Result<(), String> {
-    let conn = open_collections_db(db_path).await?;
     conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| e.to_string())?;
     let result = async {
         for path in &image_paths {
