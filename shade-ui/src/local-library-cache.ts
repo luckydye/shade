@@ -28,6 +28,7 @@ type CachedLocalItem = {
   path: string;
   name: string;
   modified_at: number | null;
+  file_hash: string | null;
   has_snapshots: boolean;
   latest_snapshot_id: string | null;
   rating: number | null;
@@ -48,6 +49,10 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     modified_at: normalizeModifiedAt(
       (image as LibraryImage & { modified_at?: unknown }).modified_at,
     ),
+    file_hash:
+      typeof image.file_hash === "string" && image.file_hash.length > 0
+        ? image.file_hash
+        : null,
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
       latest_snapshot_id: normalizeSnapshotVersion(
@@ -65,6 +70,10 @@ function toCachedLocalItem(libraryId: string, image: LibraryImage): CachedLocalI
     path: image.path,
     name: image.name,
     modified_at: normalizeModifiedAt(image.modified_at),
+    file_hash:
+      typeof image.file_hash === "string" && image.file_hash.length > 0
+        ? image.file_hash
+        : null,
     has_snapshots: image.metadata?.has_snapshots ?? false,
     latest_snapshot_id: normalizeSnapshotVersion(
       image.metadata?.latest_snapshot_id,
@@ -79,6 +88,10 @@ function toLibraryImage(item: CachedLocalItem): LibraryImage {
     path: item.path,
     name: item.name,
     modified_at: normalizeModifiedAt(item.modified_at),
+    file_hash:
+      typeof item.file_hash === "string" && item.file_hash.length > 0
+        ? item.file_hash
+        : null,
     metadata: {
       has_snapshots: item.has_snapshots,
       latest_snapshot_id: normalizeSnapshotVersion(item.latest_snapshot_id),
@@ -190,7 +203,10 @@ async function putCachedThumbnail(
   });
 }
 
-async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
+async function warmLocalLibraryThumbnails(
+  libraryId: string,
+  items: LibraryImage[],
+) {
   const workerCount = 4;
   let nextIndex = 0;
 
@@ -221,6 +237,12 @@ async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
   }
 
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (await isTauriRuntime()) {
+    tauriLocalLibraryListings.set(
+      libraryId,
+      normalizeLibraryImageListing(await listLibraryImages(libraryId)),
+    );
+  }
 }
 
 export async function getCachedLocalLibraryItems(
@@ -238,13 +260,13 @@ export async function loadLocalLibraryItemsCachedOrRemote(
   if (await isTauriRuntime()) {
     const listing = normalizeLibraryImageListing(await listLibraryImages(libraryId));
     tauriLocalLibraryListings.set(libraryId, listing);
-    void warmLocalLibraryThumbnails(listing.items);
+    void warmLocalLibraryThumbnails(libraryId, listing.items);
     return listing;
   }
   try {
     const listing = normalizeLibraryImageListing(await listLibraryImages(libraryId));
     await saveLocalLibraryListing(libraryId, listing);
-    void warmLocalLibraryThumbnails(listing.items);
+    void warmLocalLibraryThumbnails(libraryId, listing.items);
     return listing;
   } catch (error) {
     const cachedListing = await loadLocalLibraryListing(libraryId);

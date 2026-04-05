@@ -202,6 +202,7 @@ export interface OpenImageInfo {
   canvas_width: number;
   canvas_height: number;
   source_bit_depth: string;
+  file_hash: string | null;
 }
 
 export interface LocalPeer {
@@ -236,6 +237,7 @@ export interface LibraryImage {
   path: string;
   name: string;
   modified_at: number | null;
+  file_hash: string | null;
   metadata: LibraryImageMetadata;
 }
 
@@ -648,6 +650,7 @@ async function _loadEncodedBytes(
     canvas_width: result.canvasWidth,
     canvas_height: result.canvasHeight,
     source_bit_depth: result.source_bit_depth,
+    file_hash: null,
   };
 }
 
@@ -955,7 +958,7 @@ export interface SnapshotInfo {
 }
 
 export interface MediaRatingParams {
-  media_id: string;
+  file_hash: string;
   rating: number | null;
 }
 
@@ -1331,14 +1334,16 @@ export async function listSnapshots(imagePath?: string | null): Promise<Snapshot
 }
 
 export async function listMediaRatings(
-  mediaIds: string[],
+  fileHashes: string[],
 ): Promise<Record<string, number>> {
-  if (mediaIds.length === 0) {
+  if (fileHashes.length === 0) {
     return {};
   }
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("list_media_ratings", { mediaIds }) as Promise<Record<string, number>>;
+    return inv("list_media_ratings", {
+      fileHashes,
+    }) as Promise<Record<string, number>>;
   }
   return {};
 }
@@ -1612,7 +1617,7 @@ export interface Collection {
 }
 
 export interface CollectionItem {
-  image_path: string;
+  file_hash: string;
   position: number;
   added_at: number;
 }
@@ -1624,8 +1629,8 @@ export interface CollectionsPlatform {
   deleteCollection(collectionId: string): Promise<void>;
   reorderCollection(collectionId: string, newPosition: number): Promise<void>;
   listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
-  addToCollection(collectionId: string, imagePaths: string[]): Promise<void>;
-  removeFromCollection(collectionId: string, imagePaths: string[]): Promise<void>;
+  addToCollection(collectionId: string, fileHashes: string[]): Promise<void>;
+  removeFromCollection(collectionId: string, fileHashes: string[]): Promise<void>;
 }
 
 export function listCollections(libraryId: string): Promise<Collection[]> {
@@ -1652,10 +1657,10 @@ export function listCollectionItems(collectionId: string): Promise<CollectionIte
   return getPlatform().collections.listCollectionItems(collectionId);
 }
 
-export function addToCollection(collectionId: string, imagePaths: string[]): Promise<void> {
-  return getPlatform().collections.addToCollection(collectionId, imagePaths);
+export function addToCollection(collectionId: string, fileHashes: string[]): Promise<void> {
+  return getPlatform().collections.addToCollection(collectionId, fileHashes);
 }
 
-export function removeFromCollection(collectionId: string, imagePaths: string[]): Promise<void> {
-  return getPlatform().collections.removeFromCollection(collectionId, imagePaths);
+export function removeFromCollection(collectionId: string, fileHashes: string[]): Promise<void> {
+  return getPlatform().collections.removeFromCollection(collectionId, fileHashes);
 }

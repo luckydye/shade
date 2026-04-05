@@ -440,11 +440,13 @@ export const MediaView: Component = () => {
   );
   const displayedItems = createMemo(() => {
     const items = filteredByFilename();
-    const paths = collectionItemPaths();
-    if (selectedCollectionId() === null || paths.size === 0) {
+    const fileHashes = collectionItemPaths();
+    if (selectedCollectionId() === null || fileHashes.size === 0) {
       return items;
     }
-    return items.filter((item) => paths.has(mediaItemKey(item)));
+    return items.filter(
+      (item) => item.kind === "local" && !!item.fileHash && fileHashes.has(item.fileHash),
+    );
   });
   const itemsById = createMemo(
     () => new Map(displayedItems().map((item) => [mediaItemKey(item), item])),
@@ -1367,7 +1369,23 @@ export const MediaView: Component = () => {
       return;
     }
     const items = await listCollectionItems(colId);
-    setCollectionItemPaths(new Set(items.map((i) => i.image_path)));
+    setCollectionItemPaths(new Set(items.map((i) => i.file_hash)));
+  }
+
+  function selectedCollectionFileHashes() {
+    return selectedMediaItemIds().map((itemId) => {
+      const item = itemsById().get(itemId);
+      if (!item) {
+        throw new Error(`selected media item not found: ${itemId}`);
+      }
+      if (item.kind !== "local") {
+        throw new Error(`collection item is not local: ${itemId}`);
+      }
+      if (!item.fileHash) {
+        throw new Error(`file hash unavailable for: ${item.path}`);
+      }
+      return item.fileHash;
+    });
   }
 
   async function handleCreateCollection() {
@@ -1392,9 +1410,9 @@ export const MediaView: Component = () => {
   }
 
   async function handleAddToCollection(collectionId: string) {
-    const paths = selectedMediaItemIds();
-    if (paths.length === 0) return;
-    await addToCollection(collectionId, paths);
+    const fileHashes = selectedCollectionFileHashes();
+    if (fileHashes.length === 0) return;
+    await addToCollection(collectionId, fileHashes);
     setShowAddToCollectionMenu(false);
     if (selectedCollectionId() === collectionId) {
       await refreshCollectionItems();
@@ -1405,9 +1423,9 @@ export const MediaView: Component = () => {
   async function handleRemoveFromCollection() {
     const colId = selectedCollectionId();
     if (!colId) return;
-    const paths = selectedMediaItemIds();
-    if (paths.length === 0) return;
-    await removeFromCollection(colId, paths);
+    const fileHashes = selectedCollectionFileHashes();
+    if (fileHashes.length === 0) return;
+    await removeFromCollection(colId, fileHashes);
     setSelectedMediaItemIds([]);
     await refreshCollectionItems();
     await refreshCollections();

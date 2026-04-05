@@ -28,10 +28,10 @@ export const tauriCollectionsPlatform: CollectionsPlatform = {
   listCollectionItems(collectionId) {
     return inv<CollectionItem[]>("list_collection_items", { collectionId });
   },
-  async addToCollection(collectionId, imagePaths) {
-    await inv("add_to_collection", { collectionId, imagePaths });
+  async addToCollection(collectionId, fileHashes) {
+    await inv("add_to_collection", { collectionId, fileHashes });
   },
-  async removeFromCollection(collectionId, imagePaths) {
-    await inv("remove_from_collection", { collectionId, imagePaths });
+  async removeFromCollection(collectionId, fileHashes) {
+    await inv("remove_from_collection", { collectionId, fileHashes });
   },
 };

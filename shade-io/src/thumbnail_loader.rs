@@ -2,7 +2,14 @@ use crate::{ThumbnailJob, ThumbnailQueue};
 use std::path::Path;
 use std::sync::Arc;
 
-pub type ThumbnailResponseSender = tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>;
+#[derive(Clone, Debug)]
+pub struct LoadedThumbnail {
+    pub bytes: Vec<u8>,
+    pub file_hash: Option<String>,
+}
+
+pub type ThumbnailResponseSender =
+    tokio::sync::oneshot::Sender<Result<LoadedThumbnail, String>>;
 
 fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
     let path = path
@@ -33,10 +40,15 @@ fn parse_s3_media_path(path: &str) -> Result<(&str, &str), String> {
     Ok((source_id, key))
 }
 
-pub fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
+pub fn generate_desktop_thumbnail(path: &str) -> Result<LoadedThumbnail, String> {
     let source = Path::new(path);
-    let (pixels, width, height) =
-        crate::load_image(source).map_err(|error| error.to_string())?;
+    let encoded = std::fs::read(source).map_err(|error| error.to_string())?;
+    let file_hash = blake3::hash(&encoded).to_hex().to_string();
+    let (pixels, width, height) = crate::load_image_bytes(
+        &encoded,
+        source.file_name().and_then(|name| name.to_str()),
+    )
+    .map_err(|error| error.to_string())?;
     let img = image::RgbaImage::from_raw(width, height, pixels)
         .ok_or("failed to wrap pixels in RgbaImage")?;
     let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
@@ -47,7 +59,10 @@ pub fn generate_desktop_thumbnail(path: &str) -> Result<Vec<u8>, String> {
             image::ImageFormat::Jpeg,
         )
         .map_err(|error| error.to_string())?;
-    Ok(jpeg)
+    Ok(LoadedThumbnail {
+        bytes: jpeg,
+        file_hash: Some(file_hash),
+    })
 }
 
 pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue<ThumbnailResponseSender>> {
@@ -81,7 +96,7 @@ pub async fn load_thumbnail_bytes<
     load_camera_thumbnail: CameraThumbnail,
     load_s3_thumbnail: S3Thumbnail,
     load_photo_thumbnail: PhotoThumbnail,
-) -> Result<Vec<u8>, String>
+) -> Result<LoadedThumbnail, String>
 where
     CameraThumbnail: Fn(String, String) -> CameraFuture,
     CameraFuture: std::future::Future<Output = Result<Vec<u8>, String>>,
@@ -92,14 +107,27 @@ where
 {
     if picture_id.starts_with("ccapi://") {
         let (host, file_path) = parse_ccapi_media_path(picture_id)?;
-        return load_camera_thumbnail(host.to_string(), file_path.to_string()).await;
+        return load_camera_thumbnail(host.to_string(), file_path.to_string())
+            .await
+            .map(|bytes| LoadedThumbnail {
+                bytes,
+                file_hash: None,
+            });
     }
     if picture_id.starts_with("s3://") {
         let _ = parse_s3_media_path(picture_id)?;
-        return load_s3_thumbnail(picture_id.to_string()).await;
+        return load_s3_thumbnail(picture_id.to_string())
+            .await
+            .map(|bytes| LoadedThumbnail {
+                bytes,
+                file_hash: None,
+            });
     }
     if let Some(bytes) = load_photo_thumbnail(picture_id.to_string()).await? {
-        return Ok(bytes);
+        return Ok(LoadedThumbnail {
+            bytes,
+            file_hash: None,
+        });
     }
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     thumbnail_queue.push(ThumbnailJob {

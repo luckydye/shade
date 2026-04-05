@@ -16,11 +16,11 @@ use std::{convert::TryFrom, io::Cursor};
 #[cfg(feature = "native")]
 pub mod app_config;
 #[cfg(feature = "native")]
-pub mod collections;
+pub mod camera_services;
 #[cfg(feature = "native")]
 pub mod ccapi;
 #[cfg(feature = "native")]
-pub mod camera_services;
+pub mod collections;
 #[cfg(feature = "native")]
 pub mod image_loader;
 #[cfg(feature = "native")]
@@ -48,12 +48,12 @@ pub use app_config::{
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
 #[cfg(feature = "native")]
 pub use collections::{
-    add_collection_items, create_collection, create_collections_tables, delete_collection,
-    list_collection_items, list_collections, remove_collection_items, rename_collection,
-    reorder_collection, Collection, CollectionItem,
+    add_collection_items, create_collection, create_collections_tables,
+    delete_collection, list_collection_items, list_collections, remove_collection_items,
+    rename_collection, reorder_collection, Collection, CollectionItem,
 };
 #[cfg(feature = "native")]
-pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
+pub use image_loader::{hash_file, load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
     delete_persisted_library_index, has_persisted_library_index,
@@ -82,7 +82,7 @@ pub use library_source::{
 #[cfg(feature = "native")]
 pub use thumbnail_loader::{
     generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
-    ThumbnailResponseSender,
+    LoadedThumbnail, ThumbnailResponseSender,
 };
 #[cfg(feature = "native")]
 pub use thumbnail_queue::{PendingThumbnailJob, ThumbnailJob, ThumbnailQueue};
@@ -1025,8 +1025,8 @@ mod tests {
 
         let decode_start = Instant::now();
         let raw_source = RawSource::new_from_slice(&bytes).with_path("_MGC3030.CR3");
-        let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
-            .expect("RAW decode");
+        let raw_image =
+            rawler::decode(&raw_source, &RawDecodeParams::default()).expect("RAW decode");
         let decode_duration = decode_start.elapsed();
 
         let develop_start = Instant::now();
@@ -1034,10 +1034,8 @@ mod tests {
         let develop_duration = develop_start.elapsed();
 
         let orient_start = Instant::now();
-        let oriented = apply_orientation(
-            developed,
-            raw_orientation_to_exif(raw_image.orientation),
-        );
+        let oriented =
+            apply_orientation(developed, raw_orientation_to_exif(raw_image.orientation));
         let orient_duration = orient_start.elapsed();
 
         let color_type = oriented.color();
@@ -1049,7 +1047,8 @@ mod tests {
         let image = into_linear_float_image(oriented, color_type, &ColorSpace::Srgb);
         let convert_duration = convert_start.elapsed();
 
-        let total = decode_duration + develop_duration + orient_duration + convert_duration;
+        let total =
+            decode_duration + develop_duration + orient_duration + convert_duration;
 
         eprintln!(
             "cr3 wasm-open benchmark: decode={} develop={} orient={} to_float={} legacy_to_float={} total={} size={}x{}",

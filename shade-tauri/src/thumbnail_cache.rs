@@ -6,7 +6,7 @@ pub struct ThumbnailCacheDb(Mutex<libsql::Connection>);
 #[derive(Clone, Debug)]
 pub struct ThumbnailCacheEntry {
     pub picture_id: String,
-    pub media_id: String,
+    pub file_hash: String,
     pub data: Vec<u8>,
 }
 
@@ -23,7 +23,7 @@ impl ThumbnailCacheDb {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
                 picture_id TEXT PRIMARY KEY NOT NULL,
-                media_id TEXT,
+                file_hash TEXT,
                 data BLOB NOT NULL
             )",
             (),
@@ -34,17 +34,17 @@ impl ThumbnailCacheDb {
             .query("PRAGMA table_info(thumbnails)", ())
             .await
             .map_err(|e| e.to_string())?;
-        let mut has_media_id = false;
+        let mut has_file_hash = false;
         let mut has_created_at = false;
         while let Some(row) = columns.next().await.map_err(|e| e.to_string())? {
             match row.get::<String>(1).map_err(|e| e.to_string())?.as_str() {
-                "media_id" => has_media_id = true,
+                "file_hash" => has_file_hash = true,
                 "created_at" => has_created_at = true,
                 _ => {}
             }
         }
-        if !has_media_id {
-            conn.execute("ALTER TABLE thumbnails ADD COLUMN media_id TEXT", ())
+        if !has_file_hash {
+            conn.execute("ALTER TABLE thumbnails ADD COLUMN file_hash TEXT", ())
                 .await
                 .map_err(|e| e.to_string())?;
         }
@@ -56,40 +56,26 @@ impl ThumbnailCacheDb {
             .await
             .map_err(|e| e.to_string())?;
         }
-        let mut rows = conn
-            .query(
-                "SELECT picture_id FROM thumbnails WHERE media_id IS NULL OR media_id = ''",
-                (),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut picture_ids = Vec::new();
-        while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-            picture_ids.push(row.get::<String>(0).map_err(|e| e.to_string())?);
-        }
-        for picture_id in picture_ids {
-            let media_id = thumbnail_media_id_from_cache_key(&picture_id);
-            conn.execute(
-                "UPDATE thumbnails SET media_id = ?2 WHERE picture_id = ?1",
-                libsql::params![picture_id, media_id],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        }
         Ok(Self(Mutex::new(conn)))
     }
 
-    pub async fn get(&self, picture_id: &str) -> Result<Option<Vec<u8>>, String> {
+    pub async fn get(
+        &self,
+        picture_id: &str,
+    ) -> Result<Option<(Option<String>, Vec<u8>)>, String> {
         let conn = self.0.lock().await;
         let mut rows = conn
             .query(
-                "SELECT data FROM thumbnails WHERE picture_id = ?1",
+                "SELECT file_hash, data FROM thumbnails WHERE picture_id = ?1",
                 [picture_id],
             )
             .await
             .map_err(|e| e.to_string())?;
         match rows.next().await.map_err(|e| e.to_string())? {
-            Some(row) => Ok(Some(row.get(0).map_err(|e| e.to_string())?)),
+            Some(row) => Ok(Some((
+                row.get::<Option<String>>(0).map_err(|e| e.to_string())?,
+                row.get::<Vec<u8>>(1).map_err(|e| e.to_string())?,
+            ))),
             None => Ok(None),
         }
     }
@@ -97,14 +83,14 @@ impl ThumbnailCacheDb {
     pub async fn put(
         &self,
         picture_id: &str,
-        media_id: &str,
+        file_hash: Option<&str>,
         data: &[u8],
     ) -> Result<(), String> {
         let created_at = current_millis()?;
         let conn = self.0.lock().await;
         conn.execute(
-            "INSERT OR REPLACE INTO thumbnails (picture_id, media_id, data, created_at) VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![picture_id, media_id, data.to_vec(), created_at],
+            "INSERT OR REPLACE INTO thumbnails (picture_id, file_hash, data, created_at) VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![picture_id, file_hash, data.to_vec(), created_at],
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -118,7 +104,10 @@ impl ThumbnailCacheDb {
         let conn = self.0.lock().await;
         let mut rows = conn
             .query(
-                "SELECT picture_id, media_id, data FROM thumbnails WHERE created_at > ?1 ORDER BY created_at ASC",
+                "SELECT picture_id, file_hash, data
+                 FROM thumbnails
+                 WHERE created_at > ?1 AND file_hash IS NOT NULL AND file_hash != ''
+                 ORDER BY created_at ASC",
                 [since_millis],
             )
             .await
@@ -127,7 +116,7 @@ impl ThumbnailCacheDb {
         while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
             entries.push(ThumbnailCacheEntry {
                 picture_id: row.get::<String>(0).map_err(|e| e.to_string())?,
-                media_id: row.get::<String>(1).map_err(|e| e.to_string())?,
+                file_hash: row.get::<String>(1).map_err(|e| e.to_string())?,
                 data: row.get::<Vec<u8>>(2).map_err(|e| e.to_string())?,
             });
         }
@@ -156,35 +145,12 @@ pub fn thumbnail_cache_key(picture_id: &str) -> String {
     picture_id.to_string()
 }
 
-pub fn thumbnail_media_id_from_cache_key(picture_id: &str) -> String {
-    let Some((media_id, revision)) = picture_id.rsplit_once('#') else {
-        return picture_id.to_string();
-    };
-    if revision.chars().all(|char| char.is_ascii_digit()) {
-        return media_id.to_string();
-    }
-    picture_id.to_string()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{thumbnail_cache_key, thumbnail_media_id_from_cache_key};
-
-    #[test]
-    fn keeps_non_revision_keys_unchanged() {
-        assert_eq!(
-            thumbnail_media_id_from_cache_key("s3://bucket/file.jpg"),
-            "s3://bucket/file.jpg"
-        );
-    }
+    use super::thumbnail_cache_key;
 
     #[test]
     fn strips_revision_suffix_from_local_cache_key() {
-        let cache_key = "/tmp/example.jpg#123456789";
-        assert_eq!(
-            thumbnail_media_id_from_cache_key(cache_key),
-            "/tmp/example.jpg"
-        );
         let _ = thumbnail_cache_key("/tmp/example.jpg");
     }
 }

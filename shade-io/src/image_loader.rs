@@ -18,7 +18,7 @@ fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
 
-fn hash_file(path: &Path) -> Result<String, String> {
+pub fn hash_file(path: &Path) -> Result<String, String> {
     let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0_u8; 64 * 1024];

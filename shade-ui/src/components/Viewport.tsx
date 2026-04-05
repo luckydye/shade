@@ -79,11 +79,11 @@ function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
   }
   switch (artboard.source.kind) {
     case "path":
-      return artboard.source.path;
+      return artboard.activeFileHash;
     case "peer":
       return `peer:${artboard.source.peerEndpointId}:${artboard.source.picture.id}`;
     case "file":
-      return null;
+      return artboard.activeFileHash;
     default:
       throw new Error("unknown artboard source");
   }
@@ -338,7 +338,7 @@ export const Viewport: Component = () => {
     setIsSavingRating(true);
     try {
       await setMediaRating({
-        media_id: mediaId,
+        file_hash: mediaId,
         rating,
       });
     } catch (error) {

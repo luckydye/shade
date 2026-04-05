@@ -7,7 +7,7 @@ use tauri::Manager;
 #[derive(Clone)]
 pub struct ThumbnailTaggingService {
     pub sender: Option<crossbeam_channel::Sender<ThumbnailCacheEntry>>,
-    pub pending_media_ids:
+    pub pending_file_hashes:
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub _lock_file: std::sync::Arc<Option<std::fs::File>>,
 }
@@ -20,28 +20,28 @@ impl ThumbnailTaggingService {
         };
         {
             let mut pending = self
-                .pending_media_ids
+                .pending_file_hashes
                 .lock()
                 .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?;
-            if !pending.insert(entry.media_id.clone()) {
+            if !pending.insert(entry.file_hash.clone()) {
                 return Ok(());
             }
         }
         if let Err(error) = sender.send(entry.clone()) {
-            self.pending_media_ids
+            self.pending_file_hashes
                 .lock()
                 .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?
-                .remove(&entry.media_id);
+                .remove(&entry.file_hash);
             return Err(error.to_string());
         }
         Ok(())
     }
 
-    pub fn finish(&self, media_id: &str) -> Result<(), String> {
-        self.pending_media_ids
+    pub fn finish(&self, file_hash: &str) -> Result<(), String> {
+        self.pending_file_hashes
             .lock()
             .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?
-            .remove(media_id);
+            .remove(file_hash);
         Ok(())
     }
 }
@@ -62,7 +62,7 @@ pub fn spawn_thumbnail_tagging_worker(
         log::info!("thumbnail tagging worker passive pid={pid}");
         let service = ThumbnailTaggingService {
             sender: None,
-            pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
+            pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
             _lock_file: std::sync::Arc::new(None),
@@ -78,7 +78,7 @@ pub fn spawn_thumbnail_tagging_worker(
             log::warn!("thumbnail tagging disabled pid={pid}: {error}");
             let service = ThumbnailTaggingService {
                 sender: None,
-                pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
+                pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
                     std::collections::HashSet::new(),
                 )),
                 _lock_file: std::sync::Arc::new(None),
@@ -107,7 +107,7 @@ pub fn spawn_thumbnail_tagging_worker(
     );
     let service = ThumbnailTaggingService {
         sender: Some(sender),
-        pending_media_ids: std::sync::Arc::new(std::sync::Mutex::new(
+        pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashSet::new(),
         )),
         _lock_file: std::sync::Arc::new(Some(lock_file)),
@@ -135,14 +135,14 @@ pub fn spawn_thumbnail_tagging_worker(
             };
             log::info!("thumbnail tagging constructed tagger pid={pid}");
             while let Ok(entry) = receiver.recv() {
-                let media_id = entry.media_id.clone();
+                let file_hash = entry.file_hash.clone();
                 if let Err(error) =
                     process_thumbnail_tagging_entry(&runtime, &mut tagger, &vocabulary, entry)
                 {
-                    eprintln!("thumbnail tagging failed for {media_id}: {error}");
+                    eprintln!("thumbnail tagging failed for {file_hash}: {error}");
                 }
                 worker_service
-                    .finish(&media_id)
+                    .finish(&file_hash)
                     .expect("failed to mark thumbnail tagging job as finished");
             }
         })
@@ -163,11 +163,11 @@ pub fn process_thumbnail_tagging_entry(
     vocabulary: &[shade_tagging::TagVocabularyEntry],
     entry: ThumbnailCacheEntry,
 ) -> Result<(), String> {
-    log::info!("thumbnail tagging processing media_id={}", entry.media_id);
-    if runtime.block_on(crate::commands::media_tags_exist(&entry.media_id))? {
+    log::info!("thumbnail tagging processing file_hash={}", entry.file_hash);
+    if runtime.block_on(crate::commands::media_tags_exist(&entry.file_hash))? {
         log::info!(
-            "thumbnail tagging skipped existing tags media_id={}",
-            entry.media_id
+            "thumbnail tagging skipped existing tags file_hash={}",
+            entry.file_hash
         );
         return Ok(());
     }
@@ -179,8 +179,8 @@ pub fn process_thumbnail_tagging_entry(
         )
         .map_err(|e| e.to_string())?;
     if result.tags.is_empty() {
-        runtime.block_on(crate::commands::persist_media_tags_empty(&entry.media_id))?;
-        log::info!("thumbnail tagging no tags media_id={}", entry.media_id);
+        runtime.block_on(crate::commands::persist_media_tags_empty(&entry.file_hash))?;
+        log::info!("thumbnail tagging no tags file_hash={}", entry.file_hash);
         return Ok(());
     }
     let tags = result
@@ -188,10 +188,10 @@ pub fn process_thumbnail_tagging_entry(
         .iter()
         .map(|tag| tag.label.clone())
         .collect::<Vec<_>>();
-    runtime.block_on(crate::commands::persist_media_tags(&entry.media_id, &tags))?;
+    runtime.block_on(crate::commands::persist_media_tags(&entry.file_hash, &tags))?;
     log::info!(
-        "thumbnail tagging persisted media_id={} tags={}",
-        entry.media_id,
+        "thumbnail tagging persisted file_hash={} tags={}",
+        entry.file_hash,
         tags.join(",")
     );
     Ok(())

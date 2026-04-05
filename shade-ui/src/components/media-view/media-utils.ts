@@ -37,6 +37,7 @@ export type MediaItem =
       id: string;
       name: string;
       path: string;
+      fileHash: string | null;
       modifiedAt: number | null;
       metadata: MediaItemMetadata;
     }
@@ -45,6 +46,7 @@ export type MediaItem =
       id: string;
       name: string;
       peerId: string;
+      fileHash: string | null;
       modifiedAt: number | null;
       metadata: MediaItemMetadata;
     };
@@ -282,7 +284,7 @@ export function filterMediaItemsByFilename(items: MediaItem[], filters: string[]
 }
 
 function mediaRatingId(item: MediaItem) {
-  return item.kind === "peer" ? `peer:${item.peerId}:${item.id}` : item.path;
+  return item.kind === "peer" ? `peer:${item.peerId}:${item.id}` : item.fileHash;
 }
 
 function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem {
@@ -296,9 +298,16 @@ function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem 
 }
 
 export async function applyStoredRatings(items: MediaItem[]) {
-  const ratings = await listMediaRatings(items.map(mediaRatingId));
+  const ratingIds = items
+    .map((item) => ({ item, ratingId: mediaRatingId(item) }))
+    .filter((entry): entry is { item: MediaItem; ratingId: string } => entry.ratingId !== null);
+  const ratings = await listMediaRatings(ratingIds.map((entry) => entry.ratingId));
   return items.map((item) => {
-    const storedRating = ratings[mediaRatingId(item)];
+    const ratingId = mediaRatingId(item);
+    if (!ratingId) {
+      return item;
+    }
+    const storedRating = ratings[ratingId];
     if (storedRating === undefined) {
       return item;
     }
@@ -334,6 +343,7 @@ export function localMediaItem(image: LibraryImage): MediaItem {
     id: image.path,
     name: image.name || pictureName(image.path),
     path: image.path,
+    fileHash: image.file_hash,
     modifiedAt: normalizeModifiedAt(image.modified_at),
     metadata: {
       hasSnapshots: image.metadata?.has_snapshots ?? false,
@@ -351,6 +361,7 @@ export function peerMediaItem(image: PeerLibraryItem): MediaItem {
     id: image.id,
     name: image.name,
     peerId: image.peerId,
+    fileHash: null,
     modifiedAt: normalizeModifiedAt(image.modified_at),
     metadata: {
       hasSnapshots: image.has_snapshots,
@@ -445,6 +456,7 @@ export async function openMediaItem(
   const activeMediaSelection = {
     libraryId,
     itemId: mediaItemKey(item),
+    fileHash: item.fileHash,
     rating: item.metadata.rating,
     baseRating: item.metadata.baseRating,
   };

@@ -24,6 +24,7 @@ type CachedCameraItem = {
   contentKey: string;
   name: string;
   modified_at: number | null;
+  file_hash: string | null;
   has_snapshots: boolean;
   latest_snapshot_id: string | null;
   rating: number | null;
@@ -53,6 +54,10 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     modified_at: normalizeModifiedAt(
       (image as LibraryImage & { modified_at?: unknown }).modified_at,
     ),
+    file_hash:
+      typeof image.file_hash === "string" && image.file_hash.length > 0
+        ? image.file_hash
+        : null,
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
       latest_snapshot_id: normalizeSnapshotVersion(
@@ -69,6 +74,10 @@ function toCachedCameraItem(image: LibraryImage): CachedCameraItem {
     contentKey: cameraContentKey(image.path),
     name: image.name,
     modified_at: normalizeModifiedAt(image.modified_at),
+    file_hash:
+      typeof image.file_hash === "string" && image.file_hash.length > 0
+        ? image.file_hash
+        : null,
     has_snapshots: image.metadata?.has_snapshots ?? false,
     latest_snapshot_id: normalizeSnapshotVersion(
       image.metadata?.latest_snapshot_id,
@@ -83,6 +92,10 @@ function toLibraryImage(host: string, item: CachedCameraItem): LibraryImage {
     path: `ccapi://${host}${item.contentKey}`,
     name: item.name,
     modified_at: normalizeModifiedAt(item.modified_at),
+    file_hash:
+      typeof item.file_hash === "string" && item.file_hash.length > 0
+        ? item.file_hash
+        : null,
     metadata: {
       has_snapshots: item.has_snapshots,
       latest_snapshot_id: normalizeSnapshotVersion(item.latest_snapshot_id),

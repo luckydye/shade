@@ -6,7 +6,7 @@ import type {
 import { requestToPromise, withStores } from "shade-ui/src/cache-utils";
 
 const DB_NAME = "shade-browser-collections";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const COLLECTIONS_STORE = "collections";
 const ITEMS_STORE = "collection_items";
 
@@ -20,7 +20,7 @@ type CollectionRecord = {
 
 type CollectionItemRecord = {
   collection_id: string;
-  image_path: string;
+  file_hash: string;
   position: number;
   added_at: number;
 };
@@ -37,6 +37,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(COLLECTIONS_STORE)) {
         db.createObjectStore(COLLECTIONS_STORE);
       }
+      if (db.objectStoreNames.contains(ITEMS_STORE)) {
+        db.deleteObjectStore(ITEMS_STORE);
+      }
       if (!db.objectStoreNames.contains(ITEMS_STORE)) {
         db.createObjectStore(ITEMS_STORE);
       }
@@ -49,8 +52,8 @@ function collectionKey(id: string) {
   return id;
 }
 
-function itemKey(collectionId: string, imagePath: string) {
-  return `${collectionId}::${imagePath}`;
+function itemKey(collectionId: string, fileHash: string) {
+  return `${collectionId}::${fileHash}`;
 }
 
 async function countItems(
@@ -182,14 +185,14 @@ export const browserCollectionsPlatform: CollectionsPlatform = {
         .filter((r) => r.collection_id === collectionId)
         .sort((a, b) => a.position - b.position || a.added_at - b.added_at);
       return items.map((r) => ({
-        image_path: r.image_path,
+        file_hash: r.file_hash,
         position: r.position,
         added_at: r.added_at,
       }));
     });
   },
 
-  async addToCollection(collectionId, imagePaths) {
+  async addToCollection(collectionId, fileHashes) {
     await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
       const all = await requestToPromise(stores[ITEMS_STORE].getAll());
       const existing = (all as CollectionItemRecord[]).filter(
@@ -197,29 +200,29 @@ export const browserCollectionsPlatform: CollectionsPlatform = {
       );
       let maxPos = existing.reduce((m, r) => Math.max(m, r.position), -1);
       const now = Date.now();
-      const existingPaths = new Set(existing.map((r) => r.image_path));
-      for (const path of imagePaths) {
-        if (existingPaths.has(path)) continue;
+      const existingFileHashes = new Set(existing.map((r) => r.file_hash));
+      for (const fileHash of fileHashes) {
+        if (existingFileHashes.has(fileHash)) continue;
         maxPos += 1;
         const record: CollectionItemRecord = {
           collection_id: collectionId,
-          image_path: path,
+          file_hash: fileHash,
           position: maxPos,
           added_at: now,
         };
         await requestToPromise(
-          stores[ITEMS_STORE].put(record, itemKey(collectionId, path)),
+          stores[ITEMS_STORE].put(record, itemKey(collectionId, fileHash)),
         );
       }
     });
   },
 
-  async removeFromCollection(collectionId, imagePaths) {
+  async removeFromCollection(collectionId, fileHashes) {
     await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
       await Promise.all(
-        imagePaths.map((path) =>
+        fileHashes.map((fileHash) =>
           requestToPromise(
-            stores[ITEMS_STORE].delete(itemKey(collectionId, path)),
+            stores[ITEMS_STORE].delete(itemKey(collectionId, fileHash)),
           ),
         ),
       );

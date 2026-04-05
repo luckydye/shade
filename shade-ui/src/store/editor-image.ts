@@ -164,6 +164,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       ? {
           libraryId: artboard.activeMediaLibraryId,
           itemId: artboard.activeMediaItemId,
+          fileHash: artboard.activeFileHash,
           rating: artboard.activeMediaRating,
           baseRating: artboard.activeMediaBaseRating,
         }
@@ -182,6 +183,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       width: info.canvas_width,
       height: info.canvas_height,
       sourceBitDepth: info.source_bit_depth,
+      activeFileHash: info.file_hash ?? artboard.activeFileHash,
       previewTile: null,
       backdropTile: null,
     });
@@ -262,6 +264,7 @@ function setPendingEditorState(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    fileHash: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null,
@@ -290,12 +293,14 @@ async function openImageFrom(
     canvas_width: number;
     canvas_height: number;
     source_bit_depth: string;
+    file_hash: string | null;
   }>,
   source: ArtboardSource,
   loadingMediaSrc: string | null,
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    fileHash: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null,
@@ -351,6 +356,7 @@ async function openImageFrom(
     source,
     activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
     activeMediaItemId: activeMediaSelection?.itemId ?? null,
+    activeFileHash: activeMediaSelection?.fileHash ?? null,
     activeMediaRating: activeMediaSelection?.rating ?? null,
     activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
     previewTile: null,
@@ -390,6 +396,7 @@ async function openImageFrom(
       source,
       activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
       activeMediaItemId: activeMediaSelection?.itemId ?? null,
+      activeFileHash: info.file_hash ?? activeMediaSelection?.fileHash ?? null,
       activeMediaRating: activeMediaSelection?.rating ?? null,
       activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
       previewTile: null,
@@ -512,6 +519,7 @@ export async function openImage(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    fileHash: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null = null,
@@ -543,6 +551,7 @@ export async function openPeerImage(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
+    fileHash: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null = null,

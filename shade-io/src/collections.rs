@@ -12,7 +12,7 @@ pub struct Collection {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CollectionItem {
-    pub image_path: String,
+    pub file_hash: String,
     pub position: i64,
     pub added_at: u64,
 }
@@ -35,15 +35,47 @@ pub async fn create_collections_tables(conn: &libsql::Connection) -> Result<(), 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS collection_items (
             collection_id TEXT NOT NULL,
-            image_path TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
             position INTEGER NOT NULL DEFAULT 0,
             added_at INTEGER NOT NULL,
-            PRIMARY KEY (collection_id, image_path)
+            PRIMARY KEY (collection_id, file_hash)
         )",
         (),
     )
     .await
     .map_err(|e| e.to_string())?;
+    let mut columns = conn
+        .query("PRAGMA table_info(collection_items)", ())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut has_file_hash = false;
+    while let Some(row) = columns.next().await.map_err(|e| e.to_string())? {
+        if row.get::<String>(1).map_err(|e| e.to_string())? == "file_hash" {
+            has_file_hash = true;
+            break;
+        }
+    }
+    if !has_file_hash {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE collection_items RENAME TO collection_items_old;
+             CREATE TABLE collection_items (
+                 collection_id TEXT NOT NULL,
+                 file_hash TEXT NOT NULL,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 added_at INTEGER NOT NULL,
+                 PRIMARY KEY (collection_id, file_hash)
+             );
+             INSERT INTO collection_items (collection_id, file_hash, position, added_at)
+                 SELECT old.collection_id, images.file_hash, old.position, old.added_at
+                 FROM collection_items_old old
+                 JOIN images ON images.source_name = old.image_path;
+             DROP TABLE collection_items_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_collections_library ON collections(library_id)",
         (),
@@ -144,7 +176,9 @@ pub async fn delete_collection(
     conn: &libsql::Connection,
     collection_id: &str,
 ) -> Result<(), String> {
-    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| e.to_string())?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|e| e.to_string())?;
     let result = async {
         conn.execute(
             "DELETE FROM collection_items WHERE collection_id = ?1",
@@ -160,7 +194,9 @@ pub async fn delete_collection(
     .await;
     match result {
         Ok(()) => {
-            conn.execute("COMMIT", ()).await.map_err(|e| e.to_string())?;
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(())
         }
         Err(e) => {
@@ -190,7 +226,7 @@ pub async fn list_collection_items(
 ) -> Result<Vec<CollectionItem>, String> {
     let mut rows = conn
         .query(
-            "SELECT image_path, position, added_at FROM collection_items
+            "SELECT file_hash, position, added_at FROM collection_items
              WHERE collection_id = ?1
              ORDER BY position ASC, added_at ASC",
             [collection_id],
@@ -200,7 +236,7 @@ pub async fn list_collection_items(
     let mut result = Vec::new();
     while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
         result.push(CollectionItem {
-            image_path: row.get::<String>(0).map_err(|e| e.to_string())?,
+            file_hash: row.get::<String>(0).map_err(|e| e.to_string())?,
             position: row.get::<i64>(1).map_err(|e| e.to_string())?,
             added_at: row.get::<u64>(2).map_err(|e| e.to_string())?,
         });
@@ -211,7 +247,7 @@ pub async fn list_collection_items(
 pub async fn add_collection_items(
     conn: &libsql::Connection,
     collection_id: &str,
-    image_paths: Vec<String>,
+    file_hashes: Vec<String>,
 ) -> Result<(), String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -228,14 +264,16 @@ pub async fn add_collection_items(
         Some(row) => row.get::<i64>(0).map_err(|e| e.to_string())?,
         None => -1,
     };
-    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| e.to_string())?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|e| e.to_string())?;
     let result = async {
-        for path in &image_paths {
+        for file_hash in &file_hashes {
             pos += 1;
             conn.execute(
-                "INSERT OR IGNORE INTO collection_items (collection_id, image_path, position, added_at)
+                "INSERT OR IGNORE INTO collection_items (collection_id, file_hash, position, added_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                libsql::params![collection_id, path.as_str(), pos, now],
+                libsql::params![collection_id, file_hash.as_str(), pos, now],
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -245,7 +283,9 @@ pub async fn add_collection_items(
     .await;
     match result {
         Ok(()) => {
-            conn.execute("COMMIT", ()).await.map_err(|e| e.to_string())?;
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(())
         }
         Err(e) => {
@@ -258,14 +298,16 @@ pub async fn add_collection_items(
 pub async fn remove_collection_items(
     conn: &libsql::Connection,
     collection_id: &str,
-    image_paths: Vec<String>,
+    file_hashes: Vec<String>,
 ) -> Result<(), String> {
-    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| e.to_string())?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|e| e.to_string())?;
     let result = async {
-        for path in &image_paths {
+        for file_hash in &file_hashes {
             conn.execute(
-                "DELETE FROM collection_items WHERE collection_id = ?1 AND image_path = ?2",
-                libsql::params![collection_id, path.as_str()],
+                "DELETE FROM collection_items WHERE collection_id = ?1 AND file_hash = ?2",
+                libsql::params![collection_id, file_hash.as_str()],
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -275,7 +317,9 @@ pub async fn remove_collection_items(
     .await;
     match result {
         Ok(()) => {
-            conn.execute("COMMIT", ()).await.map_err(|e| e.to_string())?;
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(())
         }
         Err(e) => {

@@ -89,6 +89,8 @@ pub struct LibraryImage {
     pub name: String,
     pub modified_at: Option<u64>,
     #[serde(default)]
+    pub file_hash: Option<String>,
+    #[serde(default)]
     pub metadata: LibraryImageMetadata,
 }
 
@@ -561,6 +563,12 @@ pub async fn open_library_db() -> Result<libsql::Connection, String> {
     )
     .await
     .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_images_source_name ON images(source_name)",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     // Migrate from old integer-version schema to UUID-based schema if needed.
     let needs_migration = {
         let mut rows = conn
@@ -611,7 +619,7 @@ pub async fn open_library_db() -> Result<libsql::Connection, String> {
     }
     conn.execute(
         "CREATE TABLE IF NOT EXISTS media_ratings (
-            media_id TEXT PRIMARY KEY NOT NULL,
+            file_hash TEXT PRIMARY KEY NOT NULL,
             rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
             updated_at INTEGER NOT NULL
         )",
@@ -621,17 +629,76 @@ pub async fn open_library_db() -> Result<libsql::Connection, String> {
     .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS media_tags (
-            media_id TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
             tag TEXT NOT NULL,
             updated_at INTEGER NOT NULL,
-            PRIMARY KEY (media_id, tag)
+            PRIMARY KEY (file_hash, tag)
         )",
         (),
     )
     .await
     .map_err(|e| e.to_string())?;
+    if table_has_column(&conn, "media_ratings", "media_id").await? {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE media_ratings RENAME TO media_ratings_old;
+             CREATE TABLE media_ratings (
+                 file_hash TEXT PRIMARY KEY NOT NULL,
+                 rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                 updated_at INTEGER NOT NULL
+             );
+             INSERT INTO media_ratings (file_hash, rating, updated_at)
+                 SELECT images.file_hash, old.rating, old.updated_at
+                 FROM media_ratings_old old
+                 JOIN images ON images.source_name = old.media_id;
+             DROP TABLE media_ratings_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    if table_has_column(&conn, "media_tags", "media_id").await? {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE media_tags RENAME TO media_tags_old;
+             CREATE TABLE media_tags (
+                 file_hash TEXT NOT NULL,
+                 tag TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (file_hash, tag)
+             );
+             INSERT INTO media_tags (file_hash, tag, updated_at)
+                 SELECT images.file_hash, old.tag, old.updated_at
+                 FROM media_tags_old old
+                 JOIN images ON images.source_name = old.media_id;
+             DROP TABLE media_tags_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     shade_io::create_collections_tables(&conn).await?;
     Ok(conn)
+}
+
+async fn table_has_column(
+    conn: &libsql::Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, String> {
+    let query =
+        format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1");
+    let mut rows = conn
+        .query(query.as_str(), libsql::params![column])
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .next()
+        .await
+        .map_err(|e| e.to_string())?
+        .and_then(|row| row.get::<i64>(0).ok())
+        .unwrap_or(0)
+        > 0)
 }
 
 fn unix_timestamp_millis() -> Result<i64, String> {
@@ -662,31 +729,31 @@ fn normalize_media_tags(tags: &[String]) -> Vec<String> {
 }
 
 async fn load_media_ratings_map(
-    media_ids: &[String],
+    file_hashes: &[String],
 ) -> Result<HashMap<String, u8>, String> {
-    if media_ids.is_empty() {
+    if file_hashes.is_empty() {
         return Ok(HashMap::new());
     }
-    let requested_ids = media_ids
+    let requested_hashes = file_hashes
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
     let conn = open_library_db().await?;
     let mut rows = conn
-        .query("SELECT media_id, rating FROM media_ratings", ())
+        .query("SELECT file_hash, rating FROM media_ratings", ())
         .await
         .map_err(|error| error.to_string())?;
     let mut ratings = HashMap::new();
     while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
-        let media_id = row.get::<String>(0).map_err(|error| error.to_string())?;
-        if !requested_ids.contains(&media_id) {
+        let file_hash = row.get::<String>(0).map_err(|error| error.to_string())?;
+        if !requested_hashes.contains(&file_hash) {
             continue;
         }
         let rating = row
             .get::<i64>(1)
             .map_err(|error| error.to_string())
             .and_then(|value| u8::try_from(value).map_err(|error| error.to_string()))?;
-        ratings.insert(media_id, rating);
+        ratings.insert(file_hash, rating);
     }
     Ok(ratings)
 }
@@ -727,72 +794,75 @@ pub struct PeerPictureInfo {
 }
 
 async fn load_media_tags_map(
-    media_ids: &[String],
+    file_hashes: &[String],
 ) -> Result<HashMap<String, Vec<String>>, String> {
-    if media_ids.is_empty() {
+    if file_hashes.is_empty() {
         return Ok(HashMap::new());
     }
-    let requested_ids = media_ids
+    let requested_hashes = file_hashes
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
     let conn = open_library_db().await?;
     let mut rows = conn
-        .query("SELECT media_id, tag FROM media_tags ORDER BY tag ASC", ())
+        .query("SELECT file_hash, tag FROM media_tags ORDER BY tag ASC", ())
         .await
         .map_err(|error| error.to_string())?;
     let mut tags = HashMap::<String, Vec<String>>::new();
     while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
-        let media_id = row.get::<String>(0).map_err(|error| error.to_string())?;
-        if !requested_ids.contains(&media_id) {
+        let file_hash = row.get::<String>(0).map_err(|error| error.to_string())?;
+        if !requested_hashes.contains(&file_hash) {
             continue;
         }
         let tag = row.get::<String>(1).map_err(|error| error.to_string())?;
         if tag.is_empty() {
             continue;
         }
-        tags.entry(media_id).or_default().push(tag);
+        tags.entry(file_hash).or_default().push(tag);
     }
     Ok(tags)
 }
 
-async fn persist_media_rating(media_id: &str, rating: Option<u8>) -> Result<(), String> {
+async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
     let conn = open_library_db().await?;
     if let Some(value) = normalized {
         conn.execute(
-            "INSERT INTO media_ratings (media_id, rating, updated_at)
+            "INSERT INTO media_ratings (file_hash, rating, updated_at)
              VALUES (?1, ?2, ?3)
-             ON CONFLICT(media_id)
+             ON CONFLICT(file_hash)
              DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
-            libsql::params![media_id, i64::from(value), unix_timestamp_millis()?],
+            libsql::params![file_hash, i64::from(value), unix_timestamp_millis()?],
         )
         .await
         .map_err(|error| error.to_string())?;
         return Ok(());
     }
-    conn.execute("DELETE FROM media_ratings WHERE media_id = ?1", [media_id])
-        .await
-        .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM media_ratings WHERE file_hash = ?1",
+        [file_hash],
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     Ok(())
 }
 
-pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), String> {
+pub async fn persist_media_tags(file_hash: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
     let conn = open_library_db().await?;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
     let result = async {
-        conn.execute("DELETE FROM media_tags WHERE media_id = ?1", [media_id])
+        conn.execute("DELETE FROM media_tags WHERE file_hash = ?1", [file_hash])
             .await
             .map_err(|error| error.to_string())?;
         let updated_at = unix_timestamp_millis()?;
         for tag in normalized {
             conn.execute(
-                "INSERT INTO media_tags (media_id, tag, updated_at)
+                "INSERT INTO media_tags (file_hash, tag, updated_at)
                  VALUES (?1, ?2, ?3)",
-                libsql::params![media_id, tag, updated_at],
+                libsql::params![file_hash, tag, updated_at],
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -814,19 +884,19 @@ pub async fn persist_media_tags(media_id: &str, tags: &[String]) -> Result<(), S
     }
 }
 
-pub async fn persist_media_tags_empty(media_id: &str) -> Result<(), String> {
+pub async fn persist_media_tags_empty(file_hash: &str) -> Result<(), String> {
     let conn = open_library_db().await?;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
     let result = async {
-        conn.execute("DELETE FROM media_tags WHERE media_id = ?1", [media_id])
+        conn.execute("DELETE FROM media_tags WHERE file_hash = ?1", [file_hash])
             .await
             .map_err(|error| error.to_string())?;
         conn.execute(
-            "INSERT INTO media_tags (media_id, tag, updated_at)
+            "INSERT INTO media_tags (file_hash, tag, updated_at)
              VALUES (?1, '', ?2)",
-            libsql::params![media_id, unix_timestamp_millis()?],
+            libsql::params![file_hash, unix_timestamp_millis()?],
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -863,12 +933,12 @@ pub async fn max_media_tag_updated_at() -> Result<i64, String> {
     Ok(max)
 }
 
-pub async fn media_tags_exist(media_id: &str) -> Result<bool, String> {
+pub async fn media_tags_exist(file_hash: &str) -> Result<bool, String> {
     let conn = open_library_db().await?;
     let mut rows = conn
         .query(
-            "SELECT 1 FROM media_tags WHERE media_id = ?1 LIMIT 1",
-            [media_id],
+            "SELECT 1 FROM media_tags WHERE file_hash = ?1 LIMIT 1",
+            [file_hash],
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -920,6 +990,23 @@ async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
     Ok(rows.next().await.map_err(|e| e.to_string())?.is_some())
 }
 
+async fn register_image_source(
+    file_hash: &str,
+    source_name: Option<&str>,
+) -> Result<(), String> {
+    let conn = open_library_db().await?;
+    let now = unix_timestamp_millis()?;
+    conn.execute(
+        "INSERT INTO images (file_hash, source_name, created_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(file_hash) DO UPDATE SET source_name = excluded.source_name",
+        libsql::params![file_hash, source_name, now],
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Persists a snapshot and returns its UUID id.
 /// If `id` is given (e.g. when inserting a synced peer snapshot), that id is used;
 /// otherwise a new UUID v4 is generated.
@@ -931,16 +1018,9 @@ async fn persist_snapshot(
     data: &PersistedLayerData,
 ) -> Result<String, String> {
     ensure_non_image_layers(&data.layers)?;
+    register_image_source(file_hash, source_name).await?;
     let conn = open_library_db().await?;
     let now = unix_timestamp_millis()?;
-    conn.execute(
-        "INSERT INTO images (file_hash, source_name, created_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(file_hash) DO UPDATE SET source_name = excluded.source_name",
-        libsql::params![file_hash, source_name, now],
-    )
-    .await
-    .map_err(|e| e.to_string())?;
     let snapshot_id = id
         .map(|s| s.to_owned())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -1184,13 +1264,13 @@ pub struct SnapshotInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MediaRatingParams {
-    pub media_id: String,
+    pub file_hash: String,
     pub rating: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MediaTagsParams {
-    pub media_id: String,
+    pub file_hash: String,
     pub tags: Vec<String>,
 }
 
@@ -1933,6 +2013,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             name: item.name,
             path: item.path,
             modified_at: item.modified_at,
+            file_hash: None,
             metadata: LibraryImageMetadata {
                 has_snapshots: false,
                 latest_snapshot_id: None,
@@ -1980,6 +2061,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
                 modified_at,
+                file_hash: None,
                 metadata: LibraryImageMetadata {
                     has_snapshots: false,
                     latest_snapshot_id: None,
@@ -2060,6 +2142,7 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
         name: item.name,
         path: item.path,
         modified_at: item.modified_at,
+        file_hash: None,
         metadata: LibraryImageMetadata {
             has_snapshots: false,
             latest_snapshot_id: None,
@@ -2534,6 +2617,7 @@ impl EditorState {
             canvas_width: width,
             canvas_height: height,
             source_bit_depth,
+            file_hash: None,
         }
     }
 
@@ -2576,6 +2660,7 @@ impl EditorState {
             canvas_width: width,
             canvas_height: height,
             source_bit_depth,
+            file_hash: None,
         }
     }
 }
@@ -2588,6 +2673,7 @@ pub struct LayerInfoResponse {
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub source_bit_depth: String,
+    pub file_hash: Option<String>,
 }
 
 #[tauri::command]
@@ -2780,29 +2866,13 @@ pub async fn apply_peer_metadata(
     let mut tags_added: u32 = 0;
 
     for meta in peer_metadata {
-        // Resolve file_hash → local source_name (media_id).
-        let mut rows = conn
-            .query(
-                "SELECT source_name FROM images WHERE file_hash = ?1 LIMIT 1",
-                [meta.file_hash.as_str()],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        let media_id = match rows.next().await.map_err(|e| e.to_string())? {
-            Some(row) => match row.get::<Option<String>>(0).map_err(|e| e.to_string())? {
-                Some(name) => name,
-                None => continue,
-            },
-            None => continue,
-        };
-
         // ── Rating: last-write-wins ──────────────────────────────────────
         if let Some(peer_rating) = meta.rating {
             let peer_ts = meta.rating_updated_at.unwrap_or(0);
             let local_ts: i64 = conn
                 .query(
-                    "SELECT updated_at FROM media_ratings WHERE media_id = ?1 LIMIT 1",
-                    [media_id.as_str()],
+                    "SELECT updated_at FROM media_ratings WHERE file_hash = ?1 LIMIT 1",
+                    [meta.file_hash.as_str()],
                 )
                 .await
                 .map_err(|e| e.to_string())?
@@ -2814,11 +2884,11 @@ pub async fn apply_peer_metadata(
 
             if peer_ts > local_ts {
                 conn.execute(
-                    "INSERT INTO media_ratings (media_id, rating, updated_at)
+                    "INSERT INTO media_ratings (file_hash, rating, updated_at)
                      VALUES (?1, ?2, ?3)
-                     ON CONFLICT(media_id)
+                     ON CONFLICT(file_hash)
                      DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
-                    libsql::params![media_id.as_str(), i64::from(peer_rating), peer_ts],
+                    libsql::params![meta.file_hash.as_str(), i64::from(peer_rating), peer_ts],
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -2832,8 +2902,8 @@ pub async fn apply_peer_metadata(
             let mut existing_tags = std::collections::HashSet::new();
             let mut tag_rows = conn
                 .query(
-                    "SELECT tag FROM media_tags WHERE media_id = ?1",
-                    [media_id.as_str()],
+                    "SELECT tag FROM media_tags WHERE file_hash = ?1",
+                    [meta.file_hash.as_str()],
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -2845,9 +2915,13 @@ pub async fn apply_peer_metadata(
             for tag in &meta.tags {
                 if !existing_tags.contains(tag) {
                     conn.execute(
-                        "INSERT INTO media_tags (media_id, tag, updated_at)
+                        "INSERT INTO media_tags (file_hash, tag, updated_at)
                          VALUES (?1, ?2, ?3)",
-                        libsql::params![media_id.as_str(), tag.as_str(), peer_tags_ts],
+                        libsql::params![
+                            meta.file_hash.as_str(),
+                            tag.as_str(),
+                            peer_tags_ts
+                        ],
                     )
                     .await
                     .map_err(|e| e.to_string())?;
@@ -2895,6 +2969,7 @@ pub async fn open_peer_image(
         Some(&picture_id),
     )
     .await;
+    register_image_source(&file_hash, Some(&picture_id)).await?;
     let persisted = load_latest_edit_version(&file_hash).await?;
     let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
     let response = {
@@ -2902,13 +2977,19 @@ pub async fn open_peer_image(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_linear_image(
+        let mut response = st.replace_with_linear_image(
             image.pixels.to_vec(),
             image.width,
             image.height,
             info.bit_depth,
         );
-        restore_persisted_layers(&mut st, file_hash, Some(picture_id), persisted)?;
+        restore_persisted_layers(
+            &mut st,
+            file_hash.clone(),
+            Some(picture_id),
+            persisted,
+        )?;
+        response.file_hash = Some(file_hash);
         response
     };
     Ok(response)
@@ -2941,6 +3022,9 @@ pub async fn open_image<R: tauri::Runtime>(
         )
         .await?;
     let file_hash = opened.file_hash;
+    if let Some(source_name) = opened.source_name.as_deref() {
+        register_image_source(&file_hash, Some(source_name)).await?;
+    }
     if let Some(peer) = p2p.0.read().await.clone() {
         let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
     }
@@ -2950,13 +3034,19 @@ pub async fn open_image<R: tauri::Runtime>(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_linear_image(
+        let mut response = st.replace_with_linear_image(
             opened.image.pixels.to_vec(),
             opened.image.width,
             opened.image.height,
             opened.info.bit_depth,
         );
-        restore_persisted_layers(&mut st, file_hash, opened.source_name, persisted)?;
+        restore_persisted_layers(
+            &mut st,
+            file_hash.clone(),
+            opened.source_name,
+            persisted,
+        )?;
+        response.file_hash = Some(file_hash);
         response
     };
     Ok(response)
@@ -2974,6 +3064,9 @@ pub async fn open_image_encoded_bytes(
         st.begin_open_request()
     };
     let file_hash = hash_bytes(&bytes);
+    if let Some(file_name) = file_name.as_deref() {
+        register_image_source(&file_hash, Some(file_name)).await?;
+    }
     if let Some(peer) = p2p.0.read().await.clone() {
         let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
     }
@@ -2984,13 +3077,14 @@ pub async fn open_image_encoded_bytes(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_linear_image(
+        let mut response = st.replace_with_linear_image(
             image.pixels.to_vec(),
             image.width,
             image.height,
             info.bit_depth,
         );
-        restore_persisted_layers(&mut st, file_hash, file_name, persisted)?;
+        restore_persisted_layers(&mut st, file_hash.clone(), file_name, persisted)?;
+        response.file_hash = Some(file_hash);
         response
     };
     Ok(response)
@@ -3030,7 +3124,7 @@ pub async fn open_image_bytes(
         if !st.is_current_open_request(open_request_id) {
             return Err(SUPERSEDED_IMAGE_LOAD_ERROR.into());
         }
-        let response = st.replace_with_image(
+        let mut response = st.replace_with_image(
             pixels
                 .into_iter()
                 .map(|channel| channel as f32 / 255.0)
@@ -3040,7 +3134,8 @@ pub async fn open_image_bytes(
             "8-bit".into(),
             shade_core::ColorSpace::Srgb,
         );
-        restore_persisted_layers(&mut st, file_hash, None, persisted)?;
+        restore_persisted_layers(&mut st, file_hash.clone(), None, persisted)?;
+        response.file_hash = Some(file_hash);
         response
     };
     Ok(response)
@@ -4020,11 +4115,19 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     }
     let cache = app.state::<crate::ThumbnailCacheDb>();
     let cache_key = crate::thumbnail_cache::thumbnail_cache_key(picture_id);
-    if let Ok(Some(cached)) = cache.0.get(&cache_key).await {
-        return Ok(cached);
+    if let Ok(Some((cached_file_hash, cached_bytes))) = cache.0.get(&cache_key).await {
+        if let Some(file_hash) = cached_file_hash.as_deref() {
+            register_image_source(file_hash, Some(picture_id)).await?;
+            return Ok(cached_bytes);
+        }
+        let is_local_path =
+            !picture_id.starts_with("ccapi://") && !picture_id.starts_with("s3://");
+        if !is_local_path {
+            return Ok(cached_bytes);
+        }
     }
     let thumbnail_queue = app.state::<crate::ThumbnailService>().raw_queue.clone();
-    let bytes = shade_io::load_thumbnail_bytes(
+    let thumbnail = shade_io::load_thumbnail_bytes(
         picture_id,
         thumbnail_queue.as_ref(),
         {
@@ -4044,17 +4147,25 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         },
     )
     .await?;
-    cache.0.put(&cache_key, picture_id, &bytes).await?;
+    if let Some(file_hash) = thumbnail.file_hash.as_deref() {
+        register_image_source(file_hash, Some(picture_id)).await?;
+    }
+    cache
+        .0
+        .put(&cache_key, thumbnail.file_hash.as_deref(), &thumbnail.bytes)
+        .await?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    crate::tagging_worker::enqueue_thumbnail_for_tagging(
-        &app,
-        crate::thumbnail_cache::ThumbnailCacheEntry {
-            picture_id: cache_key,
-            media_id: picture_id.to_string(),
-            data: bytes.clone(),
-        },
-    )?;
-    Ok(bytes)
+    if let Some(file_hash) = thumbnail.file_hash.clone() {
+        crate::tagging_worker::enqueue_thumbnail_for_tagging(
+            &app,
+            crate::thumbnail_cache::ThumbnailCacheEntry {
+                picture_id: cache_key,
+                file_hash,
+                data: thumbnail.bytes.clone(),
+            },
+        )?;
+    }
+    Ok(thumbnail.bytes)
 }
 
 pub async fn load_picture_bytes<R: tauri::Runtime>(
@@ -4235,7 +4346,7 @@ async fn enrich_listing_metadata(
     let conn = open_library_db().await?;
     let mut rows = conn
         .query(
-            "SELECT i.source_name, ev.id
+            "SELECT i.source_name, i.file_hash, ev.id
              FROM images i
              JOIN edit_versions ev ON ev.file_hash = i.file_hash
              WHERE i.source_name IS NOT NULL
@@ -4249,23 +4360,54 @@ async fn enrich_listing_metadata(
         .await
         .map_err(|e| e.to_string())?;
     let mut snapshot_ids: HashMap<String, String> = HashMap::new();
+    let mut file_hashes_by_source: HashMap<String, String> = HashMap::new();
     while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
         let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
-        let id = row.get::<String>(1).map_err(|e| e.to_string())?;
+        let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
+        let id = row.get::<String>(2).map_err(|e| e.to_string())?;
+        file_hashes_by_source.insert(source_name.clone(), file_hash);
         snapshot_ids.insert(source_name, id);
+    }
+    if listing
+        .items
+        .iter()
+        .any(|item| !file_hashes_by_source.contains_key(&item.path))
+    {
+        let mut hash_rows = conn
+            .query(
+                "SELECT source_name, file_hash
+                 FROM images
+                 WHERE source_name IS NOT NULL",
+                (),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        while let Some(row) = hash_rows.next().await.map_err(|e| e.to_string())? {
+            let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
+            let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
+            file_hashes_by_source
+                .entry(source_name)
+                .or_insert(file_hash);
+        }
     }
     let tags = load_media_tags_map(
         &listing
             .items
             .iter()
-            .map(|item| item.path.clone())
+            .filter_map(|item| file_hashes_by_source.get(&item.path).cloned())
             .collect::<Vec<_>>(),
     )
     .await?;
     for item in &mut listing.items {
+        item.file_hash = file_hashes_by_source.get(&item.path).cloned();
         item.metadata.latest_snapshot_id = snapshot_ids.get(&item.path).cloned();
         item.metadata.has_snapshots = item.metadata.latest_snapshot_id.is_some();
-        item.metadata.tags = tags.get(&item.path).cloned().unwrap_or_default();
+        item.metadata.tags = item
+            .file_hash
+            .as_ref()
+            .and_then(|file_hash| tags.get(file_hash))
+            .cloned()
+            .unwrap_or_default();
     }
     Ok(())
 }
@@ -4282,25 +4424,25 @@ pub async fn list_library_images<R: tauri::Runtime>(
 
 #[tauri::command]
 pub async fn list_media_ratings(
-    media_ids: Vec<String>,
+    file_hashes: Vec<String>,
 ) -> Result<HashMap<String, u8>, String> {
-    load_media_ratings_map(&media_ids).await
+    load_media_ratings_map(&file_hashes).await
 }
 
 #[tauri::command]
 pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
-    if params.media_id.trim().is_empty() {
-        return Err("media id cannot be empty".to_string());
+    if params.file_hash.trim().is_empty() {
+        return Err("file hash cannot be empty".to_string());
     }
-    persist_media_rating(&params.media_id, params.rating).await
+    persist_media_rating(&params.file_hash, params.rating).await
 }
 
 #[tauri::command]
 pub async fn set_media_tags(params: MediaTagsParams) -> Result<(), String> {
-    if params.media_id.trim().is_empty() {
-        return Err("media id cannot be empty".to_string());
+    if params.file_hash.trim().is_empty() {
+        return Err("file hash cannot be empty".to_string());
     }
-    persist_media_tags(&params.media_id, &params.tags).await
+    persist_media_tags(&params.file_hash, &params.tags).await
 }
 
 async fn build_library_listing<R: tauri::Runtime>(
@@ -4323,6 +4465,7 @@ async fn build_library_listing<R: tauri::Runtime>(
                         name: picture_display_name(&photo.uri),
                         path: photo.uri,
                         modified_at: photo.modified_at,
+                        file_hash: None,
                         metadata: Default::default(),
                     })
                     .collect(),
@@ -4356,6 +4499,7 @@ async fn build_library_listing<R: tauri::Runtime>(
                             name: picture_display_name(&photo.id),
                             path: photo.id,
                             modified_at: photo.modified_at,
+                            file_hash: None,
                             metadata: Default::default(),
                         })
                         .collect(),
@@ -5063,31 +5207,10 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
         let mut result = Vec::new();
         for file_hash in file_hashes {
-            // rating
-            let mut rows = conn
-                .query(
-                    "SELECT i.source_name FROM images i WHERE i.file_hash = ?1 LIMIT 1",
-                    [file_hash.as_str()],
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let source_name = if let Some(row) = rows
-                .next()
-                .await
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?
-            {
-                row.get::<Option<String>>(0)
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?
-            } else {
-                continue;
-            };
-            let Some(source_name) = source_name else {
-                continue;
-            };
             let mut rating_rows = conn
                 .query(
-                    "SELECT rating, updated_at FROM media_ratings WHERE media_id = ?1 LIMIT 1",
-                    [source_name.as_str()],
+                    "SELECT rating, updated_at FROM media_ratings WHERE file_hash = ?1 LIMIT 1",
+                    [file_hash.as_str()],
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -5107,8 +5230,8 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
             };
             let mut tag_rows = conn
                 .query(
-                    "SELECT tag, updated_at FROM media_tags WHERE media_id = ?1",
-                    [source_name.as_str()],
+                    "SELECT tag, updated_at FROM media_tags WHERE file_hash = ?1",
+                    [file_hash.as_str()],
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -5493,7 +5616,9 @@ fn normalize_crop_rect(
 // ── Collections ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn list_collections(library_id: String) -> Result<Vec<shade_io::Collection>, String> {
+pub async fn list_collections(
+    library_id: String,
+) -> Result<Vec<shade_io::Collection>, String> {
     let conn = open_library_db().await?;
     shade_io::list_collections(&conn, &library_id).await
 }
@@ -5508,7 +5633,10 @@ pub async fn create_collection(
 }
 
 #[tauri::command]
-pub async fn rename_collection(collection_id: String, name: String) -> Result<(), String> {
+pub async fn rename_collection(
+    collection_id: String,
+    name: String,
+) -> Result<(), String> {
     let conn = open_library_db().await?;
     shade_io::rename_collection(&conn, &collection_id, &name).await
 }
@@ -5520,7 +5648,10 @@ pub async fn delete_collection(collection_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn reorder_collection(collection_id: String, new_position: i64) -> Result<(), String> {
+pub async fn reorder_collection(
+    collection_id: String,
+    new_position: i64,
+) -> Result<(), String> {
     let conn = open_library_db().await?;
     shade_io::reorder_collection(&conn, &collection_id, new_position).await
 }
@@ -5536,19 +5667,19 @@ pub async fn list_collection_items(
 #[tauri::command]
 pub async fn add_to_collection(
     collection_id: String,
-    image_paths: Vec<String>,
+    file_hashes: Vec<String>,
 ) -> Result<(), String> {
     let conn = open_library_db().await?;
-    shade_io::add_collection_items(&conn, &collection_id, image_paths).await
+    shade_io::add_collection_items(&conn, &collection_id, file_hashes).await
 }
 
 #[tauri::command]
 pub async fn remove_from_collection(
     collection_id: String,
-    image_paths: Vec<String>,
+    file_hashes: Vec<String>,
 ) -> Result<(), String> {
     let conn = open_library_db().await?;
-    shade_io::remove_collection_items(&conn, &collection_id, image_paths).await
+    shade_io::remove_collection_items(&conn, &collection_id, file_hashes).await
 }
 
 #[cfg(test)]
