@@ -2115,31 +2115,33 @@ export const MediaView: Component = () => {
                         ) : (
                           <For each={row.ids}>
                             {(id) => {
-                              const item = itemsById().get(id);
+                              const item = () => itemsById().get(id);
                               return (
-                                item && (
-                                  <MediaTile
-                                    item={item}
-                                    cachedSrc={getBufferedThumbnailSrc(item)}
-                                    compact
-                                    offline={selectedLibraryIsOffline()}
-                                    disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
-                                    active={activeMediaItemId() === id}
-                                    selected={selectedMediaItemIdSet().has(id)}
-                                    showSelectionControls={showSelectionControls()}
-                                    onThumbnailLoaded={(src) =>
-                                      rememberThumbnailSrc(item, src)
-                                    }
-                                    onActivate={(src) => {
-                                      const libraryId = selectedLibraryId();
-                                      if (!libraryId) {
-                                        throw new Error("selected library is required");
+                                <Show when={item()}>
+                                  {(currentItem) => (
+                                    <MediaTile
+                                      item={currentItem()}
+                                      cachedSrc={getBufferedThumbnailSrc(currentItem())}
+                                      compact
+                                      offline={selectedLibraryIsOffline()}
+                                      disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
+                                      active={activeMediaItemId() === id}
+                                      selected={selectedMediaItemIdSet().has(id)}
+                                      showSelectionControls={showSelectionControls()}
+                                      onThumbnailLoaded={(src) =>
+                                        rememberThumbnailSrc(currentItem(), src)
                                       }
-                                      void handleOpenItem(item, libraryId, src);
-                                    }}
-                                    onToggleSelection={() => toggleMediaSelection(id)}
-                                  />
-                                )
+                                      onActivate={(src) => {
+                                        const libraryId = selectedLibraryId();
+                                        if (!libraryId) {
+                                          throw new Error("selected library is required");
+                                        }
+                                        void handleOpenItem(currentItem(), libraryId, src);
+                                      }}
+                                      onToggleSelection={() => toggleMediaSelection(id)}
+                                    />
+                                  )}
+                                </Show>
                               );
                             }}
                           </For>
@@ -2167,29 +2169,31 @@ export const MediaView: Component = () => {
                       ) : (
                         <For each={row.ids}>
                           {(id) => {
-                            const item = itemsById().get(id);
+                            const item = () => itemsById().get(id);
                             return (
-                              item && (
-                                <MediaTile
-                                  item={item}
-                                  cachedSrc={getBufferedThumbnailSrc(item)}
-                                  offline={selectedLibraryIsOffline()}
-                                  active={activeMediaItemId() === id}
-                                  selected={selectedMediaItemIdSet().has(id)}
-                                  showSelectionControls={showSelectionControls()}
-                                  onThumbnailLoaded={(src) =>
-                                    rememberThumbnailSrc(item, src)
-                                  }
-                                  onActivate={(src) => {
-                                    const libraryId = selectedLibraryId();
-                                    if (!libraryId) {
-                                      throw new Error("selected library is required");
+                              <Show when={item()}>
+                                {(currentItem) => (
+                                  <MediaTile
+                                    item={currentItem()}
+                                    cachedSrc={getBufferedThumbnailSrc(currentItem())}
+                                    offline={selectedLibraryIsOffline()}
+                                    active={activeMediaItemId() === id}
+                                    selected={selectedMediaItemIdSet().has(id)}
+                                    showSelectionControls={showSelectionControls()}
+                                    onThumbnailLoaded={(src) =>
+                                      rememberThumbnailSrc(currentItem(), src)
                                     }
-                                    void handleOpenItem(item, libraryId, src);
-                                  }}
-                                  onToggleSelection={() => toggleMediaSelection(id)}
-                                />
-                              )
+                                    onActivate={(src) => {
+                                      const libraryId = selectedLibraryId();
+                                      if (!libraryId) {
+                                        throw new Error("selected library is required");
+                                      }
+                                      void handleOpenItem(currentItem(), libraryId, src);
+                                    }}
+                                    onToggleSelection={() => toggleMediaSelection(id)}
+                                  />
+                                )}
+                              </Show>
                             );
                           }}
                         </For>
