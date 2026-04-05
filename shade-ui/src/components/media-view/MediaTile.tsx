@@ -61,6 +61,16 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
     setSrc(cachedSrc);
   });
 
+  createEffect((prevModified: number | null | undefined) => {
+    const modified = props.item.modifiedAt;
+    if (prevModified !== undefined && prevModified !== modified && src()) {
+      setSrc(undefined);
+      setLoadError(null);
+      setLoadRequestVersion((v) => v + 1);
+    }
+    return modified;
+  }, undefined as number | null | undefined);
+
   createEffect(() => {
     loadRequestVersion();
     if (
