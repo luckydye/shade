@@ -210,7 +210,7 @@ export const MediaView: Component = () => {
   const thumbnailMemoryBuffer = new Map<string, string>();
 
   const thumbnailBufferKey = (item: MediaItem) =>
-    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}`;
+    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}::modified:${item.modifiedAt ?? "none"}`;
 
   const getBufferedThumbnailSrc = (item: MediaItem) => {
     const key = thumbnailBufferKey(item);
@@ -1186,6 +1186,9 @@ export const MediaView: Component = () => {
         completedFiles: files.length,
         currentFileName: null,
       });
+      if (isS3Library(library)) {
+        await refreshLibraryIndex(library.id);
+      }
       await refetchCachedLibraryItems();
       await refetchItems();
     } catch (err) {
@@ -1226,6 +1229,9 @@ export const MediaView: Component = () => {
         completedFiles: paths.length,
         currentFileName: null,
       });
+      if (isS3Library(library)) {
+        await refreshLibraryIndex(library.id);
+      }
       await refetchCachedLibraryItems();
       await refetchItems();
     } catch (err) {
