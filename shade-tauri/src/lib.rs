@@ -36,8 +36,6 @@ pub fn run() {
             raw_queue: shade_io::spawn_thumbnail_workers(),
             render_sender: commands::spawn_thumbnail_render_worker(),
         })
-        .manage(LibraryScanService(shade_io::LibraryScanService::new()))
-        .manage(S3LibraryScanService(commands::S3LibraryScanState::new()))
         .manage(CameraDiscoveryService(
             shade_io::CameraDiscoveryService::new(),
         ))
@@ -46,6 +44,17 @@ pub fn run() {
         ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
+            tauri::async_runtime::block_on(commands::setup_library_db())
+                .map_err(|e| e.to_string())?;
+            let library_index_db =
+                tauri::async_runtime::block_on(commands::setup_library_index_db())
+                    .map_err(|e| e.to_string())?;
+            app.manage(LibraryScanService(shade_io::LibraryScanService::new(
+                library_index_db.clone(),
+            )));
+            app.manage(S3LibraryScanService(commands::S3LibraryScanState::new(
+                library_index_db,
+            )));
             let thumbnail_cache = std::sync::Arc::new(
                 tauri::async_runtime::block_on(commands::open_thumbnail_cache_db())
                     .map_err(|e| e.to_string())?,

@@ -3,6 +3,80 @@ use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use tokio::sync::Mutex;
+
+pub struct LibraryIndexDb {
+    _db: libsql::Database,
+    conn: Mutex<libsql::Connection>,
+}
+
+impl LibraryIndexDb {
+    pub async fn open(db_path: &Path) -> Result<Self, String> {
+        std::fs::create_dir_all(library_index_db_parent(db_path)?)
+            .map_err(|error| error.to_string())?;
+        let db = libsql::Builder::new_local(db_path)
+            .build()
+            .await
+            .map_err(|error| error.to_string())?;
+        let conn = db.connect().map_err(|error| error.to_string())?;
+        conn.query("PRAGMA journal_mode = WAL", ())
+            .await
+            .map_err(|error| error.to_string())?;
+        conn.query("PRAGMA busy_timeout = 5000", ())
+            .await
+            .map_err(|error| error.to_string())?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS library_indexes (
+                library_id TEXT PRIMARY KEY NOT NULL,
+                root_path TEXT NOT NULL,
+                indexed_at INTEGER NOT NULL
+            )",
+            (),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS library_index_items (
+                library_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                modified_at INTEGER,
+                rating INTEGER,
+                PRIMARY KEY (library_id, path)
+            )",
+            (),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let mut columns = conn
+            .query("PRAGMA table_info(library_index_items)", ())
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut has_rating = false;
+        while let Some(row) = columns.next().await.map_err(|error| error.to_string())? {
+            if row.get::<String>(1).map_err(|error| error.to_string())? == "rating" {
+                has_rating = true;
+                break;
+            }
+        }
+        if !has_rating {
+            conn.execute(
+                "ALTER TABLE library_index_items ADD COLUMN rating INTEGER",
+                (),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+        Ok(Self {
+            _db: db,
+            conn: Mutex::new(conn),
+        })
+    }
+
+    pub async fn conn(&self) -> tokio::sync::MutexGuard<'_, libsql::Connection> {
+        self.conn.lock().await
+    }
+}
 
 const IMAGE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "tiff", "tif", "webp", "avif", "exr", "dng", "cr2", "cr3",
@@ -61,64 +135,6 @@ pub fn sort_indexed_library_items(items: &mut [IndexedLibraryImage]) {
     });
 }
 
-async fn open_library_index_db(db_path: &Path) -> Result<libsql::Connection, String> {
-    std::fs::create_dir_all(library_index_db_parent(db_path)?)
-        .map_err(|error| error.to_string())?;
-    let db = libsql::Builder::new_local(db_path)
-        .build()
-        .await
-        .map_err(|error| error.to_string())?;
-    let conn = db.connect().map_err(|error| error.to_string())?;
-    conn.execute("PRAGMA journal_mode = WAL", ())
-        .await
-        .map_err(|error| error.to_string())?;
-    conn.execute("PRAGMA busy_timeout = 5000", ())
-        .await
-        .map_err(|error| error.to_string())?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS library_indexes (
-            library_id TEXT PRIMARY KEY NOT NULL,
-            root_path TEXT NOT NULL,
-            indexed_at INTEGER NOT NULL
-        )",
-        (),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS library_index_items (
-            library_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            name TEXT NOT NULL,
-            modified_at INTEGER,
-            rating INTEGER,
-            PRIMARY KEY (library_id, path)
-        )",
-        (),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let mut columns = conn
-        .query("PRAGMA table_info(library_index_items)", ())
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut has_rating = false;
-    while let Some(row) = columns.next().await.map_err(|error| error.to_string())? {
-        if row.get::<String>(1).map_err(|error| error.to_string())? == "rating" {
-            has_rating = true;
-            break;
-        }
-    }
-    if !has_rating {
-        conn.execute(
-            "ALTER TABLE library_index_items ADD COLUMN rating INTEGER",
-            (),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    }
-    Ok(conn)
-}
 
 pub fn picture_display_name(picture_id: &str) -> String {
     if let Some(name) = Path::new(picture_id)
@@ -325,12 +341,12 @@ pub fn scan_directory_images(root: &Path) -> Result<Vec<IndexedLibraryImage>, St
 }
 
 pub async fn load_persisted_library_index(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
     root_path: &Path,
 ) -> Result<Option<PersistedLibraryIndex>, String> {
     load_persisted_library_index_by_root(
-        db_path,
+        db,
         library_id,
         &library_index_root_path(root_path)?,
     )
@@ -338,11 +354,11 @@ pub async fn load_persisted_library_index(
 }
 
 pub async fn load_persisted_library_index_by_root(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
     root: &str,
 ) -> Result<Option<PersistedLibraryIndex>, String> {
-    let conn = open_library_index_db(db_path).await?;
+    let conn = db.conn().await;
     let root = library_index_root_key(root)?;
     let mut metadata_rows = conn
         .query(
@@ -401,12 +417,12 @@ pub async fn load_persisted_library_index_by_root(
 }
 
 pub async fn has_persisted_library_index(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
     root_path: &Path,
 ) -> Result<bool, String> {
     has_persisted_library_index_by_root(
-        db_path,
+        db,
         library_id,
         &library_index_root_path(root_path)?,
     )
@@ -414,11 +430,11 @@ pub async fn has_persisted_library_index(
 }
 
 pub async fn has_persisted_library_index_by_root(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
     root: &str,
 ) -> Result<bool, String> {
-    let conn = open_library_index_db(db_path).await?;
+    let conn = db.conn().await;
     let root = library_index_root_key(root)?;
     let mut rows = conn
         .query(
@@ -438,13 +454,13 @@ pub async fn has_persisted_library_index_by_root(
 }
 
 pub async fn replace_persisted_library_index(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
     root_path: &Path,
     items: &[IndexedLibraryImage],
 ) -> Result<u64, String> {
     replace_persisted_library_index_by_root(
-        db_path,
+        db,
         library_id,
         &library_index_root_path(root_path)?,
         items,
@@ -453,12 +469,12 @@ pub async fn replace_persisted_library_index(
 }
 
 pub async fn replace_persisted_library_index_by_root(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
     root: &str,
     items: &[IndexedLibraryImage],
 ) -> Result<u64, String> {
-    let conn = open_library_index_db(db_path).await?;
+    let conn = db.conn().await;
     let indexed_at_u64 = system_time_millis(std::time::SystemTime::now())?;
     let indexed_at = i64::try_from(indexed_at_u64).map_err(|error| error.to_string())?;
     let root = library_index_root_key(root)?;
@@ -520,10 +536,10 @@ pub async fn replace_persisted_library_index_by_root(
 }
 
 pub async fn delete_persisted_library_index(
-    db_path: &Path,
+    db: &LibraryIndexDb,
     library_id: &str,
 ) -> Result<(), String> {
-    let conn = open_library_index_db(db_path).await?;
+    let conn = db.conn().await;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;

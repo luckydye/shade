@@ -1913,7 +1913,6 @@ export const MediaView: Component = () => {
                       >
                         <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
                           <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]">
-                            <div class="absolute left-1/2 top-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--text-muted)]" />
                           </div>
                         </div>
                         <div class="space-y-1">

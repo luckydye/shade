@@ -23,10 +23,10 @@ impl ThumbnailCacheDb {
             .await
             .map_err(|e| e.to_string())?;
         let conn = db.connect().map_err(|e| e.to_string())?;
-        conn.execute("PRAGMA journal_mode = WAL", ())
+        conn.query("PRAGMA journal_mode = WAL", ())
             .await
             .map_err(|e| e.to_string())?;
-        conn.execute("PRAGMA busy_timeout = 5000", ())
+        conn.query("PRAGMA busy_timeout = 5000", ())
             .await
             .map_err(|e| e.to_string())?;
         conn.execute(

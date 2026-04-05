@@ -1,7 +1,7 @@
 use crate::{
     indexed_library_image_for_path, is_supported_library_image,
     load_persisted_library_index, replace_persisted_library_index,
-    sort_indexed_library_items, IndexedLibraryImage,
+    sort_indexed_library_items, IndexedLibraryImage, LibraryIndexDb,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -23,6 +23,7 @@ pub struct LibraryScanSnapshot {
 pub struct LibraryScanService {
     pub scans: Mutex<HashMap<String, Arc<Mutex<LibraryScanSnapshot>>>>,
     pub watches: Mutex<HashMap<String, LibraryWatchHandle>>,
+    pub index_db: Arc<LibraryIndexDb>,
 }
 
 pub struct LibraryWatchHandle {
@@ -30,16 +31,16 @@ pub struct LibraryWatchHandle {
 }
 
 impl LibraryScanService {
-    pub fn new() -> Arc<Self> {
+    pub fn new(index_db: Arc<LibraryIndexDb>) -> Arc<Self> {
         Arc::new(Self {
             scans: Mutex::new(HashMap::new()),
             watches: Mutex::new(HashMap::new()),
+            index_db,
         })
     }
 
     pub async fn ensure_snapshot_for_library(
         &self,
-        db_path: &Path,
         library_id: &str,
         root: PathBuf,
     ) -> Result<(Arc<Mutex<LibraryScanSnapshot>>, bool), String> {
@@ -52,7 +53,7 @@ impl LibraryScanService {
         {
             return Ok((snapshot, false));
         }
-        let persisted = load_persisted_library_index(db_path, library_id, &root).await?;
+        let persisted = load_persisted_library_index(&self.index_db, library_id, &root).await?;
         let should_scan = persisted.is_none();
         let completed_at = persisted.as_ref().map(|listing| listing.indexed_at);
         let snapshot = Arc::new(Mutex::new(LibraryScanSnapshot {
@@ -77,7 +78,6 @@ impl LibraryScanService {
 
     pub fn watch_library(
         self: &Arc<Self>,
-        db_path: &Path,
         library_id: &str,
         root: PathBuf,
     ) -> Result<(), String> {
@@ -98,7 +98,6 @@ impl LibraryScanService {
             .map_err(|error| error.to_string())?;
         spawn_library_watch_loop(
             self.clone(),
-            db_path.to_path_buf(),
             library_id.to_string(),
             root,
             rx,
@@ -112,12 +111,11 @@ impl LibraryScanService {
 
     pub async fn request_refresh(
         &self,
-        db_path: &Path,
         library_id: &str,
         root: PathBuf,
     ) -> Result<bool, String> {
         let (snapshot, _) = self
-            .ensure_snapshot_for_library(db_path, library_id, root.clone())
+            .ensure_snapshot_for_library(library_id, root.clone())
             .await?;
         {
             let guard = snapshot
@@ -129,7 +127,7 @@ impl LibraryScanService {
         }
         start_library_scan(
             snapshot,
-            db_path.to_path_buf(),
+            self.index_db.clone(),
             library_id.to_string(),
             root,
             false,
@@ -139,18 +137,17 @@ impl LibraryScanService {
 
     pub async fn snapshot_for_library(
         self: &Arc<Self>,
-        db_path: &Path,
         library_id: &str,
         root: PathBuf,
     ) -> Result<LibraryScanSnapshot, String> {
-        self.watch_library(db_path, library_id, root.clone())?;
+        self.watch_library(library_id, root.clone())?;
         let (snapshot, should_scan) = self
-            .ensure_snapshot_for_library(db_path, library_id, root.clone())
+            .ensure_snapshot_for_library(library_id, root.clone())
             .await?;
         if should_scan {
             start_library_scan(
                 snapshot.clone(),
-                db_path.to_path_buf(),
+                self.index_db.clone(),
                 library_id.to_string(),
                 root,
                 true,
@@ -168,12 +165,11 @@ impl LibraryScanService {
 
     pub async fn refresh_library(
         self: &Arc<Self>,
-        db_path: &Path,
         library_id: &str,
         root: PathBuf,
     ) -> Result<(), String> {
-        self.watch_library(db_path, library_id, root.clone())?;
-        if self.request_refresh(db_path, library_id, root).await? {
+        self.watch_library(library_id, root.clone())?;
+        if self.request_refresh(library_id, root).await? {
             return Ok(());
         }
         Err(format!(
@@ -213,7 +209,6 @@ impl LibraryScanService {
 
 fn spawn_library_watch_loop(
     service: Arc<LibraryScanService>,
-    db_path: PathBuf,
     library_id: String,
     root: PathBuf,
     rx: std::sync::mpsc::Receiver<Result<notify::Event, notify::Error>>,
@@ -249,7 +244,6 @@ fn spawn_library_watch_loop(
                 }
                 loop {
                     match runtime.block_on(service.request_refresh(
-                        &db_path,
                         &library_id,
                         root.clone(),
                     )) {
@@ -270,7 +264,7 @@ fn library_watch_event_requires_refresh(event: &notify::Event) -> bool {
 
 pub fn start_library_scan(
     snapshot: Arc<Mutex<LibraryScanSnapshot>>,
-    db_path: PathBuf,
+    index_db: Arc<LibraryIndexDb>,
     library_id: String,
     root: PathBuf,
     publish_progress: bool,
@@ -303,7 +297,7 @@ pub fn start_library_scan(
                         .map_err(|error| error.to_string())?;
                     runtime
                         .block_on(replace_persisted_library_index(
-                            &db_path,
+                            &index_db,
                             &library_id,
                             &root,
                             &items,

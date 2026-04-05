@@ -62,7 +62,7 @@ pub use library_index::{
     load_persisted_library_index_by_root, picture_display_name,
     replace_persisted_library_index, replace_persisted_library_index_by_root,
     scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
-    PersistedLibraryIndex,
+    LibraryIndexDb, PersistedLibraryIndex,
 };
 #[cfg(feature = "native")]
 pub use library_scan_service::{

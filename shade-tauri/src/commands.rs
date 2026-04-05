@@ -106,22 +106,210 @@ struct PeerPairedEvent {
 }
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+static LIBRARY_DB: tokio::sync::OnceCell<LibraryDb> = tokio::sync::OnceCell::const_new();
+static LIBRARY_INDEX_DB: tokio::sync::OnceCell<Arc<shade_io::LibraryIndexDb>> =
+    tokio::sync::OnceCell::const_new();
+
+pub struct LibraryDb {
+    _db: libsql::Database,
+    conn: TokioMutex<libsql::Connection>,
+}
+
+async fn init_library_db() -> Result<LibraryDb, String> {
+    let path = library_db_path()?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid library db path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let db = libsql::Builder::new_local(&path)
+        .build()
+        .await
+        .map_err(|e| e.to_string())?;
+    let conn = db.connect().map_err(|e| e.to_string())?;
+    conn.query("PRAGMA journal_mode = WAL", ())
+        .await
+        .map_err(|e| e.to_string())?;
+    conn.query("PRAGMA busy_timeout = 5000", ())
+        .await
+        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS images (
+            file_hash TEXT PRIMARY KEY NOT NULL,
+            source_name TEXT,
+            created_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_images_source_name ON images(source_name)",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    // Migrate from old integer-version schema to UUID-based schema if needed.
+    let needs_migration = {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM pragma_table_info('edit_versions') WHERE name = 'version'",
+                (),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let row = rows.next().await.map_err(|e| e.to_string())?;
+        row.map(|r| r.get::<i64>(0).unwrap_or(0) > 0)
+            .unwrap_or(false)
+    };
+    if needs_migration {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE edit_versions RENAME TO edit_versions_old;
+             CREATE TABLE edit_versions (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 file_hash TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 layers_json TEXT NOT NULL,
+                 peer_origin TEXT,
+                 FOREIGN KEY (file_hash) REFERENCES images(file_hash)
+             );
+             INSERT INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
+                 SELECT lower(hex(randomblob(16))), file_hash, created_at, layers_json, NULL
+                 FROM edit_versions_old;
+             DROP TABLE edit_versions_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS edit_versions (
+                id TEXT PRIMARY KEY NOT NULL,
+                file_hash TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                layers_json TEXT NOT NULL,
+                peer_origin TEXT,
+                FOREIGN KEY (file_hash) REFERENCES images(file_hash)
+            )",
+            (),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS media_ratings (
+            file_hash TEXT PRIMARY KEY NOT NULL,
+            rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+            updated_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS media_tags (
+            file_hash TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (file_hash, tag)
+        )",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    if table_has_column(&conn, "media_ratings", "media_id").await? {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE media_ratings RENAME TO media_ratings_old;
+             CREATE TABLE media_ratings (
+                 file_hash TEXT PRIMARY KEY NOT NULL,
+                 rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                 updated_at INTEGER NOT NULL
+             );
+             INSERT INTO media_ratings (file_hash, rating, updated_at)
+                 SELECT images.file_hash, old.rating, old.updated_at
+                 FROM media_ratings_old old
+                 JOIN images ON images.source_name = old.media_id;
+             DROP TABLE media_ratings_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    if table_has_column(&conn, "media_tags", "media_id").await? {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE media_tags RENAME TO media_tags_old;
+             CREATE TABLE media_tags (
+                 file_hash TEXT NOT NULL,
+                 tag TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (file_hash, tag)
+             );
+             INSERT INTO media_tags (file_hash, tag, updated_at)
+                 SELECT images.file_hash, old.tag, old.updated_at
+                 FROM media_tags_old old
+                 JOIN images ON images.source_name = old.media_id;
+             DROP TABLE media_tags_old;
+             COMMIT;",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    shade_io::create_collections_tables(&conn).await?;
+    Ok(LibraryDb {
+        _db: db,
+        conn: TokioMutex::new(conn),
+    })
+}
+
+async fn library_db_conn() -> tokio::sync::MutexGuard<'static, libsql::Connection> {
+    LIBRARY_DB
+        .get()
+        .expect("library db not initialized")
+        .conn
+        .lock()
+        .await
+}
+
+pub async fn setup_library_db() -> Result<(), String> {
+    let db = init_library_db().await?;
+    LIBRARY_DB
+        .set(db)
+        .map_err(|_| "library db already initialized".to_string())
+}
+
+pub async fn setup_library_index_db() -> Result<Arc<shade_io::LibraryIndexDb>, String> {
+    let path = library_index_db_path()?;
+    let db = Arc::new(shade_io::LibraryIndexDb::open(&path).await?);
+    LIBRARY_INDEX_DB
+        .set(db.clone())
+        .map_err(|_| "library index db already initialized".to_string())?;
+    Ok(db)
+}
+
+fn library_index_db() -> &'static Arc<shade_io::LibraryIndexDb> {
+    LIBRARY_INDEX_DB
+        .get()
+        .expect("library index db not initialized")
+}
 const SUPERSEDED_IMAGE_LOAD_ERROR: &str = "image load superseded by newer request";
 
 pub struct S3LibraryScanState {
     pub scans: Mutex<HashMap<String, Arc<Mutex<shade_io::LibraryScanSnapshot>>>>,
+    pub index_db: Arc<shade_io::LibraryIndexDb>,
 }
 
 impl S3LibraryScanState {
-    pub fn new() -> Arc<Self> {
+    pub fn new(index_db: Arc<shade_io::LibraryIndexDb>) -> Arc<Self> {
         Arc::new(Self {
             scans: Mutex::new(HashMap::new()),
+            index_db,
         })
     }
 
     pub async fn ensure_snapshot_for_library(
         &self,
-        db_path: &Path,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<(Arc<Mutex<shade_io::LibraryScanSnapshot>>, bool), String> {
         let library_id = s3_library_id(&config.id);
@@ -135,7 +323,7 @@ impl S3LibraryScanState {
             return Ok((snapshot, false));
         }
         let persisted = shade_io::load_persisted_library_index_by_root(
-            db_path,
+            &self.index_db,
             &library_id,
             &shade_io::format_s3_library_detail(config),
         )
@@ -164,15 +352,14 @@ impl S3LibraryScanState {
 
     pub async fn snapshot_for_library(
         self: &Arc<Self>,
-        db_path: &Path,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<shade_io::LibraryScanSnapshot, String> {
         let (snapshot, should_scan) =
-            self.ensure_snapshot_for_library(db_path, config).await?;
+            self.ensure_snapshot_for_library(config).await?;
         if should_scan {
             start_s3_library_scan(
                 snapshot.clone(),
-                db_path.to_path_buf(),
+                self.index_db.clone(),
                 config.clone(),
                 true,
             )?;
@@ -189,10 +376,9 @@ impl S3LibraryScanState {
 
     pub async fn request_refresh(
         self: &Arc<Self>,
-        db_path: &Path,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<bool, String> {
-        let (snapshot, _) = self.ensure_snapshot_for_library(db_path, config).await?;
+        let (snapshot, _) = self.ensure_snapshot_for_library(config).await?;
         let publish_progress = {
             let guard = snapshot
                 .lock()
@@ -204,7 +390,7 @@ impl S3LibraryScanState {
         };
         start_s3_library_scan(
             snapshot,
-            db_path.to_path_buf(),
+            self.index_db.clone(),
             config.clone(),
             publish_progress,
         )?;
@@ -213,10 +399,9 @@ impl S3LibraryScanState {
 
     pub async fn refresh_library(
         self: &Arc<Self>,
-        db_path: &Path,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<(), String> {
-        if self.request_refresh(db_path, config).await? {
+        if self.request_refresh(config).await? {
             return Ok(());
         }
         Err(format!(
@@ -298,25 +483,29 @@ async fn sync_peer_snapshots_for_file_hash(
         return Ok(Vec::new());
     }
 
-    let conn = open_library_db().await?;
-    let mut rows = conn
-        .query(
-            "SELECT id FROM edit_versions WHERE file_hash = ?1",
-            [file_hash],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut local_ids = std::collections::HashSet::new();
-    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-        if let Ok(id) = row.get::<String>(0) {
-            local_ids.insert(id);
+    let local_ids = {
+        let conn = library_db_conn().await;
+        let mut rows = conn
+            .query(
+                "SELECT id FROM edit_versions WHERE file_hash = ?1",
+                [file_hash],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut ids = std::collections::HashSet::new();
+        while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+            if let Ok(id) = row.get::<String>(0) {
+                ids.insert(id);
+            }
         }
-    }
+        ids
+    };
 
     let mut synced_ids = Vec::new();
     for snap in peer_snapshots {
         if local_ids.contains(&snap.id) {
             if let Some(source_name) = source_name {
+                let conn = library_db_conn().await;
                 conn.execute(
                     "UPDATE images SET source_name = ?1 WHERE file_hash = ?2",
                     libsql::params![source_name, file_hash],
@@ -542,151 +731,6 @@ fn restore_masks_from_params(
     }
 }
 
-pub async fn open_library_db() -> Result<libsql::Connection, String> {
-    let path = library_db_path()?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("invalid library db path: {}", path.display()))?;
-    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let db = libsql::Builder::new_local(path)
-        .build()
-        .await
-        .map_err(|e| e.to_string())?;
-    let conn = db.connect().map_err(|e| e.to_string())?;
-    conn.execute("PRAGMA journal_mode = WAL", ())
-        .await
-        .map_err(|e| e.to_string())?;
-    conn.execute("PRAGMA busy_timeout = 5000", ())
-        .await
-        .map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS images (
-            file_hash TEXT PRIMARY KEY NOT NULL,
-            source_name TEXT,
-            created_at INTEGER NOT NULL
-        )",
-        (),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_images_source_name ON images(source_name)",
-        (),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    // Migrate from old integer-version schema to UUID-based schema if needed.
-    let needs_migration = {
-        let mut rows = conn
-            .query(
-                "SELECT COUNT(*) FROM pragma_table_info('edit_versions') WHERE name = 'version'",
-                (),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        let row = rows.next().await.map_err(|e| e.to_string())?;
-        row.map(|r| r.get::<i64>(0).unwrap_or(0) > 0)
-            .unwrap_or(false)
-    };
-    if needs_migration {
-        conn.execute_batch(
-            "BEGIN;
-             ALTER TABLE edit_versions RENAME TO edit_versions_old;
-             CREATE TABLE edit_versions (
-                 id TEXT PRIMARY KEY NOT NULL,
-                 file_hash TEXT NOT NULL,
-                 created_at INTEGER NOT NULL,
-                 layers_json TEXT NOT NULL,
-                 peer_origin TEXT,
-                 FOREIGN KEY (file_hash) REFERENCES images(file_hash)
-             );
-             INSERT INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
-                 SELECT lower(hex(randomblob(16))), file_hash, created_at, layers_json, NULL
-                 FROM edit_versions_old;
-             DROP TABLE edit_versions_old;
-             COMMIT;",
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    } else {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS edit_versions (
-                id TEXT PRIMARY KEY NOT NULL,
-                file_hash TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                layers_json TEXT NOT NULL,
-                peer_origin TEXT,
-                FOREIGN KEY (file_hash) REFERENCES images(file_hash)
-            )",
-            (),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS media_ratings (
-            file_hash TEXT PRIMARY KEY NOT NULL,
-            rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
-            updated_at INTEGER NOT NULL
-        )",
-        (),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS media_tags (
-            file_hash TEXT NOT NULL,
-            tag TEXT NOT NULL,
-            updated_at INTEGER NOT NULL,
-            PRIMARY KEY (file_hash, tag)
-        )",
-        (),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    if table_has_column(&conn, "media_ratings", "media_id").await? {
-        conn.execute_batch(
-            "BEGIN;
-             ALTER TABLE media_ratings RENAME TO media_ratings_old;
-             CREATE TABLE media_ratings (
-                 file_hash TEXT PRIMARY KEY NOT NULL,
-                 rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
-                 updated_at INTEGER NOT NULL
-             );
-             INSERT INTO media_ratings (file_hash, rating, updated_at)
-                 SELECT images.file_hash, old.rating, old.updated_at
-                 FROM media_ratings_old old
-                 JOIN images ON images.source_name = old.media_id;
-             DROP TABLE media_ratings_old;
-             COMMIT;",
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-    if table_has_column(&conn, "media_tags", "media_id").await? {
-        conn.execute_batch(
-            "BEGIN;
-             ALTER TABLE media_tags RENAME TO media_tags_old;
-             CREATE TABLE media_tags (
-                 file_hash TEXT NOT NULL,
-                 tag TEXT NOT NULL,
-                 updated_at INTEGER NOT NULL,
-                 PRIMARY KEY (file_hash, tag)
-             );
-             INSERT INTO media_tags (file_hash, tag, updated_at)
-                 SELECT images.file_hash, old.tag, old.updated_at
-                 FROM media_tags_old old
-                 JOIN images ON images.source_name = old.media_id;
-             DROP TABLE media_tags_old;
-             COMMIT;",
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-    shade_io::create_collections_tables(&conn).await?;
-    Ok(conn)
-}
-
 async fn table_has_column(
     conn: &libsql::Connection,
     table: &str,
@@ -744,7 +788,7 @@ async fn load_media_ratings_map(
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query("SELECT file_hash, rating FROM media_ratings", ())
         .await
@@ -765,7 +809,7 @@ async fn load_media_ratings_map(
 }
 
 async fn snapshot_ids_by_source_name() -> Result<HashMap<String, String>, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query(
             "SELECT i.source_name, ev.id
@@ -809,7 +853,7 @@ async fn load_media_tags_map(
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query("SELECT file_hash, tag FROM media_tags ORDER BY tag ASC", ())
         .await
@@ -831,7 +875,7 @@ async fn load_media_tags_map(
 
 async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     if let Some(value) = normalized {
         conn.execute(
             "INSERT INTO media_ratings (file_hash, rating, updated_at)
@@ -855,7 +899,7 @@ async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(),
 
 pub async fn persist_media_tags(file_hash: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
@@ -891,7 +935,7 @@ pub async fn persist_media_tags(file_hash: &str, tags: &[String]) -> Result<(), 
 }
 
 pub async fn persist_media_tags_empty(file_hash: &str) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
@@ -924,7 +968,7 @@ pub async fn persist_media_tags_empty(file_hash: &str) -> Result<(), String> {
 }
 
 pub async fn max_media_tag_updated_at() -> Result<i64, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query("SELECT MAX(updated_at) FROM media_tags", ())
         .await
@@ -940,7 +984,7 @@ pub async fn max_media_tag_updated_at() -> Result<i64, String> {
 }
 
 pub async fn media_tags_exist(file_hash: &str) -> Result<bool, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query(
             "SELECT 1 FROM media_tags WHERE file_hash = ?1 LIMIT 1",
@@ -958,7 +1002,7 @@ pub async fn media_tags_exist(file_hash: &str) -> Result<bool, String> {
 async fn load_latest_edit_version(
     file_hash: &str,
 ) -> Result<Option<PersistedEditVersion>, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query(
             "SELECT id, layers_json
@@ -981,7 +1025,7 @@ async fn load_latest_edit_version(
 }
 
 async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query(
             "SELECT 1
@@ -1000,7 +1044,7 @@ async fn register_image_source(
     file_hash: &str,
     source_name: Option<&str>,
 ) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let now = unix_timestamp_millis()?;
     conn.execute(
         "INSERT INTO images (file_hash, source_name, created_at)
@@ -1025,7 +1069,7 @@ async fn persist_snapshot(
 ) -> Result<String, String> {
     ensure_non_image_layers(&data.layers)?;
     register_image_source(file_hash, source_name).await?;
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let now = unix_timestamp_millis()?;
     let snapshot_id = id
         .map(|s| s.to_owned())
@@ -1127,7 +1171,7 @@ async fn persist_current_edit_version(
     let id = if let Some(existing_id) = current_snapshot_id {
         // Update the existing snapshot in place.
         ensure_non_image_layers(&data.layers)?;
-        let conn = open_library_db().await?;
+        let conn = library_db_conn().await;
         conn.execute(
             "UPDATE edit_versions SET layers_json = ?1 WHERE id = ?2",
             libsql::params![
@@ -1171,7 +1215,7 @@ async fn list_snapshots_for_file(
     file_hash: &str,
     current_snapshot_id: Option<&str>,
 ) -> Result<Vec<SnapshotInfo>, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     // ROW_NUMBER ordered by created_at gives a stable display index.
     let mut rows = conn
         .query(
@@ -1205,7 +1249,7 @@ async fn load_snapshot_by_id(
     file_hash: &str,
     id: &str,
 ) -> Result<PersistedEditVersion, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut rows = conn
         .query(
             "SELECT layers_json
@@ -1830,16 +1874,15 @@ async fn refresh_desktop_local_library<R: tauri::Runtime>(
     library_id: &str,
     library_root: PathBuf,
 ) -> Result<(), String> {
-    let db_path = library_index_db_path()?;
     app.state::<crate::LibraryScanService>()
         .0
-        .refresh_library(&db_path, library_id, library_root)
+        .refresh_library(library_id, library_root)
         .await
 }
 
 fn start_s3_library_scan(
     snapshot: Arc<Mutex<shade_io::LibraryScanSnapshot>>,
-    db_path: PathBuf,
+    index_db: Arc<shade_io::LibraryIndexDb>,
     config: shade_io::S3LibraryConfig,
     publish_progress: bool,
 ) -> Result<(), String> {
@@ -1878,7 +1921,7 @@ fn start_s3_library_scan(
                         )
                         .await?;
                         let indexed_at = replace_persisted_library_index_by_root(
-                            &db_path,
+                            &index_db,
                             &library_id,
                             &root,
                             &items,
@@ -1962,23 +2005,22 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        let db_path = library_index_db_path()?;
+        let index_db = library_index_db();
         let library_scan_service = app.state::<crate::LibraryScanService>().0.clone();
         let s3_scan_service = app.state::<crate::S3LibraryScanService>().0.clone();
         for (library_id, root) in desktop_local_library_roots()? {
             if !local_library_is_available(&root) {
                 continue;
             }
-            library_scan_service.watch_library(&db_path, &library_id, root.clone())?;
+            library_scan_service.watch_library(&library_id, root.clone())?;
             if tauri::async_runtime::block_on(has_persisted_library_index(
-                &db_path,
+                index_db,
                 &library_id,
                 &root,
             ))? {
                 continue;
             }
             tauri::async_runtime::block_on(library_scan_service.refresh_library(
-                &db_path,
                 &library_id,
                 root,
             ))?;
@@ -1988,14 +2030,14 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
                 continue;
             };
             if tauri::async_runtime::block_on(has_persisted_library_index_by_root(
-                &db_path,
+                index_db,
                 &s3_library_id(&config.id),
                 &shade_io::format_s3_library_detail(&config),
             ))? {
                 continue;
             }
             tauri::async_runtime::block_on(
-                s3_scan_service.refresh_library(&db_path, &config),
+                s3_scan_service.refresh_library(&config),
             )?;
         }
         Ok(())
@@ -2115,7 +2157,7 @@ async fn list_s3_library_images<R: tauri::Runtime>(
     let snapshot = app
         .state::<crate::S3LibraryScanService>()
         .0
-        .snapshot_for_library(&library_index_db_path()?, config)
+        .snapshot_for_library(config)
         .await?;
     Ok(LibraryImageListing {
         items: snapshot
@@ -2867,7 +2909,7 @@ pub async fn apply_peer_metadata(
         });
     }
 
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     let mut ratings_updated: u32 = 0;
     let mut tags_added: u32 = 0;
 
@@ -4349,51 +4391,53 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
 async fn enrich_listing_metadata(
     listing: &mut LibraryImageListing,
 ) -> Result<(), String> {
-    let conn = open_library_db().await?;
-    let mut rows = conn
-        .query(
-            "SELECT i.source_name, i.file_hash, ev.id
-             FROM images i
-             JOIN edit_versions ev ON ev.file_hash = i.file_hash
-             WHERE i.source_name IS NOT NULL
-             AND ev.created_at = (
-                 SELECT MAX(ev2.created_at)
-                 FROM edit_versions ev2
-                 WHERE ev2.file_hash = i.file_hash
-             )",
-            (),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
     let mut snapshot_ids: HashMap<String, String> = HashMap::new();
     let mut file_hashes_by_source: HashMap<String, String> = HashMap::new();
-    while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-        let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
-        let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
-        let id = row.get::<String>(2).map_err(|e| e.to_string())?;
-        file_hashes_by_source.insert(source_name.clone(), file_hash);
-        snapshot_ids.insert(source_name, id);
-    }
-    if listing
-        .items
-        .iter()
-        .any(|item| !file_hashes_by_source.contains_key(&item.path))
     {
-        let mut hash_rows = conn
+        let conn = library_db_conn().await;
+        let mut rows = conn
             .query(
-                "SELECT source_name, file_hash
-                 FROM images
-                 WHERE source_name IS NOT NULL",
+                "SELECT i.source_name, i.file_hash, ev.id
+                 FROM images i
+                 JOIN edit_versions ev ON ev.file_hash = i.file_hash
+                 WHERE i.source_name IS NOT NULL
+                 AND ev.created_at = (
+                     SELECT MAX(ev2.created_at)
+                     FROM edit_versions ev2
+                     WHERE ev2.file_hash = i.file_hash
+                 )",
                 (),
             )
             .await
             .map_err(|e| e.to_string())?;
-        while let Some(row) = hash_rows.next().await.map_err(|e| e.to_string())? {
+        while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
             let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
             let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
-            file_hashes_by_source
-                .entry(source_name)
-                .or_insert(file_hash);
+            let id = row.get::<String>(2).map_err(|e| e.to_string())?;
+            file_hashes_by_source.insert(source_name.clone(), file_hash);
+            snapshot_ids.insert(source_name, id);
+        }
+        if listing
+            .items
+            .iter()
+            .any(|item| !file_hashes_by_source.contains_key(&item.path))
+        {
+            let mut hash_rows = conn
+                .query(
+                    "SELECT source_name, file_hash
+                     FROM images
+                     WHERE source_name IS NOT NULL",
+                    (),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            while let Some(row) = hash_rows.next().await.map_err(|e| e.to_string())? {
+                let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
+                let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
+                file_hashes_by_source
+                    .entry(source_name)
+                    .or_insert(file_hash);
+            }
         }
     }
     let tags = load_media_tags_map(
@@ -4530,13 +4574,12 @@ async fn build_library_listing<R: tauri::Runtime>(
             )
             .await;
         }
-        let db_path = library_index_db_path()?;
         let library_path =
             require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
         let snapshot = _app
             .state::<crate::LibraryScanService>()
             .0
-            .snapshot_for_library(&db_path, &library_id, library_path)
+            .snapshot_for_library(&library_id, library_path)
             .await?;
         Ok(LibraryImageListing {
             items: snapshot
@@ -4573,19 +4616,17 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             _app.state::<crate::S3LibraryScanService>()
                 .0
                 .refresh_library(
-                    &library_index_db_path()?,
                     &resolve_s3_library_config(&library_id)?,
                 )
                 .await?;
             crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app).await?;
             return Ok(());
         }
-        let db_path = library_index_db_path()?;
         let library_path =
             require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
         _app.state::<crate::LibraryScanService>()
             .0
-            .refresh_library(&db_path, &library_id, library_path)
+            .refresh_library(&library_id, library_path)
             .await?;
         crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app).await?;
         Ok(())
@@ -4617,10 +4658,9 @@ pub async fn add_media_library<R: tauri::Runtime>(
     save_app_config(&config)?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
-        let db_path = library_index_db_path()?;
         _app.state::<crate::LibraryScanService>()
             .0
-            .refresh_library(&db_path, &library.id, canonical)
+            .refresh_library(&library.id, canonical)
             .await?;
     }
     Ok(library)
@@ -4647,7 +4687,7 @@ pub async fn add_s3_media_library<R: tauri::Runtime>(
     {
         _app.state::<crate::S3LibraryScanService>()
             .0
-            .refresh_library(&library_index_db_path()?, &library)
+            .refresh_library(&library)
             .await?;
     }
     Ok(persisted_library)
@@ -4814,7 +4854,7 @@ pub async fn remove_media_library<R: tauri::Runtime>(
             removed,
             shade_io::LibraryConfig::Local(_) | shade_io::LibraryConfig::S3(_)
         ) {
-            delete_persisted_library_index(&library_index_db_path()?, &id).await?;
+            delete_persisted_library_index(library_index_db(), &id).await?;
         }
         if matches!(removed, shade_io::LibraryConfig::Local(_)) {
             _app.state::<crate::LibraryScanService>()
@@ -5156,7 +5196,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         &self,
         file_hash: &str,
     ) -> anyhow::Result<Vec<shade_p2p::SyncSnapshotInfo>> {
-        let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
+        let conn = library_db_conn().await;
         let mut rows = conn
             .query(
                 "SELECT id, created_at FROM edit_versions WHERE file_hash = ?1 ORDER BY created_at DESC",
@@ -5182,7 +5222,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
     }
 
     async fn get_snapshot_data(&self, id: &str) -> anyhow::Result<Vec<u8>> {
-        let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
+        let conn = library_db_conn().await;
         let mut rows = conn
             .query(
                 "SELECT layers_json FROM edit_versions WHERE id = ?1 LIMIT 1",
@@ -5210,7 +5250,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
         if file_hashes.is_empty() {
             return Ok(Vec::new());
         }
-        let conn = open_library_db().await.map_err(anyhow::Error::msg)?;
+        let conn = library_db_conn().await;
         let mut result = Vec::new();
         for file_hash in file_hashes {
             let mut rating_rows = conn
@@ -5625,7 +5665,7 @@ fn normalize_crop_rect(
 pub async fn list_collections(
     library_id: String,
 ) -> Result<Vec<shade_io::Collection>, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::list_collections(&conn, &library_id).await
 }
 
@@ -5634,7 +5674,7 @@ pub async fn create_collection(
     library_id: String,
     name: String,
 ) -> Result<shade_io::Collection, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::create_collection(&conn, &library_id, &name).await
 }
 
@@ -5643,13 +5683,13 @@ pub async fn rename_collection(
     collection_id: String,
     name: String,
 ) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::rename_collection(&conn, &collection_id, &name).await
 }
 
 #[tauri::command]
 pub async fn delete_collection(collection_id: String) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::delete_collection(&conn, &collection_id).await
 }
 
@@ -5658,7 +5698,7 @@ pub async fn reorder_collection(
     collection_id: String,
     new_position: i64,
 ) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::reorder_collection(&conn, &collection_id, new_position).await
 }
 
@@ -5666,7 +5706,7 @@ pub async fn reorder_collection(
 pub async fn list_collection_items(
     collection_id: String,
 ) -> Result<Vec<shade_io::CollectionItem>, String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::list_collection_items(&conn, &collection_id).await
 }
 
@@ -5675,7 +5715,7 @@ pub async fn add_to_collection(
     collection_id: String,
     file_hashes: Vec<String>,
 ) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::add_collection_items(&conn, &collection_id, file_hashes).await
 }
 
@@ -5684,7 +5724,7 @@ pub async fn remove_from_collection(
     collection_id: String,
     file_hashes: Vec<String>,
 ) -> Result<(), String> {
-    let conn = open_library_db().await?;
+    let conn = library_db_conn().await;
     shade_io::remove_collection_items(&conn, &collection_id, file_hashes).await
 }
 
