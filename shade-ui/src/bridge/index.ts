@@ -38,6 +38,7 @@ export interface NativeDragDropPayload {
 export interface TauriPlatform {
   kind: "tauri";
   thumbnailBackend: ThumbnailBackend;
+  collections: CollectionsPlatform;
   isTauri(): boolean;
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   pickDirectory(): Promise<string | null>;
@@ -51,6 +52,7 @@ export interface TauriPlatform {
 export interface BrowserPlatform {
   kind: "browser";
   thumbnailBackend: ThumbnailBackend;
+  collections: CollectionsPlatform;
   createWorker(): Worker;
   media: BrowserMediaPlatform;
   presets: BrowserPresetsPlatform;
@@ -1596,4 +1598,64 @@ export async function getMaskThumbnail(
     }) as Promise<MaskThumbnail>;
   }
   throw new Error("getMaskThumbnail is only implemented for Tauri");
+}
+
+// ── Collections ──────────────────────────────────────────────────────────────
+
+export interface Collection {
+  id: string;
+  library_id: string;
+  name: string;
+  position: number;
+  created_at: number;
+  item_count: number;
+}
+
+export interface CollectionItem {
+  image_path: string;
+  position: number;
+  added_at: number;
+}
+
+export interface CollectionsPlatform {
+  listCollections(libraryId: string): Promise<Collection[]>;
+  createCollection(libraryId: string, name: string): Promise<Collection>;
+  renameCollection(collectionId: string, name: string): Promise<void>;
+  deleteCollection(collectionId: string): Promise<void>;
+  reorderCollection(collectionId: string, newPosition: number): Promise<void>;
+  listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
+  addToCollection(collectionId: string, imagePaths: string[]): Promise<void>;
+  removeFromCollection(collectionId: string, imagePaths: string[]): Promise<void>;
+}
+
+export function listCollections(libraryId: string): Promise<Collection[]> {
+  return getPlatform().collections.listCollections(libraryId);
+}
+
+export function createCollection(libraryId: string, name: string): Promise<Collection> {
+  return getPlatform().collections.createCollection(libraryId, name);
+}
+
+export function renameCollection(collectionId: string, name: string): Promise<void> {
+  return getPlatform().collections.renameCollection(collectionId, name);
+}
+
+export function deleteCollection(collectionId: string): Promise<void> {
+  return getPlatform().collections.deleteCollection(collectionId);
+}
+
+export function reorderCollection(collectionId: string, newPosition: number): Promise<void> {
+  return getPlatform().collections.reorderCollection(collectionId, newPosition);
+}
+
+export function listCollectionItems(collectionId: string): Promise<CollectionItem[]> {
+  return getPlatform().collections.listCollectionItems(collectionId);
+}
+
+export function addToCollection(collectionId: string, imagePaths: string[]): Promise<void> {
+  return getPlatform().collections.addToCollection(collectionId, imagePaths);
+}
+
+export function removeFromCollection(collectionId: string, imagePaths: string[]): Promise<void> {
+  return getPlatform().collections.removeFromCollection(collectionId, imagePaths);
 }

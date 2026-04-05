@@ -15,15 +15,23 @@ import { Portal } from "solid-js/web";
 import {
   addMediaLibrary,
   addS3MediaLibrary,
+  addToCollection,
+  type Collection,
+  createCollection,
+  deleteCollection,
   deleteMediaLibraryItem,
   isTauriRuntime,
+  listCollectionItems,
+  listCollections,
   listenNativeDragDrop,
   listenPeerPaired,
   listMediaLibraries,
   pairPeerDevice,
   pickDirectory,
   refreshLibraryIndex,
+  removeFromCollection,
   removeMediaLibrary,
+  renameCollection,
   type S3MediaLibraryInput,
   setMediaLibraryOrder,
   uploadMediaLibraryFile,
@@ -39,6 +47,7 @@ import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor"
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { Button } from "./Button";
 import { ActionButton } from "./ActionButton";
+import { CollectionSidebar } from "./media-view/CollectionSidebar";
 import { MediaTile } from "./media-view/MediaTile";
 import {
   applyStoredRatings,
@@ -171,6 +180,10 @@ export const MediaView: Component = () => {
     dragging: boolean;
   } | null = null;
   let suppressLibraryClickUntil = 0;
+  const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(null);
+  const [collections, setCollections] = createSignal<Collection[]>([]);
+  const [collectionItemPaths, setCollectionItemPaths] = createSignal<Set<string>>(new Set());
+  const [showAddToCollectionMenu, setShowAddToCollectionMenu] = createSignal(false);
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
@@ -422,9 +435,17 @@ export const MediaView: Component = () => {
   const activeFilenameFilter = createMemo(() =>
     state.currentView === "editor" ? [] : normalizeFilenameFilter(filenameFilter()),
   );
-  const displayedItems = createMemo(() =>
+  const filteredByFilename = createMemo(() =>
     filterMediaItemsByFilename(availableItems(), activeFilenameFilter()),
   );
+  const displayedItems = createMemo(() => {
+    const items = filteredByFilename();
+    const paths = collectionItemPaths();
+    if (selectedCollectionId() === null || paths.size === 0) {
+      return items;
+    }
+    return items.filter((item) => paths.has(mediaItemKey(item)));
+  });
   const itemsById = createMemo(
     () => new Map(displayedItems().map((item) => [mediaItemKey(item), item])),
   );
@@ -1330,6 +1351,83 @@ export const MediaView: Component = () => {
     }
   }
 
+  async function refreshCollections() {
+    const libId = selectedLibraryId();
+    if (!libId) {
+      setCollections([]);
+      return;
+    }
+    setCollections(await listCollections(libId));
+  }
+
+  async function refreshCollectionItems() {
+    const colId = selectedCollectionId();
+    if (!colId) {
+      setCollectionItemPaths(new Set<string>());
+      return;
+    }
+    const items = await listCollectionItems(colId);
+    setCollectionItemPaths(new Set(items.map((i) => i.image_path)));
+  }
+
+  async function handleCreateCollection() {
+    const libId = selectedLibraryId();
+    if (!libId) return;
+    const col = await createCollection(libId, "Untitled");
+    await refreshCollections();
+    setSelectedCollectionId(col.id);
+  }
+
+  async function handleRenameCollection(id: string, name: string) {
+    await renameCollection(id, name);
+    await refreshCollections();
+  }
+
+  async function handleDeleteCollection(id: string) {
+    await deleteCollection(id);
+    if (selectedCollectionId() === id) {
+      setSelectedCollectionId(null);
+    }
+    await refreshCollections();
+  }
+
+  async function handleAddToCollection(collectionId: string) {
+    const paths = selectedMediaItemIds();
+    if (paths.length === 0) return;
+    await addToCollection(collectionId, paths);
+    setShowAddToCollectionMenu(false);
+    if (selectedCollectionId() === collectionId) {
+      await refreshCollectionItems();
+    }
+    await refreshCollections();
+  }
+
+  async function handleRemoveFromCollection() {
+    const colId = selectedCollectionId();
+    if (!colId) return;
+    const paths = selectedMediaItemIds();
+    if (paths.length === 0) return;
+    await removeFromCollection(colId, paths);
+    setSelectedMediaItemIds([]);
+    await refreshCollectionItems();
+    await refreshCollections();
+  }
+
+  // Refresh collections when library changes
+  createEffect(
+    on(selectedLibraryId, () => {
+      setSelectedCollectionId(null);
+      void refreshCollections();
+    }),
+  );
+
+  // Refresh collection items when selected collection changes
+  createEffect(
+    on(selectedCollectionId, () => {
+      void refreshCollectionItems();
+    }),
+  );
+
   const isEditorStrip = () => state.currentView === "editor";
   const mediaVisibleClass = () => (isEditorStrip() ? "flex touch-compact:hidden" : "flex");
   const shellClass = () =>
@@ -1376,7 +1474,7 @@ export const MediaView: Component = () => {
       </Show>
       <Show when={!isEditorStrip()}>
         <div
-          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-6 py-4 touch-mobile:px-4`}
+          class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-4 touch-mobile:px-4`}
         >
           <div class="flex w-full flex-wrap items-center gap-3">
             <div
@@ -1518,7 +1616,7 @@ export const MediaView: Component = () => {
                 </div>
               </Portal>
             </Show>
-            <div class="relative flex items-center" ref={libraryActionsRef}>
+            <div class="relative flex items-center gap-2" ref={libraryActionsRef}>
               <Show when={selectedLibrary()}>
                 <label class="block w-full w-56 touch-mobile:hidden">
                   <input
@@ -1683,7 +1781,18 @@ export const MediaView: Component = () => {
           </div>
         </div>
       </Show>
-      <div class="relative flex-1 min-h-0">
+      <div class="relative flex-1 min-h-0 flex">
+        <Show when={!isEditorStrip() && selectedLibrary()}>
+          <CollectionSidebar
+            collections={collections()}
+            selectedCollectionId={selectedCollectionId()}
+            onSelect={(id) => setSelectedCollectionId(id)}
+            onCreate={() => void handleCreateCollection()}
+            onRename={(id, name) => void handleRenameCollection(id, name)}
+            onDelete={(id) => void handleDeleteCollection(id)}
+          />
+        </Show>
+        <div class="relative flex-1 min-h-0">
         <Show when={hasImage() && state.currentView === "editor"}>
           <div class="px-3 pt-5 pb-4 w-full">
             <ActionButton
@@ -1953,6 +2062,7 @@ export const MediaView: Component = () => {
           </div>
         </Show>
       </div>
+      </div>
 
       <div
         class={`${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 py-3 touch-mobile:hidden lg:px-6`}
@@ -1973,6 +2083,52 @@ export const MediaView: Component = () => {
               >
                 Open Selected
               </Button>
+              <div class="relative">
+                <Button
+                  type="button"
+                  class={SURFACE_BUTTON_CLASS}
+                  onClick={() => setShowAddToCollectionMenu(!showAddToCollectionMenu())}
+                >
+                  Add to Collection
+                </Button>
+                <Show when={showAddToCollectionMenu()}>
+                  <div class="absolute bottom-full right-0 mb-1 min-w-[160px] rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] py-1 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
+                    <For each={collections()}>
+                      {(col) => (
+                        <button
+                          type="button"
+                          class="flex h-7 w-full items-center px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+                          onClick={() => void handleAddToCollection(col.id)}
+                        >
+                          {col.name}
+                        </button>
+                      )}
+                    </For>
+                    <button
+                      type="button"
+                      class="flex h-7 w-full items-center border-t border-[var(--border)] px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+                      onClick={async () => {
+                        const libId = selectedLibraryId();
+                        if (!libId) return;
+                        const col = await createCollection(libId, "Untitled");
+                        await refreshCollections();
+                        await handleAddToCollection(col.id);
+                      }}
+                    >
+                      + New Collection
+                    </button>
+                  </div>
+                </Show>
+              </div>
+              <Show when={selectedCollectionId()}>
+                <Button
+                  type="button"
+                  class={DANGER_BUTTON_CLASS}
+                  onClick={() => void handleRemoveFromCollection()}
+                >
+                  Remove from Collection
+                </Button>
+              </Show>
               <Show when={canWriteSelectedLibrary()}>
                 <Button
                   type="button"

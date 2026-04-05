@@ -5489,6 +5489,63 @@ fn normalize_crop_rect(
     })
 }
 
+// ── Collections ──────────────────────────────────────────────────────────────
+
+fn collections_db_path() -> Result<PathBuf, String> {
+    Ok(app_config_dir()?.join("collections.db"))
+}
+
+#[tauri::command]
+pub async fn list_collections(library_id: String) -> Result<Vec<shade_io::Collection>, String> {
+    shade_io::list_collections(&collections_db_path()?, &library_id).await
+}
+
+#[tauri::command]
+pub async fn create_collection(
+    library_id: String,
+    name: String,
+) -> Result<shade_io::Collection, String> {
+    shade_io::create_collection(&collections_db_path()?, &library_id, &name).await
+}
+
+#[tauri::command]
+pub async fn rename_collection(collection_id: String, name: String) -> Result<(), String> {
+    shade_io::rename_collection(&collections_db_path()?, &collection_id, &name).await
+}
+
+#[tauri::command]
+pub async fn delete_collection(collection_id: String) -> Result<(), String> {
+    shade_io::delete_collection(&collections_db_path()?, &collection_id).await
+}
+
+#[tauri::command]
+pub async fn reorder_collection(collection_id: String, new_position: i64) -> Result<(), String> {
+    shade_io::reorder_collection(&collections_db_path()?, &collection_id, new_position).await
+}
+
+#[tauri::command]
+pub async fn list_collection_items(
+    collection_id: String,
+) -> Result<Vec<shade_io::CollectionItem>, String> {
+    shade_io::list_collection_items(&collections_db_path()?, &collection_id).await
+}
+
+#[tauri::command]
+pub async fn add_to_collection(
+    collection_id: String,
+    image_paths: Vec<String>,
+) -> Result<(), String> {
+    shade_io::add_collection_items(&collections_db_path()?, &collection_id, image_paths).await
+}
+
+#[tauri::command]
+pub async fn remove_from_collection(
+    collection_id: String,
+    image_paths: Vec<String>,
+) -> Result<(), String> {
+    shade_io::remove_collection_items(&collections_db_path()?, &collection_id, image_paths).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{export_render_request, normalize_media_tags};

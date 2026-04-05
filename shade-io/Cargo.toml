@@ -15,6 +15,7 @@ native = [
     "dep:reqwest",
     "dep:sha2",
     "dep:tokio",
+    "dep:uuid",
 ]
 ffmpeg = ["dep:video-rs", "dep:ndarray"]
 
@@ -39,5 +40,6 @@ percent-encoding = { version = "2.3", optional = true }
 quick-xml = { version = "0.38", features = ["serialize"], optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"], optional = true }
 sha2 = { version = "0.10", optional = true }
+uuid = { workspace = true, optional = true }
 video-rs = { version = "0.10", features = ["ndarray"], optional = true }
 ndarray = { version = "0.16.1", optional = true }

@@ -7737,6 +7737,7 @@ dependencies = [
  "sha2 0.10.9",
  "shade-core",
  "tokio",
+ "uuid",
  "video-rs",
 ]
 

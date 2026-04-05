@@ -16,6 +16,8 @@ use std::{convert::TryFrom, io::Cursor};
 #[cfg(feature = "native")]
 pub mod app_config;
 #[cfg(feature = "native")]
+pub mod collections;
+#[cfg(feature = "native")]
 pub mod ccapi;
 #[cfg(feature = "native")]
 pub mod camera_services;
@@ -44,6 +46,12 @@ pub use app_config::{
 };
 #[cfg(feature = "native")]
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
+#[cfg(feature = "native")]
+pub use collections::{
+    add_collection_items, create_collection, delete_collection, list_collection_items,
+    list_collections, remove_collection_items, rename_collection, reorder_collection,
+    Collection, CollectionItem,
+};
 #[cfg(feature = "native")]
 pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]

@@ -136,6 +136,14 @@ pub fn run() {
             commands::create_brush_mask,
             commands::stamp_brush_mask,
             commands::get_mask_thumbnail,
+            commands::list_collections,
+            commands::create_collection,
+            commands::rename_collection,
+            commands::delete_collection,
+            commands::reorder_collection,
+            commands::list_collection_items,
+            commands::add_to_collection,
+            commands::remove_from_collection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
