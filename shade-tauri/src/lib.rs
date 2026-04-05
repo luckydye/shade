@@ -111,6 +111,8 @@ pub fn run() {
             commands::list_library_images,
             commands::list_media_ratings,
             commands::set_media_library_order,
+            commands::set_library_mode,
+            commands::sync_library,
             commands::refresh_library_index,
             commands::add_media_library,
             commands::add_s3_media_library,

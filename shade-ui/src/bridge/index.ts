@@ -48,6 +48,9 @@ export interface TauriPlatform {
   listenNativeDragDrop(
     listener: (payload: NativeDragDropPayload) => void,
   ): Promise<() => void>;
+  listenLibrarySyncProgress(
+    listener: (payload: LibrarySyncProgress) => void,
+  ): Promise<() => void>;
 }
 
 export interface BrowserPlatform {
@@ -555,6 +558,15 @@ export async function listenNativeDragDrop(
   return getTauriPlatform().listenNativeDragDrop(listener);
 }
 
+export async function listenLibrarySyncProgress(
+  listener: (payload: LibrarySyncProgress) => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) {
+    return () => {};
+  }
+  return getTauriPlatform().listenLibrarySyncProgress(listener);
+}
+
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
   if (!(await isTauriRuntime())) {
     return {
@@ -827,10 +839,21 @@ export async function listPictures(): Promise<string[]> {
   return [];
 }
 
+export type LibraryMode = "browse" | "sync";
+
+export type LibrarySyncProgress = {
+  library_id: string;
+  total: number;
+  completed: number;
+  current_name: string | null;
+};
+
 export interface MediaLibrary {
   id: string;
   name: string;
   kind: "directory" | "camera" | "s3" | "peer";
+  mode: LibraryMode;
+  sync_target?: string | null;
   path?: string | null;
   removable: boolean;
   readonly: boolean;
@@ -1164,6 +1187,22 @@ export function resetLocalThumbnailFailure(path: string): void {
 
 export function resetCameraThumbnailFailure(path: string): void {
   getPlatform().libraryCache.resetCameraThumbnailFailure(path);
+}
+
+export async function setLibraryMode(libraryId: string, mode: LibraryMode, syncTarget?: string | null): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("setLibraryMode is only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  await inv("set_library_mode", { libraryId, mode, syncTarget: syncTarget ?? null });
+}
+
+export async function syncLibrary(libraryId: string): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("syncLibrary is only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  await inv("sync_library", { libraryId });
 }
 
 export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {

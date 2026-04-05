@@ -1,8 +1,9 @@
 use crate::{
-    library_config_id, peer_library_id, LibraryConfig, LocalLibraryConfig,
+    library_config_id, peer_library_id, LibraryConfig, LibraryMode, LocalLibraryConfig,
     PeerLibraryConfig, S3LibraryConfig,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -10,6 +11,8 @@ use std::path::{Path, PathBuf};
 pub struct AppConfig {
     pub libraries: Vec<LibraryConfig>,
     pub library_order: Vec<String>,
+    pub library_modes: HashMap<String, LibraryMode>,
+    pub sync_targets: HashMap<String, String>,
     pub p2p_secret_key: Option<[u8; 32]>,
 }
 
@@ -169,6 +172,8 @@ fn migrate_app_config(config: PersistedAppConfig) -> AppConfig {
     AppConfig {
         libraries,
         library_order,
+        library_modes: HashMap::new(),
+        sync_targets: HashMap::new(),
         p2p_secret_key: config.p2p_secret_key,
     }
 }

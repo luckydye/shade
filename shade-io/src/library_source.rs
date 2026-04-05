@@ -64,6 +64,14 @@ pub enum LibraryConfig {
     Peer(PeerLibraryConfig),
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LibraryMode {
+    #[default]
+    Browse,
+    Sync,
+}
+
 #[derive(Debug, Clone)]
 pub struct S3ObjectEntry {
     pub key: String,

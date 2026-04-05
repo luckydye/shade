@@ -72,6 +72,8 @@ pub struct MediaLibrary {
     pub readonly: bool,
     pub is_online: Option<bool>,
     pub is_refreshing: Option<bool>,
+    pub mode: String,
+    pub sync_target: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -103,6 +105,14 @@ pub struct LibraryImageListing {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PeerPairedEvent {
     peer_endpoint_id: String,
+}
+
+#[derive(Serialize, Clone)]
+struct LibrarySyncProgress {
+    library_id: String,
+    total: usize,
+    completed: usize,
+    current_name: Option<String>,
 }
 
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -618,6 +628,12 @@ fn library_index_db_path() -> Result<PathBuf, String> {
 
 fn thumbnail_cache_db_path() -> Result<PathBuf, String> {
     Ok(app_config_dir()?.join("thumbnails.db"))
+}
+
+fn library_sync_dir(library_id: &str) -> Result<PathBuf, String> {
+    let dir = app_config_dir()?.join("sync").join(library_id);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
 
 pub async fn open_thumbnail_cache_db(
@@ -1528,6 +1544,8 @@ fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> Media
         readonly: true,
         is_online: Some(is_online),
         is_refreshing: None,
+        mode: "browse".into(),
+        sync_target: None,
     }
 }
 
@@ -1545,6 +1563,8 @@ fn peer_library_for_endpoint(
         readonly: true,
         is_online: Some(is_online),
         is_refreshing: None,
+        mode: "browse".into(),
+        sync_target: None,
     }
 }
 
@@ -1579,6 +1599,8 @@ fn library_for_directory(path: PathBuf, is_refreshing: bool) -> MediaLibrary {
         readonly: false,
         is_online: Some(is_online),
         is_refreshing: Some(is_refreshing && is_online),
+        mode: "browse".into(),
+        sync_target: None,
     }
 }
 
@@ -1592,6 +1614,8 @@ fn library_for_s3(config: &shade_io::S3LibraryConfig) -> MediaLibrary {
         readonly: false,
         is_online: None,
         is_refreshing: None,
+        mode: "browse".into(),
+        sync_target: None,
     }
 }
 
@@ -1738,6 +1762,8 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         readonly: false,
         is_online: Some(pictures_online),
         is_refreshing: Some(pictures_online && scan_service.is_refreshing("pictures")?),
+        mode: "browse".into(),
+        sync_target: None,
     }];
     let mut config = load_app_config()?;
     let discovered_peers = discovered_peers_by_endpoint(app).await;
@@ -1788,12 +1814,210 @@ async fn list_desktop_media_libraries<R: tauri::Runtime>(
         }
         libraries.push(ccapi_library_for_host(&host, true, false));
     }
-    Ok(ordered_library_entries(libraries, &config.library_order))
+    let mut result = ordered_library_entries(libraries, &config.library_order);
+    for lib in &mut result {
+        if let Some(mode) = config.library_modes.get(&lib.id) {
+            lib.mode = match mode {
+                shade_io::LibraryMode::Browse => "browse".into(),
+                shade_io::LibraryMode::Sync => "sync".into(),
+            };
+        }
+        if let Some(target) = config.sync_targets.get(&lib.id) {
+            lib.sync_target = Some(target.clone());
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
 pub async fn set_media_library_order(library_order: Vec<String>) -> Result<(), String> {
     set_library_order(library_order)
+}
+
+#[tauri::command]
+pub async fn set_library_mode(library_id: String, mode: String, sync_target: Option<String>) -> Result<(), String> {
+    let library_mode = match mode.as_str() {
+        "browse" => shade_io::LibraryMode::Browse,
+        "sync" => shade_io::LibraryMode::Sync,
+        other => return Err(format!("invalid library mode: {other}")),
+    };
+    let mut config = load_app_config()?;
+    config.library_modes.insert(library_id.clone(), library_mode);
+    match sync_target {
+        Some(target) => { config.sync_targets.insert(library_id, target); }
+        None => { config.sync_targets.remove(&library_id); }
+    }
+    save_app_config(&config)
+}
+
+#[tauri::command]
+pub async fn sync_library<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    library_id: String,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<(), String> {
+    if library_id.starts_with("s3:") {
+        sync_download_s3(&app, &library_id).await
+    } else if library_id.starts_with("peer:") {
+        sync_download_peer(&app, &library_id, &p2p).await
+    } else {
+        sync_upload_local(&app, &library_id).await
+    }
+}
+
+async fn sync_download_s3<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
+) -> Result<(), String> {
+    let sync_dir = library_sync_dir(library_id)?;
+    let config = resolve_s3_library_config(library_id)?;
+    let objects = shade_io::list_s3_objects(&config).await?;
+    let entries: Vec<_> = objects
+        .into_iter()
+        .filter(|entry| is_supported_library_image(Path::new(&entry.key)))
+        .collect();
+    let total = entries.len();
+    for (i, entry) in entries.iter().enumerate() {
+        let file_name = Path::new(&entry.key)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| entry.key.clone());
+        let dest = sync_dir.join(&file_name);
+        if dest.exists() {
+            continue;
+        }
+        let _ = app.emit(
+            "library-sync-progress",
+            LibrarySyncProgress {
+                library_id: library_id.to_owned(),
+                total,
+                completed: i,
+                current_name: Some(file_name.clone()),
+            },
+        );
+        let bytes = shade_io::get_s3_object_bytes(&config, &entry.key).await?;
+        std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    }
+    emit_sync_complete(app, library_id, total);
+    Ok(())
+}
+
+async fn sync_download_peer<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
+    p2p: &tauri::State<'_, crate::P2pState>,
+) -> Result<(), String> {
+    let sync_dir = library_sync_dir(library_id)?;
+    let peer_endpoint_id = library_id
+        .strip_prefix("peer:")
+        .expect("peer: prefix already checked");
+    let p2p_handle = require_p2p(p2p).await?;
+    let pictures = p2p_handle
+        .list_peer_pictures(peer_endpoint_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let total = pictures.len();
+    for (i, picture) in pictures.iter().enumerate() {
+        let dest = sync_dir.join(&picture.name);
+        if dest.exists() {
+            continue;
+        }
+        let _ = app.emit(
+            "library-sync-progress",
+            LibrarySyncProgress {
+                library_id: library_id.to_owned(),
+                total,
+                completed: i,
+                current_name: Some(picture.name.clone()),
+            },
+        );
+        let bytes = p2p_handle
+            .get_peer_image_bytes(peer_endpoint_id, &picture.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    }
+    emit_sync_complete(app, library_id, total);
+    Ok(())
+}
+
+async fn sync_upload_local<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
+) -> Result<(), String> {
+    let library_path =
+        require_local_library_path(resolve_desktop_library_path(library_id)?)?;
+    let local_files = scan_directory_images(&library_path)?;
+    if local_files.is_empty() {
+        return Ok(());
+    }
+
+    let config = load_app_config()?;
+    let target_id = config
+        .sync_targets
+        .get(library_id)
+        .ok_or_else(|| format!("no sync target configured for library: {library_id}"))?;
+    let target = resolve_s3_library_config(target_id)?;
+    let remote_names = list_s3_remote_names(&target).await?;
+    let total = local_files.len();
+    let mut completed = 0;
+
+    for local_file in &local_files {
+        let local_path = Path::new(&local_file.path);
+        let file_name = local_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("invalid file name: {}", local_file.path))?;
+        if remote_names.contains(file_name) {
+            completed += 1;
+            continue;
+        }
+        let _ = app.emit(
+            "library-sync-progress",
+            LibrarySyncProgress {
+                library_id: library_id.to_owned(),
+                total,
+                completed,
+                current_name: Some(file_name.to_owned()),
+            },
+        );
+        let bytes = std::fs::read(local_path).map_err(|e| e.to_string())?;
+        let key = s3_upload_object_key(&target, file_name);
+        shade_io::put_s3_object_bytes(&target, &key, &bytes).await?;
+        completed += 1;
+    }
+    emit_sync_complete(app, library_id, total);
+    Ok(())
+}
+
+async fn list_s3_remote_names(
+    config: &shade_io::S3LibraryConfig,
+) -> Result<std::collections::HashSet<String>, String> {
+    let objects = shade_io::list_s3_objects(config).await?;
+    Ok(objects
+        .into_iter()
+        .filter_map(|entry| {
+            Path::new(&entry.key)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .collect())
+}
+
+fn emit_sync_complete<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
+    total: usize,
+) {
+    let _ = app.emit(
+        "library-sync-progress",
+        LibrarySyncProgress {
+            library_id: library_id.to_owned(),
+            total,
+            completed: total,
+            current_name: None,
+        },
+    );
 }
 
 fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
@@ -4352,6 +4576,8 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             readonly: true,
             is_online: None,
             is_refreshing: None,
+            mode: "browse".into(),
+            sync_target: None,
         }];
         let mut config = load_app_config()?;
         let discovered_peers = discovered_peers_by_endpoint(&_app).await;
@@ -4385,6 +4611,8 @@ pub async fn list_media_libraries<R: tauri::Runtime>(
             readonly: true,
             is_online: None,
             is_refreshing: None,
+            mode: "browse".into(),
+            sync_target: None,
         }];
         let mut config = load_app_config()?;
         let discovered_peers = discovered_peers_by_endpoint(&_app).await;

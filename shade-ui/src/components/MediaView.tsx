@@ -26,6 +26,8 @@ import {
   isTauriRuntime,
   listCollectionItems,
   listCollections,
+  listenLibrarySyncProgress,
+  type LibrarySyncProgress,
   listenNativeDragDrop,
   listenPeerPaired,
   listMediaLibraries,
@@ -37,7 +39,9 @@ import {
   removeMediaLibrary,
   renameCollection,
   type S3MediaLibraryInput,
+  setLibraryMode,
   setMediaLibraryOrder,
+  syncLibrary,
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
 } from "../bridge/index";
@@ -190,6 +194,7 @@ export const MediaView: Component = () => {
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
+  const [syncProgress, setSyncProgress] = createSignal<LibrarySyncProgress | null>(null);
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
@@ -794,8 +799,19 @@ export const MediaView: Component = () => {
         void unlisten();
       });
     });
+    void listenLibrarySyncProgress((progress) => {
+      if (progress.completed >= progress.total) {
+        setSyncProgress(null);
+        void refetchItems();
+      } else {
+        setSyncProgress(progress);
+      }
+    }).then((unlisten) => {
+      onCleanup(unlisten);
+    });
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
+      syncSelectedLibraryIfNeeded();
     }, 3000);
     onCleanup(() => {
       isDisposed = true;
@@ -1112,6 +1128,14 @@ export const MediaView: Component = () => {
     }
   }
 
+  function syncSelectedLibraryIfNeeded() {
+    const library = selectedLibrary();
+    if (!library || library.mode !== "sync" || syncProgress()) {
+      return;
+    }
+    void syncLibrary(library.id);
+  }
+
   async function handleRefreshLibrary() {
     const library = selectedLibrary();
     if (
@@ -1120,6 +1144,7 @@ export const MediaView: Component = () => {
       isCameraLibrary(library) ||
       isS3Library(library)
     ) {
+      syncSelectedLibraryIfNeeded();
       return;
     }
     setIsSubmitting(true);
@@ -1127,6 +1152,7 @@ export const MediaView: Component = () => {
     try {
       await refreshLibraryIndex(library.id);
       await refetchItems();
+      syncSelectedLibraryIfNeeded();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1679,6 +1705,63 @@ export const MediaView: Component = () => {
                   >
                     Refresh
                   </Button>
+                  <Show when={selectedLibrary()?.mode === "sync"}>
+                    <Button
+                      type="button"
+                      role="menuitem"
+                      class={MENU_ITEM_BUTTON_CLASS}
+                      disabled={isSubmitting()}
+                      onClick={() => {
+                        const library = selectedLibrary();
+                        if (!library) return;
+                        setShowLibraryActions(false);
+                        void setLibraryMode(library.id, "browse", null).then(() => refetchLibraries());
+                      }}
+                    >
+                      Disable Sync
+                    </Button>
+                  </Show>
+                  <Show when={selectedLibrary()?.mode !== "sync" && (selectedLibrary()?.kind === "s3" || selectedLibrary()?.kind === "peer")}>
+                    <Button
+                      type="button"
+                      role="menuitem"
+                      class={MENU_ITEM_BUTTON_CLASS}
+                      disabled={isSubmitting()}
+                      onClick={() => {
+                        const library = selectedLibrary();
+                        if (!library) return;
+                        setShowLibraryActions(false);
+                        void setLibraryMode(library.id, "sync").then(() => refetchLibraries());
+                      }}
+                    >
+                      Enable Sync
+                    </Button>
+                  </Show>
+                  <Show when={selectedLibrary()?.mode !== "sync" && selectedLibrary()?.kind === "directory"}>
+                    <div class="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.05em] text-[var(--text-subtle)]">
+                      Sync to
+                    </div>
+                    <For each={orderedLibraryEntries().filter(
+                      (lib) => lib.id !== selectedLibrary()?.id && (lib.kind === "s3" || lib.kind === "peer"),
+                    )}>
+                      {(target) => (
+                        <Button
+                          type="button"
+                          role="menuitem"
+                          class={MENU_ITEM_BUTTON_CLASS}
+                          disabled={isSubmitting()}
+                          onClick={() => {
+                            const library = selectedLibrary();
+                            if (!library) return;
+                            setShowLibraryActions(false);
+                            void setLibraryMode(library.id, "sync", target.id).then(() => refetchLibraries());
+                          }}
+                        >
+                          {target.name}
+                        </Button>
+                      )}
+                    </For>
+                  </Show>
                   <Button
                     type="button"
                     role="menuitem"
@@ -2251,6 +2334,30 @@ export const MediaView: Component = () => {
               <div
                 class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
                 style={{ width: `${uploadProgressPercent()}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={syncProgress()}>
+        {(progress) => (
+          <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
+            <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
+              <span>Syncing Library</span>
+              <span class="text-[var(--text-dim)]">
+                {progress().completed}/{progress().total}
+              </span>
+            </div>
+            <Show when={progress().current_name}>
+              <p class="mt-1 overflow-hidden whitespace-nowrap text-ellipsis text-[12px] font-medium text-[var(--text-dim)]">
+                {progress().current_name}
+              </p>
+            </Show>
+            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              <div
+                class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
+                style={{ width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%` }}
               />
             </div>
           </div>

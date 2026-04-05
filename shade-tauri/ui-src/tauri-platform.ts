@@ -12,6 +12,7 @@ type TauriPlatformApi = Pick<
   | "pickExportTarget"
   | "listenPeerPaired"
   | "listenNativeDragDrop"
+  | "listenLibrarySyncProgress"
 >;
 
 function normalizeDialogPath(path: string | string[] | null): string | null {
@@ -48,6 +49,14 @@ export const tauriPlatform: TauriPlatformApi = {
   },
   async listenPeerPaired(listener) {
     const unlisten = await listen("peer-paired", listener);
+    return () => {
+      void unlisten();
+    };
+  },
+  async listenLibrarySyncProgress(listener) {
+    const unlisten = await listen<{ library_id: string; total: number; completed: number; current_name: string | null }>("library-sync-progress", (event) => {
+      listener(event.payload);
+    });
     return () => {
       void unlisten();
     };

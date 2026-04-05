@@ -172,6 +172,7 @@ function toMediaLibrary(record: BrowserMediaLibraryRecord): MediaLibrary {
     id: record.id,
     name: record.name,
     kind: "directory",
+    mode: "browse",
     path: record.path,
     removable: true,
     readonly: true,

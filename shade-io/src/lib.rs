@@ -76,8 +76,9 @@ pub use library_source::{
     list_s3_objects_page, local_library_id, media_path_for_s3_object,
     normalize_s3_library_input, parse_s3_media_path, peer_library_id,
     put_s3_object_bytes, resolve_s3_source_id_from_library_id, s3_library_id,
-    AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LocalLibraryConfig,
-    PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry, S3ObjectListPage,
+    AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LibraryMode,
+    LocalLibraryConfig, PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry,
+    S3ObjectListPage,
 };
 #[cfg(feature = "native")]
 pub use thumbnail_loader::{
