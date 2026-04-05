@@ -96,7 +96,14 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
                 onDblClick={() => startRename(collection.id)}
                 onContextMenu={(e: MouseEvent) => handleContextMenu(e, collection.id)}
               >
-                <span class="min-w-0 truncate">{collection.name}</span>
+                <span class="flex min-w-0 items-center gap-1.5 truncate">
+                  <svg class="shrink-0 opacity-50" width="11" height="11" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="0.5" y="2.5" width="11" height="9" rx="1.5" stroke="currentColor"/>
+                    <path d="M0.5 5.5H11.5" stroke="currentColor" stroke-width="0.75"/>
+                    <path d="M3 2.5V1.5C3 1 3.5 0.5 4 0.5H8C8.5 0.5 9 1 9 1.5V2.5" stroke="currentColor" stroke-width="0.75"/>
+                  </svg>
+                  {collection.name}
+                </span>
                 <span class="shrink-0 text-[10px] text-[var(--text-faint)]">
                   {collection.item_count}
                 </span>
