@@ -17,6 +17,8 @@ export type CollectionSidebarProps = {
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 };
 
 export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
@@ -52,7 +54,19 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
   }
 
   return (
-    <div class="flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-6 pl-4">
+    <>
+      {/* Mobile backdrop */}
+      <Show when={props.mobileOpen}>
+        <div
+          class="fixed inset-0 z-30 hidden touch-mobile:block bg-black/40"
+          onClick={() => props.onMobileClose?.()}
+        />
+      </Show>
+    <div
+      class={`flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-6 pl-4 touch-mobile:fixed touch-mobile:inset-y-0 touch-mobile:left-0 touch-mobile:z-40 touch-mobile:bg-[var(--panel-bg)] touch-mobile:shadow-xl touch-mobile:transition-transform touch-mobile:duration-300 ${
+        props.mobileOpen ? "touch-mobile:translate-x-0" : "touch-mobile:-translate-x-full"
+      }`}
+    >
       <div class="flex-1 overflow-y-auto pr-2 space-y-1">
         <Button
           type="button"
@@ -160,5 +174,6 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
         }}
       </Show>
     </div>
+    </>
   );
 };

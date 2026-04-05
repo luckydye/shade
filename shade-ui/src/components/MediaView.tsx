@@ -184,6 +184,7 @@ export const MediaView: Component = () => {
   let suppressLibraryClickUntil = 0;
   const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(null);
   const [collections, setCollections] = createSignal<Collection[]>([]);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   const [collectionItemPaths, setCollectionItemPaths] = createSignal<Set<string>>(new Set());
   const [showAddToCollectionMenu, setShowAddToCollectionMenu] = createSignal(false);
   const [uploadDragFeedback, setUploadDragFeedback] =
@@ -1801,15 +1802,41 @@ export const MediaView: Component = () => {
           </div>
         </div>
       </Show>
-      <div class="relative flex-1 min-h-0 flex">
+      <div
+        class="relative flex-1 min-h-0 flex"
+        onTouchStart={(e) => {
+          const touch = e.touches[0];
+          if (touch.clientX > 24) return;
+          const startX = touch.clientX;
+          const startY = touch.clientY;
+          let moved = false;
+          function onMove(ev: TouchEvent) {
+            if (moved) return;
+            const dx = ev.touches[0].clientX - startX;
+            const dy = Math.abs(ev.touches[0].clientY - startY);
+            if (dx > 30 && dy < 50) {
+              moved = true;
+              setMobileSidebarOpen(true);
+            }
+          }
+          function onEnd() {
+            document.removeEventListener("touchmove", onMove);
+            document.removeEventListener("touchend", onEnd);
+          }
+          document.addEventListener("touchmove", onMove, { passive: true });
+          document.addEventListener("touchend", onEnd, { once: true });
+        }}
+      >
         <Show when={!isEditorStrip() && selectedLibrary()}>
           <CollectionSidebar
             collections={collections()}
             selectedCollectionId={selectedCollectionId()}
-            onSelect={(id) => setSelectedCollectionId(id)}
+            onSelect={(id) => { setSelectedCollectionId(id); setMobileSidebarOpen(false); }}
             onCreate={() => void handleCreateCollection()}
             onRename={(id, name) => void handleRenameCollection(id, name)}
             onDelete={(id) => void handleDeleteCollection(id)}
+            mobileOpen={mobileSidebarOpen()}
+            onMobileClose={() => setMobileSidebarOpen(false)}
           />
         </Show>
         <div class="relative flex-1 min-h-0">
