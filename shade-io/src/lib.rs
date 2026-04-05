@@ -58,11 +58,11 @@ pub use image_loader::{hash_file, load_picture_bytes, open_image, OpenedImage};
 pub use library_index::{
     delete_persisted_library_index, has_persisted_library_index,
     has_persisted_library_index_by_root, indexed_library_image_for_path,
-    is_supported_library_image, library_index_db_path, load_persisted_library_index,
-    load_persisted_library_index_by_root, picture_display_name,
-    replace_persisted_library_index, replace_persisted_library_index_by_root,
-    scan_directory_images, sort_indexed_library_items, IndexedLibraryImage,
-    LibraryIndexDb, PersistedLibraryIndex,
+    is_supported_library_image, library_index_db_path, library_index_root_key,
+    load_persisted_library_index, load_persisted_library_index_by_root, picture_display_name,
+    rating_for_image_path, replace_persisted_library_index,
+    replace_persisted_library_index_by_root, scan_directory_images, sort_indexed_library_items,
+    upsert_library_index_items, IndexedLibraryImage, LibraryIndexDb, PersistedLibraryIndex,
 };
 #[cfg(feature = "native")]
 pub use library_scan_service::{

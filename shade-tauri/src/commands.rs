@@ -897,6 +897,30 @@ async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(),
     Ok(())
 }
 
+// Reads the XMP sidecar rating for a local file path and stores it with INSERT OR IGNORE,
+// so it never overwrites a rating the user has set explicitly.
+async fn import_xmp_rating(picture_id: &str, file_hash: &str) {
+    if picture_id.contains("://") {
+        return; // skip non-local paths (ccapi://, s3://, etc.)
+    }
+    let path = std::path::Path::new(picture_id);
+    let Ok(Some(rating)) = shade_io::rating_for_image_path(path) else {
+        return;
+    };
+    let Ok(now) = unix_timestamp_millis() else {
+        return;
+    };
+    if let Ok(conn) = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        library_db_conn(),
+    ).await {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO media_ratings (file_hash, rating, updated_at) VALUES (?1, ?2, ?3)",
+            libsql::params![file_hash, i64::from(rating), now],
+        ).await;
+    }
+}
+
 pub async fn persist_media_tags(file_hash: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
     let conn = library_db_conn().await;
@@ -4204,6 +4228,7 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         .await?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     if let Some(file_hash) = thumbnail.file_hash.clone() {
+        import_xmp_rating(picture_id, &file_hash).await;
         crate::tagging_worker::enqueue_thumbnail_for_tagging(
             &app,
             crate::thumbnail_cache::ThumbnailCacheEntry {

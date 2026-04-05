@@ -1,7 +1,7 @@
 use crate::{
-    indexed_library_image_for_path, is_supported_library_image,
-    load_persisted_library_index, replace_persisted_library_index,
-    sort_indexed_library_items, IndexedLibraryImage, LibraryIndexDb,
+    is_supported_library_image, library_index_root_key, load_persisted_library_index,
+    picture_display_name, replace_persisted_library_index, sort_indexed_library_items,
+    upsert_library_index_items, IndexedLibraryImage, LibraryIndexDb,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -130,7 +130,6 @@ impl LibraryScanService {
             self.index_db.clone(),
             library_id.to_string(),
             root,
-            false,
         )?;
         Ok(true)
     }
@@ -150,7 +149,6 @@ impl LibraryScanService {
                 self.index_db.clone(),
                 library_id.to_string(),
                 root,
-                true,
             )?;
         }
         let snapshot = snapshot
@@ -267,7 +265,6 @@ pub fn start_library_scan(
     index_db: Arc<LibraryIndexDb>,
     library_id: String,
     root: PathBuf,
-    publish_progress: bool,
 ) -> Result<(), String> {
     {
         let mut guard = snapshot
@@ -281,15 +278,13 @@ pub fn start_library_scan(
         guard.is_scanning = true;
         guard.is_complete = false;
         guard.error = None;
-        if publish_progress {
-            guard.items.clear();
-            guard.completed_at = None;
-        }
+        guard.items.clear();
+        guard.completed_at = None;
     }
     std::thread::Builder::new()
         .name("shade-library-scan".into())
         .spawn(move || {
-            let result = scan_library_into_snapshot(&root, &snapshot, publish_progress)
+            let result = scan_library_into_snapshot(&root, &snapshot, &index_db, &library_id)
                 .and_then(|items| {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -308,10 +303,7 @@ pub fn start_library_scan(
                 .lock()
                 .expect("library scan snapshot lock poisoned");
             match result {
-                Ok((items, indexed_at)) => {
-                    if !publish_progress {
-                        guard.items = items;
-                    }
+                Ok((_, indexed_at)) => {
                     guard.completed_at = Some(indexed_at);
                 }
                 Err(error) => {
@@ -328,35 +320,69 @@ pub fn start_library_scan(
 pub fn scan_library_into_snapshot(
     dir: &Path,
     snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
-    publish_progress: bool,
+    index_db: &Arc<LibraryIndexDb>,
+    library_id: &str,
 ) -> Result<Vec<IndexedLibraryImage>, String> {
+    let root_str = dir
+        .to_str()
+        .ok_or_else(|| format!("non-utf8 path: {}", dir.display()))?;
+    let root_key = library_index_root_key(root_str)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
     let mut dirs = vec![dir.to_path_buf()];
     let mut batch = Vec::new();
     let mut items = Vec::new();
     while let Some(current_dir) = dirs.pop() {
-        let entries =
-            std::fs::read_dir(&current_dir).map_err(|error| error.to_string())?;
+        let entries = match std::fs::read_dir(&current_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
         for entry in entries {
-            let entry = entry.map_err(|error| error.to_string())?;
+            let Ok(entry) = entry else { continue };
             let path = entry.path();
-            if path.is_dir() {
+            let Ok(file_type) = entry.file_type() else { continue };
+            if file_type.is_dir() {
                 dirs.push(path);
                 continue;
             }
-            if !path.is_file() || !is_supported_library_image(&path) {
+            if !file_type.is_file() || !is_supported_library_image(&path) {
                 continue;
             }
-            let item = indexed_library_image_for_path(&path)?;
+            let Some(path_str) = path.to_str() else { continue };
+            let modified_at = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| u64::try_from(d.as_millis()).ok());
+            let item = IndexedLibraryImage {
+                name: picture_display_name(path_str),
+                path: path_str.to_string(),
+                modified_at,
+                rating: None,
+            };
             items.push(item.clone());
-            if publish_progress {
-                batch.push(item);
-            }
-            if publish_progress && batch.len() >= 64 {
+            batch.push(item);
+            if batch.len() >= 16 {
+                let _ = runtime.block_on(upsert_library_index_items(
+                    index_db,
+                    library_id,
+                    &root_key,
+                    &batch,
+                ));
                 flush_library_scan_batch(snapshot, &mut batch)?;
             }
         }
     }
-    if publish_progress {
+    if !batch.is_empty() {
+        let _ = runtime.block_on(upsert_library_index_items(
+            index_db,
+            library_id,
+            &root_key,
+            &batch,
+        ));
         flush_library_scan_batch(snapshot, &mut batch)?;
     }
     sort_indexed_library_items(&mut items);

@@ -1457,8 +1457,8 @@ export const MediaView: Component = () => {
       : "flex flex-1 flex-col overflow-hidden pt-0 touch-compact:pt-[calc(env(safe-area-inset-top)+3.5rem)]";
   const scrollClass = () =>
     isEditorStrip()
-      ? "media-scroll h-full overflow-y-auto px-2 py-3"
-      : "media-scroll h-full overflow-y-auto p-6 touch-mobile:p-4";
+      ? "media-scroll flex-1 min-h-0 overflow-y-auto px-2 py-3"
+      : "media-scroll flex-1 min-h-0 overflow-y-auto p-6 touch-mobile:p-4";
 
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   
@@ -1839,7 +1839,7 @@ export const MediaView: Component = () => {
             onMobileClose={() => setMobileSidebarOpen(false)}
           />
         </Show>
-        <div class="relative flex-1 min-h-0">
+        <div class="relative flex-1 min-h-0 flex flex-col">
         <Show when={hasImage() && state.currentView === "editor"}>
           <div class="px-3 pt-5 pb-4 w-full">
             <ActionButton
@@ -1864,6 +1864,12 @@ export const MediaView: Component = () => {
           </div>
         </Show>
       
+        <Show when={!isEditorStrip() && !isLibraryScanComplete() && availableItems().length > 0}>
+          <div class="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-5 py-2 text-[11px] font-medium text-[var(--text-dim)]">
+            <div class="h-2.5 w-2.5 animate-spin rounded-full border border-[var(--border-medium)] border-t-[var(--text-muted)]" />
+            Indexing · {availableItems().length.toLocaleString()} images found so far
+          </div>
+        </Show>
         <div
           ref={setScrollRef}
           class={scrollClass()}
@@ -1944,10 +1950,14 @@ export const MediaView: Component = () => {
                         </div>
                         <div class="space-y-1">
                           <h2 class="text-sm font-semibold text-[var(--text)]">
-                            Loading library
+                            {availableItems().length > 0
+                              ? `Found ${availableItems().length.toLocaleString()} images…`
+                              : "Scanning library…"}
                           </h2>
                           <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                            Indexing images and restoring cached items.
+                            {items.loading
+                              ? "Loading your library."
+                              : "Indexing images in this library. This may take a while for large or remote libraries."}
                           </p>
                         </div>
                       </div>
@@ -2111,13 +2121,13 @@ export const MediaView: Component = () => {
       </div>
 
       <div
-        class={`${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 py-3 touch-mobile:hidden lg:px-6`}
+        class={`${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 touch-mobile:hidden lg:px-6`}
       >
         {displayedError() && (
-          <p class="text-sm text-[var(--danger-text)]">{displayedError()}</p>
+          <p class="text-sm py-3 text-[var(--danger-text)]">{displayedError()}</p>
         )}
         <Show when={selectedMediaItemIds().length > 0}>
-          <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center justify-between gap-2 py-3">
             <p class="text-[11px] font-medium text-[var(--text-dim)]">
               {selectedMediaItemIds().length} selected
             </p>
@@ -2195,7 +2205,7 @@ export const MediaView: Component = () => {
             </div>
           </div>
         </Show>
-        <Show when={selectedLibraryDetail()}>
+        {/*<Show when={selectedLibraryDetail()}>
           <p class="overflow-hidden whitespace-nowrap text-ellipsis text-[11px] font-medium text-[var(--text-dim)]">
             {selectedLibraryDetail()}
             {selectedLibraryIsOffline() && " • offline"}
@@ -2205,7 +2215,7 @@ export const MediaView: Component = () => {
               !isLibraryScanComplete() &&
               ` • indexing ${availableItems().length} images`}
           </p>
-        </Show>
+        </Show>*/}
       </div>
       
       <Show when={selectedLibrary()}>

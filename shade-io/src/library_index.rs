@@ -277,6 +277,8 @@ pub fn image_file_may_embed_xmp(path: &Path) -> bool {
     )
 }
 
+// Only checks sidecar .xmp files — reading the image body is too expensive over NAS/slow
+// filesystems and would hang the scan thread for large libraries.
 pub fn rating_for_image_path(path: &Path) -> Result<Option<u8>, String> {
     let sidecar_path = path.with_extension("xmp");
     if sidecar_path.is_file() {
@@ -287,14 +289,7 @@ pub fn rating_for_image_path(path: &Path) -> Result<Option<u8>, String> {
             )
         })?);
     }
-    if !image_file_may_embed_xmp(path) {
-        return Ok(None);
-    }
-    file_bytes_xmp_rating(
-        &std::fs::read(path).map_err(|error| {
-            format!("failed to read image {}: {error}", path.display())
-        })?,
-    )
+    Ok(None)
 }
 
 pub fn indexed_library_image_for_path(
@@ -313,7 +308,7 @@ pub fn indexed_library_image_for_path(
         name: picture_display_name(&path_string),
         path: path_string,
         modified_at: Some(system_time_millis(modified_at)?),
-        rating: rating_for_image_path(path)?,
+        rating: None,
     })
 }
 
@@ -527,6 +522,63 @@ pub async fn replace_persisted_library_index_by_root(
                 .await
                 .map_err(|error| error.to_string())?;
             Ok(indexed_at_u64)
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", ()).await;
+            Err(error)
+        }
+    }
+}
+
+pub async fn upsert_library_index_items(
+    db: &LibraryIndexDb,
+    library_id: &str,
+    root: &str,
+    items: &[IndexedLibraryImage],
+) -> Result<(), String> {
+    let conn = db.conn().await;
+    let root = library_index_root_key(root)?;
+    conn.execute("BEGIN IMMEDIATE", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let result = async {
+        conn.execute(
+            "INSERT OR IGNORE INTO library_indexes (library_id, root_path, indexed_at)
+             VALUES (?1, ?2, 0)",
+            libsql::params![library_id, root],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        for item in items {
+            let modified_at = item
+                .modified_at
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            let rating = item.rating.map(i64::from);
+            conn.execute(
+                "INSERT OR REPLACE INTO library_index_items (library_id, path, name, modified_at, rating)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                libsql::params![
+                    library_id,
+                    item.path.as_str(),
+                    item.name.as_str(),
+                    modified_at,
+                    rating
+                ],
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+        Ok::<(), String>(())
+    }
+    .await;
+    match result {
+        Ok(()) => {
+            conn.execute("COMMIT", ())
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(())
         }
         Err(error) => {
             let _ = conn.execute("ROLLBACK", ()).await;
