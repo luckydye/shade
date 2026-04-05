@@ -8,7 +8,7 @@ use shade_core::{
 };
 use shade_io::{
     from_linear_srgb_f32, generate_desktop_thumbnail, load_image,
-    load_image_f32_with_colorspace, quantize_rgba_f32, save_image, scan_directory_images,
+    load_image_f32_with_info, quantize_rgba_f32, save_image, scan_directory_images,
     to_linear_srgb_f32,
 };
 #[cfg(feature = "video")]
@@ -546,7 +546,8 @@ async fn main() -> Result<()> {
                 .unwrap_or(ColorSpace::Srgb);
 
             log::info!("Loading image: {}", input.display());
-            let (image, detected_cs) = load_image_f32_with_colorspace(&input)?;
+            let (image, info) = load_image_f32_with_info(&input)?;
+            let detected_cs = info.color_space;
             let width = image.width;
             let height = image.height;
             let mut pixels = image.pixels.to_vec();

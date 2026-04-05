@@ -51,9 +51,7 @@ static THUMBNAIL_TAGGING_SERVICE: std::sync::OnceLock<ThumbnailTaggingService> =
     std::sync::OnceLock::new();
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub fn spawn_thumbnail_tagging_worker(
-    thumbnail_cache: std::sync::Arc<crate::thumbnail_cache::ThumbnailCacheDb>,
-) -> Result<ThumbnailTaggingService, String> {
+pub fn spawn_thumbnail_tagging_worker() -> Result<ThumbnailTaggingService, String> {
     if let Some(service) = THUMBNAIL_TAGGING_SERVICE.get() {
         return Ok(service.clone());
     }
@@ -93,18 +91,8 @@ pub fn spawn_thumbnail_tagging_worker(
     };
     let vocabulary =
         shade_tagging::photo_auto_tag_vocabulary().map_err(|e| e.to_string())?;
-    let last_tagged_at =
-        tauri::async_runtime::block_on(crate::commands::max_media_tag_updated_at())
-            .map_err(|e| e.to_string())?;
-    let startup_entries = tauri::async_runtime::block_on(
-        thumbnail_cache.list_entries_after(last_tagged_at),
-    )
-    .map_err(|e| e.to_string())?;
     let (sender, receiver) = crossbeam_channel::unbounded::<ThumbnailCacheEntry>();
-    log::info!(
-        "thumbnail tagging worker active pid={pid} startup_entries={}",
-        startup_entries.len()
-    );
+    log::info!("thumbnail tagging worker active pid={pid}");
     let service = ThumbnailTaggingService {
         sender: Some(sender),
         pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
@@ -168,9 +156,6 @@ pub fn spawn_thumbnail_tagging_worker(
     THUMBNAIL_TAGGING_SERVICE
         .set(service.clone())
         .map_err(|_| "thumbnail tagging worker already initialized".to_string())?;
-    for entry in startup_entries {
-        service.enqueue(entry)?;
-    }
     Ok(service)
 }
 

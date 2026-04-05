@@ -118,59 +118,27 @@ const RAW_EXTENSIONS: &[&str] = &[
 /// Load an image from disk and return raw RGBA8 bytes along with dimensions.
 /// Pixels are returned as-is (still in the source colour space / gamma).
 pub fn load_image(path: &Path) -> Result<(Vec<u8>, u32, u32)> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Cannot read file: {}", path.display()))?;
-    let (pixels, width, height, _) = load_image_bytes_with_colorspace(
-        &bytes,
-        path.file_name().and_then(|name| name.to_str()),
-    )
-    .with_context(|| format!("Failed to decode image: {}", path.display()))?;
-    Ok((pixels, width, height))
+    let (image, _) = load_image_f32_with_info(path)?;
+    Ok((quantize_rgba_f32(&image.pixels), image.width, image.height))
 }
 
-/// Load an encoded image from memory and return raw RGBA8 bytes along with dimensions.
-/// `name_hint` is used only for format detection when the payload itself is ambiguous.
-pub fn load_image_bytes(
-    bytes: &[u8],
-    name_hint: Option<&str>,
-) -> Result<(Vec<u8>, u32, u32)> {
-    let (pixels, width, height, _) = load_image_bytes_with_colorspace(bytes, name_hint)?;
-    Ok((pixels, width, height))
+pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+    let (image, _) = load_image_bytes_f32_with_info(bytes, name_hint)?;
+    Ok((quantize_rgba_f32(&image.pixels), image.width, image.height))
 }
 
 pub fn load_image_f32(path: &Path) -> Result<FloatImage> {
-    let (image, _) = load_image_f32_with_colorspace(path)?;
+    let (image, _) = load_image_f32_with_info(path)?;
     Ok(image)
 }
 
 pub fn load_image_bytes_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatImage> {
-    let (image, _) = load_image_bytes_f32_with_colorspace(bytes, name_hint)?;
+    let (image, _) = load_image_bytes_f32_with_info(bytes, name_hint)?;
     Ok(image)
 }
 
 /// Load an image and also detect its embedded colour space.
 /// Returns (pixels_rgba8, width, height, detected_color_space).
-pub fn load_image_with_colorspace(
-    path: &Path,
-) -> Result<(Vec<u8>, u32, u32, ColorSpace)> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Cannot read file: {}", path.display()))?;
-    load_image_bytes_with_colorspace(
-        &bytes,
-        path.file_name().and_then(|name| name.to_str()),
-    )
-    .with_context(|| format!("Failed to decode image: {}", path.display()))
-}
-
-pub fn load_image_f32_with_colorspace(path: &Path) -> Result<(FloatImage, ColorSpace)> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Cannot read file: {}", path.display()))?;
-    load_image_bytes_f32_with_colorspace(
-        &bytes,
-        path.file_name().and_then(|name| name.to_str()),
-    )
-    .with_context(|| format!("Failed to decode image: {}", path.display()))
-}
 
 #[derive(Clone, Debug)]
 pub struct SourceImageInfo {
@@ -189,80 +157,6 @@ pub fn load_image_f32_with_info(path: &Path) -> Result<(FloatImage, SourceImageI
     Ok((image, info))
 }
 
-/// Load an encoded image from memory and also detect its colour space.
-pub fn load_image_bytes_with_colorspace(
-    bytes: &[u8],
-    name_hint: Option<&str>,
-) -> Result<(Vec<u8>, u32, u32, ColorSpace)> {
-    if is_exr(name_hint, bytes) {
-        let (pixels, width, height) = decode_exr(bytes)?;
-        return Ok((pixels, width, height, ColorSpace::LinearSrgb));
-    }
-    if is_camera_raw(name_hint, bytes) {
-        let (pixels, width, height) = decode_camera_raw(bytes, name_hint)?;
-        return Ok((pixels, width, height, ColorSpace::Srgb));
-    }
-
-    let ext = name_hint
-        .and_then(|name| Path::new(name).extension())
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    let color_space = match ext.as_str() {
-        "jpg" | "jpeg" => detect_jpeg_colorspace(&bytes),
-        "png" => detect_png_colorspace(&bytes),
-        _ => ColorSpace::Unknown,
-    };
-
-    let img = apply_orientation(
-        image::load_from_memory(&bytes).context("Failed to decode image bytes")?,
-        read_orientation(&mut Cursor::new(bytes))?,
-    );
-    let rgba = img.to_rgba8();
-    let (width, height) = rgba.dimensions();
-
-    Ok((rgba.into_raw(), width, height, color_space))
-}
-
-pub fn load_image_bytes_f32_with_colorspace(
-    bytes: &[u8],
-    name_hint: Option<&str>,
-) -> Result<(FloatImage, ColorSpace)> {
-    if is_exr(name_hint, bytes) {
-        return Ok((decode_exr_f32(bytes)?, ColorSpace::LinearSrgb));
-    }
-    if is_camera_raw(name_hint, bytes) {
-        return Ok((decode_camera_raw_f32(bytes, name_hint)?, ColorSpace::Srgb));
-    }
-
-    let ext = name_hint
-        .and_then(|name| Path::new(name).extension())
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    let color_space = match ext.as_str() {
-        "jpg" | "jpeg" => detect_jpeg_colorspace(bytes),
-        "png" => detect_png_colorspace(bytes),
-        _ => ColorSpace::Unknown,
-    };
-
-    let rgba = apply_orientation(
-        image::load_from_memory(bytes).context("Failed to decode image bytes")?,
-        read_orientation(&mut Cursor::new(bytes))?,
-    )
-    .to_rgba32f();
-    let (width, height) = rgba.dimensions();
-    Ok((
-        FloatImage {
-            pixels: rgba.into_raw().into(),
-            width,
-            height,
-        },
-        color_space,
-    ))
-}
 
 pub fn load_image_bytes_f32_with_info(
     bytes: &[u8],
@@ -625,64 +519,6 @@ fn is_cr3(bytes: &[u8]) -> bool {
     bytes[4..8] == *b"ftyp" && matches!(&bytes[8..12], b"cr3 " | b"crx ")
 }
 
-fn decode_exr(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
-    struct ExrPixels {
-        width: usize,
-        data: Vec<f32>,
-    }
-
-    let image = exr::prelude::read()
-        .no_deep_data()
-        .largest_resolution_level()
-        .rgba_channels(
-            |resolution, _channels| ExrPixels {
-                width: resolution.width(),
-                data: vec![0.0; resolution.area() * 4],
-            },
-            |pixels: &mut ExrPixels, position, (r, g, b, a): (f32, f32, f32, f32)| {
-                let base = (position.y() * pixels.width + position.x()) * 4;
-                pixels.data[base] = r;
-                pixels.data[base + 1] = g;
-                pixels.data[base + 2] = b;
-                pixels.data[base + 3] = a;
-            },
-        )
-        .first_valid_layer()
-        .all_attributes()
-        .from_buffered(Cursor::new(bytes))
-        .context("EXR decode failed")?;
-
-    let width =
-        u32::try_from(image.layer_data.size.width()).context("EXR width exceeds u32")?;
-    let height = u32::try_from(image.layer_data.size.height())
-        .context("EXR height exceeds u32")?;
-    let float_pixels = image.layer_data.channel_data.pixels.data;
-    let mut rgba = Vec::with_capacity(float_pixels.len());
-    for channel in float_pixels {
-        rgba.push(float_to_u8(channel));
-    }
-
-    Ok((rgba, width, height))
-}
-
-fn decode_camera_raw(
-    bytes: &[u8],
-    name_hint: Option<&str>,
-) -> Result<(Vec<u8>, u32, u32)> {
-    let raw_source = match name_hint {
-        Some(name) => RawSource::new_from_slice(bytes).with_path(name),
-        None => RawSource::new_from_slice(bytes),
-    };
-    let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
-        .context("RAW decode failed")?;
-    let image = apply_orientation(
-        develop_raw_image(&raw_image)?,
-        raw_orientation_to_exif(raw_image.orientation),
-    );
-    let rgba = image.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    Ok((rgba.into_raw(), width, height))
-}
 
 fn decode_exr_f32(bytes: &[u8]) -> Result<FloatImage> {
     struct ExrPixels {

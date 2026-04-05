@@ -61,9 +61,7 @@ pub fn run() {
             );
             app.manage(ThumbnailCacheDb(thumbnail_cache.clone()));
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            app.manage(tagging_worker::spawn_thumbnail_tagging_worker(
-                thumbnail_cache.clone(),
-            )?);
+            app.manage(tagging_worker::spawn_thumbnail_tagging_worker()?);
             let pairing_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
             app.manage(PeerPairingState(pairing_lock.clone()));
             let handle = app.handle().clone();
