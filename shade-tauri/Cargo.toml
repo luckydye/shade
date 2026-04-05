@@ -36,5 +36,5 @@ name = "shade_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "shade-tauri"
+name = "shade"
 path = "src/main.rs"

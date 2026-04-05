@@ -52,7 +52,7 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
   }
 
   return (
-    <div class="flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-2 pl-4">
+    <div class="flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-6 pl-4">
       <div class="flex-1 overflow-y-auto pr-2 space-y-1">
         <Button
           type="button"
