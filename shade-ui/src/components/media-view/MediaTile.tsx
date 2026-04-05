@@ -1,7 +1,9 @@
 import type { Component } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { resetCameraThumbnailFailure } from "../../camera-library-cache";
-import { resetLocalThumbnailFailure } from "../../local-library-cache";
+import {
+  resetCameraThumbnailFailure,
+  resetLocalThumbnailFailure,
+} from "../../bridge/index";
 import { Button } from "../Button";
 import { MediaRating } from "../MediaRating";
 import { loadItemSrc, type MediaItem } from "./media-utils";

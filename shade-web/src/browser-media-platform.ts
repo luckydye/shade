@@ -7,12 +7,12 @@ import type {
   MediaLibrary,
 } from "shade-ui/src/bridge/index";
 import { getBrowserPlatform } from "shade-ui/src/bridge/index";
-import { requestToPromise, withStores } from "shade-ui/src/cache-utils";
 import {
   fileNameFromPath,
   loadBrowserEncodedBytes,
   loadBrowserThumbnailBytes,
 } from "./browser-image-preview";
+import { requestToPromise, withStores } from "./indexed-db";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;

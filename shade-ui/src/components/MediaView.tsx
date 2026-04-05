@@ -13,6 +13,9 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
+  getCachedCameraLibraryItems,
+  getCachedLocalLibraryItems,
+  getCachedPeerLibraryItems,
   addMediaLibrary,
   addS3MediaLibrary,
   addToCollection,
@@ -29,6 +32,7 @@ import {
   pairPeerDevice,
   pickDirectory,
   refreshLibraryIndex,
+  removePeerLibrary,
   removeFromCollection,
   removeMediaLibrary,
   renameCollection,
@@ -37,12 +41,6 @@ import {
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
 } from "../bridge/index";
-import { getCachedCameraLibraryItems } from "../camera-library-cache";
-import { getCachedLocalLibraryItems } from "../local-library-cache";
-import {
-  getCachedPeerLibraryItems,
-  removePeerLibrary,
-} from "../peer-library-cache";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { Button } from "./Button";
@@ -123,9 +121,13 @@ export const MediaView: Component = () => {
         return [];
       }
       if (libraryId.startsWith("peer:")) {
+        const peerId = libraryId.slice("peer:".length);
         return applyStoredRatings(
-          (await getCachedPeerLibraryItems(libraryId.slice("peer:".length))).map(
-            peerMediaItem,
+          (await getCachedPeerLibraryItems(peerId)).map((picture) =>
+            peerMediaItem({
+              ...picture,
+              peerId,
+            }),
           ),
         );
       }

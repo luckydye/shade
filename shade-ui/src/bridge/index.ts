@@ -38,6 +38,7 @@ export interface NativeDragDropPayload {
 export interface TauriPlatform {
   kind: "tauri";
   thumbnailBackend: ThumbnailBackend;
+  libraryCache: LibraryCachePlatform;
   collections: CollectionsPlatform;
   isTauri(): boolean;
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
@@ -52,6 +53,7 @@ export interface TauriPlatform {
 export interface BrowserPlatform {
   kind: "browser";
   thumbnailBackend: ThumbnailBackend;
+  libraryCache: LibraryCachePlatform;
   collections: CollectionsPlatform;
   createWorker(): Worker;
   media: BrowserMediaPlatform;
@@ -897,6 +899,35 @@ export interface BrowserSnapshotsPlatform {
   markSnapshotCurrent(id: string): Promise<void>;
 }
 
+export interface LibraryCachePlatform {
+  getCachedLocalLibraryItems(libraryId: string): Promise<LibraryImage[]>;
+  loadLocalLibraryItemsCachedOrRemote(
+    libraryId: string,
+  ): Promise<LibraryImageListing>;
+  getCachedCameraLibraryItems(host: string): Promise<LibraryImage[]>;
+  loadCameraLibraryItemsCachedOrRemote(host: string): Promise<LibraryImage[]>;
+  getCachedPeerLibraryItems(peerId: string): Promise<SharedPicture[]>;
+  loadPeerLibraryItemsCachedOrRemote(peerId: string): Promise<SharedPicture[]>;
+  removePeerLibrary(peerId: string): Promise<void>;
+  resolveLocalThumbnailSrc(
+    path: string,
+    latestSnapshotId: string | null,
+    signal: AbortSignal,
+  ): Promise<string>;
+  resolveCameraThumbnailSrc(
+    path: string,
+    latestSnapshotId: string | null,
+    signal: AbortSignal,
+  ): Promise<string>;
+  resolvePeerThumbnailSrc(
+    peerId: string,
+    pictureId: string,
+    signal: AbortSignal,
+  ): Promise<string>;
+  resetLocalThumbnailFailure(path: string): void;
+  resetCameraThumbnailFailure(path: string): void;
+}
+
 let _platform: Platform | null = null;
 
 async function getTauriInvoke() {
@@ -1055,6 +1086,84 @@ export async function removeMediaLibrary(id: string): Promise<void> {
     return;
   }
   await getBrowserPlatform().media.removeMediaLibrary(id);
+}
+
+export function getCachedLocalLibraryItems(libraryId: string): Promise<LibraryImage[]> {
+  return getPlatform().libraryCache.getCachedLocalLibraryItems(libraryId);
+}
+
+export function loadLocalLibraryItemsCachedOrRemote(
+  libraryId: string,
+): Promise<LibraryImageListing> {
+  return getPlatform().libraryCache.loadLocalLibraryItemsCachedOrRemote(libraryId);
+}
+
+export function getCachedCameraLibraryItems(host: string): Promise<LibraryImage[]> {
+  return getPlatform().libraryCache.getCachedCameraLibraryItems(host);
+}
+
+export function loadCameraLibraryItemsCachedOrRemote(
+  host: string,
+): Promise<LibraryImage[]> {
+  return getPlatform().libraryCache.loadCameraLibraryItemsCachedOrRemote(host);
+}
+
+export function getCachedPeerLibraryItems(peerId: string): Promise<SharedPicture[]> {
+  return getPlatform().libraryCache.getCachedPeerLibraryItems(peerId);
+}
+
+export function loadPeerLibraryItemsCachedOrRemote(
+  peerId: string,
+): Promise<SharedPicture[]> {
+  return getPlatform().libraryCache.loadPeerLibraryItemsCachedOrRemote(peerId);
+}
+
+export function removePeerLibrary(peerId: string): Promise<void> {
+  return getPlatform().libraryCache.removePeerLibrary(peerId);
+}
+
+export function resolveLocalThumbnailSrc(
+  path: string,
+  latestSnapshotId: string | null,
+  signal: AbortSignal,
+): Promise<string> {
+  return getPlatform().libraryCache.resolveLocalThumbnailSrc(
+    path,
+    latestSnapshotId,
+    signal,
+  );
+}
+
+export function resolveCameraThumbnailSrc(
+  path: string,
+  latestSnapshotId: string | null,
+  signal: AbortSignal,
+): Promise<string> {
+  return getPlatform().libraryCache.resolveCameraThumbnailSrc(
+    path,
+    latestSnapshotId,
+    signal,
+  );
+}
+
+export function resolvePeerThumbnailSrc(
+  peerId: string,
+  pictureId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  return getPlatform().libraryCache.resolvePeerThumbnailSrc(
+    peerId,
+    pictureId,
+    signal,
+  );
+}
+
+export function resetLocalThumbnailFailure(path: string): void {
+  getPlatform().libraryCache.resetLocalThumbnailFailure(path);
+}
+
+export function resetCameraThumbnailFailure(path: string): void {
+  getPlatform().libraryCache.resetCameraThumbnailFailure(path);
 }
 
 export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {

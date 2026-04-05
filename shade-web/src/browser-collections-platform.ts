@@ -3,7 +3,7 @@ import type {
   CollectionItem,
   CollectionsPlatform,
 } from "shade-ui/src/bridge/index";
-import { requestToPromise, withStores } from "shade-ui/src/cache-utils";
+import { requestToPromise, withStores } from "./indexed-db";
 
 const DB_NAME = "shade-browser-collections";
 const DB_VERSION = 2;

@@ -1,22 +1,15 @@
 import {
+  loadCameraLibraryItemsCachedOrRemote,
+  loadLocalLibraryItemsCachedOrRemote,
+  loadPeerLibraryItemsCachedOrRemote,
   listMediaRatings,
+  resolveCameraThumbnailSrc,
+  resolveLocalThumbnailSrc,
+  resolvePeerThumbnailSrc,
   type LibraryImage,
   type MediaLibrary,
   type SharedPicture,
 } from "../../bridge/index";
-import {
-  loadCameraLibraryItemsCachedOrRemote,
-  resolveCameraThumbnailSrc,
-} from "../../camera-library-cache";
-import {
-  loadLocalLibraryItemsCachedOrRemote,
-  resolveLocalThumbnailSrc,
-} from "../../local-library-cache";
-import {
-  loadPeerLibraryItemsCachedOrRemote,
-  type PeerLibraryItem,
-  resolvePeerThumbnailSrc,
-} from "../../peer-library-cache";
 import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../cache-utils";
 import { openImage, openPeerImage } from "../../store/editor";
 
@@ -74,6 +67,15 @@ export type UploadProgress = {
 export type UploadDragFeedback = {
   itemCount: number | null;
 };
+
+type PeerLibraryItem = SharedPicture & { peerId: string };
+
+function toPeerLibraryItem(peerId: string, picture: SharedPicture): PeerLibraryItem {
+  return {
+    ...picture,
+    peerId,
+  };
+}
 
 export function isPeerLibrary(library: LibraryEntry | null): library is VisiblePeerLibrary {
   return library?.kind === "peer";
@@ -384,7 +386,9 @@ async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> 
   if (libraryId.startsWith("peer:")) {
     const peerId = libraryId.slice("peer:".length);
     return applyStoredRatings(
-      (await loadPeerLibraryItemsCachedOrRemote(peerId)).map(peerMediaItem),
+      (await loadPeerLibraryItemsCachedOrRemote(peerId)).map((picture) =>
+        peerMediaItem(toPeerLibraryItem(peerId, picture)),
+      ),
     );
   }
   if (libraryId.startsWith("ccapi:")) {

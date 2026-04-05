@@ -4,7 +4,15 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { NativeDragDropPayload, TauriPlatform } from "shade-ui/src/bridge/index";
 
-type TauriPlatformApi = Omit<TauriPlatform, "kind" | "thumbnailBackend">;
+type TauriPlatformApi = Pick<
+  TauriPlatform,
+  | "isTauri"
+  | "invoke"
+  | "pickDirectory"
+  | "pickExportTarget"
+  | "listenPeerPaired"
+  | "listenNativeDragDrop"
+>;
 
 function normalizeDialogPath(path: string | string[] | null): string | null {
   if (path === null) {

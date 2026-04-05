@@ -1,10 +1,10 @@
 import { createStore } from "solid-js/store";
 import {
+  loadPeerLibraryItemsCachedOrRemote,
   getLocalPeerDiscoverySnapshot,
   type LocalPeerDiscoverySnapshot,
   type SharedPicture,
 } from "../bridge/index";
-import { loadPeerLibraryItemsCachedOrRemote } from "../peer-library-cache";
 
 interface P2pState extends LocalPeerDiscoverySnapshot {
   isLoading: boolean;

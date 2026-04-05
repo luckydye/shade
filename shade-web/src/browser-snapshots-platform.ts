@@ -5,7 +5,7 @@ import type {
   EditSnapshotInfo,
   SnapshotInfo,
 } from "shade-ui/src/bridge/index";
-import { requestToPromise } from "shade-ui/src/cache-utils";
+import { requestToPromise } from "./indexed-db";
 
 const DB_NAME = "shade-browser-snapshots";
 const DB_VERSION = 1;
