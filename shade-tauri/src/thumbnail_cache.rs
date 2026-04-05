@@ -1,7 +1,10 @@
 use std::path::Path;
 use tokio::sync::Mutex;
 
-pub struct ThumbnailCacheDb(Mutex<libsql::Connection>);
+pub struct ThumbnailCacheDb {
+    _db: libsql::Database,
+    conn: Mutex<libsql::Connection>,
+}
 
 #[derive(Clone, Debug)]
 pub struct ThumbnailCacheEntry {
@@ -20,6 +23,12 @@ impl ThumbnailCacheDb {
             .await
             .map_err(|e| e.to_string())?;
         let conn = db.connect().map_err(|e| e.to_string())?;
+        conn.execute("PRAGMA journal_mode = WAL", ())
+            .await
+            .map_err(|e| e.to_string())?;
+        conn.execute("PRAGMA busy_timeout = 5000", ())
+            .await
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
                 picture_id TEXT PRIMARY KEY NOT NULL,
@@ -56,14 +65,17 @@ impl ThumbnailCacheDb {
             .await
             .map_err(|e| e.to_string())?;
         }
-        Ok(Self(Mutex::new(conn)))
+        Ok(Self {
+            _db: db,
+            conn: Mutex::new(conn),
+        })
     }
 
     pub async fn get(
         &self,
         picture_id: &str,
     ) -> Result<Option<(Option<String>, Vec<u8>)>, String> {
-        let conn = self.0.lock().await;
+        let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
                 "SELECT file_hash, data FROM thumbnails WHERE picture_id = ?1",
@@ -87,7 +99,7 @@ impl ThumbnailCacheDb {
         data: &[u8],
     ) -> Result<(), String> {
         let created_at = current_millis()?;
-        let conn = self.0.lock().await;
+        let conn = self.conn.lock().await;
         conn.execute(
             "INSERT OR REPLACE INTO thumbnails (picture_id, file_hash, data, created_at) VALUES (?1, ?2, ?3, ?4)",
             libsql::params![picture_id, file_hash, data.to_vec(), created_at],
@@ -101,7 +113,7 @@ impl ThumbnailCacheDb {
         &self,
         since_millis: i64,
     ) -> Result<Vec<ThumbnailCacheEntry>, String> {
-        let conn = self.0.lock().await;
+        let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
                 "SELECT picture_id, file_hash, data

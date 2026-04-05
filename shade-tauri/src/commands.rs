@@ -553,6 +553,12 @@ pub async fn open_library_db() -> Result<libsql::Connection, String> {
         .await
         .map_err(|e| e.to_string())?;
     let conn = db.connect().map_err(|e| e.to_string())?;
+    conn.execute("PRAGMA journal_mode = WAL", ())
+        .await
+        .map_err(|e| e.to_string())?;
+    conn.execute("PRAGMA busy_timeout = 5000", ())
+        .await
+        .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS images (
             file_hash TEXT PRIMARY KEY NOT NULL,

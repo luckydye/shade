@@ -69,6 +69,12 @@ async fn open_library_index_db(db_path: &Path) -> Result<libsql::Connection, Str
         .await
         .map_err(|error| error.to_string())?;
     let conn = db.connect().map_err(|error| error.to_string())?;
+    conn.execute("PRAGMA journal_mode = WAL", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    conn.execute("PRAGMA busy_timeout = 5000", ())
+        .await
+        .map_err(|error| error.to_string())?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS library_indexes (
             library_id TEXT PRIMARY KEY NOT NULL,
