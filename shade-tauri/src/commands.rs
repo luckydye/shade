@@ -4406,25 +4406,28 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
-    if let Some(bytes) = render_snapshot_thumbnail_bytes(&app, picture_id).await? {
+    // The picture_id may contain a #modified_at suffix for cache busting.
+    // Strip it for the actual load path, keep the original for the cache key.
+    let load_path = picture_id.split_once('#').map_or(picture_id, |(p, _)| p);
+    if let Some(bytes) = render_snapshot_thumbnail_bytes(&app, load_path).await? {
         return Ok(bytes);
     }
     let cache = app.state::<crate::ThumbnailCacheDb>();
     let cache_key = crate::thumbnail_cache::thumbnail_cache_key(picture_id);
     if let Ok(Some((cached_file_hash, cached_bytes))) = cache.0.get(&cache_key).await {
         if let Some(file_hash) = cached_file_hash.as_deref() {
-            register_image_source(file_hash, Some(picture_id)).await?;
+            register_image_source(file_hash, Some(load_path)).await?;
             return Ok(cached_bytes);
         }
         let is_local_path =
-            !picture_id.starts_with("ccapi://") && !picture_id.starts_with("s3://");
+            !load_path.starts_with("ccapi://") && !load_path.starts_with("s3://");
         if !is_local_path {
             return Ok(cached_bytes);
         }
     }
     let thumbnail_queue = app.state::<crate::ThumbnailService>().raw_queue.clone();
     let thumbnail = shade_io::load_thumbnail_bytes(
-        picture_id,
+        load_path,
         thumbnail_queue.as_ref(),
         {
             let app = app.clone();
@@ -4444,7 +4447,7 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     )
     .await?;
     if let Some(file_hash) = thumbnail.file_hash.as_deref() {
-        register_image_source(file_hash, Some(picture_id)).await?;
+        register_image_source(file_hash, Some(load_path)).await?;
     }
     cache
         .0

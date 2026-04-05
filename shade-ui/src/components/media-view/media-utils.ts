@@ -448,7 +448,11 @@ export async function loadItemSrc(
   if (item.path.startsWith("ccapi://")) {
     return resolveCameraThumbnailSrc(item.path, item.metadata.latestSnapshotId, signal);
   }
-  return resolveLocalThumbnailSrc(item.path, item.metadata.latestSnapshotId, signal);
+  const path =
+    item.path.startsWith("s3://") && item.modifiedAt != null
+      ? `${item.path}#${item.modifiedAt}`
+      : item.path;
+  return resolveLocalThumbnailSrc(path, item.metadata.latestSnapshotId, signal);
 }
 
 export async function openMediaItem(

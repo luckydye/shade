@@ -23,6 +23,8 @@ const PINNED_LIBRARY_ID: &str = "pictures";
 struct PersistedAppConfig {
     libraries: Vec<LibraryConfig>,
     library_order: Vec<String>,
+    library_modes: HashMap<String, LibraryMode>,
+    sync_targets: HashMap<String, String>,
     directories: Vec<String>,
     s3_libraries: Vec<S3LibraryConfig>,
     paired_peers: Vec<String>,
@@ -172,8 +174,8 @@ fn migrate_app_config(config: PersistedAppConfig) -> AppConfig {
     AppConfig {
         libraries,
         library_order,
-        library_modes: HashMap::new(),
-        sync_targets: HashMap::new(),
+        library_modes: config.library_modes,
+        sync_targets: config.sync_targets,
         p2p_secret_key: config.p2p_secret_key,
     }
 }

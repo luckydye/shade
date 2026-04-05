@@ -495,13 +495,9 @@ export const MediaView: Component = () => {
   const hasLibraries = createMemo(() => orderedLibraryEntries().length > 0);
   const canRefreshSelectedLibrary = createMemo(() => {
     const library = selectedLibrary();
-    return (
-      !!library &&
-      !isPeerLibrary(library) &&
-      !isCameraLibrary(library) &&
-      !isS3Library(library) &&
-      library.is_online !== false
-    );
+    if (!library) return false;
+    if (isS3Library(library)) return true;
+    return !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_online !== false;
   });
   const canWriteSelectedLibrary = createMemo(() => libraryIsWritable(selectedLibrary()));
   const shouldDeferEditorStripThumbnails = createMemo(
@@ -1133,17 +1129,14 @@ export const MediaView: Component = () => {
     if (!library || library.mode !== "sync" || syncProgress()) {
       return;
     }
-    void syncLibrary(library.id);
+    void syncLibrary(library.id).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
   }
 
   async function handleRefreshLibrary() {
     const library = selectedLibrary();
-    if (
-      !library ||
-      isPeerLibrary(library) ||
-      isCameraLibrary(library) ||
-      isS3Library(library)
-    ) {
+    if (!library || isPeerLibrary(library) || isCameraLibrary(library)) {
       syncSelectedLibraryIfNeeded();
       return;
     }
@@ -1731,7 +1724,14 @@ export const MediaView: Component = () => {
                         const library = selectedLibrary();
                         if (!library) return;
                         setShowLibraryActions(false);
-                        void setLibraryMode(library.id, "sync").then(() => refetchLibraries());
+                        void setLibraryMode(library.id, "sync").then(
+                          () => {
+                            void refetchLibraries();
+                            return syncLibrary(library.id);
+                          },
+                        ).catch((err) => {
+                          setError(err instanceof Error ? err.message : String(err));
+                        });
                       }}
                     >
                       Enable Sync
@@ -1754,7 +1754,14 @@ export const MediaView: Component = () => {
                             const library = selectedLibrary();
                             if (!library) return;
                             setShowLibraryActions(false);
-                            void setLibraryMode(library.id, "sync", target.id).then(() => refetchLibraries());
+                            void setLibraryMode(library.id, "sync", target.id).then(
+                              () => {
+                                void refetchLibraries();
+                                return syncLibrary(library.id);
+                              },
+                            ).catch((err) => {
+                              setError(err instanceof Error ? err.message : String(err));
+                            });
                           }}
                         >
                           {target.name}
