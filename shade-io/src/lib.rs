@@ -124,7 +124,13 @@ pub fn load_image(path: &Path) -> Result<(Vec<u8>, u32, u32)> {
         .with_context(|| format!("Failed to decode image: {}", path.display()))
 }
 
-pub fn load_image_bytes(bytes: &[u8], _name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+    if is_exr(name_hint, bytes) || is_camera_raw(name_hint, bytes) {
+        let (image, info) = load_image_bytes_f32_with_info(bytes, name_hint)?;
+        let mut pixels = image.pixels.to_vec();
+        from_linear_srgb_f32(&mut pixels, &info.color_space);
+        return Ok((quantize_rgba_f32(&pixels), image.width, image.height));
+    }
     let img = apply_orientation(
         image::load_from_memory(bytes).context("Failed to decode image bytes")?,
         read_orientation(&mut Cursor::new(bytes))?,

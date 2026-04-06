@@ -122,15 +122,17 @@ export const tauriLibraryCache: LibraryCachePlatform = {
   async removePeerLibrary(peerId) {
     tauriPeerLibraryItems.delete(peerId);
   },
-  resolveLocalThumbnailSrc(path, _latestSnapshotId, signal) {
+  resolveLocalThumbnailSrc(path, latestSnapshotId, signal) {
+    const thumbnailPath = latestSnapshotId ? `${path}#snapshot:${latestSnapshotId}` : path;
     return thumbnailObjectUrl(
-      getThumbnailBackend().getThumbnailBytes(path),
+      getThumbnailBackend().getThumbnailBytes(thumbnailPath),
       signal,
     );
   },
-  resolveCameraThumbnailSrc(path, _latestSnapshotId, signal) {
+  resolveCameraThumbnailSrc(path, latestSnapshotId, signal) {
+    const thumbnailPath = latestSnapshotId ? `${path}#snapshot:${latestSnapshotId}` : path;
     return thumbnailObjectUrl(
-      getThumbnailBackend().getThumbnailBytes(path),
+      getThumbnailBackend().getThumbnailBytes(thumbnailPath),
       signal,
     );
   },

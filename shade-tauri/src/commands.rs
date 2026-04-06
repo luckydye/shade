@@ -3622,7 +3622,7 @@ fn encode_jpeg_thumbnail(
 async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     picture_id: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> Result<Option<(Vec<u8>, String)>, String> {
     if !has_snapshot_for_source(picture_id).await? {
         return Ok(None);
     }
@@ -3667,7 +3667,8 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
             response: response_tx,
         })
         .map_err(|e| e.to_string())?;
-    Ok(Some(response_rx.await.map_err(|error| error.to_string())??))
+    let bytes = response_rx.await.map_err(|error| error.to_string())??;
+    Ok(Some((bytes, opened.file_hash)))
 }
 
 /// Run the full GPU render pipeline and return raw RGBA8 pixels.
@@ -4406,12 +4407,9 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     picture_id: &str,
 ) -> Result<Vec<u8>, String> {
-    // The picture_id may contain a #modified_at suffix for cache busting.
+    // The picture_id may contain a #modified_at or #snapshot:<id> suffix for cache busting.
     // Strip it for the actual load path, keep the original for the cache key.
     let load_path = picture_id.split_once('#').map_or(picture_id, |(p, _)| p);
-    if let Some(bytes) = render_snapshot_thumbnail_bytes(&app, load_path).await? {
-        return Ok(bytes);
-    }
     let cache = app.state::<crate::ThumbnailCacheDb>();
     let cache_key = crate::thumbnail_cache::thumbnail_cache_key(picture_id);
     if let Ok(Some((cached_file_hash, cached_bytes))) = cache.0.get(&cache_key).await {
@@ -4424,6 +4422,11 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         if !is_local_path {
             return Ok(cached_bytes);
         }
+    }
+    if let Some((bytes, file_hash)) = render_snapshot_thumbnail_bytes(&app, load_path).await? {
+        register_image_source(&file_hash, Some(load_path)).await?;
+        cache.0.put(&cache_key, Some(&file_hash), &bytes).await?;
+        return Ok(bytes);
     }
     let thumbnail_queue = app.state::<crate::ThumbnailService>().raw_queue.clone();
     let thumbnail = shade_io::load_thumbnail_bytes(
