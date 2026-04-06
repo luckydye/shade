@@ -57,6 +57,9 @@ export interface TauriPlatform {
   listenLibraryScanProgress(
     listener: (libraryId: string) => void,
   ): Promise<() => void>;
+  listenImageOpenPhase(
+    listener: (phase: string) => void,
+  ): Promise<() => void>;
 }
 
 export interface BrowserPlatform {
@@ -589,6 +592,15 @@ export async function listenLibraryScanProgress(
     return () => {};
   }
   return getTauriPlatform().listenLibraryScanProgress(listener);
+}
+
+export async function listenImageOpenPhase(
+  listener: (phase: string) => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) {
+    return () => {};
+  }
+  return getTauriPlatform().listenImageOpenPhase(listener);
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {

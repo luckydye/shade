@@ -15,6 +15,7 @@ type TauriPlatformApi = Pick<
   | "listenLibrarySyncProgress"
   | "listenLibraryScanComplete"
   | "listenLibraryScanProgress"
+  | "listenImageOpenPhase"
 >;
 
 function normalizeDialogPath(path: string | string[] | null): string | null {
@@ -73,6 +74,14 @@ export const tauriPlatform: TauriPlatformApi = {
   },
   async listenLibraryScanProgress(listener) {
     const unlisten = await listen<string>("library-scan-progress", (event) => {
+      listener(event.payload);
+    });
+    return () => {
+      void unlisten();
+    };
+  },
+  async listenImageOpenPhase(listener) {
+    const unlisten = await listen<string>("image-open-phase", (event) => {
       listener(event.payload);
     });
     return () => {

@@ -3,6 +3,11 @@ import { createSignal, For, Show } from "solid-js";
 import type { Collection } from "../../bridge/index";
 import { Button } from "../Button";
 
+function formatCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 const SIDEBAR_ITEM_BASE =
   "flex w-full items-center justify-between gap-1 rounded-md px-2 py-1 text-left text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const SIDEBAR_ITEM_ACTIVE =
@@ -13,6 +18,7 @@ const SIDEBAR_ITEM_INACTIVE =
 export type CollectionSidebarProps = {
   collections: Collection[];
   selectedCollectionId: string | null;
+  totalCount: number;
   onSelect: (id: string | null) => void;
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
@@ -76,6 +82,9 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
           onClick={() => props.onSelect(null)}
         >
           All Photos
+          <span class="shrink-0 text-[10px] text-[var(--text-faint)]">
+            {formatCount(props.totalCount)}
+          </span>
         </Button>
 
         <For each={props.collections}>

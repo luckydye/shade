@@ -2226,7 +2226,7 @@ async fn scan_s3_library_into_snapshot<R: tauri::Runtime>(
 
     // Fire HEAD requests with bounded concurrency, draining incrementally so the UI
     // can show results as they arrive rather than waiting for all 40k objects.
-    const MAX_CONCURRENT: usize = 16;
+    const MAX_CONCURRENT: usize = 8;
     const BATCH_SIZE: usize = 100;
 
     let mut join_set = tokio::task::JoinSet::new();
@@ -3342,13 +3342,21 @@ pub async fn open_image<R: tauri::Runtime>(
         st.begin_open_request()
     };
     let photo_app = app.clone();
+    let s3_app = app.clone();
     let opened =
         shade_io::open_image(
             &path,
             |host, file_path| async move {
                 load_camera_image_from_tauri(&host, &file_path).await
             },
-            |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
+            |s3_path| {
+                let app = s3_app.clone();
+                async move {
+                    let bytes = load_s3_image_from_tauri(&s3_path).await?;
+                    let _ = app.emit("image-open-phase", "processing");
+                    Ok(bytes)
+                }
+            },
             move |picture_id| {
                 let app = photo_app.clone();
                 async move { load_photo_image_from_tauri(&app, &picture_id).await }

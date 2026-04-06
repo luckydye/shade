@@ -148,7 +148,7 @@ export const Toolbar: Component = () => {
           <span class="block max-w-full truncate text-[11px] font-medium text-[var(--text-value)]">
             {(state.isLoading && (
               <span>
-                Processing
+                {state.isDownloading ? "Downloading" : "Processing"}
               </span>
             )) ||
               statusText()}

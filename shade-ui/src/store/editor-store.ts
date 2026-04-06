@@ -67,6 +67,7 @@ export interface EditorState {
   previewContentVersion: number;
   selectedLayerIdx: number;
   isLoading: boolean;
+  isDownloading: boolean;
   webgpuAvailable: boolean;
   webgpuReason: string | null;
   loadError: string | null;
@@ -97,6 +98,7 @@ export const [state, setState] = createStore<EditorState>({
   previewContentVersion: 0,
   selectedLayerIdx: -1,
   isLoading: false,
+  isDownloading: false,
   webgpuAvailable: true,
   webgpuReason: null,
   loadError: null,

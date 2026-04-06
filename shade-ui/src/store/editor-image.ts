@@ -525,13 +525,30 @@ export async function openImage(
   } | null = null,
   mode: OpenImageMode = "replace",
 ) {
-  await openImageFrom(
-    () => bridge.openImage(path),
-    { kind: "path", path },
-    loadingMediaSrc,
-    activeMediaSelection,
-    mode,
-  );
+  const isS3 = path.startsWith("s3://");
+  if (isS3) {
+    setState("isDownloading", true);
+  }
+  let unlistenPhase: (() => void) | null = null;
+  if (isS3) {
+    unlistenPhase = await bridge.listenImageOpenPhase((phase) => {
+      if (phase === "processing") {
+        setState("isDownloading", false);
+      }
+    });
+  }
+  try {
+    await openImageFrom(
+      () => bridge.openImage(path),
+      { kind: "path", path },
+      loadingMediaSrc,
+      activeMediaSelection,
+      mode,
+    );
+  } finally {
+    unlistenPhase?.();
+    setState("isDownloading", false);
+  }
 }
 
 export async function openImageFile(file: File, mode: OpenImageMode = "replace") {

@@ -277,6 +277,10 @@ pub async fn get_s3_object_bytes(
     config: &S3LibraryConfig,
     key: &str,
 ) -> Result<Vec<u8>, String> {
+    let _permit = s3_get_semaphore()
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
     let client = http_client()?;
     let request = signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
     let response = client
@@ -354,6 +358,10 @@ pub async fn head_s3_object_modified_at(
     config: &S3LibraryConfig,
     key: &str,
 ) -> Result<Option<u64>, String> {
+    let _permit = s3_head_semaphore()
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
     let client = http_client()?;
     let request = signed_request("HEAD", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
     let response = client
@@ -417,6 +425,17 @@ fn http_client() -> Result<reqwest::Client, String> {
                 .expect("failed to build S3 HTTP client")
         })
         .clone())
+}
+
+// Separate semaphores so indexing (HEAD) and downloads (GET) never block each other.
+fn s3_head_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(8))
+}
+
+fn s3_get_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(4))
 }
 
 fn normalize_endpoint(endpoint: &str) -> Result<String, String> {

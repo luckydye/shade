@@ -1874,7 +1874,6 @@ export const Inspector: Component = () => {
   const DesktopSelectedLayerPanel: Component = () => (
     <Show
       when={state.selectedLayerIdx >= 0}
-      fallback={<EmptyState>Open an image and select a layer to edit.</EmptyState>}
     >
       <Show
         when={selectedCropLayer()}

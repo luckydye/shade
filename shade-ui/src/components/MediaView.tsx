@@ -1936,6 +1936,7 @@ export const MediaView: Component = () => {
           <CollectionSidebar
             collections={collections()}
             selectedCollectionId={selectedCollectionId()}
+            totalCount={availableItems().length}
             onSelect={(id) => { setSelectedCollectionId(id); setMobileSidebarOpen(false); }}
             onCreate={() => void handleCreateCollection()}
             onRename={(id, name) => void handleRenameCollection(id, name)}
@@ -1946,7 +1947,7 @@ export const MediaView: Component = () => {
         </Show>
         <div class="relative flex-1 min-h-0 flex flex-col">
         <Show when={hasImage() && state.currentView === "editor"}>
-          <div class="px-3 pt-5 pb-4 w-full">
+          <div class="px-3 pt-5 pb-4 w-full flex justify-center">
             <ActionButton
               label="Back"
               icon={
