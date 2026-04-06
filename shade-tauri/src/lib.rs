@@ -3,7 +3,7 @@ mod photos;
 mod tagging_worker;
 mod thumbnail_cache;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub struct P2pState(
     pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>,
@@ -49,8 +49,16 @@ pub fn run() {
             let library_index_db =
                 tauri::async_runtime::block_on(commands::setup_library_index_db())
                     .map_err(|e| e.to_string())?;
+            let handle_progress = app.handle().clone();
+            let handle_complete = app.handle().clone();
             app.manage(LibraryScanService(shade_io::LibraryScanService::new(
                 library_index_db.clone(),
+                move |library_id| {
+                    let _ = handle_progress.emit("library-scan-progress", library_id);
+                },
+                move |library_id| {
+                    let _ = handle_complete.emit("library-scan-complete", library_id);
+                },
             )));
             app.manage(S3LibraryScanService(commands::S3LibraryScanState::new(
                 library_index_db,

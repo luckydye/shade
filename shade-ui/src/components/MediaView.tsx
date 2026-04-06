@@ -26,6 +26,8 @@ import {
   isTauriRuntime,
   listCollectionItems,
   listCollections,
+  listenLibraryScanComplete,
+  listenLibraryScanProgress,
   listenLibrarySyncProgress,
   type LibrarySyncProgress,
   listenNativeDragDrop,
@@ -952,16 +954,17 @@ export const MediaView: Component = () => {
     void refetchItems();
   });
 
+  // Camera libraries have no event support — poll while incomplete.
   createEffect(() => {
-    const libraryId = selectedLibraryId();
-    const current = items();
-    if (!libraryId || libraryId.startsWith("peer:")) {
+    const library = selectedLibrary();
+    if (!library || !isCameraLibrary(library)) {
       return;
     }
+    const current = items();
     if (
       items.loading ||
       !current ||
-      current.libraryId !== libraryId ||
+      current.libraryId !== library.id ||
       (current.isComplete && !selectedLibraryIsRefreshing())
     ) {
       return;
@@ -977,40 +980,22 @@ export const MediaView: Component = () => {
     onCleanup(() => clearTimeout(timer));
   });
 
-  createEffect(() => {
-    const library = selectedLibrary();
-    if (
-      state.currentView !== "media" ||
-      !library ||
-      isPeerLibrary(library) ||
-      isCameraLibrary(library) ||
-      isS3Library(library)
-    ) {
-      return;
-    }
-    let isPollingStopped = false;
-    let isRefreshing = false;
-    const poll = async () => {
-      if (isPollingStopped || isRefreshing || items.loading) {
-        return;
+  onMount(() => {
+    void listenLibraryScanComplete((libraryId) => {
+      const library = selectedLibrary();
+      if (library?.id === libraryId) {
+        void refetchItems();
       }
-      isRefreshing = true;
-      try {
-        await refetchItems();
-      } catch (error) {
-        if (!isPollingStopped) {
-          setError(error instanceof Error ? error.message : String(error));
-        }
-      } finally {
-        isRefreshing = false;
+    }).then((unlisten) => {
+      onCleanup(unlisten);
+    });
+    void listenLibraryScanProgress((libraryId) => {
+      const library = selectedLibrary();
+      if (library?.id === libraryId) {
+        void refetchItems();
       }
-    };
-    const timer = window.setInterval(() => {
-      void poll();
-    }, 750);
-    onCleanup(() => {
-      isPollingStopped = true;
-      window.clearInterval(timer);
+    }).then((unlisten) => {
+      onCleanup(unlisten);
     });
   });
 
@@ -1545,7 +1530,7 @@ export const MediaView: Component = () => {
         <div
           class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-4 touch-mobile:px-4`}
         >
-          <div class="flex w-full flex-wrap items-center gap-3">
+          <div class="relative flex w-full flex-wrap items-center gap-3">
             <div
               ref={libraryTabsRef}
               class="relative gap-2 flex flex-1 overflow-x-auto"
@@ -1813,8 +1798,9 @@ export const MediaView: Component = () => {
                 </div>
               </Show>
             </div>
+            
             <Show when={showS3Form()}>
-              <div class="grid grid-cols-3 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-3 touch-mobile:grid-cols-1">
+              <div class="absolute left-1/4 top-full z-10 mt-2 grid grid-cols-3 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-3 touch-mobile:grid-cols-1">
                 <div class="col-span-3 touch-mobile:col-span-1">
                   <div class={PANEL_SECTION_TITLE_CLASS}>S3 Library</div>
                 </div>

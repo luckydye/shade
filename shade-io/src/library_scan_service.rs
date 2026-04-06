@@ -24,6 +24,8 @@ pub struct LibraryScanService {
     pub scans: Mutex<HashMap<String, Arc<Mutex<LibraryScanSnapshot>>>>,
     pub watches: Mutex<HashMap<String, LibraryWatchHandle>>,
     pub index_db: Arc<LibraryIndexDb>,
+    on_progress: Arc<dyn Fn(&str) + Send + Sync>,
+    on_complete: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
 pub struct LibraryWatchHandle {
@@ -31,11 +33,17 @@ pub struct LibraryWatchHandle {
 }
 
 impl LibraryScanService {
-    pub fn new(index_db: Arc<LibraryIndexDb>) -> Arc<Self> {
+    pub fn new(
+        index_db: Arc<LibraryIndexDb>,
+        on_progress: impl Fn(&str) + Send + Sync + 'static,
+        on_complete: impl Fn(&str) + Send + Sync + 'static,
+    ) -> Arc<Self> {
         Arc::new(Self {
             scans: Mutex::new(HashMap::new()),
             watches: Mutex::new(HashMap::new()),
             index_db,
+            on_progress: Arc::new(on_progress),
+            on_complete: Arc::new(on_complete),
         })
     }
 
@@ -130,6 +138,8 @@ impl LibraryScanService {
             self.index_db.clone(),
             library_id.to_string(),
             root,
+            self.on_progress.clone(),
+            self.on_complete.clone(),
         )?;
         Ok(true)
     }
@@ -149,6 +159,8 @@ impl LibraryScanService {
                 self.index_db.clone(),
                 library_id.to_string(),
                 root,
+                self.on_progress.clone(),
+                self.on_complete.clone(),
             )?;
         }
         let snapshot = snapshot
@@ -265,6 +277,8 @@ pub fn start_library_scan(
     index_db: Arc<LibraryIndexDb>,
     library_id: String,
     root: PathBuf,
+    on_progress: Arc<dyn Fn(&str) + Send + Sync>,
+    on_complete: Arc<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), String> {
     {
         let mut guard = snapshot
@@ -284,7 +298,7 @@ pub fn start_library_scan(
     std::thread::Builder::new()
         .name("shade-library-scan".into())
         .spawn(move || {
-            let result = scan_library_into_snapshot(&root, &snapshot, &index_db, &library_id)
+            let result = scan_library_into_snapshot(&root, &snapshot, &index_db, &library_id, &*on_progress)
                 .and_then(|items| {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -312,6 +326,8 @@ pub fn start_library_scan(
             }
             guard.is_scanning = false;
             guard.is_complete = true;
+            drop(guard);
+            on_complete(&library_id);
         })
         .expect("failed to spawn library scan thread");
     Ok(())
@@ -322,6 +338,7 @@ pub fn scan_library_into_snapshot(
     snapshot: &Arc<Mutex<LibraryScanSnapshot>>,
     index_db: &Arc<LibraryIndexDb>,
     library_id: &str,
+    on_progress: &dyn Fn(&str),
 ) -> Result<Vec<IndexedLibraryImage>, String> {
     let root_str = dir
         .to_str()
@@ -373,6 +390,7 @@ pub fn scan_library_into_snapshot(
                     &batch,
                 ));
                 flush_library_scan_batch(snapshot, &mut batch)?;
+                on_progress(library_id);
             }
         }
     }
@@ -384,6 +402,7 @@ pub fn scan_library_into_snapshot(
             &batch,
         ));
         flush_library_scan_batch(snapshot, &mut batch)?;
+        on_progress(library_id);
     }
     sort_indexed_library_items(&mut items);
     Ok(items)

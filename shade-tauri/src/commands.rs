@@ -360,18 +360,19 @@ impl S3LibraryScanState {
         Ok((snapshot, should_scan))
     }
 
-    pub async fn snapshot_for_library(
+    pub async fn snapshot_for_library<R: tauri::Runtime>(
         self: &Arc<Self>,
+        app: tauri::AppHandle<R>,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<shade_io::LibraryScanSnapshot, String> {
         let (snapshot, should_scan) =
             self.ensure_snapshot_for_library(config).await?;
         if should_scan {
             start_s3_library_scan(
+                app,
                 snapshot.clone(),
                 self.index_db.clone(),
                 config.clone(),
-                true,
             )?;
         }
         let snapshot = snapshot
@@ -384,34 +385,35 @@ impl S3LibraryScanState {
         Ok(snapshot)
     }
 
-    pub async fn request_refresh(
+    pub async fn request_refresh<R: tauri::Runtime>(
         self: &Arc<Self>,
+        app: tauri::AppHandle<R>,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<bool, String> {
         let (snapshot, _) = self.ensure_snapshot_for_library(config).await?;
-        let publish_progress = {
+        {
             let guard = snapshot
                 .lock()
                 .map_err(|_| "S3 library scan snapshot lock poisoned".to_string())?;
             if guard.is_scanning {
                 return Ok(false);
             }
-            guard.completed_at.is_none() && guard.items.is_empty()
-        };
+        }
         start_s3_library_scan(
+            app,
             snapshot,
             self.index_db.clone(),
             config.clone(),
-            publish_progress,
         )?;
         Ok(true)
     }
 
-    pub async fn refresh_library(
+    pub async fn refresh_library<R: tauri::Runtime>(
         self: &Arc<Self>,
+        app: tauri::AppHandle<R>,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<(), String> {
-        if self.request_refresh(config).await? {
+        if self.request_refresh(app, config).await? {
             return Ok(());
         }
         Err(format!(
@@ -2128,11 +2130,11 @@ async fn refresh_desktop_local_library<R: tauri::Runtime>(
         .await
 }
 
-fn start_s3_library_scan(
+fn start_s3_library_scan<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     snapshot: Arc<Mutex<shade_io::LibraryScanSnapshot>>,
     index_db: Arc<shade_io::LibraryIndexDb>,
     config: shade_io::S3LibraryConfig,
-    publish_progress: bool,
 ) -> Result<(), String> {
     let library_id = s3_library_id(&config.id);
     let root = shade_io::format_s3_library_detail(&config);
@@ -2148,10 +2150,8 @@ fn start_s3_library_scan(
         guard.is_scanning = true;
         guard.is_complete = false;
         guard.error = None;
-        if publish_progress {
-            guard.items.clear();
-            guard.completed_at = None;
-        }
+        guard.items.clear();
+        guard.completed_at = None;
     }
     std::thread::Builder::new()
         .name("shade-s3-library-scan".into())
@@ -2163,9 +2163,10 @@ fn start_s3_library_scan(
                 .and_then(|runtime| {
                     runtime.block_on(async {
                         let items = scan_s3_library_into_snapshot(
+                            &app,
+                            &library_id,
                             &config,
                             &snapshot,
-                            publish_progress,
                         )
                         .await?;
                         let indexed_at = replace_persisted_library_index_by_root(
@@ -2184,10 +2185,7 @@ fn start_s3_library_scan(
                 .lock()
                 .expect("S3 library scan snapshot lock poisoned");
             match result {
-                Ok((items, indexed_at)) => {
-                    if !publish_progress {
-                        guard.items = items;
-                    }
+                Ok((_, indexed_at)) => {
                     guard.completed_at = Some(indexed_at);
                 }
                 Err(error) => {
@@ -2196,54 +2194,90 @@ fn start_s3_library_scan(
             }
             guard.is_scanning = false;
             guard.is_complete = true;
+            drop(guard);
+            let _ = app.emit("library-scan-complete", &library_id);
         })
         .map_err(|error| error.to_string())?;
     Ok(())
 }
 
-async fn scan_s3_library_into_snapshot(
+async fn scan_s3_library_into_snapshot<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
     config: &shade_io::S3LibraryConfig,
     snapshot: &Arc<Mutex<shade_io::LibraryScanSnapshot>>,
-    publish_progress: bool,
 ) -> Result<Vec<shade_io::IndexedLibraryImage>, String> {
+    // Collect all image objects across all pages first (listing is fast).
+    let mut image_objects = Vec::new();
     let mut continuation_token: Option<String> = None;
-    let mut batch = Vec::new();
-    let mut items = Vec::new();
     loop {
         let page =
             shade_io::list_s3_objects_page(config, continuation_token.as_deref()).await?;
         for object in page.objects {
-            if !is_supported_library_image(Path::new(&object.key)) {
-                continue;
+            if is_supported_library_image(Path::new(&object.key)) {
+                image_objects.push(object);
             }
-            let metadata_modified_at = shade_io::head_s3_object_modified_at(config, &object.key)
-                .await
-                .ok()
-                .flatten();
-            let item = shade_io::IndexedLibraryImage {
-                name: picture_display_name(&object.key),
-                path: shade_io::media_path_for_s3_object(&config.id, &object.key),
-                modified_at: metadata_modified_at.or(object.modified_at),
-                rating: None,
-            };
-            items.push(item.clone());
-            if publish_progress {
-                batch.push(item);
-            }
-        }
-        if publish_progress && batch.len() >= 64 {
-            shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
         }
         continuation_token = page.next_continuation_token;
         if continuation_token.is_none() {
             break;
         }
     }
-    if publish_progress {
-        shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
+
+    // Fire HEAD requests with bounded concurrency, draining incrementally so the UI
+    // can show results as they arrive rather than waiting for all 40k objects.
+    const MAX_CONCURRENT: usize = 16;
+    const BATCH_SIZE: usize = 100;
+
+    let mut join_set = tokio::task::JoinSet::new();
+    let mut pending = image_objects.into_iter();
+
+    // Seed initial tasks up to MAX_CONCURRENT.
+    for object in pending.by_ref().take(MAX_CONCURRENT) {
+        let config = config.clone();
+        join_set.spawn(async move {
+            let atime = shade_io::head_s3_object_modified_at(&config, &object.key).await;
+            (object, atime)
+        });
     }
-    shade_io::sort_indexed_library_items(&mut items);
-    Ok(items)
+
+    let mut batch: Vec<shade_io::IndexedLibraryImage> = Vec::with_capacity(BATCH_SIZE);
+    let mut all_items = Vec::new();
+
+    while let Some(result) = join_set.join_next().await {
+        let (object, atime) = result.map_err(|e| e.to_string())?;
+        let item = shade_io::IndexedLibraryImage {
+            name: picture_display_name(&object.key),
+            path: shade_io::media_path_for_s3_object(&config.id, &object.key),
+            modified_at: atime?,
+            rating: None,
+        };
+        batch.push(item.clone());
+        all_items.push(item);
+
+        // Keep the pipeline full.
+        if let Some(next_object) = pending.next() {
+            let config = config.clone();
+            join_set.spawn(async move {
+                let atime =
+                    shade_io::head_s3_object_modified_at(&config, &next_object.key).await;
+                (next_object, atime)
+            });
+        }
+
+        if batch.len() >= BATCH_SIZE {
+            shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
+            let _ = app.emit("library-scan-progress", library_id);
+        }
+    }
+
+    if !batch.is_empty() {
+        shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
+        let _ = app.emit("library-scan-progress", library_id);
+    }
+
+    shade_io::sort_indexed_library_items(&mut all_items);
+    Ok(all_items)
 }
 
 pub fn prime_missing_library_indexes<R: tauri::Runtime>(
@@ -2289,7 +2323,7 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
                 continue;
             }
             tauri::async_runtime::block_on(
-                s3_scan_service.refresh_library(&config),
+                s3_scan_service.refresh_library(app.clone(), &config),
             )?;
         }
         Ok(())
@@ -2409,7 +2443,7 @@ async fn list_s3_library_images<R: tauri::Runtime>(
     let snapshot = app
         .state::<crate::S3LibraryScanService>()
         .0
-        .snapshot_for_library(config)
+        .snapshot_for_library(app.clone(), config)
         .await?;
     Ok(LibraryImageListing {
         items: snapshot
@@ -4879,6 +4913,7 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
             _app.state::<crate::S3LibraryScanService>()
                 .0
                 .refresh_library(
+                    _app.clone(),
                     &resolve_s3_library_config(&library_id)?,
                 )
                 .await?;
@@ -4950,7 +4985,7 @@ pub async fn add_s3_media_library<R: tauri::Runtime>(
     {
         _app.state::<crate::S3LibraryScanService>()
             .0
-            .refresh_library(&library)
+            .refresh_library(_app.clone(), &library)
             .await?;
     }
     Ok(persisted_library)

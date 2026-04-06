@@ -377,7 +377,7 @@ pub async fn head_s3_object_modified_at(
     let value_str = value
         .to_str()
         .map_err(|error| format!("invalid x-amz-meta-atime header: {error}"))?;
-    parse_last_modified(Some(value_str))
+    Ok(parse_last_modified(Some(value_str)).ok().flatten())
 }
 
 pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(), String> {
@@ -407,11 +407,16 @@ pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(),
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .http1_only()
-        .build()
-        .map_err(|error| error.to_string())
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    Ok(CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(APP_USER_AGENT)
+                .http1_only()
+                .build()
+                .expect("failed to build S3 HTTP client")
+        })
+        .clone())
 }
 
 fn normalize_endpoint(endpoint: &str) -> Result<String, String> {

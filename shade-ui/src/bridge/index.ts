@@ -51,6 +51,12 @@ export interface TauriPlatform {
   listenLibrarySyncProgress(
     listener: (payload: LibrarySyncProgress) => void,
   ): Promise<() => void>;
+  listenLibraryScanComplete(
+    listener: (libraryId: string) => void,
+  ): Promise<() => void>;
+  listenLibraryScanProgress(
+    listener: (libraryId: string) => void,
+  ): Promise<() => void>;
 }
 
 export interface BrowserPlatform {
@@ -565,6 +571,24 @@ export async function listenLibrarySyncProgress(
     return () => {};
   }
   return getTauriPlatform().listenLibrarySyncProgress(listener);
+}
+
+export async function listenLibraryScanComplete(
+  listener: (libraryId: string) => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) {
+    return () => {};
+  }
+  return getTauriPlatform().listenLibraryScanComplete(listener);
+}
+
+export async function listenLibraryScanProgress(
+  listener: (libraryId: string) => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) {
+    return () => {};
+  }
+  return getTauriPlatform().listenLibraryScanProgress(listener);
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
