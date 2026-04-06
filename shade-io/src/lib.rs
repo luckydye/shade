@@ -118,13 +118,20 @@ const RAW_EXTENSIONS: &[&str] = &[
 /// Load an image from disk and return raw RGBA8 bytes along with dimensions.
 /// Pixels are returned as-is (still in the source colour space / gamma).
 pub fn load_image(path: &Path) -> Result<(Vec<u8>, u32, u32)> {
-    let (image, _) = load_image_f32_with_info(path)?;
-    Ok((quantize_rgba_f32(&image.pixels), image.width, image.height))
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("Cannot read file: {}", path.display()))?;
+    load_image_bytes(&bytes, path.file_name().and_then(|name| name.to_str()))
+        .with_context(|| format!("Failed to decode image: {}", path.display()))
 }
 
-pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
-    let (image, _) = load_image_bytes_f32_with_info(bytes, name_hint)?;
-    Ok((quantize_rgba_f32(&image.pixels), image.width, image.height))
+pub fn load_image_bytes(bytes: &[u8], _name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+    let img = apply_orientation(
+        image::load_from_memory(bytes).context("Failed to decode image bytes")?,
+        read_orientation(&mut Cursor::new(bytes))?,
+    );
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok((rgba.into_raw(), width, height))
 }
 
 pub fn load_image_f32(path: &Path) -> Result<FloatImage> {
