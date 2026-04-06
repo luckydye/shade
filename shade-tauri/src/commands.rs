@@ -2216,10 +2216,14 @@ async fn scan_s3_library_into_snapshot(
             if !is_supported_library_image(Path::new(&object.key)) {
                 continue;
             }
+            let metadata_modified_at = shade_io::head_s3_object_modified_at(config, &object.key)
+                .await
+                .ok()
+                .flatten();
             let item = shade_io::IndexedLibraryImage {
                 name: picture_display_name(&object.key),
                 path: shade_io::media_path_for_s3_object(&config.id, &object.key),
-                modified_at: object.modified_at,
+                modified_at: metadata_modified_at.or(object.modified_at),
                 rating: None,
             };
             items.push(item.clone());

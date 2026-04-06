@@ -350,6 +350,36 @@ pub async fn put_s3_object_bytes_with_modified(
     Ok(())
 }
 
+pub async fn head_s3_object_modified_at(
+    config: &S3LibraryConfig,
+    key: &str,
+) -> Result<Option<u64>, String> {
+    let client = http_client()?;
+    let request = signed_request("HEAD", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
+    let response = client
+        .head(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date)
+        .send()
+        .await
+        .map_err(|error| format!("S3 request failed for {}: {}", config.endpoint, error))?
+        .error_for_status()
+        .map_err(|error| {
+            format!(
+                "S3 head request failed for s3://{}/{} at {}: {}",
+                config.bucket, key, config.endpoint, error
+            )
+        })?;
+    let Some(value) = response.headers().get("x-amz-meta-atime") else {
+        return Ok(None);
+    };
+    let value_str = value
+        .to_str()
+        .map_err(|error| format!("invalid x-amz-meta-atime header: {error}"))?;
+    parse_last_modified(Some(value_str))
+}
+
 pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(), String> {
     let client = http_client()?;
     let request = signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
