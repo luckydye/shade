@@ -1254,7 +1254,7 @@ export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void
 
 export async function refreshLibraryIndex(libraryId: string): Promise<void> {
   if (!(await isTauriRuntime())) {
-    throw new Error("refreshLibraryIndex is only implemented for Tauri");
+    return;
   }
   const inv = await getTauriInvoke();
   await inv("refresh_library_index", { libraryId });
