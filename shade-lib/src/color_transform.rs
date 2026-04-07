@@ -1,5 +1,5 @@
 use crate::{context::GpuContext, INTERNAL_TEXTURE_FORMAT};
-use shade_core::{ColorMatrix3x3, ColorSpace};
+use shade_lib::{ColorMatrix3x3, ColorSpace};
 use wgpu::*;
 
 const SHADER: &str = include_str!("../shaders/color_transform.wgsl");

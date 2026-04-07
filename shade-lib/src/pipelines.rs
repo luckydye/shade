@@ -648,7 +648,7 @@ impl ColorPipeline {
         &self,
         ctx: &GpuContext,
         input_tex: &Texture,
-        params: shade_core::ColorParams,
+        params: shade_lib::ColorParams,
     ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();
@@ -741,7 +741,7 @@ impl VignettePipeline {
         &self,
         ctx: &GpuContext,
         input_tex: &Texture,
-        params: shade_core::VignetteParams,
+        params: shade_lib::VignetteParams,
         uv_offset: (f32, f32),
         uv_scale: (f32, f32),
     ) -> Result<Texture> {
@@ -833,7 +833,7 @@ impl SharpenPipeline {
         &self,
         ctx: &GpuContext,
         input_tex: &Texture,
-        params: shade_core::SharpenParams,
+        params: shade_lib::SharpenParams,
     ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();
@@ -913,7 +913,7 @@ struct GrainUniform {
 }
 
 impl GrainUniform {
-    fn new(params: shade_core::GrainParams, effect_space: EffectSpace) -> Self {
+    fn new(params: shade_lib::GrainParams, effect_space: EffectSpace) -> Self {
         Self {
             grain: [params.amount, params.size, params.roughness, params.seed],
             image_space0: [
@@ -955,7 +955,7 @@ impl GrainPipeline {
         &self,
         ctx: &GpuContext,
         input_tex: &Texture,
-        params: shade_core::GrainParams,
+        params: shade_lib::GrainParams,
         effect_space: EffectSpace,
     ) -> Result<Texture> {
         let device = &ctx.device;
@@ -1022,7 +1022,7 @@ struct GlowUniform {
 }
 
 impl GlowUniform {
-    fn new(params: shade_core::GlowParams, effect_space: EffectSpace) -> Self {
+    fn new(params: shade_lib::GlowParams, effect_space: EffectSpace) -> Self {
         Self {
             glow: [params.amount, effect_space.step_x, effect_space.step_y, 0.0],
             image_space: [
@@ -1058,7 +1058,7 @@ impl GlowPipeline {
         &self,
         ctx: &GpuContext,
         input_tex: &Texture,
-        params: shade_core::GlowParams,
+        params: shade_lib::GlowParams,
         effect_space: EffectSpace,
     ) -> Result<Texture> {
         let device = &ctx.device;
@@ -1113,8 +1113,8 @@ struct HslParamsGpu {
     blue: [f32; 4],
 }
 
-impl From<shade_core::HslParams> for HslParamsGpu {
-    fn from(p: shade_core::HslParams) -> Self {
+impl From<shade_lib::HslParams> for HslParamsGpu {
+    fn from(p: shade_lib::HslParams) -> Self {
         Self {
             red: [p.red_hue, p.red_sat, p.red_lum, 0.0],
             green: [p.green_hue, p.green_sat, p.green_lum, 0.0],
@@ -1151,7 +1151,7 @@ impl HslPipeline {
         &self,
         ctx: &GpuContext,
         input_tex: &Texture,
-        params: shade_core::HslParams,
+        params: shade_lib::HslParams,
     ) -> Result<Texture> {
         let device = &ctx.device;
         let size = input_tex.size();

@@ -1,4 +1,4 @@
-extern crate self as shade_core;
+extern crate self as shade_lib;
 
 pub mod color_transform;
 pub mod composite;

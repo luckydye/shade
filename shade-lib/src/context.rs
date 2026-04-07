@@ -45,7 +45,7 @@ impl GpuContext {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    label: Some("shade-core device"),
+                    label: Some("shade-lib device"),
                     required_features: enabled_features,
                     required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::default(),

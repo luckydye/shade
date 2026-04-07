@@ -1,7 +1,7 @@
 // Two-pass separable Gaussian unsharp mask pipeline
 use crate::{context::GpuContext, pipelines::EffectSpace, INTERNAL_TEXTURE_FORMAT};
 use bytemuck::{Pod, Zeroable};
-use shade_core::SharpenParams;
+use shade_lib::SharpenParams;
 use wgpu::*;
 
 const SHADER_H: &str = include_str!("../shaders/sharpen_h.wgsl");

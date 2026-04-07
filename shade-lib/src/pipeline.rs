@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use shade_core::ToneParams;
+use shade_lib::ToneParams;
 use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,

@@ -5,7 +5,7 @@
 // the NLM mode is a single tiled compute pass.
 
 use bytemuck::{Pod, Zeroable};
-use shade_core::DenoiseParams;
+use shade_lib::DenoiseParams;
 use wgpu::util::DeviceExt;
 use wgpu::*;
 

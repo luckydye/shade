@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures_channel::oneshot;
 use half::f16;
-use shade_core::{
+use shade_lib::{
     AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack, TextureId,
     ToneParams,
 };
@@ -500,7 +500,7 @@ impl Renderer {
                                 e.visible
                                     && e.mask.is_none()
                                     && e.opacity == 1.0
-                                    && e.blend_mode == shade_core::BlendMode::Normal
+                                    && e.blend_mode == shade_lib::BlendMode::Normal
                                     && matches!(e.layer, Layer::Adjustment { .. })
                             })
                             .map(|(j, e)| (idx + 1 + j, e));
@@ -1431,7 +1431,7 @@ mod tests {
         encode_preview_pixels, normalize_preview_crop, resample_mask_region,
         rgba_display_f32_to_u8, view_uv_mapping, FloatImage, PreviewCrop, Renderer,
     };
-    use shade_core::{
+    use shade_lib::{
         AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, MaskData, TextureId,
         VignetteParams,
     };
@@ -2425,7 +2425,7 @@ mod tests {
         let mut stack = LayerStack::new();
         stack.add_image_layer(1, 16, 16);
         stack.add_adjustment_layer(vec![AdjustmentOp::Sharpen(
-            shade_core::SharpenParams {
+            shade_lib::SharpenParams {
                 amount: 1.0,
                 threshold: 0.0,
             },
@@ -2615,7 +2615,7 @@ mod tests {
         let mut stack = LayerStack::new();
         stack.add_image_layer(1, 16, 16);
         stack.add_adjustment_layer(vec![AdjustmentOp::Denoise(
-            shade_core::DenoiseParams {
+            shade_lib::DenoiseParams {
                 luma_strength: 0.8,
                 chroma_strength: 0.6,
                 mode: 0,
