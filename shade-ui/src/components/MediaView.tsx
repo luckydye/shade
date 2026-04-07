@@ -456,7 +456,7 @@ export const MediaView: Component = () => {
       return items;
     }
     return items.filter(
-      (item) => item.kind === "local" && !!item.fileHash && fileHashes.has(item.fileHash),
+      (item) => item.kind === "local" && fileHashes.has(item.fileHash ?? item.path),
     );
   });
   const itemsById = createMemo(
@@ -1417,10 +1417,7 @@ export const MediaView: Component = () => {
       if (item.kind !== "local") {
         throw new Error(`collection item is not local: ${itemId}`);
       }
-      if (!item.fileHash) {
-        throw new Error(`file hash unavailable for: ${item.path}`);
-      }
-      return item.fileHash;
+      return item.fileHash ?? item.path;
     });
   }
 
@@ -1751,7 +1748,9 @@ export const MediaView: Component = () => {
                       Enable Sync
                     </Button>
                   </Show>
-                  <Show when={selectedLibrary()?.mode !== "sync" && selectedLibrary()?.kind === "directory"}>
+                  <Show when={selectedLibrary()?.mode !== "sync" && selectedLibrary()?.kind === "directory" && orderedLibraryEntries().filter(
+                    (lib) => lib.id !== selectedLibrary()?.id && (lib.kind === "s3" || lib.kind === "peer"),
+                  ).length > 0}>
                     <div class="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.05em] text-[var(--text-subtle)]">
                       Sync to
                     </div>
