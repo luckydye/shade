@@ -7687,29 +7687,11 @@ dependencies = [
  "exr",
  "image",
  "log",
- "shade-core",
  "shade-io",
+ "shade-lib",
  "shade-p2p",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "shade-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bytemuck",
- "futures-channel",
- "half",
- "image",
- "log",
- "serde",
- "serde_json",
- "shade-io",
- "tokio",
- "wgpu",
 ]
 
 [[package]]
@@ -7735,10 +7717,28 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "shade-core",
+ "shade-lib",
  "tokio",
  "uuid",
  "video-rs",
+]
+
+[[package]]
+name = "shade-lib"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytemuck",
+ "futures-channel",
+ "half",
+ "image",
+ "log",
+ "serde",
+ "serde_json",
+ "shade-io",
+ "tokio",
+ "wgpu",
 ]
 
 [[package]]
@@ -7789,8 +7789,8 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "shade-core",
  "shade-io",
+ "shade-lib",
  "shade-p2p",
  "shade-tagging",
  "tauri",
@@ -7813,8 +7813,8 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "shade-core",
  "shade-io",
+ "shade-lib",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",

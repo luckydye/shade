@@ -1,6 +1,6 @@
 use crate::engine::WasmEngine;
 use serde::{Deserialize, Serialize};
-use shade_core::{
+use shade_lib::{
     ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, MaskParams,
     PreviewCrop as GpuPreviewCrop, Renderer, ToneParams,
 };
@@ -48,11 +48,11 @@ pub struct PreviewFrame {
 }
 
 fn apply_preview_request(
-    mut stack: shade_core::LayerStack,
+    mut stack: shade_lib::LayerStack,
     canvas_width: u32,
     canvas_height: u32,
     request: Option<PreviewRenderRequest>,
-) -> (shade_core::LayerStack, PreviewRenderRequest) {
+) -> (shade_lib::LayerStack, PreviewRenderRequest) {
     let request = request.unwrap_or(PreviewRenderRequest {
         target_width: canvas_width,
         target_height: canvas_height,
@@ -61,7 +61,7 @@ fn apply_preview_request(
     });
     if request.ignore_crop_layers.unwrap_or(false) {
         for entry in &mut stack.layers {
-            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
+            if matches!(entry.layer, shade_lib::Layer::Crop { .. }) {
                 entry.visible = false;
             }
         }
@@ -448,7 +448,7 @@ pub fn get_stack_json() -> String {
                         }),
                     });
                 let adjustments = match &l.layer {
-                    shade_core::Layer::Adjustment { ops } => {
+                    shade_lib::Layer::Adjustment { ops } => {
                         let mut tone = None;
                         let mut color = None;
                         let mut hsl = None;
@@ -461,7 +461,7 @@ pub fn get_stack_json() -> String {
                         let mut denoise = None;
                         for op in ops {
                             match op {
-                                shade_core::AdjustmentOp::Tone {
+                                shade_lib::AdjustmentOp::Tone {
                                     exposure,
                                     contrast,
                                     blacks,
@@ -480,7 +480,7 @@ pub fn get_stack_json() -> String {
                                         "gamma": gamma,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Color(params) => {
+                                shade_lib::AdjustmentOp::Color(params) => {
                                     color = Some(serde_json::json!({
                                         "saturation": params.saturation,
                                         "vibrancy": params.vibrancy,
@@ -488,7 +488,7 @@ pub fn get_stack_json() -> String {
                                         "tint": params.tint,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Hsl(params) => {
+                                shade_lib::AdjustmentOp::Hsl(params) => {
                                     hsl = Some(serde_json::json!({
                                         "red_hue": params.red_hue,
                                         "red_sat": params.red_sat,
@@ -501,7 +501,7 @@ pub fn get_stack_json() -> String {
                                         "blue_lum": params.blue_lum,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Curves {
+                                shade_lib::AdjustmentOp::Curves {
                                     lut_r,
                                     lut_g,
                                     lut_b,
@@ -518,7 +518,7 @@ pub fn get_stack_json() -> String {
                                         "control_points": control_points,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::LsCurve {
+                                shade_lib::AdjustmentOp::LsCurve {
                                     lut,
                                     control_points,
                                 } => {
@@ -527,28 +527,28 @@ pub fn get_stack_json() -> String {
                                         "control_points": control_points,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Vignette(params) => {
+                                shade_lib::AdjustmentOp::Vignette(params) => {
                                     vignette = Some(serde_json::json!({
                                         "amount": params.amount,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Sharpen(params) => {
+                                shade_lib::AdjustmentOp::Sharpen(params) => {
                                     sharpen = Some(serde_json::json!({
                                         "amount": params.amount,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Grain(params) => {
+                                shade_lib::AdjustmentOp::Grain(params) => {
                                     grain = Some(serde_json::json!({
                                         "amount": params.amount,
                                         "size": params.size,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Glow(params) => {
+                                shade_lib::AdjustmentOp::Glow(params) => {
                                     glow = Some(serde_json::json!({
                                         "amount": params.amount,
                                     }));
                                 }
-                                shade_core::AdjustmentOp::Denoise(params) => {
+                                shade_lib::AdjustmentOp::Denoise(params) => {
                                     denoise = Some(serde_json::json!({
                                         "luma_strength": params.luma_strength,
                                         "chroma_strength": params.chroma_strength,
@@ -574,9 +574,9 @@ pub fn get_stack_json() -> String {
                 };
                 serde_json::json!({
                     "kind": match &l.layer {
-                        shade_core::Layer::Image { .. } => "image",
-                        shade_core::Layer::Crop { .. } => "crop",
-                        shade_core::Layer::Adjustment { .. } => "adjustment",
+                        shade_lib::Layer::Image { .. } => "image",
+                        shade_lib::Layer::Crop { .. } => "crop",
+                        shade_lib::Layer::Adjustment { .. } => "adjustment",
                     },
                     "name": l.name.clone(),
                     "visible": l.visible,
@@ -584,7 +584,7 @@ pub fn get_stack_json() -> String {
                     "has_mask": l.mask.is_some(),
                     "mask_params": mask_params,
                     "crop": match &l.layer {
-                        shade_core::Layer::Crop { rect } => Some(serde_json::json!({
+                        shade_lib::Layer::Crop { rect } => Some(serde_json::json!({
                             "x": rect.x,
                             "y": rect.y,
                             "width": rect.width,
@@ -609,8 +609,8 @@ pub fn get_stack_json() -> String {
 
 #[derive(Serialize, Deserialize)]
 struct StackSnapshot {
-    layers: Vec<shade_core::LayerEntry>,
-    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    layers: Vec<shade_lib::LayerEntry>,
+    mask_params: HashMap<shade_lib::MaskId, shade_lib::MaskParams>,
 }
 
 #[wasm_bindgen]
@@ -621,7 +621,7 @@ pub fn get_stack_snapshot_json() -> String {
             .stack
             .layers
             .iter()
-            .filter(|l| !matches!(l.layer, shade_core::Layer::Image { .. }))
+            .filter(|l| !matches!(l.layer, shade_lib::Layer::Image { .. }))
             .cloned()
             .collect();
         let mut mp = HashMap::new();

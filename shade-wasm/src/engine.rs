@@ -1,4 +1,4 @@
-use shade_core::{
+use shade_lib::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
     CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
     Layer, LayerStack, MaskData, MaskParams, SharpenParams, TextureId, ToneParams,
@@ -65,7 +65,7 @@ impl WasmEngine {
                 ]
             })
             .collect::<Vec<_>>();
-        to_linear_srgb_f32(&mut linear_pixels, &shade_core::ColorSpace::Srgb);
+        to_linear_srgb_f32(&mut linear_pixels, &shade_lib::ColorSpace::Srgb);
         let image = FloatImage {
             pixels: linear_pixels.into(),
             width,
@@ -218,7 +218,7 @@ impl WasmEngine {
 
     pub fn apply_tone(&mut self, layer_idx: usize, params: ToneParams) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let new_op = AdjustmentOp::Tone {
                     exposure: params.exposure,
                     contrast: params.contrast,
@@ -243,7 +243,7 @@ impl WasmEngine {
 
     pub fn apply_color(&mut self, layer_idx: usize, params: ColorParams) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 if let Some(op) =
                     ops.iter_mut().find(|o| matches!(o, AdjustmentOp::Color(_)))
                 {
@@ -258,7 +258,7 @@ impl WasmEngine {
 
     pub fn apply_hsl(&mut self, layer_idx: usize, params: HslParams) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let new_op = AdjustmentOp::Hsl(params);
                 if let Some(op) =
                     ops.iter_mut().find(|o| matches!(o, AdjustmentOp::Hsl(_)))
@@ -278,7 +278,7 @@ impl WasmEngine {
         control_points: Vec<CurveControlPoint>,
     ) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let lut = build_curve_lut_from_points(&control_points);
                 let new_op = AdjustmentOp::Curves {
                     lut_r: lut.clone(),
@@ -307,7 +307,7 @@ impl WasmEngine {
         control_points: Vec<CurveControlPoint>,
     ) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let lut = build_curve_lut_from_points(&control_points);
                 let new_op = AdjustmentOp::LsCurve {
                     lut,
@@ -328,7 +328,7 @@ impl WasmEngine {
 
     pub fn apply_vignette(&mut self, layer_idx: usize, amount: f32) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let new_op = AdjustmentOp::Vignette(VignetteParams {
                     amount,
                     ..VignetteParams::default()
@@ -348,7 +348,7 @@ impl WasmEngine {
 
     pub fn apply_sharpen(&mut self, layer_idx: usize, amount: f32) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let new_op = AdjustmentOp::Sharpen(SharpenParams {
                     amount,
                     threshold: 0.0,
@@ -368,7 +368,7 @@ impl WasmEngine {
 
     pub fn apply_grain(&mut self, layer_idx: usize, amount: f32, size: f32) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let existing = ops.iter().find_map(|op| match op {
                     AdjustmentOp::Grain(params) => Some(*params),
                     _ => None,
@@ -392,7 +392,7 @@ impl WasmEngine {
 
     pub fn apply_glow(&mut self, layer_idx: usize, amount: f32) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 let new_op = AdjustmentOp::Glow(GlowParams {
                     amount,
                     ..GlowParams::default()
@@ -411,7 +411,7 @@ impl WasmEngine {
 
     pub fn apply_denoise(&mut self, layer_idx: usize, params: DenoiseParams) {
         if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
-            if let shade_core::Layer::Adjustment { ops } = &mut entry.layer {
+            if let shade_lib::Layer::Adjustment { ops } = &mut entry.layer {
                 if let Some(op) = ops
                     .iter_mut()
                     .find(|o| matches!(o, AdjustmentOp::Denoise(_)))
@@ -462,8 +462,8 @@ impl WasmEngine {
 
     pub fn replace_non_image_layers(
         &mut self,
-        layers: Vec<shade_core::LayerEntry>,
-        saved_mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+        layers: Vec<shade_lib::LayerEntry>,
+        saved_mask_params: HashMap<shade_lib::MaskId, shade_lib::MaskParams>,
     ) {
         let image_layers: Vec<_> = self
             .stack
@@ -531,7 +531,7 @@ impl WasmEngine {
 #[cfg(test)]
 mod tests {
     use super::WasmEngine;
-    use shade_core::MaskParams;
+    use shade_lib::MaskParams;
 
     fn create_engine() -> WasmEngine {
         let mut engine = WasmEngine::new();
