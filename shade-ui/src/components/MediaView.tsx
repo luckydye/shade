@@ -108,7 +108,7 @@ const INPUT_CLASS =
 const EMPTY_STATE_CLASS =
   "px-3 py-4 text-sm text-[var(--text-faint)]";
 const EMPTY_STATE_PANEL_CLASS =
-  "mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-6 py-8 text-center";
+  "mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-8 text-center";
 const LIBRARY_TAB_BASE_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
