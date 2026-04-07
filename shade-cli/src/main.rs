@@ -1,7 +1,7 @@
 #[cfg_attr(not(feature = "video"), allow(unused_imports))]
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use shade_core::{
+use shade_lib::{
     AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect, FloatImage, GrainParams,
     LayerStack, MaskData, MaskParams, PreviewCrop, Renderer, SharpenParams, ToneParams,
     VignetteParams,
@@ -335,6 +335,7 @@ impl PeerProvider for ServePeerProvider {
     async fn get_thumbnail(&self, picture_id: &str) -> Result<Vec<u8>> {
         let picture_path = resolve_served_picture_path(&self.root, picture_id)?;
         generate_desktop_thumbnail(path_string(&picture_path)?)
+            .map(|t| t.bytes)
             .map_err(anyhow::Error::msg)
     }
 
@@ -685,7 +686,7 @@ async fn main() -> Result<()> {
             let mut stack = LayerStack::new();
 
             // Image layer — texture_id = 0.
-            let base_texture_id: shade_core::TextureId = 0;
+            let base_texture_id: shade_lib::TextureId = 0;
             stack.add_image_layer(base_texture_id, width, height);
 
             // Adjustment layer ops.
