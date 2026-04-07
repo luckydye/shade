@@ -1683,7 +1683,7 @@ export const MediaView: Component = () => {
                   />
                 </label>
               </Show>
-              
+
               <Button
                 type="button"
                 class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}

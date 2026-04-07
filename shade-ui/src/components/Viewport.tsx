@@ -79,7 +79,7 @@ function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
   }
   switch (artboard.source.kind) {
     case "path":
-      return artboard.activeFileHash;
+      return artboard.activeFileHash ?? artboard.source.path;
     case "peer":
       return `peer:${artboard.source.peerEndpointId}:${artboard.source.picture.id}`;
     case "file":

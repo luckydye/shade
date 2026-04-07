@@ -62,6 +62,11 @@ export interface TauriPlatform {
   ): Promise<() => void>;
 }
 
+export interface BrowserRatingsPlatform {
+  listRatings(ids: string[]): Promise<Record<string, number>>;
+  setRating(id: string, rating: number | null): Promise<void>;
+}
+
 export interface BrowserPlatform {
   kind: "browser";
   thumbnailBackend: ThumbnailBackend;
@@ -71,6 +76,7 @@ export interface BrowserPlatform {
   media: BrowserMediaPlatform;
   presets: BrowserPresetsPlatform;
   snapshots: BrowserSnapshotsPlatform;
+  ratings: BrowserRatingsPlatform;
 }
 
 export type Platform = BrowserPlatform | TauriPlatform;
@@ -1518,18 +1524,18 @@ export async function listSnapshots(imagePath?: string | null): Promise<Snapshot
 }
 
 export async function listMediaRatings(
-  fileHashes: string[],
+  ids: string[],
 ): Promise<Record<string, number>> {
-  if (fileHashes.length === 0) {
+  if (ids.length === 0) {
     return {};
   }
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("list_media_ratings", {
-      fileHashes,
+      fileHashes: ids,
     }) as Promise<Record<string, number>>;
   }
-  return {};
+  return getBrowserPlatform().ratings.listRatings(ids);
 }
 
 export async function setMediaRating(params: MediaRatingParams): Promise<void> {
@@ -1538,7 +1544,7 @@ export async function setMediaRating(params: MediaRatingParams): Promise<void> {
     await inv("set_media_rating", { params });
     return;
   }
-  throw new Error("setMediaRating is only implemented for Tauri");
+  await getBrowserPlatform().ratings.setRating(params.file_hash, params.rating);
 }
 
 /**

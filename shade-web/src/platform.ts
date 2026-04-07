@@ -3,6 +3,7 @@ import type { BrowserPlatform } from "shade-ui/src/bridge/index";
 import { browserCollectionsPlatform } from "./browser-collections-platform";
 import { browserLibraryCache } from "./browser-library-cache";
 import { browserMediaPlatform } from "./browser-media-platform";
+import { browserRatingsPlatform } from "./browser-ratings-platform";
 import { browserPresetsPlatform } from "./browser-presets-platform";
 import { browserSnapshotsPlatform } from "./browser-snapshots-platform";
 import { browserThumbnailBackend } from "./browser-thumbnail-backend";
@@ -16,4 +17,5 @@ export const browserPlatform: BrowserPlatform = {
   media: browserMediaPlatform,
   presets: browserPresetsPlatform,
   snapshots: browserSnapshotsPlatform,
+  ratings: browserRatingsPlatform,
 };

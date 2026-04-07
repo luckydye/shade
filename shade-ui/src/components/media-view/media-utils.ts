@@ -287,7 +287,10 @@ export function filterMediaItemsByFilename(items: MediaItem[], filters: string[]
 }
 
 function mediaRatingId(item: MediaItem) {
-  return item.kind === "peer" ? `peer:${item.peerId}:${item.id}` : item.fileHash;
+  if (item.kind === "peer") {
+    return `peer:${item.peerId}:${item.id}`;
+  }
+  return item.fileHash ?? item.path;
 }
 
 function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem {
