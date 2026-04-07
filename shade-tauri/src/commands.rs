@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use shade_core::{
+use shade_lib::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
     CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
     LayerStack, MaskData, MaskParams, PreviewCrop as GpuPreviewCrop, Renderer,
@@ -50,7 +50,7 @@ struct IosPhotoEntry {
 
 pub struct EditorState {
     pub stack: LayerStack,
-    pub image_sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+    pub image_sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub next_texture_id: u64,
@@ -647,7 +647,7 @@ fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
 
-fn texture_id_for_file_hash(file_hash: &str) -> Result<shade_core::TextureId, String> {
+fn texture_id_for_file_hash(file_hash: &str) -> Result<shade_lib::TextureId, String> {
     let prefix = file_hash
         .get(..16)
         .ok_or_else(|| format!("invalid file hash: {file_hash}"))?;
@@ -658,19 +658,19 @@ fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
     let layers: Vec<_> = stack
         .layers
         .iter()
-        .filter(|entry| !matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .filter(|entry| !matches!(entry.layer, shade_lib::Layer::Image { .. }))
         .cloned()
         .collect();
-    let mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams> = layers
+    let mask_params: HashMap<shade_lib::MaskId, shade_lib::MaskParams> = layers
         .iter()
         .filter_map(|entry| entry.mask)
         .filter_map(|id| {
             let params = stack.mask_params.get(&id)?;
             // For brush masks, sync current pixel data from the mask store into params
             let synced = match params {
-                shade_core::MaskParams::Brush { .. } => {
+                shade_lib::MaskParams::Brush { .. } => {
                     let data = stack.masks.get(&id)?;
-                    shade_core::MaskParams::Brush {
+                    shade_lib::MaskParams::Brush {
                         width: data.width,
                         height: data.height,
                         pixels: data.pixels.clone(),
@@ -687,10 +687,10 @@ fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
     }
 }
 
-fn ensure_non_image_layers(layers: &[shade_core::LayerEntry]) -> Result<(), String> {
+fn ensure_non_image_layers(layers: &[shade_lib::LayerEntry]) -> Result<(), String> {
     if layers
         .iter()
-        .any(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .any(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
     {
         return Err("persisted edit versions cannot contain image layers".into());
     }
@@ -701,7 +701,7 @@ fn parse_layer_data(json: &str) -> Result<PersistedLayerData, String> {
     if let Ok(data) = serde_json::from_str::<PersistedLayerData>(json) {
         return Ok(data);
     }
-    let layers: Vec<shade_core::LayerEntry> =
+    let layers: Vec<shade_lib::LayerEntry> =
         serde_json::from_str(json).map_err(|e| e.to_string())?;
     Ok(PersistedLayerData {
         layers,
@@ -712,7 +712,7 @@ fn parse_layer_data(json: &str) -> Result<PersistedLayerData, String> {
 fn restore_masks_from_params(
     stack: &mut LayerStack,
     base_idx: usize,
-    saved_params: &HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    saved_params: &HashMap<shade_lib::MaskId, shade_lib::MaskParams>,
     width: u32,
     height: u32,
 ) {
@@ -725,21 +725,21 @@ fn restore_masks_from_params(
             continue;
         };
         let mask = match params {
-            shade_core::MaskParams::Linear { x1, y1, x2, y2 } => {
-                let mut m = shade_core::MaskData::new_empty(width, height);
+            shade_lib::MaskParams::Linear { x1, y1, x2, y2 } => {
+                let mut m = shade_lib::MaskData::new_empty(width, height);
                 m.fill_linear_gradient(*x1, *y1, *x2, *y2);
                 m
             }
-            shade_core::MaskParams::Radial { cx, cy, radius } => {
-                let mut m = shade_core::MaskData::new_empty(width, height);
+            shade_lib::MaskParams::Radial { cx, cy, radius } => {
+                let mut m = shade_lib::MaskData::new_empty(width, height);
                 m.fill_radial_gradient(*cx, *cy, *radius);
                 m
             }
-            shade_core::MaskParams::Brush {
+            shade_lib::MaskParams::Brush {
                 width: bw,
                 height: bh,
                 pixels,
-            } => shade_core::MaskData {
+            } => shade_lib::MaskData {
                 width: *bw,
                 height: *bh,
                 pixels: pixels.clone(),
@@ -1149,7 +1149,7 @@ fn restore_persisted_layers(
         .stack
         .layers
         .iter()
-        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
         .cloned()
         .collect();
     if image_layers.is_empty() {
@@ -1172,7 +1172,7 @@ fn restore_persisted_layers(
 }
 
 fn build_persisted_layer_stack(
-    texture_id: shade_core::TextureId,
+    texture_id: shade_lib::TextureId,
     width: u32,
     height: u32,
     persisted: &PersistedEditVersion,
@@ -1316,17 +1316,17 @@ async fn load_snapshot_by_id(
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PersistedLayerData {
-    layers: Vec<shade_core::LayerEntry>,
+    layers: Vec<shade_lib::LayerEntry>,
     #[serde(default)]
-    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    mask_params: HashMap<shade_lib::MaskId, shade_lib::MaskParams>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PresetFile {
     version: u32,
-    layers: Vec<shade_core::LayerEntry>,
+    layers: Vec<shade_lib::LayerEntry>,
     #[serde(default)]
-    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    mask_params: HashMap<shade_lib::MaskId, shade_lib::MaskParams>,
 }
 
 #[derive(Debug)]
@@ -2623,7 +2623,7 @@ async fn load_photo_image_from_tauri<R: tauri::Runtime>(
 pub enum RenderJob {
     Preview {
         stack: LayerStack,
-        sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+        sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
@@ -2631,7 +2631,7 @@ pub enum RenderJob {
     },
     PreviewFloat16 {
         stack: LayerStack,
-        sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+        sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
@@ -2640,7 +2640,7 @@ pub enum RenderJob {
     },
     Export {
         stack: LayerStack,
-        sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+        sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
@@ -2650,7 +2650,7 @@ pub enum RenderJob {
 
 pub struct ThumbnailRenderJob {
     stack: LayerStack,
-    sources: Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+    sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
     canvas_width: u32,
     canvas_height: u32,
     request: PreviewRenderRequest,
@@ -2915,7 +2915,7 @@ impl EditorState {
         width: u32,
         height: u32,
         source_bit_depth: String,
-        color_space: shade_core::ColorSpace,
+        color_space: shade_lib::ColorSpace,
     ) -> LayerInfoResponse {
         // Convert source pixels to linear sRGB (the internal working space).
         to_linear_srgb_f32(&mut pixels, &color_space);
@@ -3474,7 +3474,7 @@ pub async fn open_image_bytes(
             width,
             height,
             "8-bit".into(),
-            shade_core::ColorSpace::Srgb,
+            shade_lib::ColorSpace::Srgb,
         );
         restore_persisted_layers(&mut st, file_hash.clone(), None, persisted)?;
         response.file_hash = Some(file_hash);
@@ -3538,7 +3538,7 @@ fn snapshot_render_state(
 ) -> Result<
     (
         LayerStack,
-        Arc<std::collections::HashMap<shade_core::TextureId, FloatImage>>,
+        Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
         u32,
         u32,
     ),
@@ -3570,7 +3570,7 @@ fn apply_preview_request(
     });
     if request.ignore_crop_layers.unwrap_or(false) {
         for entry in &mut stack.layers {
-            if matches!(entry.layer, shade_core::Layer::Crop { .. }) {
+            if matches!(entry.layer, shade_lib::Layer::Crop { .. }) {
                 entry.visible = false;
             }
         }
@@ -3598,7 +3598,7 @@ fn export_render_request(
         if !entry.visible {
             return None;
         }
-        let shade_core::Layer::Crop { rect } = &entry.layer else {
+        let shade_lib::Layer::Crop { rect } = &entry.layer else {
             return None;
         };
         Some(PreviewCrop {
@@ -3884,7 +3884,7 @@ pub async fn apply_edit(
         }
         let layer = &mut st.stack.layers[params.layer_idx];
         match &mut layer.layer {
-            shade_core::Layer::Crop { rect } => {
+            shade_lib::Layer::Crop { rect } => {
                 if params.op != "crop" {
                     return Err("target layer is a crop layer".into());
                 }
@@ -3901,7 +3901,7 @@ pub async fn apply_edit(
                 )?;
                 st.stack.generation += 1;
             }
-            shade_core::Layer::Adjustment { ops } => {
+            shade_lib::Layer::Adjustment { ops } => {
                 match params.op.as_str() {
                     "tone" => {
                         let next = AdjustmentOp::Tone {
@@ -5268,7 +5268,7 @@ pub async fn load_preset(
             .stack
             .layers
             .iter()
-            .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+            .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
             .cloned()
             .collect();
         if image_layers.is_empty() {
@@ -5290,8 +5290,8 @@ pub async fn load_preset(
 
 #[derive(Serialize, Deserialize)]
 struct StackSnapshot {
-    layers: Vec<shade_core::LayerEntry>,
-    mask_params: HashMap<shade_core::MaskId, shade_core::MaskParams>,
+    layers: Vec<shade_lib::LayerEntry>,
+    mask_params: HashMap<shade_lib::MaskId, shade_lib::MaskParams>,
 }
 
 #[tauri::command]
@@ -5303,7 +5303,7 @@ pub fn get_stack_snapshot(
         .stack
         .layers
         .iter()
-        .filter(|l| !matches!(l.layer, shade_core::Layer::Image { .. }))
+        .filter(|l| !matches!(l.layer, shade_lib::Layer::Image { .. }))
         .cloned()
         .collect();
     let mut mp = HashMap::new();
@@ -5333,7 +5333,7 @@ pub fn replace_stack(
         .stack
         .layers
         .iter()
-        .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+        .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
         .cloned()
         .collect();
     if image_layers.is_empty() {
@@ -5394,7 +5394,7 @@ pub async fn load_snapshot(
             .stack
             .layers
             .iter()
-            .filter(|entry| matches!(entry.layer, shade_core::Layer::Image { .. }))
+            .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
             .cloned()
             .collect();
         if image_layers.is_empty() {
@@ -5627,9 +5627,9 @@ pub async fn get_layer_stack(
         .iter()
         .map(|l| LayerEntryInfo {
             kind: match &l.layer {
-                shade_core::Layer::Image { .. } => "image".into(),
-                shade_core::Layer::Crop { .. } => "crop".into(),
-                shade_core::Layer::Adjustment { .. } => "adjustment".into(),
+                shade_lib::Layer::Image { .. } => "image".into(),
+                shade_lib::Layer::Crop { .. } => "crop".into(),
+                shade_lib::Layer::Adjustment { .. } => "adjustment".into(),
             },
             name: l.name.clone(),
             visible: l.visible,
@@ -5641,7 +5641,7 @@ pub async fn get_layer_stack(
                 .and_then(|id| st.stack.mask_params.get(&id))
                 .map(MaskParamsInfo::from),
             crop: match &l.layer {
-                shade_core::Layer::Crop { rect } => Some(CropValues {
+                shade_lib::Layer::Crop { rect } => Some(CropValues {
                     x: rect.x,
                     y: rect.y,
                     width: rect.width,
@@ -5651,9 +5651,9 @@ pub async fn get_layer_stack(
                 _ => None,
             },
             adjustments: match &l.layer {
-                shade_core::Layer::Image { .. } => None,
-                shade_core::Layer::Crop { .. } => None,
-                shade_core::Layer::Adjustment { ops } => {
+                shade_lib::Layer::Image { .. } => None,
+                shade_lib::Layer::Crop { .. } => None,
+                shade_lib::Layer::Adjustment { ops } => {
                     let mut adjustments = AdjustmentValues::default();
                     for op in ops {
                         match op {
@@ -5855,8 +5855,8 @@ pub async fn create_brush_mask(
         }
         let w = st.canvas_width;
         let h = st.canvas_height;
-        let mask = shade_core::MaskData::new_empty(w, h);
-        let mp = shade_core::MaskParams::Brush {
+        let mask = shade_lib::MaskData::new_empty(w, h);
+        let mp = shade_lib::MaskParams::Brush {
             width: w,
             height: h,
             pixels: vec![0u8; (w * h) as usize],
@@ -6037,7 +6037,7 @@ pub async fn remove_from_collection(
 #[cfg(test)]
 mod tests {
     use super::{export_render_request, normalize_media_tags};
-    use shade_core::{CropRect, LayerStack};
+    use shade_lib::{CropRect, LayerStack};
 
     #[test]
     fn export_render_request_uses_canvas_when_crop_is_absent() {
