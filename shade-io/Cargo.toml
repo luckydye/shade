@@ -20,7 +20,7 @@ native = [
 ffmpeg = ["dep:video-rs", "dep:ndarray"]
 
 [dependencies]
-shade-core = { path = "../shade-core" }
+shade-lib = { path = "../shade-lib" }
 image = { workspace = true }
 exr = { workspace = true }
 anyhow = { workspace = true }

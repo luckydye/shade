@@ -9,7 +9,7 @@ use rawler::{
     rawsource::RawSource,
     RawImage,
 };
-use shade_core::{ColorMatrix3x3, ColorSpace, FloatImage};
+use shade_lib::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
@@ -800,7 +800,7 @@ mod tests {
     };
     use image::DynamicImage;
     use rawler::{decoders::RawDecodeParams, rawsource::RawSource};
-    use shade_core::ColorSpace;
+    use shade_lib::ColorSpace;
     use std::path::Path;
     use std::time::{Duration, Instant};
 

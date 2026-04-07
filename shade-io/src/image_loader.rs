@@ -2,7 +2,7 @@ use crate::{
     load_image_bytes_f32_with_info, load_image_f32_with_info, picture_display_name,
     SourceImageInfo,
 };
-use shade_core::FloatImage;
+use shade_lib::FloatImage;
 use std::io::Read;
 use std::path::Path;
 
