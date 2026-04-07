@@ -787,17 +787,16 @@ export const MediaView: Component = () => {
   onMount(() => {
     startP2pPolling();
     void isTauriRuntime().then(setSupportsS3Libraries);
+    let unlistenPeerPaired: (() => void) | null = null;
     void isTauriRuntime().then(async (isTauri) => {
       if (!isTauri) {
         return;
       }
-      const unlisten = await listenPeerPaired(async () => {
+      unlistenPeerPaired = await listenPeerPaired(async () => {
         await refetchLibraries();
       });
-      onCleanup(() => {
-        void unlisten();
-      });
     });
+    let unlistenSyncProgress: (() => void) | null = null;
     void listenLibrarySyncProgress((progress) => {
       if (progress.completed >= progress.total) {
         setSyncProgress(null);
@@ -806,7 +805,7 @@ export const MediaView: Component = () => {
         setSyncProgress(progress);
       }
     }).then((unlisten) => {
-      onCleanup(unlisten);
+      unlistenSyncProgress = unlisten;
     });
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
@@ -816,6 +815,8 @@ export const MediaView: Component = () => {
       isDisposed = true;
       window.clearInterval(libraryRefreshTimer);
       stopP2pPolling();
+      void unlistenPeerPaired?.();
+      unlistenSyncProgress?.();
       for (const src of thumbnailMemoryBuffer.values()) {
         if (src !== state.loadingMediaSrc) {
           URL.revokeObjectURL(src);
@@ -981,21 +982,27 @@ export const MediaView: Component = () => {
   });
 
   onMount(() => {
+    let unlistenScanComplete: (() => void) | null = null;
     void listenLibraryScanComplete((libraryId) => {
       const library = selectedLibrary();
       if (library?.id === libraryId) {
         void refetchItems();
       }
     }).then((unlisten) => {
-      onCleanup(unlisten);
+      unlistenScanComplete = unlisten;
     });
+    let unlistenScanProgress: (() => void) | null = null;
     void listenLibraryScanProgress((libraryId) => {
       const library = selectedLibrary();
       if (library?.id === libraryId) {
         void refetchItems();
       }
     }).then((unlisten) => {
-      onCleanup(unlisten);
+      unlistenScanProgress = unlisten;
+    });
+    onCleanup(() => {
+      unlistenScanComplete?.();
+      unlistenScanProgress?.();
     });
   });
 
