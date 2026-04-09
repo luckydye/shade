@@ -38,4 +38,4 @@ shade-io = { path = "../shade-io", default-features = false }
 uuid = { version = "1", features = ["js"] }
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+wasm-opt = ["-O4"]

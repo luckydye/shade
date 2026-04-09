@@ -6,7 +6,7 @@ use shade_lib::{
     ToneParams,
 };
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use wgpu::{
     BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture,
     ImageDataLayout, MapMode, Origin3d, TextureAspect, TextureDescriptor,
@@ -59,6 +59,7 @@ pub struct Renderer {
     pub denoise_pipeline: DenoisePipeline,
     pub texture_cache: TextureCache,
     pub color_transform_pipeline: ColorTransformPipeline,
+    readback_buffer_pool: Mutex<HashMap<u64, Vec<wgpu::Buffer>>>,
 }
 
 impl Renderer {
@@ -107,6 +108,7 @@ impl Renderer {
             denoise_pipeline,
             texture_cache,
             color_transform_pipeline,
+            readback_buffer_pool: Mutex::new(HashMap::new()),
         })
     }
 
@@ -369,10 +371,8 @@ impl Renderer {
             target_height,
             crop,
         )?;
-        let pixels = self
-            .readback_work_texture_to_f32(&final_accum, target_width, target_height)
-            .await?;
-        Ok(encode_preview_pixels_to_srgb_u8(&pixels))
+        self.readback_work_texture_to_preview_u8(&final_accum, target_width, target_height)
+            .await
     }
 
     pub async fn render_stack_preview_f16(
@@ -955,26 +955,50 @@ impl Renderer {
         texture
     }
 
-    async fn readback_rgba8_texture(
+    fn acquire_readback_buffer(&self, size: u64, label: &'static str) -> wgpu::Buffer {
+        if let Some(buffer) = self
+            .readback_buffer_pool
+            .lock()
+            .expect("readback buffer pool poisoned")
+            .get_mut(&size)
+            .and_then(Vec::pop)
+        {
+            return buffer;
+        }
+        self.ctx.device.create_buffer(&BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn release_readback_buffer(&self, size: u64, buffer: wgpu::Buffer) {
+        self.readback_buffer_pool
+            .lock()
+            .expect("readback buffer pool poisoned")
+            .entry(size)
+            .or_default()
+            .push(buffer);
+    }
+
+    async fn readback_texture_bytes(
         &self,
         tex: &wgpu::Texture,
         width: u32,
         height: u32,
+        unpadded_bytes_per_row: u32,
+        label: &'static str,
     ) -> Result<Vec<u8>> {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
-        let unpadded_bytes_per_row = width * 4;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
-        let readback_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("readback buffer"),
-            size: (padded_bytes_per_row * height) as u64,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let padded_bytes_per_row =
+            align_up(unpadded_bytes_per_row, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let readback_buffer_size = (padded_bytes_per_row * height) as u64;
+        let readback_buffer = self.acquire_readback_buffer(readback_buffer_size, label);
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("readback encoder"),
+                label: Some(label),
             });
         encoder.copy_texture_to_buffer(
             ImageCopyTexture {
@@ -1014,7 +1038,18 @@ impl Renderer {
         }
         drop(mapped);
         readback_buffer.unmap();
+        self.release_readback_buffer(readback_buffer_size, readback_buffer);
         Ok(result)
+    }
+
+    async fn readback_rgba8_texture(
+        &self,
+        tex: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
+        self.readback_texture_bytes(tex, width, height, width * 4, "readback rgba8 encoder")
+            .await
     }
 
     /// Read back the pixels of a float work texture to CPU memory and quantize to preview RGBA8.
@@ -1024,73 +1059,28 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        let device = &self.ctx.device;
-        let queue = &self.ctx.queue;
+        let raw = self
+            .readback_texture_bytes(tex, width, height, width * 8, "readback f16 encoder")
+            .await?;
+        Ok(rgba_f16_bytes_to_u8(&raw))
+    }
 
-        let unpadded_bytes_per_row = width * 8;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
-
-        let readback_buffer_size = (padded_bytes_per_row * height) as u64;
-
-        let readback_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("readback buffer"),
-            size: readback_buffer_size,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("readback encoder"),
-            });
-
-        encoder.copy_texture_to_buffer(
-            ImageCopyTexture {
-                texture: tex,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            ImageCopyBuffer {
-                buffer: &readback_buffer,
-                layout: ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
-                    rows_per_image: Some(height),
-                },
-            },
-            Extent3d {
+    async fn readback_work_texture_to_preview_u8(
+        &self,
+        tex: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>> {
+        let raw = self
+            .readback_texture_bytes(
+                tex,
                 width,
                 height,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        queue.submit(std::iter::once(encoder.finish()));
-
-        let buffer_slice = readback_buffer.slice(..);
-        let (tx, rx) = oneshot::channel();
-        buffer_slice.map_async(MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-
-        device.poll(wgpu::Maintain::Wait);
-        rx.await??;
-
-        let mapped = buffer_slice.get_mapped_range();
-
-        let mut raw = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
-        for row in 0..height {
-            let row_start = (row * padded_bytes_per_row) as usize;
-            let row_end = row_start + unpadded_bytes_per_row as usize;
-            raw.extend_from_slice(&mapped[row_start..row_end]);
-        }
-
-        drop(mapped);
-        readback_buffer.unmap();
-
-        Ok(rgba_f16_bytes_to_u8(&raw))
+                width * 8,
+                "readback preview f16 encoder",
+            )
+            .await?;
+        Ok(rgba_f16_bytes_to_srgb_u8(&raw))
     }
 
     async fn readback_work_texture_to_f32(
@@ -1099,60 +1089,15 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<f32>> {
-        let device = &self.ctx.device;
-        let queue = &self.ctx.queue;
-
-        let unpadded_bytes_per_row = width * 8;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = align_up(unpadded_bytes_per_row, align);
-        let readback_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("readback float buffer"),
-            size: (padded_bytes_per_row * height) as u64,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("readback float encoder"),
-            });
-        encoder.copy_texture_to_buffer(
-            ImageCopyTexture {
-                texture: tex,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            ImageCopyBuffer {
-                buffer: &readback_buffer,
-                layout: ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
-                    rows_per_image: Some(height),
-                },
-            },
-            Extent3d {
+        let raw = self
+            .readback_texture_bytes(
+                tex,
                 width,
                 height,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit(std::iter::once(encoder.finish()));
-        let buffer_slice = readback_buffer.slice(..);
-        let (tx, rx) = oneshot::channel();
-        buffer_slice.map_async(MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-        device.poll(wgpu::Maintain::Wait);
-        rx.await??;
-        let mapped = buffer_slice.get_mapped_range();
-        let mut raw = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
-        for row in 0..height {
-            let row_start = (row * padded_bytes_per_row) as usize;
-            let row_end = row_start + unpadded_bytes_per_row as usize;
-            raw.extend_from_slice(&mapped[row_start..row_end]);
-        }
-        drop(mapped);
-        readback_buffer.unmap();
+                width * 8,
+                "readback float encoder",
+            )
+            .await?;
         Ok(rgba_f16_bytes_to_f32(&raw))
     }
 }
@@ -1300,6 +1245,22 @@ fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
     rgba
 }
 
+fn rgba_f16_bytes_to_srgb_u8(bytes: &[u8]) -> Vec<u8> {
+    let lut = preview_srgb_lut();
+    let mut rgba = Vec::with_capacity(bytes.len() / 2);
+    for pixel in bytes.chunks_exact(8) {
+        let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
+        let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
+        let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
+        let a = f16::from_bits(u16::from_ne_bytes([pixel[6], pixel[7]])).to_f32();
+        rgba.push(linear_to_srgb_u8(r, lut));
+        rgba.push(linear_to_srgb_u8(g, lut));
+        rgba.push(linear_to_srgb_u8(b, lut));
+        rgba.push((a.clamp(0.0, 1.0) * 255.0).round() as u8);
+    }
+    rgba
+}
+
 fn rgba_f16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(2)
@@ -1326,18 +1287,6 @@ fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
         pixel[2] = encoded[2];
         pixel[3] = pixel[3].clamp(0.0, 1.0);
     }
-}
-
-fn encode_preview_pixels_to_srgb_u8(pixels: &[f32]) -> Vec<u8> {
-    let lut = preview_srgb_lut();
-    let mut encoded = Vec::with_capacity(pixels.len());
-    for pixel in pixels.chunks_exact(4) {
-        encoded.push(linear_to_srgb_u8(pixel[0], lut));
-        encoded.push(linear_to_srgb_u8(pixel[1], lut));
-        encoded.push(linear_to_srgb_u8(pixel[2], lut));
-        encoded.push((pixel[3].clamp(0.0, 1.0) * 255.0).round() as u8);
-    }
-    encoded
 }
 
 fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
