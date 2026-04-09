@@ -83,8 +83,8 @@ const features = [
                 <h1
                     class="text-6xl md:text-7xl font-black uppercase leading-none tracking-tight max-w-[700px] -mb-[10px]"
                 >
-                    <span class="opacity-65 font-normal">No limits.<br/></span>
-                    <span class="opacity-65 font-normal">No uploads.<br/></span>
+                    <span class="opacity-65">No limits.<br/></span>
+                    <span class="opacity-65">No uploads.<br/></span>
                     Just RAW editing.
                 </h1>
             </div>
@@ -97,13 +97,17 @@ const features = [
                     Instantly access your library across devices with peer-to-peer sync.
                 </p>
 
-                <div class="flex items-center gap-4">
-                    <download-cta></download-cta>
+                <div class="flex flex-col items-center gap-4">
+                    <a
+                        href="/app"
+                        class="inline-flex leading-10 gap-2 rounded-full border border-white/12 bg-white px-8 text-[14px] font-semibold text-black transition-colors backdrop-blur-sm hover:bg-white/88"
+                    >
+                        Try in browser
+                    </a>
+                    <p class="text-center text-[12px] text-white/90">
+                        MacOS, Windows, iOS and Android coming soon.
+                    </p>
                 </div>
-                
-                <!-- <div>
-                    Try it in your browser
-                </div> -->
             </div>
         </section>
 
@@ -235,7 +239,17 @@ const features = [
                 No account. No credit card. Open the app and drop in your first
                 RAW file.
             </p>
-            <download-cta></download-cta>
+            <div class="flex flex-col items-center gap-4">
+                <a
+                    href="/app"
+                    class="inline-flex leading-10 gap-2 rounded-full border border-white/12 bg-white px-8 text-[14px] font-semibold text-black transition-colors backdrop-blur-sm hover:bg-white/88"
+                >
+                    Try in browser
+                </a>
+                <p class="text-center text-[12px] text-white/90">
+                    MacOS, Windows, iOS and Android coming soon.
+                </p>
+            </div>
         </section>
     </main>
 
@@ -251,6 +265,5 @@ const features = [
     </footer>
 </Layout>
 <script>
-    import "../scripts/download-cta-element";
     import "../scripts/waitlist-form";
 </script>
