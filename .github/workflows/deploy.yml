@@ -7,8 +7,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    permissions:
-      id-token: write
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +52,14 @@ jobs:
         run: bun install
         working-directory: website
 
-      - name: Build website
-        run: bun run build
+      - name: Pull Vercel environment
+        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        working-directory: website
+
+      - name: Build website for Vercel
+        run: bunx vercel build --prod --token="$VERCEL_TOKEN"
         working-directory: website
 
       - name: Deploy to Vercel
-        run: bunx vercel deploy --prebuilt --prod
+        run: bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
         working-directory: website
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_OIDC_TOKEN: ${{ secrets.VERCEL_OIDC_TOKEN }}
