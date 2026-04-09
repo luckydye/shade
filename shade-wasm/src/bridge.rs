@@ -1,4 +1,5 @@
 use crate::engine::WasmEngine;
+use js_sys::{Object, Reflect, Uint8Array};
 use serde::{Deserialize, Serialize};
 use shade_lib::{
     ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, MaskParams,
@@ -38,13 +39,6 @@ pub struct PreviewRenderRequest {
     pub target_height: u32,
     pub crop: Option<PreviewCrop>,
     pub ignore_crop_layers: Option<bool>,
-}
-
-#[derive(Serialize)]
-pub struct PreviewFrame {
-    pub pixels: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
 }
 
 fn apply_preview_request(
@@ -689,10 +683,21 @@ pub async fn render_preview_rgba(request: JsValue) -> Result<JsValue, JsValue> {
         )
         .await
         .map_err(|err| JsValue::from_str(&err.to_string()))?;
-    serde_wasm_bindgen::to_value(&PreviewFrame {
-        pixels,
-        width: request.target_width,
-        height: request.target_height,
-    })
-    .map_err(|err| JsValue::from_str(&err.to_string()))
+    let frame = Object::new();
+    Reflect::set(
+        &frame,
+        &JsValue::from_str("pixels"),
+        &Uint8Array::from(pixels.as_slice()),
+    )?;
+    Reflect::set(
+        &frame,
+        &JsValue::from_str("width"),
+        &JsValue::from_f64(request.target_width as f64),
+    )?;
+    Reflect::set(
+        &frame,
+        &JsValue::from_str("height"),
+        &JsValue::from_f64(request.target_height as f64),
+    )?;
+    Ok(frame.into())
 }
