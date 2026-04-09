@@ -62,4 +62,3 @@ jobs:
 
       - name: Deploy to Vercel
         run: vercel deploy --prod --token="$VERCEL_TOKEN"
-        working-directory: website
