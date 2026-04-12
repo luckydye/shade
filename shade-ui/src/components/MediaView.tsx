@@ -113,6 +113,10 @@ const LIBRARY_TAB_BASE_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
 
+function toErrorMessage(err: unknown): string {
+  return toErrorMessage(err);
+}
+
 export const MediaView: Component = () => {
   const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
@@ -975,7 +979,7 @@ export const MediaView: Component = () => {
         return;
       }
       void Promise.resolve(refetchItems()).catch((error) => {
-        setError(error instanceof Error ? error.message : String(error));
+        setError(toErrorMessage(error));
       });
     }, 300);
     onCleanup(() => clearTimeout(timer));
@@ -1006,26 +1010,28 @@ export const MediaView: Component = () => {
     });
   });
 
-  async function handleAddLibrary() {
-    if (isSubmitting()) {
-      return;
-    }
+  async function withSubmitting(fn: () => Promise<void>) {
+    if (isSubmitting()) return;
     setIsSubmitting(true);
     setError(null);
     try {
+      await fn();
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleAddLibrary() {
+    await withSubmitting(async () => {
       const selectedPath = await pickDirectory();
-      if (selectedPath === null) {
-        return;
-      }
+      if (selectedPath === null) return;
       const library = await addMediaLibrary(selectedPath);
       await refetchLibraries();
       setSelectedLibraryId(library.id);
       await refetchItems();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   function updateS3Draft<K extends keyof S3MediaLibraryInput>(
@@ -1051,32 +1057,18 @@ export const MediaView: Component = () => {
   }
 
   async function handleAddS3Library() {
-    if (isSubmitting()) {
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    try {
+    await withSubmitting(async () => {
       const library = await addS3MediaLibrary(s3Draft());
       resetS3Draft();
       setShowS3Form(false);
       await refetchLibraries();
       setSelectedLibraryId(library.id);
       await refetchItems();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   async function handleAddPeerLibrary(peerId: string) {
-    if (isSubmitting()) {
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    try {
+    await withSubmitting(async () => {
       await pairPeerDevice(peerId);
       const peer = p2pState.peers.find((entry) => entry.endpoint_id === peerId);
       if (!peer) {
@@ -1086,21 +1078,13 @@ export const MediaView: Component = () => {
       setSelectedLibraryId(`peer:${peerId}`);
       await refetchCachedLibraryItems();
       await refetchItems();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   async function handleRemoveLibrary() {
     const library = selectedLibrary();
-    if (!library?.removable) {
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    try {
+    if (!library?.removable) return;
+    await withSubmitting(async () => {
       if (isPeerLibrary(library)) {
         await removeMediaLibrary(library.id);
         await removePeerLibrary(peerLibraryPeerId(library));
@@ -1110,11 +1094,7 @@ export const MediaView: Component = () => {
       }
       await removeMediaLibrary(library.id);
       await refetchLibraries();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   function syncSelectedLibraryIfNeeded() {
@@ -1123,7 +1103,7 @@ export const MediaView: Component = () => {
       return;
     }
     void syncLibrary(library.id).catch((err) => {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toErrorMessage(err));
     });
   }
 
@@ -1133,17 +1113,11 @@ export const MediaView: Component = () => {
       syncSelectedLibraryIfNeeded();
       return;
     }
-    setIsSubmitting(true);
-    setError(null);
-    try {
+    await withSubmitting(async () => {
       await refreshLibraryIndex(library.id);
       await refetchItems();
       syncSelectedLibraryIfNeeded();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   async function handleUploadLibraryFiles(
@@ -1185,7 +1159,7 @@ export const MediaView: Component = () => {
       await refetchCachedLibraryItems();
       await refetchItems();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toErrorMessage(err));
     } finally {
       setUploadProgress(null);
       setIsSubmitting(false);
@@ -1228,7 +1202,7 @@ export const MediaView: Component = () => {
       await refetchCachedLibraryItems();
       await refetchItems();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toErrorMessage(err));
     } finally {
       setUploadProgress(null);
       setIsSubmitting(false);
@@ -1292,7 +1266,7 @@ export const MediaView: Component = () => {
       files = clipboardImageFiles(event.clipboardData);
     } catch (error) {
       event.preventDefault();
-      setError(error instanceof Error ? error.message : String(error));
+      setError(toErrorMessage(error));
       return;
     }
     if (files.length === 0) {
@@ -1338,7 +1312,7 @@ export const MediaView: Component = () => {
     try {
       await openMediaItem(item, libraryId, src);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toErrorMessage(err));
     }
   }
 
@@ -1361,7 +1335,7 @@ export const MediaView: Component = () => {
         await openMediaItem(item, libraryId, null, index === 0 ? "replace" : "append");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toErrorMessage(err));
     }
   }
 
@@ -1390,7 +1364,7 @@ export const MediaView: Component = () => {
       await refetchCachedLibraryItems();
       await refetchItems();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -1748,7 +1722,7 @@ export const MediaView: Component = () => {
                             return syncLibrary(library.id);
                           },
                         ).catch((err) => {
-                          setError(err instanceof Error ? err.message : String(err));
+                          setError(toErrorMessage(err));
                         });
                       }}
                     >
@@ -1780,7 +1754,7 @@ export const MediaView: Component = () => {
                                 return syncLibrary(library.id);
                               },
                             ).catch((err) => {
-                              setError(err instanceof Error ? err.message : String(err));
+                              setError(toErrorMessage(err));
                             });
                           }}
                         >

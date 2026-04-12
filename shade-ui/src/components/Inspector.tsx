@@ -150,6 +150,10 @@ function shortestAngleDelta(from: number, to: number) {
   return delta > 180 ? delta - 360 : delta;
 }
 
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   if (props.layer.kind === "crop") {
     return (
@@ -1154,12 +1158,23 @@ export const Inspector: Component = () => {
     return imageLayerIdx + 1;
   };
 
+  const withPresetBusy = async (fn: () => Promise<void>) => {
+    setIsPresetBusy(true);
+    try {
+      await fn();
+    } catch (error) {
+      setPresetStatus(toErrorMessage(error));
+    } finally {
+      setIsPresetBusy(false);
+    }
+  };
+
   const refreshPresetList = async () => {
     try {
       setPresets(await listPresets());
       setSnapshots(await listSnapshots());
     } catch (error) {
-      setPresetStatus(error instanceof Error ? error.message : String(error));
+      setPresetStatus(toErrorMessage(error));
     }
   };
 
@@ -1196,30 +1211,20 @@ export const Inspector: Component = () => {
 
   const handleSavePreset = async () => {
     const name = nextPresetName();
-    setIsPresetBusy(true);
-    try {
+    await withPresetBusy(async () => {
       await savePreset(name);
       await refreshPresetList();
       setEditingPresetName(name);
       setEditingPresetValue(name);
-    } catch (error) {
-      setPresetStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsPresetBusy(false);
-    }
+    });
   };
 
   const handleLoadPreset = async (name: string) => {
-    setIsPresetBusy(true);
-    try {
+    await withPresetBusy(async () => {
       await loadPreset(name);
       setPresetStatus(`Loaded ${name}`);
       await refreshPresetList();
-    } catch (error) {
-      setPresetStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsPresetBusy(false);
-    }
+    });
   };
 
   const handleRenamePreset = async (oldName: string, newName: string) => {
@@ -1228,42 +1233,27 @@ export const Inspector: Component = () => {
       setEditingPresetName(null);
       return;
     }
-    setIsPresetBusy(true);
-    try {
+    await withPresetBusy(async () => {
       await renamePreset(oldName, trimmed);
       await refreshPresetList();
-    } catch (error) {
-      setPresetStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsPresetBusy(false);
-      setEditingPresetName(null);
-    }
+    });
+    setEditingPresetName(null);
   };
 
   const handleLoadSnapshot = async (id: string) => {
-    setIsPresetBusy(true);
-    try {
+    await withPresetBusy(async () => {
       await loadSnapshot(id);
       setPresetStatus(`Loaded snapshot`);
       await refreshPresetList();
-    } catch (error) {
-      setPresetStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsPresetBusy(false);
-    }
+    });
   };
 
   const handleSaveSnapshot = async () => {
-    setIsPresetBusy(true);
-    try {
+    await withPresetBusy(async () => {
       await saveSnapshot();
       setPresetStatus(`Saved snapshot`);
       await refreshPresetList();
-    } catch (error) {
-      setPresetStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsPresetBusy(false);
-    }
+    });
   };
 
   const MobileLayerBody: Component = () => {
