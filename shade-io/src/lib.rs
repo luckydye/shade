@@ -2,10 +2,13 @@ use anyhow::{anyhow, Context, Result};
 use exif::{In, Tag};
 use exr::meta::{attribute::SampleType, MetaData};
 use exr::prelude::{ReadChannels, ReadLayers};
-use image::{ColorType, DynamicImage, ImageDecoder, ImageFormat, ImageReader};
+use image::{ColorType, DynamicImage, ImageFormat};
 use rawler::{
     decoders::{Orientation as RawOrientation, RawDecodeParams},
-    imgop::develop::RawDevelop,
+    imgop::develop::{
+        Intermediate as RawIntermediate, ProcessingStep as RawProcessingStep,
+        RawDevelop,
+    },
     rawsource::RawSource,
     RawImage,
 };
@@ -193,13 +196,9 @@ pub fn load_image_bytes_f32_with_info(
         let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
             .context("RAW decode failed")?;
         let bit_depth = format!("{}-bit RAW", raw_image.bps);
-        let image = apply_orientation(
-            develop_raw_image(&raw_image)?,
-            raw_orientation_to_exif(raw_image.orientation),
-        );
-        let color_type = image.color();
+        let image = develop_raw_image_linear_srgb(&raw_image)?;
         return Ok((
-            into_linear_float_image(image, color_type, &ColorSpace::Srgb),
+            image,
             SourceImageInfo {
                 bit_depth,
                 color_space: ColorSpace::Srgb,
@@ -219,17 +218,12 @@ pub fn load_image_bytes_f32_with_info(
         _ => ColorSpace::Unknown,
     };
 
-    let decoder = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .context("Failed to guess image format")?
-        .into_decoder()
-        .context("Failed to create image decoder")?;
-    let color_type = decoder.color_type();
-    let bit_depth = decoder_color_type_label(color_type);
     let image = apply_orientation(
         image::load_from_memory(bytes).context("Failed to decode image bytes")?,
         read_orientation(&mut Cursor::new(bytes))?,
     );
+    let color_type = image.color();
+    let bit_depth = decoder_color_type_label(color_type);
     Ok((
         into_linear_float_image(image, color_type, &color_space),
         SourceImageInfo {
@@ -621,6 +615,48 @@ fn into_linear_float_image(
     }
 }
 
+fn develop_raw_image_linear_srgb(raw_image: &RawImage) -> Result<FloatImage> {
+    let developed = RawDevelop {
+        steps: vec![
+            RawProcessingStep::Rescale,
+            RawProcessingStep::Demosaic,
+            RawProcessingStep::CropActiveArea,
+            RawProcessingStep::WhiteBalance,
+            RawProcessingStep::Calibrate,
+            RawProcessingStep::CropDefault,
+        ],
+    }
+    .develop_intermediate(raw_image)
+    .context("RAW development failed")?;
+    Ok(match developed {
+        RawIntermediate::ThreeColor(image) => {
+            oriented_rgb_f32_to_float_image(image.width, image.height, image.data, raw_image.orientation)
+        }
+        developed => into_linear_float_image_raw_srgb_oriented(
+            developed
+                .to_dynamic_image()
+                .ok_or_else(|| anyhow!("RAW development produced an invalid image buffer"))?,
+            raw_image.orientation,
+        ),
+    })
+}
+
+fn into_linear_float_image_raw_srgb_oriented(
+    image: DynamicImage,
+    orientation: RawOrientation,
+) -> FloatImage {
+    match image {
+        DynamicImage::ImageRgb16(image) => {
+            oriented_rgb16_to_linear_float_image(image, orientation)
+        }
+        image => {
+            let image = apply_orientation(image, raw_orientation_to_exif(orientation));
+            let color_type = image.color();
+            into_linear_float_image(image, color_type, &ColorSpace::Srgb)
+        }
+    }
+}
+
 fn rgba8_to_linear_float_image(image: image::RgbaImage) -> FloatImage {
     let (width, height) = image.dimensions();
     let linear_lut = linear_srgb_lut_u8();
@@ -681,6 +717,101 @@ fn rgba16_to_linear_float_image(
             pixels
         }
     };
+    FloatImage {
+        pixels: pixels.into(),
+        width,
+        height,
+    }
+}
+
+fn oriented_rgb_f32_to_float_image(
+    src_width: usize,
+    src_height: usize,
+    src: Vec<[f32; 3]>,
+    orientation: RawOrientation,
+) -> FloatImage {
+    let (width, height) = match orientation {
+        RawOrientation::Transpose
+        | RawOrientation::Rotate90
+        | RawOrientation::Transverse
+        | RawOrientation::Rotate270 => (src_height as u32, src_width as u32),
+        _ => (src_width as u32, src_height as u32),
+    };
+    let mut pixels = vec![0.0; width as usize * height as usize * 4];
+    let dst_width = width as usize;
+
+    for sy in 0..src_height {
+        for sx in 0..src_width {
+            let (dx, dy) = match orientation {
+                RawOrientation::Unknown | RawOrientation::Normal => (sx, sy),
+                RawOrientation::HorizontalFlip => (src_width - 1 - sx, sy),
+                RawOrientation::Rotate180 => (src_width - 1 - sx, src_height - 1 - sy),
+                RawOrientation::VerticalFlip => (sx, src_height - 1 - sy),
+                RawOrientation::Transpose => (sy, sx),
+                RawOrientation::Rotate90 => (src_height - 1 - sy, sx),
+                RawOrientation::Transverse => {
+                    (src_height - 1 - sy, src_width - 1 - sx)
+                }
+                RawOrientation::Rotate270 => (sy, src_width - 1 - sx),
+            };
+            let rgb = src[sy * src_width + sx];
+            let dst_base = (dy * dst_width + dx) * 4;
+            pixels[dst_base] = rgb[0];
+            pixels[dst_base + 1] = rgb[1];
+            pixels[dst_base + 2] = rgb[2];
+            pixels[dst_base + 3] = 1.0;
+        }
+    }
+
+    FloatImage {
+        pixels: pixels.into(),
+        width,
+        height,
+    }
+}
+
+fn oriented_rgb16_to_linear_float_image(
+    image: image::ImageBuffer<image::Rgb<u16>, Vec<u16>>,
+    orientation: RawOrientation,
+) -> FloatImage {
+    let (src_width, src_height) = image.dimensions();
+    let (width, height) = match orientation {
+        RawOrientation::Transpose
+        | RawOrientation::Rotate90
+        | RawOrientation::Transverse
+        | RawOrientation::Rotate270 => (src_height, src_width),
+        _ => (src_width, src_height),
+    };
+    let src = image.into_raw();
+    let mut pixels = vec![0.0; width as usize * height as usize * 4];
+    let linear_lut = linear_srgb_lut_u16();
+    let dst_width = width as usize;
+    let src_width = src_width as usize;
+    let src_height = src_height as usize;
+
+    for sy in 0..src_height {
+        for sx in 0..src_width {
+            let (dx, dy) = match orientation {
+                RawOrientation::Unknown | RawOrientation::Normal => (sx, sy),
+                RawOrientation::HorizontalFlip => (src_width - 1 - sx, sy),
+                RawOrientation::Rotate180 => (src_width - 1 - sx, src_height - 1 - sy),
+                RawOrientation::VerticalFlip => (sx, src_height - 1 - sy),
+                RawOrientation::Transpose => (sy, sx),
+                RawOrientation::Rotate90 => (src_height - 1 - sy, sx),
+                RawOrientation::Transverse => {
+                    (src_height - 1 - sy, src_width - 1 - sx)
+                }
+                RawOrientation::Rotate270 => (sy, src_width - 1 - sx),
+            };
+            let src_base = (sy * src_width + sx) * 3;
+            let dst_base = (dy * dst_width + dx) * 4;
+            pixels[dst_base] = linear_lut[src[src_base] as usize];
+            pixels[dst_base + 1] = linear_lut[src[src_base + 1] as usize];
+            pixels[dst_base + 2] = linear_lut[src[src_base + 2] as usize];
+            pixels[dst_base + 3] = 1.0;
+        }
+    }
+
     FloatImage {
         pixels: pixels.into(),
         width,
