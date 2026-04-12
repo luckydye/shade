@@ -6,6 +6,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
+import { clamp } from "../store/editor-store";
 
 const SCOPE_MARGIN = 2;
 const HUE_RING_WIDTH = 10;
@@ -48,10 +49,6 @@ export type VectorScopeProps = {
   scope?: ImageData | null;
   showTargets?: boolean;
 };
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
 
 function wrapAngle(value: number) {
   return ((value % 360) + 360) % 360;

@@ -555,58 +555,46 @@ export async function pickExportTarget(): Promise<string | null> {
   return getTauriPlatform().pickExportTarget();
 }
 
-export async function listenPeerPaired(
-  listener: () => void,
+async function tauriListen<L>(
+  listener: L,
+  fn: (platform: TauriPlatform, listener: L) => Promise<() => void>,
 ): Promise<() => void> {
-  if (!(await isTauriRuntime())) {
-    return () => {};
-  }
-  return getTauriPlatform().listenPeerPaired(listener);
+  if (!(await isTauriRuntime())) return () => {};
+  return fn(getTauriPlatform(), listener);
 }
 
-export async function listenNativeDragDrop(
+export function listenPeerPaired(listener: () => void): Promise<() => void> {
+  return tauriListen(listener, (p, l) => p.listenPeerPaired(l));
+}
+
+export function listenNativeDragDrop(
   listener: (payload: NativeDragDropPayload) => void,
 ): Promise<() => void> {
-  if (!(await isTauriRuntime())) {
-    return () => {};
-  }
-  return getTauriPlatform().listenNativeDragDrop(listener);
+  return tauriListen(listener, (p, l) => p.listenNativeDragDrop(l));
 }
 
-export async function listenLibrarySyncProgress(
+export function listenLibrarySyncProgress(
   listener: (payload: LibrarySyncProgress) => void,
 ): Promise<() => void> {
-  if (!(await isTauriRuntime())) {
-    return () => {};
-  }
-  return getTauriPlatform().listenLibrarySyncProgress(listener);
+  return tauriListen(listener, (p, l) => p.listenLibrarySyncProgress(l));
 }
 
-export async function listenLibraryScanComplete(
+export function listenLibraryScanComplete(
   listener: (libraryId: string) => void,
 ): Promise<() => void> {
-  if (!(await isTauriRuntime())) {
-    return () => {};
-  }
-  return getTauriPlatform().listenLibraryScanComplete(listener);
+  return tauriListen(listener, (p, l) => p.listenLibraryScanComplete(l));
 }
 
-export async function listenLibraryScanProgress(
+export function listenLibraryScanProgress(
   listener: (libraryId: string) => void,
 ): Promise<() => void> {
-  if (!(await isTauriRuntime())) {
-    return () => {};
-  }
-  return getTauriPlatform().listenLibraryScanProgress(listener);
+  return tauriListen(listener, (p, l) => p.listenLibraryScanProgress(l));
 }
 
-export async function listenImageOpenPhase(
+export function listenImageOpenPhase(
   listener: (phase: string) => void,
 ): Promise<() => void> {
-  if (!(await isTauriRuntime())) {
-    return () => {};
-  }
-  return getTauriPlatform().listenImageOpenPhase(listener);
+  return tauriListen(listener, (p, l) => p.listenImageOpenPhase(l));
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
