@@ -30,6 +30,7 @@ let refreshWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }>
 let previewSuspended = false;
 let finalPreviewLatencyEstimateMs: number | null = null;
 let refreshMode: "auto" | "final-only" = "auto";
+let finalPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastRenderedPreview:
   | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
   | null = null;
@@ -482,11 +483,78 @@ export function refreshPreview() {
 }
 
 export function refreshFinalPreview() {
+  if (finalPreviewDebounceTimer !== null) {
+    clearTimeout(finalPreviewDebounceTimer);
+    finalPreviewDebounceTimer = null;
+  }
   return requestPreviewRefresh("final-only");
 }
 
-function requestPreviewRefresh(mode: "auto" | "final-only") {
+function debounceFinalPreviewRefresh(delayMs = 120) {
   if (previewSuspended) {
+    return;
+  }
+  if (finalPreviewDebounceTimer !== null) {
+    clearTimeout(finalPreviewDebounceTimer);
+  }
+  finalPreviewDebounceTimer = setTimeout(() => {
+    finalPreviewDebounceTimer = null;
+    void requestPreviewRefresh("final-only");
+  }, delayMs);
+}
+
+function canSkipRefresh(mode: "auto" | "final-only") {
+  const snapshot = captureRefreshSnapshot();
+  const finalPreviewReq = buildPreviewRequest("final");
+  const finalBackdropReq = buildBackdropRequest("final");
+  if (!finalPreviewReq || !finalBackdropReq) {
+    return true;
+  }
+  const hasFinalPreview = canReuseRenderedPreview(
+    lastRenderedPreview,
+    "final",
+    snapshot,
+    finalPreviewReq,
+    previewTile() !== null,
+  );
+  const hasFinalBackdrop = canReuseRenderedPreview(
+    lastRenderedBackdrop,
+    "final",
+    snapshot,
+    finalBackdropReq,
+    backdropTile() !== null,
+  );
+  if (!hasFinalPreview || !hasFinalBackdrop) {
+    return false;
+  }
+  if (mode === "final-only" || !shouldRenderInteractivePreview()) {
+    return true;
+  }
+  const interactivePreviewReq = buildPreviewRequest("interactive");
+  const interactiveBackdropReq = buildBackdropRequest("interactive");
+  if (!interactivePreviewReq || !interactiveBackdropReq) {
+    return true;
+  }
+  return (
+    canReuseRenderedPreview(
+      lastRenderedPreview,
+      "interactive",
+      snapshot,
+      interactivePreviewReq,
+      previewTile() !== null,
+    ) &&
+    canReuseRenderedPreview(
+      lastRenderedBackdrop,
+      "interactive",
+      snapshot,
+      interactiveBackdropReq,
+      backdropTile() !== null,
+    )
+  );
+}
+
+function requestPreviewRefresh(mode: "auto" | "final-only") {
+  if (previewSuspended || canSkipRefresh(mode)) {
     return Promise.resolve();
   }
   refreshVersion += 1;
@@ -567,7 +635,7 @@ export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anc
     viewportCenterX: anchoredX - (anchorX - vcx) / newScale,
     viewportCenterY: anchoredY - (anchorY - vcy) / newScale,
   });
-  refreshFinalPreview();
+  debounceFinalPreviewRefresh();
 }
 
 export function panViewport(deltaX: number, deltaY: number, shouldRefresh = true) {
@@ -581,7 +649,7 @@ export function panViewport(deltaX: number, deltaY: number, shouldRefresh = true
     viewportCenterY: state.viewportCenterY - deltaY / imageScale,
   });
   if (shouldRefresh) {
-    refreshFinalPreview();
+    debounceFinalPreviewRefresh();
   }
 }
 

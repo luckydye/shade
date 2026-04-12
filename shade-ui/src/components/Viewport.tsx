@@ -1047,27 +1047,34 @@ export const Viewport: Component = () => {
     if (!(container instanceof HTMLDivElement)) {
       return;
     }
-    let pendingWidth = container.clientWidth;
-    let pendingHeight = container.clientHeight;
     let frame = 0;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
     const flushViewportSize = () => {
       frame = 0;
-      setViewportScreenSize(pendingWidth, pendingHeight);
+      timeout = null;
+      setViewportScreenSize(container.clientWidth, container.clientHeight);
     };
     flushViewportSize();
-    const observer = new ResizeObserver(([entry]) => {
-      pendingWidth = entry.contentRect.width;
-      pendingHeight = entry.contentRect.height;
+    const observer = new ResizeObserver(() => {
       if (frame !== 0) {
-        return;
+        cancelAnimationFrame(frame);
       }
-      frame = requestAnimationFrame(flushViewportSize);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (timeout !== null) {
+          clearTimeout(timeout);
+        }
+        timeout = setTimeout(flushViewportSize, 60);
+      });
     });
     observer.observe(container);
     onCleanup(() => {
       observer.disconnect();
       if (frame !== 0) {
         cancelAnimationFrame(frame);
+      }
+      if (timeout !== null) {
+        clearTimeout(timeout);
       }
     });
   });
