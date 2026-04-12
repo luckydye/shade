@@ -31,11 +31,14 @@ impl WasmEngine {
     pub fn load_image_data(&mut self, image: FloatImage) -> u64 {
         let id = self.next_texture_id;
         self.next_texture_id += 1;
+        let width = image.width;
+        let height = image.height;
         self.stack = LayerStack::new();
-        self.canvas_width = image.width;
-        self.canvas_height = image.height;
-        self.image_sources.insert(id, image.clone());
-        self.stack.add_image_layer(id, image.width, image.height);
+        self.canvas_width = width;
+        self.canvas_height = height;
+        self.image_sources.clear();
+        self.image_sources.insert(id, image);
+        self.stack.add_image_layer(id, width, height);
         self.stack.add_adjustment_layer(vec![AdjustmentOp::Tone {
             exposure: 0.0,
             contrast: 0.0,
