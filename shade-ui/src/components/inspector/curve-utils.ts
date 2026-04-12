@@ -6,6 +6,7 @@ export const LS_CURVE_IDENTITY = Array.from({ length: 256 }, () => 1.0);
 export const HISTOGRAM_SCALE_CLIP_PERCENTILE = 0.95;
 export const HISTOGRAM_SCALE_CLIP_MIN_BINS = 8;
 export const HISTOGRAM_CLIPPING_EPSILON = 1 / 255;
+export const DEFAULT_HISTOGRAM_SAMPLE_BUDGET = 160_000;
 
 export const TONE_THRESHOLD_BOUNDARIES = [
   { key: "shadows", label: "Shadows", value: 0.25 },
@@ -249,29 +250,40 @@ export function lsCurvePath(lut: readonly number[]) {
 export function buildLuminanceHistogram(
   frame: ImageData,
   binCount = 64,
+  sampleBudget = DEFAULT_HISTOGRAM_SAMPLE_BUDGET,
 ): LuminanceHistogram {
   if (binCount <= 0) {
     throw new Error("histogram bin count must be greater than zero");
   }
+  if (sampleBudget <= 0) {
+    throw new Error("histogram sample budget must be greater than zero");
+  }
   const bins = new Array<number>(binCount).fill(0);
   const { data } = frame;
   const channelScale = data instanceof Uint8ClampedArray ? 255 : 1;
+  const sampleStep = Math.max(
+    1,
+    Math.ceil(Math.sqrt((frame.width * frame.height) / sampleBudget)),
+  );
   let shadowsClipping = false;
   let highlightsClipping = false;
-  for (let idx = 0; idx < data.length; idx += 4) {
-    const alpha = data[idx + 3] / channelScale;
-    if (alpha <= 0) {
-      continue;
+  for (let y = 0; y < frame.height; y += sampleStep) {
+    for (let x = 0; x < frame.width; x += sampleStep) {
+      const idx = (y * frame.width + x) * 4;
+      const alpha = data[idx + 3] / channelScale;
+      if (alpha <= 0) {
+        continue;
+      }
+      const lum = clamp(
+        (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) / channelScale,
+        0,
+        1,
+      );
+      const bin = clamp(Math.floor(lum * (binCount - 1)), 0, binCount - 1);
+      bins[bin] += 1;
+      shadowsClipping ||= lum <= HISTOGRAM_CLIPPING_EPSILON;
+      highlightsClipping ||= lum >= 1 - HISTOGRAM_CLIPPING_EPSILON;
     }
-    const lum = clamp(
-      (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) / channelScale,
-      0,
-      1,
-    );
-    const bin = clamp(Math.floor(lum * (binCount - 1)), 0, binCount - 1);
-    bins[bin] += 1;
-    shadowsClipping ||= lum <= HISTOGRAM_CLIPPING_EPSILON;
-    highlightsClipping ||= lum >= 1 - HISTOGRAM_CLIPPING_EPSILON;
   }
   const peak = Math.max(...bins, 0);
   if (peak === 0) {

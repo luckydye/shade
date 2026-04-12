@@ -310,7 +310,7 @@ export const Inspector: Component = () => {
     selectedAdjustmentLayer()?.adjustments?.denoise ?? DEFAULT_DENOISE;
   const vectorScope = createMemo(() => {
     const tile = backdropTile();
-    return tile ? buildVectorScope(tile.image) : null;
+    return tile ? buildVectorScope(tile.image, undefined, 80_000) : null;
   });
 
   const clearLayerDragState = () => {
