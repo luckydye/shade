@@ -1047,12 +1047,29 @@ export const Viewport: Component = () => {
     if (!(container instanceof HTMLDivElement)) {
       return;
     }
-    setViewportScreenSize(container.clientWidth, container.clientHeight);
+    let pendingWidth = container.clientWidth;
+    let pendingHeight = container.clientHeight;
+    let frame = 0;
+    const flushViewportSize = () => {
+      frame = 0;
+      setViewportScreenSize(pendingWidth, pendingHeight);
+    };
+    flushViewportSize();
     const observer = new ResizeObserver(([entry]) => {
-      setViewportScreenSize(entry.contentRect.width, entry.contentRect.height);
+      pendingWidth = entry.contentRect.width;
+      pendingHeight = entry.contentRect.height;
+      if (frame !== 0) {
+        return;
+      }
+      frame = requestAnimationFrame(flushViewportSize);
     });
     observer.observe(container);
-    onCleanup(() => observer.disconnect());
+    onCleanup(() => {
+      observer.disconnect();
+      if (frame !== 0) {
+        cancelAnimationFrame(frame);
+      }
+    });
   });
 
   const onDragOver = (e: DragEvent) => {

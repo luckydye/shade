@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use wgpu::{Adapter, Device, Instance, Queue};
+use wgpu::{Adapter, Buffer, BufferDescriptor, BufferUsages, Device, Instance, Queue};
 
 /// Owns the core wgpu objects needed for headless GPU compute.
 pub struct GpuContext {
@@ -7,6 +7,23 @@ pub struct GpuContext {
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
+}
+
+pub fn create_upload_buffer(
+    device: &Device,
+    queue: &Queue,
+    label: &'static str,
+    contents: &[u8],
+    usage: BufferUsages,
+) -> Buffer {
+    let buffer = device.create_buffer(&BufferDescriptor {
+        label: Some(label),
+        size: contents.len() as u64,
+        usage: usage | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, contents);
+    buffer
 }
 
 impl GpuContext {

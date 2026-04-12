@@ -10,7 +10,7 @@ use wgpu::{
     TextureViewDimension,
 };
 
-use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::create_upload_buffer, GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 const CURVES_WGSL: &str = include_str!("../shaders/curves.wgsl");
 const LS_CURVE_WGSL: &str = include_str!("../shaders/ls_curve.wgsl");
@@ -229,13 +229,13 @@ impl CropPipeline {
             output_height,
             "crop output",
         );
-        let uniform_buf =
-            ctx.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("crop uniform"),
-                    contents: bytemuck::bytes_of(&params),
-                    usage: BufferUsages::UNIFORM,
-                });
+        let uniform_buf = create_upload_buffer(
+            &ctx.device,
+            &ctx.queue,
+            "crop uniform",
+            bytemuck::bytes_of(&params),
+            BufferUsages::UNIFORM,
+        );
         let in_view = input_tex.create_view(&TextureViewDescriptor::default());
         let out_view = output_tex.create_view(&TextureViewDescriptor::default());
         let bind_group = ctx.device.create_bind_group(&BindGroupDescriptor {
@@ -425,11 +425,13 @@ impl CurvesPipeline {
             apply_per_channel: if per_channel { 1 } else { 0 },
             _pad: [0; 3],
         };
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("curves uniform"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "curves uniform",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
@@ -657,11 +659,13 @@ impl ColorPipeline {
         let output_tex =
             create_output_texture(device, width, height, "color output texture");
 
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("color params uniform"),
-            contents: bytemuck::bytes_of(&params),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "color params uniform",
+            bytemuck::bytes_of(&params),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
@@ -762,11 +766,13 @@ impl VignettePipeline {
             uv_scale_x: uv_scale.0,
             uv_scale_y: uv_scale.1,
         };
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vignette params uniform"),
-            contents: bytemuck::bytes_of(&gpu_params),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "vignette params uniform",
+            bytemuck::bytes_of(&gpu_params),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
@@ -856,11 +862,13 @@ impl SharpenPipeline {
             _pad: [0.0; 2],
         };
 
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("sharpen params uniform"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "sharpen params uniform",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
@@ -966,11 +974,13 @@ impl GrainPipeline {
             create_output_texture(device, width, height, "grain output texture");
         let uniform = GrainUniform::new(params, effect_space);
 
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("grain params uniform"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "grain params uniform",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
@@ -1069,11 +1079,13 @@ impl GlowPipeline {
             create_output_texture(device, width, height, "glow output texture");
         let uniform = GlowUniform::new(params, effect_space);
 
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("glow params uniform"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "glow params uniform",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
@@ -1159,11 +1171,13 @@ impl HslPipeline {
         let output_tex =
             create_output_texture(device, width, height, "hsl output texture");
         let gpu = HslParamsGpu::from(params);
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hsl params uniform"),
-            contents: bytemuck::bytes_of(&gpu),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "hsl params uniform",
+            bytemuck::bytes_of(&gpu),
+            BufferUsages::UNIFORM,
+        );
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&BindGroupDescriptor {

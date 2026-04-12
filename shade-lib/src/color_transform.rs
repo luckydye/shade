@@ -1,4 +1,4 @@
-use crate::{context::GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::{create_upload_buffer, GpuContext}, INTERNAL_TEXTURE_FORMAT};
 use shade_lib::{ColorMatrix3x3, ColorSpace};
 use wgpu::*;
 
@@ -196,12 +196,13 @@ impl ColorTransformPipeline {
             view_formats: &[],
         });
 
-        use wgpu::util::DeviceExt;
-        let ubuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("color_transform_uniform"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let ubuf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "color_transform_uniform",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         let in_view = input_tex.create_view(&Default::default());
         let out_view = output_tex.create_view(&Default::default());

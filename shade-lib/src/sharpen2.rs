@@ -1,5 +1,5 @@
 // Two-pass separable Gaussian unsharp mask pipeline
-use crate::{context::GpuContext, pipelines::EffectSpace, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::{create_upload_buffer, GpuContext}, pipelines::EffectSpace, INTERNAL_TEXTURE_FORMAT};
 use bytemuck::{Pod, Zeroable};
 use shade_lib::SharpenParams;
 use wgpu::*;
@@ -197,19 +197,19 @@ impl SharpenTwoPassPipeline {
             view_formats: &[],
         });
 
-        use wgpu::util::DeviceExt;
-
         let uniform = SharpenUniform {
             amount: params.amount,
             threshold: params.threshold,
             step_x: effect_space.step_x,
             step_y: effect_space.step_y,
         };
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("sharpen_params"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let params_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "sharpen_params",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         let in_view = input_tex.create_view(&Default::default());
         let hblur_view = h_blur_tex.create_view(&Default::default());

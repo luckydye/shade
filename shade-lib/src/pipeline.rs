@@ -1,7 +1,6 @@
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use shade_lib::ToneParams;
-use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
@@ -11,7 +10,7 @@ use wgpu::{
     TextureViewDimension,
 };
 
-use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::create_upload_buffer, GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 // The tone.wgsl shader is embedded at compile time.
 const TONE_WGSL: &str = include_str!("../shaders/tone.wgsl");
@@ -162,11 +161,13 @@ impl TonePipeline {
 
         // Uniform buffer for ToneParams.
         let params_gpu = ToneParamsGpu::from(params);
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("tone params uniform"),
-            contents: bytemuck::bytes_of(&params_gpu),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            queue,
+            "tone params uniform",
+            bytemuck::bytes_of(&params_gpu),
+            BufferUsages::UNIFORM,
+        );
 
         let input_view = input_tex.create_view(&TextureViewDescriptor::default());
         let output_view = output_tex.create_view(&TextureViewDescriptor::default());

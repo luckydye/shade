@@ -30,6 +30,30 @@ function ensureRendererReady() {
   return rendererPromise;
 }
 
+function isRecoverableGpuError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("async map a buffer") ||
+    message.includes("createBuffer failed") ||
+    message.includes("device lost") ||
+    message.includes("GPUDevice")
+  );
+}
+
+async function retryWithFreshRenderer(action) {
+  try {
+    return await action();
+  } catch (error) {
+    if (!isRecoverableGpuError(error)) {
+      throw error;
+    }
+    rendererPromise = null;
+    wasm.reset_renderer();
+    await ensureRendererReady();
+    return action();
+  }
+}
+
 self.onmessage = async (event: MessageEvent) => {
   const msg = event.data;
   const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
@@ -282,8 +306,10 @@ self.onmessage = async (event: MessageEvent) => {
       }
 
       case "render_preview": {
-        await ensureRendererReady();
-        const frame = await wasm.render_preview_rgba(msg.request ?? null);
+        const frame = await retryWithFreshRenderer(async () => {
+          await ensureRendererReady();
+          return wasm.render_preview_rgba(msg.request ?? null);
+        });
         const pixels =
           frame.pixels instanceof Uint8Array
             ? frame.pixels

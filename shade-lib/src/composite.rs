@@ -1,6 +1,5 @@
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferUsages,
@@ -9,7 +8,7 @@ use wgpu::{
     TextureFormat, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
-use crate::{GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::create_upload_buffer, GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 const COMPOSITE_WGSL: &str = include_str!("../shaders/composite.wgsl");
 
@@ -174,11 +173,13 @@ impl CompositePipeline {
             &dummy_mask_tex
         };
 
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("composite params uniform"),
-            contents: bytemuck::bytes_of(&params),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            queue,
+            "composite params uniform",
+            bytemuck::bytes_of(&params),
+            BufferUsages::UNIFORM,
+        );
 
         let base_view = base_tex.create_view(&TextureViewDescriptor::default());
         let layer_view = layer_tex.create_view(&TextureViewDescriptor::default());
@@ -428,11 +429,13 @@ impl BrushStampPipeline {
         let size = mask_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("brush stamp params uniform"),
-            contents: bytemuck::bytes_of(&params),
-            usage: BufferUsages::UNIFORM,
-        });
+        let uniform_buf = create_upload_buffer(
+            device,
+            queue,
+            "brush stamp params uniform",
+            bytemuck::bytes_of(&params),
+            BufferUsages::UNIFORM,
+        );
 
         let mask_view = mask_tex.create_view(&TextureViewDescriptor::default());
 

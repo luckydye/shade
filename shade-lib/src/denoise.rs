@@ -6,10 +6,9 @@
 
 use bytemuck::{Pod, Zeroable};
 use shade_lib::DenoiseParams;
-use wgpu::util::DeviceExt;
 use wgpu::*;
 
-use crate::{pipelines::EffectSpace, GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{context::create_upload_buffer, pipelines::EffectSpace, GpuContext, INTERNAL_TEXTURE_FORMAT};
 
 const GUIDE_H_WGSL: &str = include_str!("../shaders/denoise_guide_h.wgsl");
 const GUIDE_V_WGSL: &str = include_str!("../shaders/denoise_guide_v.wgsl");
@@ -291,11 +290,13 @@ impl DenoisePipeline {
             step_x: effect_space.step_x,
             step_y: effect_space.step_y,
         };
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("denoise_params"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: BufferUsages::UNIFORM,
-        });
+        let params_buf = create_upload_buffer(
+            device,
+            &ctx.queue,
+            "denoise_params",
+            bytemuck::bytes_of(&uniform),
+            BufferUsages::UNIFORM,
+        );
 
         if params.mode == 1 {
             return self.run_nlm(ctx, input_tex, w, h, &params_buf);

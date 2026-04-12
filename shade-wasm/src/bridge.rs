@@ -271,6 +271,13 @@ pub async fn init_renderer() -> Result<(), JsValue> {
     Ok(())
 }
 
+#[wasm_bindgen]
+pub fn reset_renderer() {
+    RENDERER.with(|slot| {
+        slot.replace(None);
+    });
+}
+
 /// Set layer visibility.
 #[wasm_bindgen]
 pub fn set_layer_visible(layer_idx: usize, visible: bool) {
