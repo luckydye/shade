@@ -1246,17 +1246,18 @@ fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
 }
 
 fn rgba_f16_bytes_to_srgb_u8(bytes: &[u8]) -> Vec<u8> {
-    let lut = preview_srgb_lut();
+    let rgb_lut = preview_srgb_u8_lut_from_f16();
+    let alpha_lut = preview_alpha_u8_lut_from_f16();
     let mut rgba = Vec::with_capacity(bytes.len() / 2);
     for pixel in bytes.chunks_exact(8) {
-        let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
-        let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
-        let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
-        let a = f16::from_bits(u16::from_ne_bytes([pixel[6], pixel[7]])).to_f32();
-        rgba.push(linear_to_srgb_u8(r, lut));
-        rgba.push(linear_to_srgb_u8(g, lut));
-        rgba.push(linear_to_srgb_u8(b, lut));
-        rgba.push((a.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let r = u16::from_ne_bytes([pixel[0], pixel[1]]);
+        let g = u16::from_ne_bytes([pixel[2], pixel[3]]);
+        let b = u16::from_ne_bytes([pixel[4], pixel[5]]);
+        let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
+        rgba.push(rgb_lut[r as usize]);
+        rgba.push(rgb_lut[g as usize]);
+        rgba.push(rgb_lut[b as usize]);
+        rgba.push(alpha_lut[a as usize]);
     }
     rgba
 }
@@ -1337,6 +1338,26 @@ fn preview_srgb_lut() -> &'static [f32; PREVIEW_SRGB_LUT_SIZE + 1] {
         std::array::from_fn(|index| {
             linear_to_srgb_display(index as f32 / PREVIEW_SRGB_LUT_SIZE as f32)
         })
+    })
+}
+
+fn preview_srgb_u8_lut_from_f16() -> &'static [u8; 65536] {
+    static LUT: OnceLock<Box<[u8; 65536]>> = OnceLock::new();
+    LUT.get_or_init(|| {
+        let srgb_lut = preview_srgb_lut();
+        Box::new(std::array::from_fn(|bits| {
+            linear_to_srgb_u8(f16::from_bits(bits as u16).to_f32(), srgb_lut)
+        }))
+    })
+}
+
+fn preview_alpha_u8_lut_from_f16() -> &'static [u8; 65536] {
+    static LUT: OnceLock<Box<[u8; 65536]>> = OnceLock::new();
+    LUT.get_or_init(|| {
+        Box::new(std::array::from_fn(|bits| {
+            let value = f16::from_bits(bits as u16).to_f32();
+            (value.clamp(0.0, 1.0) * 255.0).round() as u8
+        }))
     })
 }
 
