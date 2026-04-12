@@ -12,3 +12,4 @@ models
 .env.local
 
 .idea
+.worktree
