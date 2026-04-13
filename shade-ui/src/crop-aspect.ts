@@ -1,3 +1,4 @@
+import { clamp } from "./store/editor-store";
 import type { CropRect } from "./store/editor-store";
 
 export type CropAspectRatioPreset =
@@ -41,10 +42,6 @@ export const CROP_ASPECT_RATIO_OPTIONS: readonly {
   { value: "16:9", label: "16:9" },
   { value: "9:16", label: "9:16" },
 ] as const;
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
 
 function roundPositive(value: number) {
   return Math.max(1, Math.round(value));

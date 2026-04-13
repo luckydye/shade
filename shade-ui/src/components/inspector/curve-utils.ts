@@ -33,218 +33,168 @@ export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function normalizePoints(points: readonly ControlPoint[]): ControlPoint[] {
+// --- Point normalization ---
+
+function normalizePointGeneric(point: ControlPoint, maxY: number): ControlPoint {
+  return {
+    x: clamp(Math.round(point.x), CURVE_MIN_X, CURVE_MAX_X),
+    y: clamp(point.y, 0, maxY),
+  };
+}
+
+function normalizeInteriorPointGeneric(point: ControlPoint, maxY: number): ControlPoint {
+  return {
+    x: clamp(Math.round(point.x), CURVE_MIN_X + 1, CURVE_MAX_X - 1),
+    y: clamp(point.y, 0, maxY),
+  };
+}
+
+function normalizePointsGeneric(
+  points: readonly ControlPoint[],
+  normalize: (p: ControlPoint) => ControlPoint,
+  leftDefaultY: number,
+): ControlPoint[] {
   const normalized = [...points]
-    .map(normalizePoint)
+    .map(normalize)
     .sort((a, b) => a.x - b.x)
     .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
   if (normalized[0]?.x !== CURVE_MIN_X) {
-    normalized.unshift({ x: CURVE_MIN_X, y: 0 });
+    normalized.unshift({ x: CURVE_MIN_X, y: leftDefaultY });
   }
   if (normalized[normalized.length - 1]?.x !== CURVE_MAX_X) {
     normalized.push({ x: CURVE_MAX_X, y: 1 });
   }
   return normalized;
-}
-
-export function normalizeLsPoints(points: readonly ControlPoint[]): ControlPoint[] {
-  const normalized = [...points]
-    .map(normalizeLsPoint)
-    .sort((a, b) => a.x - b.x)
-    .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
-  if (normalized[0]?.x !== CURVE_MIN_X) {
-    normalized.unshift({ x: CURVE_MIN_X, y: 1 });
-  }
-  if (normalized[normalized.length - 1]?.x !== CURVE_MAX_X) {
-    normalized.push({ x: CURVE_MAX_X, y: 1 });
-  }
-  return normalized;
-}
-
-export function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
-  const anchors = normalizePoints(points);
-  if (anchors.length < 2) {
-    throw new Error("curve requires explicit left and right endpoint clamps");
-  }
-  if (anchors[0]?.x !== CURVE_MIN_X) {
-    throw new Error("curve must include a left endpoint clamp at x=0");
-  }
-  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
-    throw new Error("curve must include a right endpoint clamp at x=255");
-  }
-  const lut = new Array<number>(256);
-  const delta = new Array<number>(anchors.length - 1);
-  const tangent = new Array<number>(anchors.length);
-  for (let i = 0; i < anchors.length - 1; i += 1) {
-    const span = anchors[i + 1].x - anchors[i].x;
-    if (span <= 0) {
-      throw new Error("curve anchors must be strictly increasing");
-    }
-    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
-  }
-  tangent[0] = delta[0];
-  tangent[anchors.length - 1] = delta[delta.length - 1];
-  for (let i = 1; i < anchors.length - 1; i += 1) {
-    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
-  }
-  for (let i = 0; i < delta.length; i += 1) {
-    if (delta[i] === 0) {
-      tangent[i] = 0;
-      tangent[i + 1] = 0;
-      continue;
-    }
-    const a = tangent[i] / delta[i];
-    const b = tangent[i + 1] / delta[i];
-    const norm = Math.hypot(a, b);
-    if (norm > 3) {
-      const scale = 3 / norm;
-      tangent[i] = scale * a * delta[i];
-      tangent[i + 1] = scale * b * delta[i];
-    }
-  }
-  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
-    const start = anchors[seg];
-    const end = anchors[seg + 1];
-    const span = end.x - start.x;
-    for (let x = start.x; x <= end.x; x += 1) {
-      const t = (x - start.x) / span;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + t;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-      lut[x] = clamp(
-        h00 * start.y +
-          h10 * span * tangent[seg] +
-          h01 * end.y +
-          h11 * span * tangent[seg + 1],
-        0,
-        1,
-      );
-    }
-  }
-  return lut;
-}
-
-export function buildLsCurveLutFromPoints(points: readonly ControlPoint[]): number[] {
-  const anchors = normalizeLsPoints(points);
-  if (anchors.length < 2) {
-    throw new Error("ls curve requires explicit left and right endpoint clamps");
-  }
-  if (anchors[0]?.x !== CURVE_MIN_X) {
-    throw new Error("ls curve must include a left endpoint clamp at x=0");
-  }
-  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
-    throw new Error("ls curve must include a right endpoint clamp at x=255");
-  }
-  const lut = new Array<number>(256);
-  const delta = new Array<number>(anchors.length - 1);
-  const tangent = new Array<number>(anchors.length);
-  for (let i = 0; i < anchors.length - 1; i += 1) {
-    const span = anchors[i + 1].x - anchors[i].x;
-    if (span <= 0) {
-      throw new Error("ls curve anchors must be strictly increasing");
-    }
-    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
-  }
-  tangent[0] = delta[0];
-  tangent[anchors.length - 1] = delta[delta.length - 1];
-  for (let i = 1; i < anchors.length - 1; i += 1) {
-    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
-  }
-  for (let i = 0; i < delta.length; i += 1) {
-    if (delta[i] === 0) {
-      tangent[i] = 0;
-      tangent[i + 1] = 0;
-      continue;
-    }
-    const a = tangent[i] / delta[i];
-    const b = tangent[i + 1] / delta[i];
-    const norm = Math.hypot(a, b);
-    if (norm > 3) {
-      const scale = 3 / norm;
-      tangent[i] = scale * a * delta[i];
-      tangent[i + 1] = scale * b * delta[i];
-    }
-  }
-  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
-    const start = anchors[seg];
-    const end = anchors[seg + 1];
-    const span = end.x - start.x;
-    for (let x = start.x; x <= end.x; x += 1) {
-      const t = (x - start.x) / span;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + t;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-      lut[x] = clamp(
-        h00 * start.y +
-          h10 * span * tangent[seg] +
-          h01 * end.y +
-          h11 * span * tangent[seg + 1],
-        0,
-        2,
-      );
-    }
-  }
-  return lut;
 }
 
 export function normalizePoint(point: ControlPoint): ControlPoint {
-  return {
-    x: clamp(Math.round(point.x), CURVE_MIN_X, CURVE_MAX_X),
-    y: clamp(point.y, 0, 1),
-  };
+  return normalizePointGeneric(point, 1);
 }
 
 export function normalizeLsPoint(point: ControlPoint): ControlPoint {
-  return {
-    x: clamp(Math.round(point.x), CURVE_MIN_X, CURVE_MAX_X),
-    y: clamp(point.y, 0, 2),
-  };
+  return normalizePointGeneric(point, 2);
 }
 
 export function normalizeInteriorPoint(point: ControlPoint): ControlPoint {
-  return {
-    x: clamp(Math.round(point.x), CURVE_MIN_X + 1, CURVE_MAX_X - 1),
-    y: clamp(point.y, 0, 1),
-  };
+  return normalizeInteriorPointGeneric(point, 1);
 }
 
 export function normalizeLsInteriorPoint(point: ControlPoint): ControlPoint {
-  return {
-    x: clamp(Math.round(point.x), CURVE_MIN_X + 1, CURVE_MAX_X - 1),
-    y: clamp(point.y, 0, 2),
-  };
+  return normalizeInteriorPointGeneric(point, 2);
+}
+
+export function normalizePoints(points: readonly ControlPoint[]): ControlPoint[] {
+  return normalizePointsGeneric(points, normalizePoint, 0);
+}
+
+export function normalizeLsPoints(points: readonly ControlPoint[]): ControlPoint[] {
+  return normalizePointsGeneric(points, normalizeLsPoint, 1);
 }
 
 export function isEndpointPoint(point: ControlPoint) {
   return point.x === CURVE_MIN_X || point.x === CURVE_MAX_X;
 }
 
-export function curvePath(lut: readonly number[]) {
+// --- LUT builders ---
+
+function buildLutGeneric(
+  points: readonly ControlPoint[],
+  normalize: (pts: readonly ControlPoint[]) => ControlPoint[],
+  maxY: number,
+  errorPrefix: string,
+): number[] {
+  const anchors = normalize(points);
+  if (anchors.length < 2) {
+    throw new Error(`${errorPrefix} requires explicit left and right endpoint clamps`);
+  }
+  if (anchors[0]?.x !== CURVE_MIN_X) {
+    throw new Error(`${errorPrefix} must include a left endpoint clamp at x=0`);
+  }
+  if (anchors[anchors.length - 1]?.x !== CURVE_MAX_X) {
+    throw new Error(`${errorPrefix} must include a right endpoint clamp at x=255`);
+  }
+  const lut = new Array<number>(256);
+  const delta = new Array<number>(anchors.length - 1);
+  const tangent = new Array<number>(anchors.length);
+  for (let i = 0; i < anchors.length - 1; i += 1) {
+    const span = anchors[i + 1].x - anchors[i].x;
+    if (span <= 0) {
+      throw new Error(`${errorPrefix} anchors must be strictly increasing`);
+    }
+    delta[i] = (anchors[i + 1].y - anchors[i].y) / span;
+  }
+  tangent[0] = delta[0];
+  tangent[anchors.length - 1] = delta[delta.length - 1];
+  for (let i = 1; i < anchors.length - 1; i += 1) {
+    tangent[i] = delta[i - 1] * delta[i] <= 0 ? 0 : (delta[i - 1] + delta[i]) / 2;
+  }
+  for (let i = 0; i < delta.length; i += 1) {
+    if (delta[i] === 0) {
+      tangent[i] = 0;
+      tangent[i + 1] = 0;
+      continue;
+    }
+    const a = tangent[i] / delta[i];
+    const b = tangent[i + 1] / delta[i];
+    const norm = Math.hypot(a, b);
+    if (norm > 3) {
+      const scale = 3 / norm;
+      tangent[i] = scale * a * delta[i];
+      tangent[i + 1] = scale * b * delta[i];
+    }
+  }
+  for (let seg = 0; seg < anchors.length - 1; seg += 1) {
+    const start = anchors[seg];
+    const end = anchors[seg + 1];
+    const span = end.x - start.x;
+    for (let x = start.x; x <= end.x; x += 1) {
+      const t = (x - start.x) / span;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1;
+      const h10 = t3 - 2 * t2 + t;
+      const h01 = -2 * t3 + 3 * t2;
+      const h11 = t3 - t2;
+      lut[x] = clamp(
+        h00 * start.y +
+          h10 * span * tangent[seg] +
+          h01 * end.y +
+          h11 * span * tangent[seg + 1],
+        0,
+        maxY,
+      );
+    }
+  }
+  return lut;
+}
+
+export function buildLutFromPoints(points: readonly ControlPoint[]): number[] {
+  return buildLutGeneric(points, normalizePoints, 1, "curve");
+}
+
+export function buildLsCurveLutFromPoints(points: readonly ControlPoint[]): number[] {
+  return buildLutGeneric(points, normalizeLsPoints, 2, "ls curve");
+}
+
+// --- SVG path helpers ---
+
+function buildCurvePath(lut: readonly number[], maxY: number) {
   return lut
     .map((value, idx) => {
       const command = idx === 0 ? "M" : "L";
       const x = (idx / 255) * 100;
-      const y = (1 - clamp(value, 0, 1)) * 100;
+      const y = (1 - clamp(value, 0, maxY) / maxY) * 100;
       return `${command} ${x} ${y}`;
     })
     .join(" ");
 }
 
+export function curvePath(lut: readonly number[]) {
+  return buildCurvePath(lut, 1);
+}
+
 export function lsCurvePath(lut: readonly number[]) {
-  return lut
-    .map((value, idx) => {
-      const command = idx === 0 ? "M" : "L";
-      const x = (idx / 255) * 100;
-      const y = (1 - clamp(value, 0, 2) / 2) * 100;
-      return `${command} ${x} ${y}`;
-    })
-    .join(" ");
+  return buildCurvePath(lut, 2);
 }
 
 export function buildLuminanceHistogram(
