@@ -59,7 +59,7 @@ pub use collections::{
 pub use image_loader::{hash_file, load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
-    delete_persisted_library_index, delete_persisted_library_index_item, has_persisted_library_index,
+    delete_persisted_library_index, has_persisted_library_index,
     has_persisted_library_index_by_root, indexed_library_image_for_path,
     is_supported_library_image, library_index_db_path, library_index_root_key,
     load_persisted_library_index, load_persisted_library_index_by_root, picture_display_name,

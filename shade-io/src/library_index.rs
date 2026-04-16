@@ -635,20 +635,6 @@ pub async fn delete_persisted_library_index(
     }
 }
 
-pub async fn delete_persisted_library_index_item(
-    db: &LibraryIndexDb,
-    library_id: &str,
-    path: &str,
-) -> Result<(), String> {
-    let conn = db.conn().await;
-    conn.execute(
-        "DELETE FROM library_index_items WHERE library_id = ?1 AND path = ?2",
-        libsql::params![library_id, path],
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
 
 pub fn library_index_db_path(config_dir: &Path) -> PathBuf {
     config_dir.join("library-index.db")

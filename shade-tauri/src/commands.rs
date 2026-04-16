@@ -5117,9 +5117,10 @@ pub async fn delete_media_library_item<R: tauri::Runtime>(
         let library_id = s3_library_id(source_id);
         let config = resolve_s3_library_config(&library_id)?;
         shade_io::delete_s3_object(&config, &key).await?;
-        shade_io::delete_persisted_library_index_item(library_index_db(), &library_id, &path)
+        _app.state::<crate::S3LibraryScanService>()
+            .0
+            .refresh_library(_app.clone(), &config)
             .await?;
-        let _ = _app.emit("library-scan-complete", &library_id);
         return Ok(());
     }
     #[cfg(any(target_os = "ios", target_os = "android"))]
