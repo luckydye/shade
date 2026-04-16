@@ -422,6 +422,18 @@ impl S3LibraryScanState {
         ))
     }
 
+    pub async fn remove_item(&self, library_id: &str, path: &str) -> Result<(), String> {
+        shade_io::delete_persisted_library_index_item(&self.index_db, library_id, path).await?;
+        if let Ok(scans) = self.scans.lock() {
+            if let Some(snapshot) = scans.get(library_id) {
+                if let Ok(mut guard) = snapshot.lock() {
+                    guard.items.retain(|item| item.path != path);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn remove_library(&self, library_id: &str) -> Result<(), String> {
         self.scans
             .lock()
@@ -5119,8 +5131,9 @@ pub async fn delete_media_library_item<R: tauri::Runtime>(
         shade_io::delete_s3_object(&config, &key).await?;
         _app.state::<crate::S3LibraryScanService>()
             .0
-            .refresh_library(_app.clone(), &config)
+            .remove_item(&library_id, &path)
             .await?;
+        let _ = _app.emit("library-scan-complete", &library_id);
         return Ok(());
     }
     #[cfg(any(target_os = "ios", target_os = "android"))]
