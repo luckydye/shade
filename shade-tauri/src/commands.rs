@@ -1985,7 +1985,7 @@ async fn sync_upload_local<R: tauri::Runtime>(
         );
         let bytes = std::fs::read(local_path).map_err(|e| e.to_string())?;
         let key = s3_upload_object_key(&target, file_name);
-        shade_io::put_s3_object_bytes_with_modified(&target, &key, &bytes, local_file.modified_at).await?;
+        shade_io::put_s3_object_bytes_with_atime(&target, &key, &bytes, local_file.modified_at).await?;
         completed += 1;
     }
     emit_sync_complete(app, library_id, total);
@@ -2249,7 +2249,7 @@ async fn scan_s3_library_into_snapshot<R: tauri::Runtime>(
         let item = shade_io::IndexedLibraryImage {
             name: picture_display_name(&object.key),
             path: shade_io::media_path_for_s3_object(&config.id, &object.key),
-            modified_at: atime?,
+            modified_at: atime?.or(object.modified_at),
             rating: None,
         };
         batch.push(item.clone());
@@ -5005,6 +5005,7 @@ pub async fn upload_media_library_file<R: tauri::Runtime>(
     library_id: String,
     file_name: String,
     bytes: Vec<u8>,
+    modified_at: Option<u64>,
     append_timestamp_on_conflict: bool,
 ) -> Result<(), String> {
     if bytes.is_empty() {
@@ -5025,10 +5026,11 @@ pub async fn upload_media_library_file<R: tauri::Runtime>(
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     if library_id.starts_with("s3:") {
         let config = resolve_s3_library_config(&library_id)?;
-        return shade_io::put_s3_object_bytes(
+        return shade_io::put_s3_object_bytes_with_atime(
             &config,
             &s3_upload_object_key(&config, &file_name),
             &bytes,
+            modified_at,
         )
         .await;
     }
@@ -5111,8 +5113,14 @@ pub async fn delete_media_library_item<R: tauri::Runtime>(
     path: String,
 ) -> Result<(), String> {
     if path.starts_with("s3://") {
-        let (config, key) = resolve_s3_library_for_media_path(&path)?;
-        return shade_io::delete_s3_object(&config, &key).await;
+        let (source_id, key) = shade_io::parse_s3_media_path(&path)?;
+        let library_id = s3_library_id(source_id);
+        let config = resolve_s3_library_config(&library_id)?;
+        shade_io::delete_s3_object(&config, &key).await?;
+        shade_io::delete_persisted_library_index_item(library_index_db(), &library_id, &path)
+            .await?;
+        let _ = _app.emit("library-scan-complete", &library_id);
+        return Ok(());
     }
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {

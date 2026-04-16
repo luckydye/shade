@@ -354,6 +354,46 @@ pub async fn put_s3_object_bytes_with_modified(
     Ok(())
 }
 
+pub async fn put_s3_object_bytes_with_atime(
+    config: &S3LibraryConfig,
+    key: &str,
+    bytes: &[u8],
+    atime: Option<u64>,
+) -> Result<(), String> {
+    let client = http_client()?;
+    let content_sha256 = sha256_hex(bytes);
+    let extra: Vec<(String, String)> = atime
+        .map(|ms| vec![("x-amz-meta-atime".to_string(), ms.to_string())])
+        .unwrap_or_default();
+    let request = signed_request("PUT", config, Some(key), &[], &content_sha256, &extra)?;
+    let mut builder = client
+        .put(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date);
+    for (name, value) in &request.extra_headers {
+        builder = builder.header(name, value);
+    }
+    builder
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .map_err(|error| {
+            format!(
+                "S3 upload request failed for {}: {}",
+                config.endpoint, error
+            )
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            format!(
+                "S3 upload failed for s3://{}/{} at {}: {}",
+                config.bucket, key, config.endpoint, error
+            )
+        })?;
+    Ok(())
+}
+
 pub async fn head_s3_object_modified_at(
     config: &S3LibraryConfig,
     key: &str,
@@ -385,7 +425,11 @@ pub async fn head_s3_object_modified_at(
     let value_str = value
         .to_str()
         .map_err(|error| format!("invalid x-amz-meta-atime header: {error}"))?;
-    Ok(parse_last_modified(Some(value_str)).ok().flatten())
+    value_str
+        .trim()
+        .parse::<u64>()
+        .map(Some)
+        .map_err(|error| format!("invalid x-amz-meta-atime value `{value_str}`: {error}"))
 }
 
 pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(), String> {

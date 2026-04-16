@@ -486,12 +486,6 @@ pub async fn replace_persisted_library_index_by_root(
         )
         .await
         .map_err(|error| error.to_string())?;
-        conn.execute(
-            "DELETE FROM library_index_items WHERE library_id = ?1",
-            [library_id],
-        )
-        .await
-        .map_err(|error| error.to_string())?;
         for item in items {
             let modified_at = item
                 .modified_at
@@ -501,7 +495,11 @@ pub async fn replace_persisted_library_index_by_root(
             let rating = item.rating.map(i64::from);
             conn.execute(
                 "INSERT INTO library_index_items (library_id, path, name, modified_at, rating)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(library_id, path) DO UPDATE SET
+                     name = excluded.name,
+                     modified_at = excluded.modified_at,
+                     rating = COALESCE(library_index_items.rating, excluded.rating)",
                 libsql::params![
                     library_id,
                     item.path.as_str(),
@@ -513,6 +511,18 @@ pub async fn replace_persisted_library_index_by_root(
             .await
             .map_err(|error| error.to_string())?;
         }
+        // Remove items no longer present in the scanned set.
+        let paths_json = serde_json::to_string(
+            &items.iter().map(|i| i.path.as_str()).collect::<Vec<_>>(),
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM library_index_items
+             WHERE library_id = ?1 AND path NOT IN (SELECT value FROM json_each(?2))",
+            libsql::params![library_id, paths_json],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
         Ok::<(), String>(())
     }
     .await;
@@ -623,6 +633,21 @@ pub async fn delete_persisted_library_index(
             Err(error)
         }
     }
+}
+
+pub async fn delete_persisted_library_index_item(
+    db: &LibraryIndexDb,
+    library_id: &str,
+    path: &str,
+) -> Result<(), String> {
+    let conn = db.conn().await;
+    conn.execute(
+        "DELETE FROM library_index_items WHERE library_id = ?1 AND path = ?2",
+        libsql::params![library_id, path],
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn library_index_db_path(config_dir: &Path) -> PathBuf {

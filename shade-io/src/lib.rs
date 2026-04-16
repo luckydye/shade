@@ -59,7 +59,7 @@ pub use collections::{
 pub use image_loader::{hash_file, load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
-    delete_persisted_library_index, has_persisted_library_index,
+    delete_persisted_library_index, delete_persisted_library_index_item, has_persisted_library_index,
     has_persisted_library_index_by_root, indexed_library_image_for_path,
     is_supported_library_image, library_index_db_path, library_index_root_key,
     load_persisted_library_index, load_persisted_library_index_by_root, picture_display_name,
@@ -79,7 +79,7 @@ pub use library_source::{
     library_config_id, list_s3_objects,
     list_s3_objects_page, local_library_id, media_path_for_s3_object,
     normalize_s3_library_input, parse_s3_media_path, peer_library_id,
-    put_s3_object_bytes, put_s3_object_bytes_with_modified,
+    put_s3_object_bytes, put_s3_object_bytes_with_atime, put_s3_object_bytes_with_modified,
     resolve_s3_source_id_from_library_id, s3_library_id,
     AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LibraryMode,
     LocalLibraryConfig, PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry,
@@ -833,13 +833,7 @@ fn linear_srgb_lut_u16() -> &'static [f32; 65536] {
     })
 }
 
-fn develop_raw_image(raw_image: &RawImage) -> Result<DynamicImage> {
-    RawDevelop::default()
-        .develop_intermediate(raw_image)
-        .context("RAW development failed")?
-        .to_dynamic_image()
-        .ok_or_else(|| anyhow!("RAW development produced an invalid image buffer"))
-}
+
 
 fn decoder_color_type_label(color_type: image::ColorType) -> &'static str {
     use image::ColorType::*;
@@ -926,7 +920,7 @@ fn apply_linear_matrix_and_gamma_f32(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_orientation, develop_raw_image, into_linear_float_image, load_image,
+        apply_orientation, into_linear_float_image, load_image,
         load_image_f32_with_info, raw_orientation_to_exif,
     };
     use image::DynamicImage;
@@ -994,7 +988,11 @@ mod tests {
         let decode_duration = decode_start.elapsed();
 
         let develop_start = Instant::now();
-        let developed = develop_raw_image(&raw_image).expect("RAW develop");
+        let developed = RawDevelop::default()
+            .develop_intermediate(&raw_image)
+            .expect("RAW development failed")
+            .to_dynamic_image()
+            .expect("RAW development produced an invalid image buffer");
         let develop_duration = develop_start.elapsed();
 
         let orient_start = Instant::now();

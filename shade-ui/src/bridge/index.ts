@@ -1104,6 +1104,7 @@ export async function uploadMediaLibraryFile(
     libraryId,
     fileName: file.name,
     bytes,
+    modifiedAt: file.lastModified,
     appendTimestampOnConflict,
   });
 }
