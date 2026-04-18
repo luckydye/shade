@@ -425,10 +425,13 @@ pub async fn head_s3_object_modified_at(
     let value_str = value
         .to_str()
         .map_err(|error| format!("invalid x-amz-meta-atime header: {error}"))?;
-    value_str
-        .trim()
-        .parse::<u64>()
-        .map(Some)
+    let trimmed = value_str.trim();
+    if let Ok(ms) = trimmed.parse::<u64>() {
+        return Ok(Some(ms));
+    }
+    // Legacy: atime was stored as RFC 3339 string — convert to ms since epoch
+    DateTime::parse_from_rfc3339(trimmed)
+        .map(|dt| Some(dt.timestamp_millis() as u64))
         .map_err(|error| format!("invalid x-amz-meta-atime value `{value_str}`: {error}"))
 }
 
