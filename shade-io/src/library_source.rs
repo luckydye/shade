@@ -763,3 +763,126 @@ mod tests {
         assert_eq!(canonical, "list-type=2&prefix=raw%20uploads%2F");
     }
 }
+
+fn general_http_client() -> Result<reqwest::Client, String> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    Ok(CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(APP_USER_AGENT)
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .expect("failed to build HTTP client")
+        })
+        .clone())
+}
+
+/// Fetch raw bytes from an arbitrary HTTP(S) URL.
+/// If the response is HTML, extracts the `og:image` meta tag and follows it.
+pub async fn fetch_url_bytes(url: &str) -> Result<(Vec<u8>, String), String> {
+    let client = general_http_client()?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("fetch failed: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("fetch returned status {}", response.status()));
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("failed to read response body: {e}"))?;
+
+    if content_type.contains("text/html") {
+        let html = String::from_utf8_lossy(&bytes);
+        let og_images = extract_og_images(&html);
+        if og_images.is_empty() {
+            return Err(format!("no og:image found in HTML response from {url}"));
+        }
+        let index = parse_img_index(url).unwrap_or(1).max(1) as usize;
+        let og_url = og_images
+            .get(index - 1)
+            .or(og_images.last())
+            .unwrap();
+        return fetch_url_bytes_direct(&client, og_url).await;
+    }
+
+    Ok((bytes.to_vec(), content_type))
+}
+
+async fn fetch_url_bytes_direct(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<(Vec<u8>, String), String> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("fetch failed: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("fetch returned status {}", response.status()));
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("failed to read response body: {e}"))?;
+    Ok((bytes.to_vec(), content_type))
+}
+
+fn extract_og_images(html: &str) -> Vec<String> {
+    // Collect all <meta property="og:image" content="..."> values.
+    // Handles both quote styles and varying attribute order.
+    let lower = html.to_lowercase();
+    let mut results = Vec::new();
+    let mut search_from = 0;
+    while let Some(rel) = lower[search_from..].find("og:image") {
+        let pos = search_from + rel;
+        let Some(tag_start) = lower[..pos].rfind('<') else {
+            break;
+        };
+        let Some(rel_end) = lower[pos..].find('>') else {
+            break;
+        };
+        let tag_end = pos + rel_end;
+        let tag = &html[tag_start..=tag_end];
+        if let Some(content_pos) = tag.to_lowercase().find("content=") {
+            let after_eq = &tag[content_pos + 8..];
+            if let Some(quote) = after_eq.chars().next() {
+                if quote == '"' || quote == '\'' {
+                    if let Some(end) = after_eq[1..].find(quote) {
+                        let url = after_eq[1..1 + end].replace("&amp;", "&");
+                        if !url.is_empty() {
+                            results.push(url);
+                        }
+                    }
+                }
+            }
+        }
+        search_from = tag_end + 1;
+    }
+    results
+}
+
+fn parse_img_index(url: &str) -> Option<u32> {
+    let query = url.split('?').nth(1)?;
+    for pair in query.split('&') {
+        let mut kv = pair.splitn(2, '=');
+        if kv.next()? == "img_index" {
+            return kv.next()?.parse().ok();
+        }
+    }
+    None
+}

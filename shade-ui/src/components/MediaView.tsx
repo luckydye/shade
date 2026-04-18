@@ -46,6 +46,7 @@ import {
   syncLibrary,
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
+  uploadMediaLibraryUrl,
 } from "../bridge/index";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
@@ -88,6 +89,10 @@ import {
   type UploadDragFeedback,
   type UploadProgress,
 } from "./media-view/media-utils";
+import {
+  filenameFromUrl,
+  transformImageUrl,
+} from "./media-view/url-transformers";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -1269,11 +1274,44 @@ export const MediaView: Component = () => {
       setError(toErrorMessage(error));
       return;
     }
-    if (files.length === 0) {
+    if (files.length > 0) {
+      event.preventDefault();
+      void handleUploadLibraryFiles(files, true);
       return;
     }
+    const text = event.clipboardData?.getData("text/plain")?.trim();
+    if (!text) return;
+    const imageUrl = transformImageUrl(text);
+    if (!imageUrl) return;
     event.preventDefault();
-    void handleUploadLibraryFiles(files, true);
+    void handleUploadFromUrl(imageUrl, text);
+  }
+
+  async function handleUploadFromUrl(fetchUrl: string, originalUrl: string) {
+    const library = selectedLibrary();
+    if (!library || !libraryIsWritable(library)) return;
+    if (isSubmitting()) {
+      setError("media library operation already in progress");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    const fileName = filenameFromUrl(originalUrl);
+    setUploadProgress({ phase: "uploading", totalFiles: 1, completedFiles: 0, currentFileName: fileName });
+    try {
+      await uploadMediaLibraryUrl(library.id, fetchUrl, fileName);
+      setUploadProgress({ phase: "refreshing", totalFiles: 1, completedFiles: 1, currentFileName: null });
+      if (isS3Library(library)) {
+        await refreshLibraryIndex(library.id);
+      }
+      await refetchCachedLibraryItems();
+      await refetchItems();
+    } catch (error) {
+      setError(toErrorMessage(error));
+    } finally {
+      setUploadProgress(null);
+      setIsSubmitting(false);
+    }
   }
 
   function toggleMediaSelection(itemId: string) {

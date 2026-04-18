@@ -1090,6 +1090,18 @@ export async function addS3MediaLibrary(
   return inv("add_s3_media_library", { params }) as Promise<MediaLibrary>;
 }
 
+export async function uploadMediaLibraryUrl(
+  libraryId: string,
+  url: string,
+  fileName: string,
+): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("URL image uploads are only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  await inv("upload_media_library_url", { libraryId, url, fileName });
+}
+
 export async function uploadMediaLibraryFile(
   libraryId: string,
   file: File,

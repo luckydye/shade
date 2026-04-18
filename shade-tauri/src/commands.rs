@@ -685,7 +685,7 @@ fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
                     shade_lib::MaskParams::Brush {
                         width: data.width,
                         height: data.height,
-                        pixels: data.pixels.clone(),
+                        pixels: data.pixels.to_vec(),
                     }
                 }
                 _ => params.clone(),
@@ -754,7 +754,7 @@ fn restore_masks_from_params(
             } => shade_lib::MaskData {
                 width: *bw,
                 height: *bh,
-                pixels: pixels.clone(),
+                pixels: pixels.clone().into(),
             },
         };
         stack.set_mask_with_params(i, mask, params.clone());
@@ -5055,6 +5055,63 @@ pub async fn upload_media_library_file<R: tauri::Runtime>(
             &library_root,
             &file_name,
             append_timestamp_on_conflict,
+        )?;
+        let mut file = std::fs::File::options()
+            .create_new(true)
+            .write(true)
+            .open(&target_path)
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = file.write_all(&bytes) {
+            let _ = std::fs::remove_file(&target_path);
+            return Err(error.to_string());
+        }
+        refresh_desktop_local_library(&_app, &library_id, library_root).await
+    }
+}
+
+#[tauri::command]
+pub async fn upload_media_library_url<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    library_id: String,
+    url: String,
+    file_name: String,
+) -> Result<(), String> {
+    let (bytes, _content_type) = shade_io::fetch_url_bytes(&url).await?;
+    if bytes.is_empty() {
+        return Err(format!("fetched image is empty: {url}"));
+    }
+    let file_name = normalize_upload_file_name(&file_name)?;
+    if !shade_io::is_supported_library_image(Path::new(&file_name)) {
+        return Err(format!("unsupported image upload: {file_name}"));
+    }
+
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = _app;
+        return Err(format!(
+            "image uploads are not supported for media library: {library_id}"
+        ));
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    if library_id.starts_with("s3:") {
+        let config = resolve_s3_library_config(&library_id)?;
+        return shade_io::put_s3_object_bytes(
+            &config,
+            &s3_upload_object_key(&config, &file_name),
+            &bytes,
+        )
+        .await;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let library_root =
+            require_local_library_path(resolve_desktop_library_path(&library_id)?)?;
+        let target_path = local_upload_target_path_with_conflict_policy(
+            &library_root,
+            &file_name,
+            true,
         )?;
         let mut file = std::fs::File::options()
             .create_new(true)
