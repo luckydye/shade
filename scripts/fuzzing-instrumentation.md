@@ -43,6 +43,7 @@ Compare based on:
 - process memory
 - queue job timings
 - error counts
+- CDP profiler and trace output where browser runtime supports it
 
 ### Tier 2: Gray-Box Source-Visible
 
@@ -113,6 +114,8 @@ Recommended:
 - render latency
 - queue latency
 - long task count
+- CPU profile hotspots
+- self time or total time by script or function where profiler exposes it
 
 Examples:
 
@@ -120,6 +123,8 @@ Examples:
 - `fuzz.step.duration`
 - `fuzz.surface.request.duration`
 - `fuzz.surface.job.duration`
+- `fuzz.runtime.profile.total_time`
+- `fuzz.runtime.profile.top_function.self_time`
 
 ## 3. Resource Metrics
 
@@ -423,6 +428,76 @@ Examples:
 
 These help correlate metric spikes to exact actions.
 
+## CDP Profiler and Trace Metrics
+
+For browser-based targets, Chrome DevTools Protocol profiling can add useful comparison signals that basic timing and memory metrics miss.
+
+Useful sources:
+
+- `agent-browser profiler start <path>`
+- `agent-browser profiler stop`
+- `agent-browser trace start <path>`
+- `agent-browser trace stop`
+
+These are helpful for:
+
+- CPU-bound regressions
+- hot function attribution
+- long task bursts
+- unexpected script work during idle
+- render pipeline cost spikes
+
+Recommended derived metrics:
+
+- total sampled profile time
+- top functions by self time
+- top functions by total time
+- total time under specific script URL
+- long task count from trace
+- total long task time from trace
+
+Example metric names:
+
+- `fuzz.runtime.profile.total_time`
+- `fuzz.runtime.profile.top_function.self_time`
+- `fuzz.runtime.trace.long_task.count`
+- `fuzz.runtime.trace.long_task.total_time`
+
+Profiler output should be stored as raw artifacts first and normalized metrics second.
+
+Recommended artifact set:
+
+- raw `.cpuprofile`
+- raw trace file
+- derived summary JSON
+- derived JSONL metrics
+
+Example derived record:
+
+```json
+{
+  "metric": "fuzz.runtime.profile.top_function.self_time",
+  "unit": "ms",
+  "value": 1842,
+  "story_id": "story.upload_process_export",
+  "surface_id": "surface.ui.editor",
+  "step_id": "step.adjust_exposure",
+  "phase": "during_drag",
+  "runtime": "chrome",
+  "function_name": "renderPreview",
+  "script_url": "http://localhost:4173/assets/editor.js"
+}
+```
+
+Use profiler-derived metrics when:
+
+- memory spike exists but root cause unclear
+- latency regressed without obvious network delta
+- CPU saturation is suspected
+- same story passes functionally but feels slower
+
+Do not use profiler metrics alone for pass or fail. Use them as explanatory and comparative signals alongside reliability, latency, and memory metrics.
+
 ## App-Specific Instrumentation
 
 Optional only.
@@ -454,6 +529,7 @@ artifacts/
     telemetry.jsonl
     aggregates.json
     comparison.json
+    profiles/
     screenshots/
     traces/
     logs/
@@ -517,6 +593,7 @@ Recommended sections:
 - new error signatures
 - memory regressions
 - latency regressions
+- CPU hotspot regressions
 - failed stories
 - links to artifacts
 
