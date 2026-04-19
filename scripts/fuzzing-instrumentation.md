@@ -1,40 +1,76 @@
-# Fuzzing Instrumentation and Run Comparison
+# Generic Fuzzing Instrumentation and Run Comparison
 
-This document defines instrumentation needed to compare fuzzing test runs at metric level across builds, branches, environments, and time.
+This document defines instrumentation needed to compare fuzzing runs at metric level across builds, branches, environments, and system types.
 
-The goal is not only to find crashes. The goal is to detect regressions in:
+It must support:
 
-- reliability
-- performance
-- memory
-- rendering
-- feature-specific behavior
+- web applications
+- APIs
+- CLI tools
+- background workers
+- scheduled jobs
+- mixed frontend and backend systems
+
+The instrumentation layer must not require app code changes. Black-box runtime metrics are baseline. Source-aware and app-defined metrics are optional improvements.
 
 ## Goals
 
 - collect stable machine-readable metrics during every run
 - preserve enough context to compare runs fairly
-- aggregate noisy raw points into useful summaries
+- aggregate noisy points into useful summaries
 - classify deltas as improvement, neutral change, or regression
-- make every regression traceable back to story, feature, step, and fixture
+- make every regression traceable back to story, feature, surface, step, and fixture
 
-## Core Principles
+## Capability Tiers
 
-- Raw metrics first. Derived summaries second.
-- Every metric needs dimensions.
-- Compare like with like only.
-- Use baselines from multiple runs, not single run.
-- Separate cold and warm cache runs.
-- Keep measurement source explicit.
+### Tier 0: Artifact-Only
+
+Compare based on:
+
+- logs
+- screenshots
+- traces
+- specs
+- generated artifacts
+
+### Tier 1: Black-Box Runtime
+
+Compare based on:
+
+- browser telemetry
+- HTTP latency
+- CLI duration
+- process memory
+- queue job timings
+- error counts
+
+### Tier 2: Gray-Box Source-Visible
+
+Add source-aware scoping:
+
+- feature id
+- surface id
+- handler id
+- command id
+- job type
+
+### Tier 3: White-Box Instrumented
+
+Optional custom metrics:
+
+- internal cache hits
+- queue depth
+- worker stage durations
+- render pipeline timings
 
 ## Instrumentation Pipeline
 
-Implement this pipeline:
+Implement:
 
 1. collect raw metrics
 2. normalize metric dimensions
 3. persist raw JSONL
-4. aggregate per story, feature, and step
+4. aggregate per story, feature, surface, and step
 5. compare against baseline
 6. classify deltas
 7. generate report
@@ -45,101 +81,82 @@ Split metrics into four groups.
 
 ## 1. Reliability Metrics
 
-Track whether system still works.
-
-Recommended metrics:
+Recommended:
 
 - story completion rate
 - step completion rate
 - assertion pass rate
-- console error count
-- uncaught exception count
-- failed network request count
+- error count
 - timeout count
 - retry count
 - crash count
-- page reload count
+- failed request count
+- failed command count
+- failed job count
 
 Examples:
 
 - `fuzz.story.success`
 - `fuzz.step.failure_count`
-- `fuzz.browser.console_error_count`
-- `fuzz.browser.request_failure_count`
+- `fuzz.runtime.error_count`
 
 ## 2. Performance Metrics
 
-Track whether system got slower.
-
-Recommended metrics:
+Recommended:
 
 - story duration
 - step duration
 - feature duration
 - request latency
-- time to first usable UI
-- time to interactive
+- command duration
+- job duration
 - render latency
+- queue latency
 - long task count
-- dropped frame count
-- layout shift if relevant
 
 Examples:
 
 - `fuzz.story.duration`
 - `fuzz.step.duration`
-- `fuzz.feature.duration`
-- `fuzz.browser.long_task_count`
+- `fuzz.surface.request.duration`
+- `fuzz.surface.job.duration`
 
 ## 3. Resource Metrics
 
-Track memory and related resource growth.
-
-Recommended metrics:
+Recommended:
 
 - browser process memory
 - renderer process memory
 - GPU process memory
+- server process memory
+- worker process memory
 - peak memory
 - memory after idle
 - storage growth
-- network bytes sent
-- network bytes received
-- object URL count if app exposes it
-- WebGL or WebGPU resource counts if app exposes them
+- network bytes sent and received
+- file descriptor count if available
 
 Examples:
 
-- `fuzz.browser.gpu.physical_footprint`
-- `fuzz.browser.renderer.rss`
-- `fuzz.browser.storage.bytes`
-- `fuzz.browser.network.received_bytes`
+- `fuzz.runtime.gpu.physical_footprint`
+- `fuzz.runtime.process.rss`
+- `fuzz.runtime.network.received_bytes`
 
-## 4. Feature-Specific Metrics
+## 4. Domain or Feature Metrics
 
-Track behavior that only makes sense for app domain.
-
-Examples:
+Recommended:
 
 - upload throughput
 - search latency
-- filter apply latency
 - export duration
+- import row failure count
 - preview render time
 - cache hit rate
-- autosave interval
-- sync roundtrip latency
-- image decode latency
-
-Examples:
-
-- `fuzz.feature.upload.duration`
-- `fuzz.feature.preview.render_duration`
-- `fuzz.feature.export.duration`
+- queue retry count
 
 ## Metric Dimensions
 
-Every metric point must carry enough dimensions to make comparisons fair.
+Every metric point must carry enough dimensions for fair comparison.
 
 Minimum dimensions:
 
@@ -147,6 +164,7 @@ Minimum dimensions:
 - `suite_id`
 - `story_id`
 - `feature_id`
+- `surface_id`
 - `step_id`
 - `mutation_id`
 - `fixture_id`
@@ -155,8 +173,8 @@ Minimum dimensions:
 - `commit_sha`
 - `branch`
 - `environment`
-- `browser`
-- `browser_version`
+- `runtime`
+- `runtime_version`
 - `os`
 - `device_profile`
 - `cache_mode`
@@ -168,31 +186,28 @@ Useful optional dimensions:
 - `user_role`
 - `network_profile`
 - `render_backend`
-- `screen_id`
-
-Without dimensions, comparisons become invalid fast.
+- `job_type`
+- `command_name`
 
 ## Metric Model
 
 Use machine-readable JSONL. OTel-style JSONL works well because:
 
-- easy to append
-- easy to stream
+- append-friendly
+- stream-friendly
 - easy to aggregate
-- maps well to external systems later
+- easy to export later
 
-Each line should represent one observation batch.
+Use metric types:
 
-Recommended metric types:
+- `gauge`
+- `histogram`
+- `sum`
 
-- gauge
-- histogram
-- sum
+Guidelines:
 
-Use:
-
-- `gauge` for memory and current resource values
-- `histogram` for durations and latency distributions
+- `gauge` for memory or current resource values
+- `histogram` for durations and latency
 - `sum` for counts and totals
 
 ## Example OTel-Style JSONL
@@ -206,7 +221,7 @@ Use:
           { "key": "service.name", "value": { "stringValue": "fuzz-runner" } },
           { "key": "run_id", "value": { "stringValue": "run-2026-04-19-001" } },
           { "key": "commit_sha", "value": { "stringValue": "abc123" } },
-          { "key": "browser", "value": { "stringValue": "chrome" } }
+          { "key": "runtime", "value": { "stringValue": "chrome" } }
         ]
       },
       "scopeMetrics": [
@@ -217,13 +232,14 @@ Use:
           },
           "metrics": [
             {
-              "name": "fuzz.browser.gpu.physical_footprint",
+              "name": "fuzz.runtime.gpu.physical_footprint",
               "unit": "By",
               "gauge": {
                 "dataPoints": [
                   {
                     "attributes": [
-                      { "key": "story_id", "value": { "stringValue": "story.upload_edit_export" } },
+                      { "key": "story_id", "value": { "stringValue": "story.upload_process_export" } },
+                      { "key": "surface_id", "value": { "stringValue": "surface.ui.editor" } },
                       { "key": "step_id", "value": { "stringValue": "step.adjust_exposure" } },
                       { "key": "fixture_id", "value": { "stringValue": "raw-large-01" } },
                       { "key": "phase", "value": { "stringValue": "during_drag" } }
@@ -245,7 +261,7 @@ Use:
 
 ## Required Run Context
 
-Persist one run metadata file per run.
+Persist one metadata file per run.
 
 It should include:
 
@@ -253,73 +269,61 @@ It should include:
 - timestamp
 - git commit
 - branch
-- browser version
+- runtime and version
 - OS version
 - machine or device class
-- viewport
 - cache mode
 - feature flags
 - fixture set
 - suite config
 
-This metadata lets you reject bad comparisons later.
-
 ## Baseline Strategy
 
-Never compare against one single run.
+Never compare against one run only.
 
 Use:
 
-- rolling baseline for same branch
-- stable baseline for release branch
-- golden baseline from pinned machine if available
+- rolling baseline for branch
+- stable baseline for release
+- golden baseline for pinned lab machine if possible
 
 Recommended sample counts:
 
-- `10` runs minimum for cheap low-noise stories
-- `20+` runs for noisy performance or memory stories
+- `10` minimum for low-noise flows
+- `20+` for memory or performance-sensitive flows
 
-Store:
+Store baselines:
 
-- per-story baseline
-- per-step baseline
-- per-fixture baseline
+- per story
+- per step
+- per fixture
+- per runtime profile
 
 ## Noise Control Rules
 
-To reduce fake regressions:
-
-- pin browser version
-- pin viewport and device profile
+- pin runtime version
 - pin fixtures
-- pin network conditions
-- separate cold-cache and warm-cache suites
-- warm up app before measured runs if needed
-- discard first run when cache hydration dominates
+- pin network profile
+- separate cold and warm cache suites
+- warm up once before measured runs when needed
 - compare only same story plus same mutation plus same fixture
+- keep machine class stable
 
 ## Comparison Model
 
-Comparison should produce three artifact layers:
+Comparison should produce:
 
 1. raw metrics
 2. aggregates
 3. comparison report
 
-### 1. Raw Metrics
+### Raw Metrics
 
-Store exact emitted points.
+Store exact emitted points plus run metadata.
 
-Examples:
+### Aggregates
 
-- `telemetry.jsonl`
-- `run-metadata.json`
-
-### 2. Aggregates
-
-Aggregate by metric name and scope.
-
-Useful aggregate fields:
+Compute:
 
 - `count`
 - `min`
@@ -336,21 +340,23 @@ Aggregate scopes:
 - run-wide
 - story-wide
 - feature-wide
+- surface-wide
 - step-wide
 - story plus fixture
 - step plus mutation
 
-### 3. Comparison Report
+### Comparison Report
 
 Compare candidate aggregates against baseline aggregates.
 
-Recommended report record:
+Example:
 
 ```json
 {
-  "metric": "fuzz.browser.gpu.physical_footprint",
+  "metric": "fuzz.runtime.gpu.physical_footprint",
   "scope": {
-    "story_id": "story.upload_edit_export",
+    "story_id": "story.upload_process_export",
+    "surface_id": "surface.ui.editor",
     "step_id": "step.adjust_exposure",
     "fixture_id": "raw-large-01"
   },
@@ -377,41 +383,32 @@ Recommended report record:
 }
 ```
 
-## Comparison Rules
+## Threshold Rules
 
-Use rule per metric class. One threshold does not fit all metrics.
+Use rule per metric class.
 
-### Latency Rules
-
-Typical rule:
+### Latency
 
 - regression if `candidate_p95 > baseline_p95 * 1.3`
-- and absolute delta > `100ms`
+- and absolute delta exceeds fixed floor
 
-### Memory Rules
-
-Typical rule:
+### Memory
 
 - regression if `candidate_peak > baseline_peak * 1.5`
-- and absolute delta > `256MiB`
+- and absolute delta exceeds fixed floor
 
-### Failure Rules
+### Reliability
 
-Typical rule:
-
-- regression if failure rate increases beyond tolerance
+- regression if success rate drops past tolerance
 - regression if new error signature appears
-- regression if story success rate drops below threshold
 
-### Count Rules
+### Count Metrics
 
-Typical rule:
+- regression if errors, retries, or failures rise beyond stable variance
 
-- regression if console errors or failed requests increase beyond stable baseline variance
+## Event Records
 
-## Event Classification
-
-Every story run should emit event-style records too, not only metrics.
+Emit event-style records too.
 
 Examples:
 
@@ -424,13 +421,13 @@ Examples:
 - timeout triggered
 - crash detected
 
-These events help correlate metric spikes to user actions.
+These help correlate metric spikes to exact actions.
 
 ## App-Specific Instrumentation
 
-Generic browser metrics are not enough for deep comparisons. Add app hooks when possible.
+Optional only.
 
-Good app-specific events:
+Useful custom events:
 
 - `feature:start`
 - `feature:end`
@@ -440,39 +437,15 @@ Good app-specific events:
 - `job:end`
 - `cache:hit`
 - `cache:miss`
-- `worker:start`
-- `worker:end`
 
-Possible transport options:
+Possible transports:
 
 - `window.__fuzzMetrics.push(...)`
-- `console.info` with structured prefix
-- custom DOM events
+- structured console logs
+- custom events
 - direct OTel exporter
 
-## Execution Signals To Capture
-
-During browser execution, collect:
-
-- console logs
-- uncaught exceptions
-- page errors
-- request failures
-- response codes
-- screenshots
-- traces
-- performance entries
-- process memory probes
-
-For desktop and browser-process comparison, also collect:
-
-- `ps` output where useful
-- `vmmap -summary` on macOS
-- browser task-manager-equivalent if accessible
-
-## Suggested Output Files Per Run
-
-Store run artifacts like this:
+## Suggested Output Layout
 
 ```text
 artifacts/
@@ -488,53 +461,44 @@ artifacts/
 
 ## Aggregation Steps
 
-Implement aggregator in this order:
-
 1. read JSONL
 2. flatten OTel metric points
-3. group by:
-   - metric name
-   - story id
-   - step id
-   - fixture id
-   - mutation id
+3. group by metric plus scope
 4. compute summary statistics
-5. write `aggregates.json`
+5. write aggregates
 
-Flattened record should look like:
+Flattened record example:
 
 ```json
 {
-  "metric": "fuzz.browser.gpu.physical_footprint",
+  "metric": "fuzz.runtime.gpu.physical_footprint",
   "unit": "By",
   "value": 10737418240,
-  "story_id": "story.upload_edit_export",
+  "story_id": "story.upload_process_export",
+  "surface_id": "surface.ui.editor",
   "step_id": "step.adjust_exposure",
   "fixture_id": "raw-large-01",
   "phase": "during_drag",
   "run_id": "run-2026-04-19-001",
-  "browser": "chrome"
+  "runtime": "chrome"
 }
 ```
 
 ## Comparison Steps
 
-Implement comparator in this order:
-
 1. load candidate aggregates
 2. load baseline aggregates
-3. match records by metric plus scope
+3. match by metric plus scope
 4. compute absolute and percent deltas
 5. evaluate threshold rules
 6. emit report
 
-Reject comparison if:
+Reject comparison if incompatible:
 
-- browser version mismatches and run is version-sensitive
-- fixture set mismatches
-- story ids mismatch
+- runtime version mismatch for sensitive suites
+- fixture mismatch
 - cache mode mismatch
-- environment mismatches in incompatible way
+- environment mismatch
 
 ## Reporting Requirements
 
@@ -542,42 +506,21 @@ Every report should answer:
 
 - what regressed
 - by how much
-- under which story and step
+- under which story, surface, and step
 - with which fixture and mutation
 - whether regression is new or recurring
 - where raw evidence lives
 
-Recommended report sections:
+Recommended sections:
 
 - top regressions by severity
 - new error signatures
 - memory regressions
 - latency regressions
 - failed stories
-- links to raw artifacts
-
-## Suggested Severity Model
-
-Use clear severity levels:
-
-- `critical`
-  - crash
-  - data corruption
-  - memory explosion
-  - total story failure
-- `high`
-  - large performance regression
-  - consistent feature failure
-- `medium`
-  - noisy but repeated regression
-  - partial workflow failure
-- `low`
-  - minor slowdown
-  - non-blocking console noise
+- links to artifacts
 
 ## Implementation Plan
-
-If starting from zero, build in this order:
 
 1. define metric naming rules
 2. define required dimensions
@@ -589,16 +532,6 @@ If starting from zero, build in this order:
 8. implement comparator
 9. implement report renderer
 
-## Practical Rules
-
-- Keep metric names stable once published.
-- Do not change units silently.
-- Use bytes for memory.
-- Use milliseconds or nanoseconds consistently.
-- Record measurement source for non-browser metrics.
-- Treat warm and cold runs as separate suites.
-- Prefer repeated small deterministic runs over one giant noisy run.
-
 ## Deliverables
 
 A solid instrumentation layer should produce:
@@ -607,6 +540,6 @@ A solid instrumentation layer should produce:
 - run metadata
 - aggregated summaries
 - comparison report
-- artifact links for screenshots, traces, and logs
+- links to traces, screenshots, logs, and raw samples
 
-That is enough to make fuzzing runs comparable over time instead of isolated one-off sessions.
+That is enough to make fuzzing runs comparable across time and across system types, not only one-off debugging sessions.
