@@ -410,7 +410,7 @@ pub struct MaskData {
     pub width: u32,
     pub height: u32,
     /// R8 data (one byte per pixel, 0=transparent, 255=opaque)
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
 }
 
 impl MaskData {
@@ -418,7 +418,7 @@ impl MaskData {
         Self {
             width,
             height,
-            pixels: vec![255u8; (width * height) as usize],
+            pixels: vec![255u8; (width * height) as usize].into(),
         }
     }
 
@@ -426,7 +426,7 @@ impl MaskData {
         Self {
             width,
             height,
-            pixels: vec![0u8; (width * height) as usize],
+            pixels: vec![0u8; (width * height) as usize].into(),
         }
     }
 
@@ -437,13 +437,14 @@ impl MaskData {
         let dy = y2 - y1;
         let len_sq = dx * dx + dy * dy;
         assert!(len_sq > 0.0, "gradient start and end must differ");
+        let pixels = Arc::make_mut(&mut self.pixels);
         for row in 0..self.height {
             for col in 0..self.width {
                 let px = col as f32 + 0.5;
                 let py = row as f32 + 0.5;
                 let t = ((px - x1) * dx + (py - y1) * dy) / len_sq;
                 let t = t.clamp(0.0, 1.0);
-                self.pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
+                pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
             }
         }
     }
@@ -452,13 +453,14 @@ impl MaskData {
     /// Center is 255, edge (at radius) is 0.
     pub fn fill_radial_gradient(&mut self, cx: f32, cy: f32, radius: f32) {
         assert!(radius > 0.0, "gradient radius must be positive");
+        let pixels = Arc::make_mut(&mut self.pixels);
         for row in 0..self.height {
             for col in 0..self.width {
                 let px = col as f32 + 0.5;
                 let py = row as f32 + 0.5;
                 let dist = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
                 let t = (1.0 - dist / radius).clamp(0.0, 1.0);
-                self.pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
+                pixels[(row * self.width + col) as usize] = (t * 255.0) as u8;
             }
         }
     }
@@ -483,25 +485,34 @@ impl MaskData {
         let col_max = (cx as i32 + r_ceil).min(w - 1);
         let row_min = (cy as i32 - r_ceil).max(0);
         let row_max = (cy as i32 + r_ceil).min(h - 1);
+        let radius_sq = radius * radius;
+        let hard_edge = 1.0 - softness.clamp(0.0, 1.0);
+        let hard_radius = radius * hard_edge;
+        let hard_radius_sq = hard_radius * hard_radius;
+        let soft_span = (radius - hard_radius).max(f32::EPSILON);
+        let pixels = Arc::make_mut(&mut self.pixels);
         for row in row_min..=row_max {
+            let row_offset = (row * w) as usize;
             for col in col_min..=col_max {
                 let dx = col as f32 + 0.5 - cx;
                 let dy = row as f32 + 0.5 - cy;
-                let dist = (dx * dx + dy * dy).sqrt();
-                let t = (dist / radius).clamp(0.0, 1.0);
-                let hard_edge = 1.0 - softness.clamp(0.0, 1.0);
-                let alpha = if t <= hard_edge {
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > radius_sq {
+                    continue;
+                }
+                let alpha = if dist_sq <= hard_radius_sq {
                     1.0_f32
                 } else {
-                    let s = (t - hard_edge) / (1.0 - hard_edge + f32::EPSILON);
+                    let dist = dist_sq.sqrt();
+                    let s = (dist - hard_radius) / soft_span;
                     0.5 * (1.0 + (std::f32::consts::PI * s).cos())
                 };
-                let idx = (row * w + col) as usize;
+                let idx = row_offset + col as usize;
                 if erase {
                     let floor = ((1.0 - alpha) * 255.0) as u8;
-                    self.pixels[idx] = self.pixels[idx].min(floor);
+                    pixels[idx] = pixels[idx].min(floor);
                 } else {
-                    self.pixels[idx] = self.pixels[idx].max((alpha * 255.0) as u8);
+                    pixels[idx] = pixels[idx].max((alpha * 255.0) as u8);
                 }
             }
         }

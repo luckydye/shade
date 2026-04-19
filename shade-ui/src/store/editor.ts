@@ -53,6 +53,7 @@ export {
   updateCropDraft,
   deleteLayer,
   moveLayer,
+  flushDeferredHistorySnapshot,
 } from "./editor-layers";
 
 export {

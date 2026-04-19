@@ -234,7 +234,7 @@ impl CompositePipeline {
     }
 }
 
-/// Create a 1×1 Rgba8Unorm texture with all pixels set to white (used as a dummy mask).
+/// Create a 1×1 R8Unorm texture with all pixels set to white (used as a dummy mask).
 fn create_white_mask_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Texture {
     let tex = device.create_texture(&TextureDescriptor {
         label: Some("dummy white mask"),
@@ -246,7 +246,7 @@ fn create_white_mask_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Text
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
+        format: TextureFormat::R8Unorm,
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -258,10 +258,10 @@ fn create_white_mask_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Text
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &[255u8, 255u8, 255u8, 255u8],
+        &[255u8],
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(4),
+            bytes_per_row: Some(1),
             rows_per_image: Some(1),
         },
         Extent3d {
@@ -274,9 +274,7 @@ fn create_white_mask_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Text
     tex
 }
 
-/// Create a mask texture (Rgba8Unorm) from R8 pixel data.
-/// The input `r8_pixels` has one byte per pixel; it is expanded to RGBA
-/// with the value in the R channel and G=B=0, A=255.
+/// Create a mask texture (R8Unorm) from R8 pixel data.
 pub fn upload_mask_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -284,15 +282,6 @@ pub fn upload_mask_texture(
     width: u32,
     height: u32,
 ) -> Texture {
-    // Expand R8 → RGBA8 (R=value, G=0, B=0, A=255)
-    let mut rgba: Vec<u8> = Vec::with_capacity((width * height * 4) as usize);
-    for &v in r8_pixels {
-        rgba.push(v);
-        rgba.push(0);
-        rgba.push(0);
-        rgba.push(255);
-    }
-
     let tex = device.create_texture(&TextureDescriptor {
         label: Some("mask texture"),
         size: Extent3d {
@@ -303,7 +292,7 @@ pub fn upload_mask_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
+        format: TextureFormat::R8Unorm,
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -315,10 +304,10 @@ pub fn upload_mask_texture(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &rgba,
+        r8_pixels,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(width * 4),
+            bytes_per_row: Some(width),
             rows_per_image: Some(height),
         },
         Extent3d {

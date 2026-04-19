@@ -2,8 +2,8 @@ use anyhow::Result;
 use futures_channel::oneshot;
 use half::f16;
 use shade_lib::{
-    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, Layer, LayerStack, TextureId,
-    ToneParams,
+    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, HslParams,
+    Layer, LayerStack, TextureId, ToneParams,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -110,6 +110,10 @@ impl Renderer {
             color_transform_pipeline,
             readback_buffer_pool: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn clear_image_cache(&self) {
+        self.texture_cache.clear();
     }
 
     /// Apply tone adjustments to raw RGBA8 pixels and return the processed RGBA8 result.
@@ -470,6 +474,11 @@ impl Renderer {
         for (idx, entry) in stack.layers.iter().enumerate() {
             if !entry.visible {
                 continue;
+            }
+            if let Layer::Adjustment { ops } = &entry.layer {
+                if ops.iter().all(is_noop_adjustment_op) {
+                    continue;
+                }
             }
 
             let current_accum = accum_owned.last().unwrap();
@@ -1186,19 +1195,67 @@ fn resample_mask_region(
     target_height: u32,
     crop: &PreviewCrop,
 ) -> Vec<u8> {
+    let x_map: Vec<_> = (0..target_width)
+        .map(|x| {
+            sample_position(x, target_width, crop.x, crop.width, source_width)
+                .round()
+                .clamp(0.0, (source_width - 1) as f32) as usize
+        })
+        .collect();
+    let y_map: Vec<_> = (0..target_height)
+        .map(|y| {
+            sample_position(y, target_height, crop.y, crop.height, source_height)
+                .round()
+                .clamp(0.0, (source_height - 1) as f32) as usize
+                * source_width as usize
+        })
+        .collect();
     let mut output = vec![0u8; (target_width * target_height) as usize];
-    for y in 0..target_height {
-        let src_y = sample_position(y, target_height, crop.y, crop.height, source_height);
-        let y0 = src_y.round().clamp(0.0, (source_height - 1) as f32) as u32;
-        for x in 0..target_width {
-            let src_x =
-                sample_position(x, target_width, crop.x, crop.width, source_width);
-            let x0 = src_x.round().clamp(0.0, (source_width - 1) as f32) as u32;
-            output[(y * target_width + x) as usize] =
-                pixels[(y0 * source_width + x0) as usize];
+    for (y, src_row) in y_map.into_iter().enumerate() {
+        let out_row = y * target_width as usize;
+        for (x, src_x) in x_map.iter().copied().enumerate() {
+            output[out_row + x] = pixels[src_row + src_x];
         }
     }
     output
+}
+
+fn is_noop_adjustment_op(op: &AdjustmentOp) -> bool {
+    match op {
+        AdjustmentOp::Tone {
+            exposure,
+            contrast,
+            blacks,
+            whites,
+            highlights,
+            shadows,
+            gamma,
+        } => {
+            *exposure == 0.0
+                && *contrast == 0.0
+                && *blacks == 0.0
+                && *whites == 0.0
+                && *highlights == 0.0
+                && *shadows == 0.0
+                && *gamma == 1.0
+        }
+        AdjustmentOp::Curves { control_points, .. } => control_points.is_none(),
+        AdjustmentOp::LsCurve { control_points, .. } => control_points.is_none(),
+        AdjustmentOp::Color(params) => {
+            params.saturation == 0.0
+                && params.vibrancy == 0.0
+                && params.temperature == 0.0
+                && params.tint == 0.0
+        }
+        AdjustmentOp::Vignette(params) => params.amount == 0.0,
+        AdjustmentOp::Sharpen(params) => params.amount == 0.0,
+        AdjustmentOp::Grain(params) => params.amount == 0.0,
+        AdjustmentOp::Glow(params) => params.amount == 0.0,
+        AdjustmentOp::Hsl(params) => *params == HslParams::default(),
+        AdjustmentOp::Denoise(params) => {
+            params.luma_strength == 0.0 && params.chroma_strength == 0.0
+        }
+    }
 }
 
 fn sample_position(
@@ -1231,16 +1288,17 @@ fn rgba_f32_to_f16_bytes(pixels: &[f32]) -> Vec<u8> {
 }
 
 fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(bytes.len() / 2);
-    for pixel in bytes.chunks_exact(8) {
+    let mut rgba = vec![0u8; bytes.len() / 2];
+    for (pixel_idx, pixel) in bytes.chunks_exact(8).enumerate() {
+        let out = pixel_idx * 4;
         let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
         let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
         let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
         let a = f16::from_bits(u16::from_ne_bytes([pixel[6], pixel[7]])).to_f32();
-        rgba.push(preview_rgb_channel_to_u8(r));
-        rgba.push(preview_rgb_channel_to_u8(g));
-        rgba.push(preview_rgb_channel_to_u8(b));
-        rgba.push(preview_alpha_channel_to_u8(a));
+        rgba[out] = preview_rgb_channel_to_u8(r);
+        rgba[out + 1] = preview_rgb_channel_to_u8(g);
+        rgba[out + 2] = preview_rgb_channel_to_u8(b);
+        rgba[out + 3] = preview_alpha_channel_to_u8(a);
     }
     rgba
 }
@@ -1248,16 +1306,17 @@ fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
 fn rgba_f16_bytes_to_srgb_u8(bytes: &[u8]) -> Vec<u8> {
     let rgb_lut = preview_srgb_u8_lut_from_f16();
     let alpha_lut = preview_alpha_u8_lut_from_f16();
-    let mut rgba = Vec::with_capacity(bytes.len() / 2);
-    for pixel in bytes.chunks_exact(8) {
+    let mut rgba = vec![0u8; bytes.len() / 2];
+    for (pixel_idx, pixel) in bytes.chunks_exact(8).enumerate() {
+        let out = pixel_idx * 4;
         let r = u16::from_ne_bytes([pixel[0], pixel[1]]);
         let g = u16::from_ne_bytes([pixel[2], pixel[3]]);
         let b = u16::from_ne_bytes([pixel[4], pixel[5]]);
         let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
-        rgba.push(rgb_lut[r as usize]);
-        rgba.push(rgb_lut[g as usize]);
-        rgba.push(rgb_lut[b as usize]);
-        rgba.push(alpha_lut[a as usize]);
+        rgba[out] = rgb_lut[r as usize];
+        rgba[out + 1] = rgb_lut[g as usize];
+        rgba[out + 2] = rgb_lut[b as usize];
+        rgba[out + 3] = alpha_lut[a as usize];
     }
     rgba
 }

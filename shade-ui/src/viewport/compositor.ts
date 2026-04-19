@@ -12,15 +12,22 @@ function createTileSurface(image: ImageData): TileSurface {
     typeof OffscreenCanvas === "function"
       ? new OffscreenCanvas(image.width, image.height)
       : document.createElement("canvas");
-  if (surface instanceof HTMLCanvasElement) {
-    surface.width = image.width;
-    surface.height = image.height;
-  }
+  surface.width = image.width;
+  surface.height = image.height;
   const surfaceCtx = surface.getContext("2d");
   if (!surfaceCtx) throw new Error("tile surface 2d context required");
   surfaceCtx.putImageData(image, 0, 0);
   tileSurfaceCache.set(image, surface);
   return surface;
+}
+
+export function releaseTileSurface(image: ImageData | null) {
+  if (!image) return;
+  const surface = tileSurfaceCache.get(image);
+  if (!surface) return;
+  tileSurfaceCache.delete(image);
+  surface.width = 0;
+  surface.height = 0;
 }
 
 // Draw one tile onto a canvas context at its correct screen position for the

@@ -13,7 +13,7 @@ image = { version = "0.25", features = ["jpeg", "png", "tiff", "webp"] }
 exr = "1.74"
 rawler = { git = "https://github.com/libshade/dnglab", rev = "6818dd8cc8c5c4990c5ce91b35b3c17268a3cf68" }
 half = "2.7"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

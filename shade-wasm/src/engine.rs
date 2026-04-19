@@ -164,7 +164,7 @@ impl WasmEngine {
         let params = MaskParams::Brush {
             width: self.canvas_width,
             height: self.canvas_height,
-            pixels: mask.pixels.clone(),
+            pixels: Vec::new(),
         };
         self.stack.set_mask_with_params(layer_idx, mask, params);
     }
@@ -197,14 +197,9 @@ impl WasmEngine {
             .get_mut(&mask_id)
             .expect("mask params missing");
         match params {
-            MaskParams::Brush {
-                width,
-                height,
-                pixels,
-            } => {
+            MaskParams::Brush { width, height, .. } => {
                 *width = mask.width;
                 *height = mask.height;
-                *pixels = mask.pixels.clone();
             }
             _ => panic!("brush mask stamp requires a brush mask"),
         }
@@ -507,7 +502,7 @@ impl WasmEngine {
                 } => MaskData {
                     width: *width,
                     height: *height,
-                    pixels: pixels.clone(),
+                    pixels: pixels.clone().into(),
                 },
             };
             self.stack.set_mask_with_params(i, mask, params.clone());
@@ -592,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn create_brush_mask_stores_brush_params() {
+    fn create_brush_mask_stores_brush_metadata_without_pixels() {
         let mut engine = create_engine();
 
         engine.create_brush_mask(1);
@@ -612,14 +607,14 @@ mod tests {
                 pixels,
             } => {
                 assert_eq!((*width, *height), (1, 2));
-                assert_eq!(pixels, &vec![0, 0]);
+                assert!(pixels.is_empty());
             }
             _ => panic!("expected a brush mask"),
         }
     }
 
     #[test]
-    fn stamp_brush_mask_updates_mask_params_pixels() {
+    fn stamp_brush_mask_keeps_brush_params_metadata_lightweight() {
         let mut engine = create_engine();
         engine.create_brush_mask(1);
 
@@ -628,20 +623,15 @@ mod tests {
         let mask_id = engine.stack.layers[1]
             .mask
             .expect("mask should be attached");
-        let mask = engine
-            .stack
-            .masks
-            .get(&mask_id)
-            .expect("mask data should be stored");
         let params = engine
             .stack
             .mask_params
             .get(&mask_id)
             .expect("mask params should be stored");
         match params {
-            MaskParams::Brush { pixels, .. } => {
-                assert_eq!(pixels, &mask.pixels);
-                assert!(pixels.iter().any(|value| *value > 0));
+            MaskParams::Brush { width, height, pixels } => {
+                assert_eq!((*width, *height), (1, 2));
+                assert!(pixels.is_empty());
             }
             _ => panic!("expected a brush mask"),
         }

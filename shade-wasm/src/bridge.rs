@@ -67,6 +67,11 @@ fn apply_preview_request(
 /// Returns the texture ID assigned.
 #[wasm_bindgen]
 pub fn load_image(pixels: &[u8], width: u32, height: u32) -> u64 {
+    RENDERER.with(|slot| {
+        if let Some(renderer) = slot.borrow().clone() {
+            renderer.clear_image_cache();
+        }
+    });
     ENGINE.with(|e| {
         e.borrow_mut()
             .load_rgba8_image_data(pixels.to_vec(), width, height)
@@ -78,6 +83,11 @@ pub fn load_image_encoded(
     bytes: &[u8],
     file_name: Option<String>,
 ) -> Result<JsValue, JsValue> {
+    RENDERER.with(|slot| {
+        if let Some(renderer) = slot.borrow().clone() {
+            renderer.clear_image_cache();
+        }
+    });
     ENGINE.with(|e| {
         let mut engine = e.borrow_mut();
         let (image, info) = load_image_bytes_f32_with_info(bytes, file_name.as_deref())
@@ -629,7 +639,24 @@ pub fn get_stack_snapshot_json() -> String {
         for layer in &non_image {
             if let Some(mask_id) = layer.mask {
                 if let Some(params) = eng.stack.mask_params.get(&mask_id) {
-                    mp.insert(mask_id, params.clone());
+                    let params = match params {
+                        MaskParams::Brush { width, height, .. } => {
+                            let pixels = eng
+                                .stack
+                                .masks
+                                .get(&mask_id)
+                                .expect("brush mask data missing")
+                                .pixels
+                                .clone();
+                            MaskParams::Brush {
+                                width: *width,
+                                height: *height,
+                                pixels: pixels.to_vec(),
+                            }
+                        }
+                        _ => params.clone(),
+                    };
+                    mp.insert(mask_id, params);
                 }
             }
         }

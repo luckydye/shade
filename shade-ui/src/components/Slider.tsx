@@ -2,7 +2,9 @@ import { type Component, createSignal, createUniqueId, onCleanup, Show } from "s
 import { clamp } from "../store/editor-store";
 import {
   activeAdjustmentSliderId,
+  flushDeferredHistorySnapshot,
   isAdjustmentSliderActive,
+  refreshFinalPreview,
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
 } from "../store/editor";
@@ -131,15 +133,21 @@ export const Slider: Component<{
           }}
           onPointerUp={(event) => {
             setSliderDragging(false);
+            void flushDeferredHistorySnapshot();
+            void refreshFinalPreview();
             maybeResetToDefault(event);
           }}
           onPointerCancel={() => {
             activePointer = null;
             setSliderDragging(false);
+            void flushDeferredHistorySnapshot();
+            void refreshFinalPreview();
           }}
           onBlur={() => {
             activePointer = null;
             setSliderDragging(false);
+            void flushDeferredHistorySnapshot();
+            void refreshFinalPreview();
           }}
         />
         <div class="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--slider-track)]" />

@@ -3,6 +3,7 @@ import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/pr
 import {
   fullCanvasCrop,
   getSelectedArtboard,
+  isAdjustmentSliderActive,
   type LayerInfo,
   normalizeCropRect,
   resolveSelectedLayerIdx,
@@ -20,6 +21,24 @@ onRestore(async (data) => {
 async function captureAndRecordSnapshot() {
   const data = await bridge.getStackSnapshot();
   recordSnapshot(data);
+}
+
+let deferredHistorySnapshot = false;
+
+function queueHistorySnapshot() {
+  if (isAdjustmentSliderActive()) {
+    deferredHistorySnapshot = true;
+    return;
+  }
+  void captureAndRecordSnapshot();
+}
+
+export async function flushDeferredHistorySnapshot() {
+  if (!deferredHistorySnapshot) {
+    return;
+  }
+  deferredHistorySnapshot = false;
+  await captureAndRecordSnapshot();
 }
 
 let pendingEdits = new Map<string, Record<string, unknown>>();
@@ -58,7 +77,7 @@ async function flushPendingEdits() {
   if (pendingEdits.size > 0) {
     await flushPendingEdits();
   } else {
-    void captureAndRecordSnapshot();
+    queueHistorySnapshot();
   }
 }
 
@@ -146,7 +165,7 @@ export async function deleteLayer(idx: number) {
     clearPreviewTiles();
   }
   await refreshPreview();
-  void captureAndRecordSnapshot();
+  queueHistorySnapshot();
 }
 
 function getMovedLayerIndex(idx: number, fromIdx: number, toIdx: number) {
@@ -412,7 +431,7 @@ export async function addLayer(kind: string, position: number) {
   }
   setState("selectedLayerIdx", idx);
   await refreshPreview();
-  void captureAndRecordSnapshot();
+  queueHistorySnapshot();
   return idx;
 }
 
@@ -436,7 +455,7 @@ export async function moveLayer(fromIdx: number, toIdx: number) {
     setState("selectedLayerIdx", nextSelectedIdx);
   }
   await refreshPreview();
-  void captureAndRecordSnapshot();
+  queueHistorySnapshot();
 }
 
 export async function listPresets() {
@@ -461,7 +480,7 @@ export async function loadPreset(name: string) {
   await bridge.loadPreset(name);
   await refreshLayerStack();
   await refreshPreview();
-  void captureAndRecordSnapshot();
+  queueHistorySnapshot();
 }
 
 export async function saveSnapshot() {
@@ -474,5 +493,5 @@ export async function loadSnapshot(id: string) {
   await bridge.loadSnapshot(id);
   await refreshLayerStack();
   await refreshPreview();
-  void captureAndRecordSnapshot();
+  queueHistorySnapshot();
 }

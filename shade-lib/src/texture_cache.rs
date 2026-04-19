@@ -31,13 +31,13 @@ impl TextureCache {
     }
 
     /// Evict a cached entry (call when image source is replaced).
-    pub fn evict(&mut self, key: u64) {
-        self.map.get_mut().remove(&key);
+    pub fn evict(&self, key: u64) {
+        self.map.borrow_mut().remove(&key);
     }
 
     /// Clear all cached textures.
-    pub fn clear(&mut self) {
-        self.map.get_mut().clear();
+    pub fn clear(&self) {
+        self.map.borrow_mut().clear();
     }
 }
 

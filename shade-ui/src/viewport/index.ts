@@ -1,7 +1,7 @@
 export type { ArtboardClip, Artboard, FitReference, PlacedRect, RenderedTile, ViewportCamera } from "./types";
 export type { ScreenSize, WorldTransform } from "./transform";
 export { buildTransform, clampCamera, computeFitScale, screenToWorld, worldToScreen } from "./transform";
-export { compositeArtboard } from "./compositor";
+export { compositeArtboard, releaseTileSurface } from "./compositor";
 export {
   backdropTile,
   clearPreviewTiles,

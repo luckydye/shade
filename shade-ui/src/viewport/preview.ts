@@ -3,6 +3,7 @@ import * as bridge from "../bridge/index";
 import {
   fullCanvasCrop,
   getCommittedCropRect,
+  isAdjustmentSliderActive,
   setSelectedArtboardBackdropTile,
   setSelectedArtboardPreviewTile,
   selectedLayerIsCrop,
@@ -11,6 +12,7 @@ import {
 } from "../store/editor-store";
 import type { FitReference, RenderedTile } from "./types";
 import { computeFitScale } from "./transform";
+import { releaseTileSurface } from "./compositor";
 
 export const [previewTile, setPreviewTile] = createSignal<RenderedTile | null>(null);
 export const [backdropTile, setBackdropTile] = createSignal<RenderedTile | null>(null);
@@ -60,6 +62,8 @@ export function clearPreviewTiles() {
   refreshVersion += 1;
   refreshQueued = null;
   refreshMode = "auto";
+  releaseTileSurface(previewTile()?.image ?? null);
+  releaseTileSurface(backdropTile()?.image ?? null);
   setPreviewTile(null);
   setBackdropTile(null);
   lastRenderedPreview = null;
@@ -250,6 +254,10 @@ function shouldRenderInteractivePreview() {
   );
 }
 
+function shouldRenderOnlyInteractivePreview() {
+  return isAdjustmentSliderActive() && shouldRenderInteractivePreview();
+}
+
 function buildPreviewRequest(quality: "interactive" | "final"): bridge.PreviewRequest | null {
   const visible = getVisibleRegion(
     state.viewportZoom,
@@ -411,6 +419,9 @@ async function performRefresh() {
     return;
   }
 
+  if (queued.version !== refreshVersion) {
+    return;
+  }
   if (queued.quality === "final") {
     setState({
       previewDisplayColorSpace:
@@ -425,6 +436,7 @@ async function performRefresh() {
   }
   const previewTileImage = toImageData(frame);
   const renderedPreviewTile = createRenderedTile(previewTileImage, crop);
+  releaseTileSurface(previewTile()?.image ?? null);
   setPreviewTile(renderedPreviewTile);
   setSelectedArtboardPreviewTile(renderedPreviewTile);
   lastRenderedPreview = {
@@ -440,6 +452,7 @@ async function performRefresh() {
     crop.height >= state.canvasHeight
   ) {
     const renderedBackdropTile = createRenderedTile(previewTileImage, crop);
+    releaseTileSurface(backdropTile()?.image ?? null);
     setBackdropTile(renderedBackdropTile);
     setSelectedArtboardBackdropTile(renderedBackdropTile);
     return;
@@ -460,6 +473,9 @@ async function performRefresh() {
   const { frame: bdFrame } = await throttledRender(backdropReq);
   if (queued.version !== refreshVersion) return;
   if (bdFrame.width === 0 || bdFrame.height === 0) return;
+  if (!refreshSnapshotMatches(snapshot)) {
+    return;
+  }
   const bdCrop = backdropReq.crop ?? fullCanvasCrop();
   const renderedBackdropCrop = {
     x: bdCrop.x,
@@ -469,6 +485,7 @@ async function performRefresh() {
   };
   const backdropImage = toImageData(bdFrame);
   const renderedBackdropTile = createRenderedTile(backdropImage, renderedBackdropCrop);
+  releaseTileSurface(backdropTile()?.image ?? null);
   setBackdropTile(renderedBackdropTile);
   setSelectedArtboardBackdropTile(renderedBackdropTile);
   lastRenderedBackdrop = {
@@ -568,10 +585,17 @@ function requestPreviewRefresh(mode: "auto" | "final-only") {
       while (true) {
         const version = refreshVersion;
         const mode = refreshMode;
+        const interactiveOnly = mode === "auto" && shouldRenderOnlyInteractivePreview();
         if (mode === "auto" && shouldRenderInteractivePreview()) {
           refreshQueued = { version, quality: "interactive" };
           await performRefresh();
           if (version !== refreshVersion) continue;
+          if (interactiveOnly) {
+            const waiters = refreshWaiters;
+            refreshWaiters = [];
+            for (const w of waiters) w.resolve();
+            return;
+          }
         }
         refreshQueued = { version, quality: "final" };
         await performRefresh();
