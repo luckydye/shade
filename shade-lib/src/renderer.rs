@@ -1000,14 +1000,19 @@ impl Renderer {
             .push(buffer);
     }
 
-    async fn readback_texture_bytes(
+    async fn readback_texture<T, F>(
         &self,
         tex: &wgpu::Texture,
         width: u32,
         height: u32,
         unpadded_bytes_per_row: u32,
         label: &'static str,
-    ) -> Result<Vec<u8>> {
+        output_capacity: usize,
+        mut decode_row: F,
+    ) -> Result<Vec<T>>
+    where
+        F: FnMut(&[u8], &mut Vec<T>),
+    {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
         let padded_bytes_per_row =
@@ -1048,16 +1053,36 @@ impl Renderer {
         device.poll(wgpu::Maintain::Wait);
         rx.await??;
         let mapped = buffer_slice.get_mapped_range();
-        let mut result = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+        let mut result = Vec::with_capacity(output_capacity);
         for row in 0..height {
             let row_start = (row * padded_bytes_per_row) as usize;
             let row_end = row_start + unpadded_bytes_per_row as usize;
-            result.extend_from_slice(&mapped[row_start..row_end]);
+            decode_row(&mapped[row_start..row_end], &mut result);
         }
         drop(mapped);
         readback_buffer.unmap();
         self.release_readback_buffer(readback_buffer_size, readback_buffer);
         Ok(result)
+    }
+
+    async fn readback_texture_bytes(
+        &self,
+        tex: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        unpadded_bytes_per_row: u32,
+        label: &'static str,
+    ) -> Result<Vec<u8>> {
+        self.readback_texture(
+            tex,
+            width,
+            height,
+            unpadded_bytes_per_row,
+            label,
+            (unpadded_bytes_per_row * height) as usize,
+            |row, result| result.extend_from_slice(row),
+        )
+        .await
     }
 
     async fn readback_rgba8_texture(
@@ -1077,10 +1102,28 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        let raw = self
-            .readback_texture_bytes(tex, width, height, width * 8, "readback f16 encoder")
-            .await?;
-        Ok(rgba_f16_bytes_to_u8(&raw))
+        let alpha_lut = preview_alpha_u8_lut_from_f16();
+        self.readback_texture(
+            tex,
+            width,
+            height,
+            width * 8,
+            "readback f16 encoder",
+            (width * height * 4) as usize,
+            |row, rgba| {
+                for pixel in row.chunks_exact(8) {
+                    let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
+                    let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
+                    let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
+                    let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
+                    rgba.push(preview_rgb_channel_to_u8(r));
+                    rgba.push(preview_rgb_channel_to_u8(g));
+                    rgba.push(preview_rgb_channel_to_u8(b));
+                    rgba.push(alpha_lut[a as usize]);
+                }
+            },
+        )
+        .await
     }
 
     async fn readback_work_texture_to_preview_u8(
@@ -1089,16 +1132,29 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        let raw = self
-            .readback_texture_bytes(
-                tex,
-                width,
-                height,
-                width * 8,
-                "readback preview f16 encoder",
-            )
-            .await?;
-        Ok(rgba_f16_bytes_to_srgb_u8(&raw))
+        let rgb_lut = preview_srgb_u8_lut_from_f16();
+        let alpha_lut = preview_alpha_u8_lut_from_f16();
+        self.readback_texture(
+            tex,
+            width,
+            height,
+            width * 8,
+            "readback preview f16 encoder",
+            (width * height * 4) as usize,
+            |row, rgba| {
+                for pixel in row.chunks_exact(8) {
+                    let r = u16::from_ne_bytes([pixel[0], pixel[1]]);
+                    let g = u16::from_ne_bytes([pixel[2], pixel[3]]);
+                    let b = u16::from_ne_bytes([pixel[4], pixel[5]]);
+                    let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
+                    rgba.push(rgb_lut[r as usize]);
+                    rgba.push(rgb_lut[g as usize]);
+                    rgba.push(rgb_lut[b as usize]);
+                    rgba.push(alpha_lut[a as usize]);
+                }
+            },
+        )
+        .await
     }
 
     async fn readback_work_texture_to_f32(
@@ -1107,16 +1163,21 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<f32>> {
-        let raw = self
-            .readback_texture_bytes(
-                tex,
-                width,
-                height,
-                width * 8,
-                "readback float encoder",
-            )
-            .await?;
-        Ok(rgba_f16_bytes_to_f32(&raw))
+        self.readback_texture(
+            tex,
+            width,
+            height,
+            width * 8,
+            "readback float encoder",
+            (width * height * 4) as usize,
+            |row, rgba| {
+                for chunk in row.chunks_exact(2) {
+                    let bits = u16::from_ne_bytes([chunk[0], chunk[1]]);
+                    rgba.push(f16::from_bits(bits).to_f32());
+                }
+            },
+        )
+        .await
     }
 }
 
@@ -1296,50 +1357,6 @@ fn rgba_f32_to_f16_bytes(pixels: &[f32]) -> Vec<u8> {
     bytes
 }
 
-fn rgba_f16_bytes_to_u8(bytes: &[u8]) -> Vec<u8> {
-    let mut rgba = vec![0u8; bytes.len() / 2];
-    for (pixel_idx, pixel) in bytes.chunks_exact(8).enumerate() {
-        let out = pixel_idx * 4;
-        let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
-        let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
-        let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
-        let a = f16::from_bits(u16::from_ne_bytes([pixel[6], pixel[7]])).to_f32();
-        rgba[out] = preview_rgb_channel_to_u8(r);
-        rgba[out + 1] = preview_rgb_channel_to_u8(g);
-        rgba[out + 2] = preview_rgb_channel_to_u8(b);
-        rgba[out + 3] = preview_alpha_channel_to_u8(a);
-    }
-    rgba
-}
-
-fn rgba_f16_bytes_to_srgb_u8(bytes: &[u8]) -> Vec<u8> {
-    let rgb_lut = preview_srgb_u8_lut_from_f16();
-    let alpha_lut = preview_alpha_u8_lut_from_f16();
-    let mut rgba = vec![0u8; bytes.len() / 2];
-    for (pixel_idx, pixel) in bytes.chunks_exact(8).enumerate() {
-        let out = pixel_idx * 4;
-        let r = u16::from_ne_bytes([pixel[0], pixel[1]]);
-        let g = u16::from_ne_bytes([pixel[2], pixel[3]]);
-        let b = u16::from_ne_bytes([pixel[4], pixel[5]]);
-        let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
-        rgba[out] = rgb_lut[r as usize];
-        rgba[out + 1] = rgb_lut[g as usize];
-        rgba[out + 2] = rgb_lut[b as usize];
-        rgba[out + 3] = alpha_lut[a as usize];
-    }
-    rgba
-}
-
-fn rgba_f16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(2)
-        .map(|chunk| {
-            let bits = u16::from_ne_bytes([chunk[0], chunk[1]]);
-            f16::from_bits(bits).to_f32()
-        })
-        .collect()
-}
-
 fn rgba_f32_to_f16_words(pixels: &[f32]) -> Vec<u16> {
     pixels
         .iter()
@@ -1453,15 +1470,6 @@ fn preview_rgb_channel_to_u8(value: f32) -> u8 {
     (encoded * 255.0).round() as u8
 }
 
-fn preview_alpha_channel_to_u8(value: f32) -> u8 {
-    if value.is_nan() {
-        return 0;
-    }
-    if value.is_infinite() {
-        return u8::MAX;
-    }
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
-}
 
 #[cfg(test)]
 mod tests {
