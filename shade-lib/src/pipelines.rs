@@ -5,9 +5,8 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
     BufferBindingType, BufferUsages, ComputePipeline, ComputePipelineDescriptor,
-    Extent3d, PipelineLayoutDescriptor, ShaderStages, StorageTextureAccess, Texture,
-    TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor,
-    TextureViewDimension,
+    PipelineLayoutDescriptor, ShaderStages, StorageTextureAccess, Texture,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::{context::create_upload_buffer, GpuContext, INTERNAL_TEXTURE_FORMAT};
@@ -134,29 +133,13 @@ fn make_simple_pipeline(
     })
 }
 
-/// Create an output texture (Rgba8Unorm, STORAGE_BINDING | COPY_SRC | TEXTURE_BINDING).
 fn create_output_texture(
-    device: &wgpu::Device,
+    ctx: &GpuContext,
     width: u32,
     height: u32,
-    label: &str,
+    label: &'static str,
 ) -> Texture {
-    device.create_texture(&TextureDescriptor {
-        label: Some(label),
-        size: Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: INTERNAL_TEXTURE_FORMAT,
-        usage: TextureUsages::STORAGE_BINDING
-            | TextureUsages::COPY_SRC
-            | TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    })
+    ctx.acquire_work_texture(width, height, label)
 }
 
 fn dispatch_simple(
@@ -224,7 +207,7 @@ impl CropPipeline {
         params: CropUniform,
     ) -> Result<Texture> {
         let output_tex = create_output_texture(
-            &ctx.device,
+            ctx,
             output_width,
             output_height,
             "crop output",
@@ -406,7 +389,7 @@ impl CurvesPipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "curves output texture");
+            create_output_texture(ctx, width, height, "curves output texture");
 
         let make_lut_buf = |data: &[f32], label: &str| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -577,7 +560,7 @@ impl LsCurvePipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "ls_curve output texture");
+            create_output_texture(ctx, width, height, "ls_curve output texture");
 
         let lut_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ls_curve lut"),
@@ -657,7 +640,7 @@ impl ColorPipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "color output texture");
+            create_output_texture(ctx, width, height, "color output texture");
 
         let uniform_buf = create_upload_buffer(
             device,
@@ -754,7 +737,7 @@ impl VignettePipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "vignette output texture");
+            create_output_texture(ctx, width, height, "vignette output texture");
 
         let gpu_params = VignetteGpuUniform {
             amount: params.amount,
@@ -846,7 +829,7 @@ impl SharpenPipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "sharpen output texture");
+            create_output_texture(ctx, width, height, "sharpen output texture");
 
         // SharpenParams is 2×f32 = 8 bytes; pad to 16 for uniform alignment
         #[repr(C)]
@@ -971,7 +954,7 @@ impl GrainPipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "grain output texture");
+            create_output_texture(ctx, width, height, "grain output texture");
         let uniform = GrainUniform::new(params, effect_space);
 
         let uniform_buf = create_upload_buffer(
@@ -1076,7 +1059,7 @@ impl GlowPipeline {
         let (width, height) = (size.width, size.height);
 
         let output_tex =
-            create_output_texture(device, width, height, "glow output texture");
+            create_output_texture(ctx, width, height, "glow output texture");
         let uniform = GlowUniform::new(params, effect_space);
 
         let uniform_buf = create_upload_buffer(
@@ -1169,7 +1152,7 @@ impl HslPipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
         let output_tex =
-            create_output_texture(device, width, height, "hsl output texture");
+            create_output_texture(ctx, width, height, "hsl output texture");
         let gpu = HslParamsGpu::from(params);
         let uniform_buf = create_upload_buffer(
             device,

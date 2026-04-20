@@ -150,22 +150,7 @@ impl CompositePipeline {
         let (width, height) = (size.width, size.height);
 
         // Output texture.
-        let output_tex = device.create_texture(&TextureDescriptor {
-            label: Some("composite output texture"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: INTERNAL_TEXTURE_FORMAT,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::COPY_SRC
-                | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let output_tex = ctx.acquire_work_texture(width, height, "composite output texture");
 
         // Dummy 1×1 white texture for when mask_tex is None.
         let effective_mask_tex: &Texture = if let Some(m) = mask_tex {

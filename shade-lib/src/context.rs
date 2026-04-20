@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use wgpu::{Adapter, Buffer, BufferDescriptor, BufferUsages, Device, Instance, Queue};
 
 /// Owns the core wgpu objects needed for headless GPU compute.
@@ -7,6 +9,7 @@ pub struct GpuContext {
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
+    work_texture_pool: Mutex<HashMap<(u32, u32), Vec<wgpu::Texture>>>,
 }
 
 pub fn create_upload_buffer(
@@ -27,6 +30,47 @@ pub fn create_upload_buffer(
 }
 
 impl GpuContext {
+    pub fn acquire_work_texture(
+        &self,
+        width: u32,
+        height: u32,
+        label: &'static str,
+    ) -> wgpu::Texture {
+        if let Some(texture) = self
+            .work_texture_pool
+            .lock()
+            .expect("work texture pool poisoned")
+            .get_mut(&(width, height))
+            .and_then(Vec::pop)
+        {
+            return texture;
+        }
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::INTERNAL_TEXTURE_FORMAT,
+            usage: crate::WORK_TEXTURE_USAGE,
+            view_formats: &[],
+        })
+    }
+
+    pub fn release_work_texture(&self, texture: wgpu::Texture) {
+        let size = texture.size();
+        self.work_texture_pool
+            .lock()
+            .expect("work texture pool poisoned")
+            .entry((size.width, size.height))
+            .or_default()
+            .push(texture);
+    }
+
     /// Create a headless wgpu context (no surface / window required).
     ///
     /// Requests the high-performance adapter and enables the features needed
@@ -76,6 +120,7 @@ impl GpuContext {
             adapter,
             device,
             queue,
+            work_texture_pool: Mutex::new(HashMap::new()),
         })
     }
 }

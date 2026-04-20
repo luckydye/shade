@@ -165,37 +165,8 @@ impl SharpenTwoPassPipeline {
         let (w, h) = (input_tex.width(), input_tex.height());
 
         // Intermediate texture for the horizontal blur result
-        let h_blur_tex = device.create_texture(&TextureDescriptor {
-            label: Some("sharpen_h_blur"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: INTERNAL_TEXTURE_FORMAT,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-
-        let output_tex = device.create_texture(&TextureDescriptor {
-            label: Some("sharpen_output"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: INTERNAL_TEXTURE_FORMAT,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::COPY_SRC
-                | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let h_blur_tex = ctx.acquire_work_texture(w, h, "sharpen_h_blur");
+        let output_tex = ctx.acquire_work_texture(w, h, "sharpen_output");
 
         let uniform = SharpenUniform {
             amount: params.amount,
@@ -278,6 +249,7 @@ impl SharpenTwoPassPipeline {
             pass.dispatch_workgroups((w + 15) / 16, (h + 15) / 16, 1);
         }
         queue.submit(Some(encoder.finish()));
+        ctx.release_work_texture(h_blur_tex);
         output_tex
     }
 }

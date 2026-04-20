@@ -165,8 +165,9 @@ impl Renderer {
             full_texture_effect_space(&input_tex),
             None,
         )?;
-        self.readback_work_texture_to_u8(&final_tex, width, height)
-            .await
+        let result = self.readback_work_texture_to_u8(&final_tex, width, height).await;
+        self.ctx.release_work_texture(final_tex);
+        result
     }
 
     pub async fn render_with_ops_f32(
@@ -186,8 +187,9 @@ impl Renderer {
             full_texture_effect_space(&input_tex),
             None,
         )?;
-        self.readback_work_texture_to_f32(&final_tex, width, height)
-            .await
+        let result = self.readback_work_texture_to_f32(&final_tex, width, height).await;
+        self.ctx.release_work_texture(final_tex);
+        result
     }
 
     /// Process a single video frame through the adjustment pipeline.
@@ -213,8 +215,9 @@ impl Renderer {
             full_texture_effect_space(&input_tex),
             Some(frame_index),
         )?;
-        self.readback_work_texture_to_u8(&final_tex, width, height)
-            .await
+        let result = self.readback_work_texture_to_u8(&final_tex, width, height).await;
+        self.ctx.release_work_texture(final_tex);
+        result
     }
 
     fn render_texture_with_ops(
@@ -324,7 +327,7 @@ impl Renderer {
                 ),
             };
             if let Some(previous_output) = owned_textures.pop() {
-                previous_output.destroy();
+                self.ctx.release_work_texture(previous_output);
             }
             owned_textures.push(output);
             current_tex = owned_textures.last().unwrap();
@@ -378,8 +381,11 @@ impl Renderer {
             target_height,
             crop,
         )?;
-        self.readback_work_texture_to_preview_u8(&final_accum, target_width, target_height)
-            .await
+        let result = self
+            .readback_work_texture_to_preview_u8(&final_accum, target_width, target_height)
+            .await;
+        self.ctx.release_work_texture(final_accum);
+        result
     }
 
     pub async fn render_stack_preview_f16(
@@ -404,6 +410,7 @@ impl Renderer {
         let mut pixels = self
             .readback_work_texture_to_f32(&final_accum, target_width, target_height)
             .await?;
+        self.ctx.release_work_texture(final_accum);
         encode_preview_pixels(&mut pixels, &ColorSpace::DisplayP3);
         Ok(rgba_f32_to_f16_words(&pixels))
     }
@@ -432,27 +439,9 @@ impl Renderer {
         };
 
         // 1. Create accumulator texture (black RGBA8).
-        let accum_tex = {
-            let t = device.create_texture(&TextureDescriptor {
-                label: Some("accumulator"),
-                size: Extent3d {
-                    width: target_width,
-                    height: target_height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: INTERNAL_TEXTURE_FORMAT,
-                usage: TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::STORAGE_BINDING
-                    | TextureUsages::COPY_SRC
-                    | TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            // Clear to black.
-            t
-        };
+        let accum_tex = self
+            .ctx
+            .acquire_work_texture(target_width, target_height, "accumulator");
 
         // We accumulate results via a mutable "current accumulator" Texture reference.
         // Because wgpu textures aren't Clone, we keep a Vec and always work with the last.
@@ -683,7 +672,7 @@ impl Renderer {
                         )?;
                         if let Some((_, _, textures)) = full_res_source.take() {
                             for texture in textures {
-                                texture.destroy();
+                                self.ctx.release_work_texture(texture);
                             }
                         }
                         full_res_source =
@@ -852,19 +841,19 @@ impl Renderer {
                 mask_tex_opt.as_ref(),
                 composite_params,
             )?;
-            layer_result.destroy();
+            self.ctx.release_work_texture(layer_result);
             if let Some(mask_tex) = mask_tex_opt {
                 mask_tex.destroy();
             }
             if let Some(previous_accum) = accum_owned.pop() {
-                previous_accum.destroy();
+                self.ctx.release_work_texture(previous_accum);
             }
             accum_owned.push(new_accum);
         }
 
         if let Some((_, _, textures)) = full_res_source.take() {
             for texture in textures {
-                texture.destroy();
+                self.ctx.release_work_texture(texture);
             }
         }
 

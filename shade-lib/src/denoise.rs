@@ -157,24 +157,8 @@ fn make_pipeline(
     })
 }
 
-fn alloc_tex(device: &Device, w: u32, h: u32, label: &str) -> Texture {
-    device.create_texture(&TextureDescriptor {
-        label: Some(label),
-        size: Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: INTERNAL_TEXTURE_FORMAT,
-        usage: TextureUsages::STORAGE_BINDING
-            | TextureUsages::COPY_SRC
-            | TextureUsages::COPY_DST
-            | TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    })
+fn alloc_tex(ctx: &GpuContext, w: u32, h: u32, label: &'static str) -> Texture {
+    ctx.acquire_work_texture(w, h, label)
 }
 
 fn dispatch(
@@ -267,7 +251,7 @@ impl DenoisePipeline {
         let (w, h) = (input_tex.width(), input_tex.height());
 
         if params.luma_strength == 0.0 && params.chroma_strength == 0.0 {
-            let output = alloc_tex(device, w, h, "denoise_passthrough");
+            let output = alloc_tex(ctx, w, h, "denoise_passthrough");
             let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("denoise_passthrough"),
             });
@@ -304,10 +288,10 @@ impl DenoisePipeline {
 
         // ── Bilateral mode ────────────────────────────────────────────────────
         // 1. Build guide: H-blur → V-blur of the noisy input
-        let guide_h_tex = alloc_tex(device, w, h, "denoise_guide_h");
-        let guide_tex = alloc_tex(device, w, h, "denoise_guide");
-        let bilat_h_tex = alloc_tex(device, w, h, "denoise_bilateral_h");
-        let output_tex = alloc_tex(device, w, h, "denoise_output");
+        let guide_h_tex = alloc_tex(ctx, w, h, "denoise_guide_h");
+        let guide_tex = alloc_tex(ctx, w, h, "denoise_guide");
+        let bilat_h_tex = alloc_tex(ctx, w, h, "denoise_bilateral_h");
+        let output_tex = alloc_tex(ctx, w, h, "denoise_output");
 
         let in_view = input_tex.create_view(&Default::default());
         let guide_h_view = guide_h_tex.create_view(&Default::default());
@@ -420,7 +404,9 @@ impl DenoisePipeline {
             h,
             "denoise_bilateral_v",
         );
-
+        ctx.release_work_texture(guide_h_tex);
+        ctx.release_work_texture(guide_tex);
+        ctx.release_work_texture(bilat_h_tex);
         output_tex
     }
 
@@ -433,7 +419,7 @@ impl DenoisePipeline {
         params_buf: &Buffer,
     ) -> Texture {
         let device = &ctx.device;
-        let output_tex = alloc_tex(device, w, h, "denoise_nlm_output");
+        let output_tex = alloc_tex(ctx, w, h, "denoise_nlm_output");
         let in_view = input_tex.create_view(&Default::default());
         let out_view = output_tex.create_view(&Default::default());
         let bg = device.create_bind_group(&BindGroupDescriptor {

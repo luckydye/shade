@@ -5,9 +5,8 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
     BufferBindingType, BufferUsages, ComputePipeline, ComputePipelineDescriptor,
-    Extent3d, PipelineLayoutDescriptor, ShaderStages, StorageTextureAccess, Texture,
-    TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor,
-    TextureViewDimension,
+    PipelineLayoutDescriptor, ShaderStages, StorageTextureAccess, Texture,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::{context::create_upload_buffer, GpuContext, INTERNAL_TEXTURE_FORMAT};
@@ -142,22 +141,7 @@ impl TonePipeline {
         let height = size.height;
 
         // Create output texture (Rgba8Unorm, storage + copy-src for readback).
-        let output_tex = device.create_texture(&TextureDescriptor {
-            label: Some("tone output texture"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: INTERNAL_TEXTURE_FORMAT,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::COPY_SRC
-                | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let output_tex = ctx.acquire_work_texture(width, height, "tone output texture");
 
         // Uniform buffer for ToneParams.
         let params_gpu = ToneParamsGpu::from(params);

@@ -17,6 +17,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub const INTERNAL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub const WORK_TEXTURE_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::TEXTURE_BINDING
+    .union(wgpu::TextureUsages::STORAGE_BINDING)
+    .union(wgpu::TextureUsages::COPY_SRC)
+    .union(wgpu::TextureUsages::COPY_DST);
 
 pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};
 pub use composite::{
