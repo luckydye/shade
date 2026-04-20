@@ -25,6 +25,7 @@ pub struct CompositeUniform {
 pub struct CompositePipeline {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
+    white_mask_texture: Texture,
 }
 
 impl CompositePipeline {
@@ -119,10 +120,12 @@ impl CompositePipeline {
             compilation_options: Default::default(),
             cache: None,
         });
+        let white_mask_texture = create_white_mask_texture(&ctx.device, &ctx.queue);
 
         Ok(Self {
             pipeline,
             bind_group_layout,
+            white_mask_texture,
         })
     }
 
@@ -165,12 +168,10 @@ impl CompositePipeline {
         });
 
         // Dummy 1×1 white texture for when mask_tex is None.
-        let dummy_mask_tex;
         let effective_mask_tex: &Texture = if let Some(m) = mask_tex {
             m
         } else {
-            dummy_mask_tex = create_white_mask_texture(device, queue);
-            &dummy_mask_tex
+            &self.white_mask_texture
         };
 
         let uniform_buf = create_upload_buffer(
