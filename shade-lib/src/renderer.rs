@@ -323,6 +323,9 @@ impl Renderer {
                     effect_space,
                 ),
             };
+            if let Some(previous_output) = owned_textures.pop() {
+                previous_output.destroy();
+            }
             owned_textures.push(output);
             current_tex = owned_textures.last().unwrap();
         }
@@ -678,6 +681,11 @@ impl Renderer {
                                 sin_r: 0.0,
                             },
                         )?;
+                        if let Some((_, _, textures)) = full_res_source.take() {
+                            for texture in textures {
+                                texture.destroy();
+                            }
+                        }
                         full_res_source =
                             Some((src_size, source_texture.clone(), preprocess_owned));
                         image_result
@@ -844,8 +852,20 @@ impl Renderer {
                 mask_tex_opt.as_ref(),
                 composite_params,
             )?;
-
+            layer_result.destroy();
+            if let Some(mask_tex) = mask_tex_opt {
+                mask_tex.destroy();
+            }
+            if let Some(previous_accum) = accum_owned.pop() {
+                previous_accum.destroy();
+            }
             accum_owned.push(new_accum);
+        }
+
+        if let Some((_, _, textures)) = full_res_source.take() {
+            for texture in textures {
+                texture.destroy();
+            }
         }
 
         // 3. Read back the final accumulator.
