@@ -413,6 +413,22 @@ fn tool_definitions() -> Vec<Value> {
             }),
         ),
         tool(
+            "open_image_path",
+            "Open one local image path directly.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "append"],
+                    }
+                },
+                "required": ["path"],
+                "additionalProperties": false,
+            }),
+        ),
+        tool(
             "select_layer",
             "Select one layer by index.",
             json!({

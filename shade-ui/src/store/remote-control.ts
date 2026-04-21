@@ -5,6 +5,7 @@ import {
   createBrushMask,
   deleteLayer,
   moveLayer,
+  openImage,
   refreshPreview,
   removeMask,
   renameLayer,
@@ -388,6 +389,21 @@ async function handleOpenLibraryImage(args: unknown) {
   };
 }
 
+async function handleOpenImagePath(args: unknown) {
+  const parsed = assertObject(args, "open_image_path arguments");
+  const path = readString(parsed, "path");
+  const mode = readOptionalString(parsed, "mode") ?? "replace";
+  if (mode !== "replace" && mode !== "append") {
+    throw new Error("mode must be replace or append");
+  }
+  await openImage(path, null, null, mode);
+  return {
+    path,
+    view: state.currentView,
+    selectedArtboardId: state.selectedArtboardId,
+  };
+}
+
 async function handleAddLayer(args: unknown) {
   const parsed = assertObject(args, "add_layer arguments");
   const kind = readString(parsed, "kind");
@@ -689,6 +705,8 @@ export async function executeRemoteControlTool(
       return handleListLibraryImages(call.arguments);
     case "open_library_image":
       return handleOpenLibraryImage(call.arguments);
+    case "open_image_path":
+      return handleOpenImagePath(call.arguments);
     case "select_layer": {
       const args = assertObject(call.arguments, "select_layer arguments");
       const layerIndex = readInteger(args, "layerIndex");
