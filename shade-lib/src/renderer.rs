@@ -745,21 +745,28 @@ impl Renderer {
                             )?
                         }
                     } else {
-                        current_view = PreviewCrop {
+                        let cropped_view =
+                            intersect_preview_crop(&prev_view, &PreviewCrop {
+                                x: rect.x,
+                                y: rect.y,
+                                width: rect.width,
+                                height: rect.height,
+                            });
+                        current_view = cropped_view.clone();
+                        post_crop_view = PreviewCrop {
                             x: rect.x,
                             y: rect.y,
                             width: rect.width,
                             height: rect.height,
                         };
-                        post_crop_view = current_view.clone();
                         self.crop_pipeline.process(
                             &self.ctx,
                             current_accum,
                             CropUniform {
-                                out_x: rect.x,
-                                out_y: rect.y,
-                                out_width: rect.width,
-                                out_height: rect.height,
+                                out_x: cropped_view.x,
+                                out_y: cropped_view.y,
+                                out_width: cropped_view.width,
+                                out_height: cropped_view.height,
                                 pivot_x: rect.x + rect.width * 0.5,
                                 pivot_y: rect.y + rect.height * 0.5,
                                 in_x: prev_view.x,
@@ -1199,6 +1206,21 @@ fn normalize_preview_crop(
     crop.x = crop.x.clamp(0.0, max_width - crop.width);
     crop.y = crop.y.clamp(0.0, max_height - crop.height);
     crop
+}
+
+fn intersect_preview_crop(a: &PreviewCrop, b: &PreviewCrop) -> PreviewCrop {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    let right = (a.x + a.width).min(b.x + b.width);
+    let bottom = (a.y + a.height).min(b.y + b.height);
+    assert!(right > x, "preview crop intersection width must be > 0");
+    assert!(bottom > y, "preview crop intersection height must be > 0");
+    PreviewCrop {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+    }
 }
 
 fn full_texture_effect_space(texture: &wgpu::Texture) -> EffectSpace {
@@ -1673,7 +1695,7 @@ mod tests {
                 MaskData {
                     width: 1,
                     height: 2,
-                    pixels: vec![0, 255],
+                    pixels: vec![0, 255].into(),
                 },
             );
             stack
@@ -2631,6 +2653,94 @@ mod tests {
             assert!(
                 diff < 0.08,
                 "channel {i}: preview={preview}, full_subregion={full}, diff={diff}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cropped_viewport_preview_matches_subregion_after_axis_aligned_crop() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let mut pixels = Vec::with_capacity(8 * 8 * 4);
+        for row in 0..8u32 {
+            for col in 0..8u32 {
+                pixels.push((row * 8 + col + 1) as f32);
+                pixels.push(0.0);
+                pixels.push(0.0);
+                pixels.push(1.0);
+            }
+        }
+
+        let mut stack = LayerStack::new();
+        stack.add_image_layer(1, 8, 8);
+        stack.add_crop_layer(CropRect {
+            x: 2.0,
+            y: 2.0,
+            width: 4.0,
+            height: 4.0,
+            rotation: 0.0,
+        });
+
+        let mut sources = HashMap::new();
+        sources.insert(
+            1,
+            FloatImage {
+                width: 8,
+                height: 8,
+                pixels: pixels.into(),
+            },
+        );
+
+        let tex_full = renderer
+            .render_stack_preview_texture(&stack, &sources, 8, 8, 4, 4, None)
+            .expect("full cropped render");
+        let px_full = renderer
+            .readback_work_texture_to_f32(&tex_full, 4, 4)
+            .await
+            .expect("readback");
+
+        let tex_preview = renderer
+            .render_stack_preview_texture(
+                &stack,
+                &sources,
+                8,
+                8,
+                2,
+                2,
+                Some(PreviewCrop {
+                    x: 3.0,
+                    y: 3.0,
+                    width: 2.0,
+                    height: 2.0,
+                }),
+            )
+            .expect("cropped viewport render");
+        let px_preview = renderer
+            .readback_work_texture_to_f32(&tex_preview, 2, 2)
+            .await
+            .expect("readback");
+
+        let mut expected_subregion = Vec::with_capacity(2 * 2 * 4);
+        for row in 0..2usize {
+            for col in 0..2usize {
+                let full_row = row + 1;
+                let full_col = col + 1;
+                let base = (full_row * 4 + full_col) * 4;
+                expected_subregion.extend_from_slice(&px_full[base..base + 4]);
+            }
+        }
+
+        for (i, (preview, expected)) in px_preview
+            .iter()
+            .zip(expected_subregion.iter())
+            .enumerate()
+        {
+            let diff = (preview - expected).abs();
+            assert!(
+                diff < 0.01,
+                "channel {i}: preview={preview}, expected_subregion={expected}, diff={diff}"
             );
         }
     }
