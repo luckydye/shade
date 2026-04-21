@@ -91,7 +91,7 @@ export const tauriPlatform: TauriPlatformApi = {
   async listenNativeDragDrop(listener) {
     return getCurrentWebview().onDragDropEvent((event) => {
       const { payload } = event;
-      if (!Array.isArray(payload.paths)) {
+      if (!("paths" in payload) || !Array.isArray(payload.paths)) {
         throw new Error("native drag-drop event is missing paths");
       }
       listener({

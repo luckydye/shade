@@ -3,6 +3,7 @@ import { render } from "solid-js/web";
 import App from "shade-ui/src/App";
 import { setPlatform } from "shade-ui/src/bridge/index";
 import { platform } from "./platform";
+import { startRemoteControlBridge } from "./remote-control";
 
 const root = document.getElementById("root");
 
@@ -59,6 +60,7 @@ window.addEventListener("unhandledrejection", (event) => {
 
 try {
   setPlatform(platform);
+  void startRemoteControlBridge().catch(reportFatalError);
   render(
     () => (
       fatalError() ? (

@@ -49,6 +49,7 @@ import {
   uploadMediaLibraryUrl,
 } from "../bridge/index";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor";
+import { registerMediaBrowserController } from "../store/media-browser-control";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { Button } from "./Button";
 import { ActionButton } from "./ActionButton";
@@ -794,6 +795,14 @@ export const MediaView: Component = () => {
   });
 
   onMount(() => {
+    const unregisterMediaBrowserController = registerMediaBrowserController({
+      selectLibrary(libraryId) {
+        setSelectedLibraryId(libraryId);
+      },
+      getSelectedLibraryId() {
+        return selectedLibraryId();
+      },
+    });
     startP2pPolling();
     void isTauriRuntime().then(setSupportsS3Libraries);
     let unlistenPeerPaired: (() => void) | null = null;
@@ -822,6 +831,7 @@ export const MediaView: Component = () => {
     }, 3000);
     onCleanup(() => {
       isDisposed = true;
+      unregisterMediaBrowserController();
       window.clearInterval(libraryRefreshTimer);
       stopP2pPolling();
       void unlistenPeerPaired?.();

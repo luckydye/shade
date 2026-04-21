@@ -1,5 +1,6 @@
 mod commands;
 mod photos;
+mod remote_control;
 mod tagging_worker;
 mod thumbnail_cache;
 
@@ -30,6 +31,7 @@ pub fn run() {
         .plugin(photos::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(P2pState(tokio::sync::RwLock::new(None)))
+        .manage(remote_control::RemoteControlState::default())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RenderService(commands::spawn_render_worker()))
         .manage(ThumbnailService {
@@ -44,6 +46,10 @@ pub fn run() {
         ))
         .setup(|app| {
             commands::init_app_paths(&app.handle().clone())?;
+            tauri::async_runtime::block_on(remote_control::start(
+                app.handle().clone(),
+                app.state::<remote_control::RemoteControlState>().0.clone(),
+            ))?;
             tauri::async_runtime::block_on(commands::setup_library_db())
                 .map_err(|e| e.to_string())?;
             let library_index_db =
@@ -162,6 +168,8 @@ pub fn run() {
             commands::list_collection_items,
             commands::add_to_collection,
             commands::remove_from_collection,
+            remote_control::submit_remote_control_response,
+            remote_control::get_remote_control_server_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

@@ -69,6 +69,7 @@ export {
   refreshFinalPreview,
   refreshPreview,
   resetViewport,
+  setViewportState,
   setViewportScreenSize,
   zoomViewport,
 } from "../viewport/preview";

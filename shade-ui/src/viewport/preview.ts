@@ -684,3 +684,28 @@ export function offsetViewportCenter(deltaX: number, deltaY: number) {
   });
   refreshPreview();
 }
+
+export function setViewportState(params: {
+  centerX?: number;
+  centerY?: number;
+  zoom?: number;
+}) {
+  if (state.canvasWidth <= 0) {
+    throw new Error("cannot set viewport without a loaded image");
+  }
+  const nextCenterX = params.centerX ?? state.viewportCenterX;
+  const nextCenterY = params.centerY ?? state.viewportCenterY;
+  const nextZoom = params.zoom ?? state.viewportZoom;
+  if (!Number.isFinite(nextCenterX) || !Number.isFinite(nextCenterY)) {
+    throw new Error("viewport center must be finite");
+  }
+  if (!Number.isFinite(nextZoom)) {
+    throw new Error("viewport zoom must be finite");
+  }
+  setState({
+    viewportCenterX: nextCenterX,
+    viewportCenterY: nextCenterY,
+    viewportZoom: Math.max(MIN_ZOOM, Math.min(getMaxViewportZoom(), nextZoom)),
+  });
+  refreshPreview();
+}
