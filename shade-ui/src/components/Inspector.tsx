@@ -120,7 +120,7 @@ const EMPTY_STATE_CLASS =
 const LAYER_ROW_CLASS =
   "grid h-8 grid-cols-[16px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
 const MASK_LAYER_ROW_CLASS =
-  "ml-8 grid h-7 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-[12px] text-[var(--text-muted)]";
+  "ml-6.5 grid h-7 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-[12px] text-[var(--text-muted)]";
 const ADD_LAYER_ROW_CLASS =
   "grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
@@ -1837,7 +1837,21 @@ export const Inspector: Component = () => {
               </div>
               <Show when={layer.has_mask}>
                 <div class={MASK_LAYER_ROW_CLASS}>
-                  <span />
+                  <span class="relative h-full w-4">
+                    <svg
+                      viewBox="0 0 16 32"
+                      class="absolute -top-3 left-0 h-8 w-4 overflow-visible text-[var(--border-active)]"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M8 1v17c0 4 2 6 12 6" />
+                      <path d="M17 21l3 3-3 3" />
+                    </svg>
+                  </span>
                   <span class="inline-flex h-4 w-4 items-center justify-center rounded-[2px] border border-[var(--border-medium)] bg-[linear-gradient(135deg,var(--surface-selected),var(--surface-subtle))] text-[9px] font-bold uppercase text-[var(--text-dim)]">
                     M
                   </span>
