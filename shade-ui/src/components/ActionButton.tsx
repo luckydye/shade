@@ -10,6 +10,7 @@ const TOOLBAR_BUTTON_SECONDARY_CLASS =
 
 export const ActionButton: Component<{
   label: string;
+  class: string;
   icon: JSX.Element;
   onClick?: () => void;
   disabled?: boolean;
@@ -19,7 +20,7 @@ export const ActionButton: Component<{
     type="button"
     onClick={props.onClick}
     disabled={props.disabled}
-    class={`${TOOLBAR_BUTTON_BASE_CLASS} ${
+    class={`${props.class} ${TOOLBAR_BUTTON_BASE_CLASS} ${
       props.primary
         ? TOOLBAR_BUTTON_PRIMARY_CLASS
         : TOOLBAR_BUTTON_SECONDARY_CLASS
