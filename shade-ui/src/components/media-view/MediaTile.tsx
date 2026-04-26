@@ -159,7 +159,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
         class={buttonClass()}
         onClick={handleClick}
         aria-pressed={isHighlighted() ? "true" : "false"}
-        title={loadError() ?? undefined}
+        title={loadError() ?? props.item.name}
       >
         <div class="relative aspect-square w-full overflow-hidden rounded-lg bg-[var(--surface)]">
           {!src() && !loadError() && props.offline && (
@@ -207,7 +207,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
             />
           </Show>
         </div>
-        <div class="flex w-full min-w-0 items-center gap-1 px-0.5 touch-mobile:hidden m-1">
+        <div class={`w-full min-w-0 items-center gap-1 px-0.5 touch-mobile:hidden m-1 ${props.compact ? "hidden" : "flex"}`}>
           <span
             class={`block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[10px] font-medium ${isHighlighted() ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
           >

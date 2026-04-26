@@ -119,6 +119,8 @@ const EMPTY_STATE_CLASS =
   "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
 const LAYER_ROW_CLASS =
   "grid h-8 grid-cols-[16px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
+const MASK_LAYER_ROW_CLASS =
+  "ml-8 grid h-7 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-[12px] text-[var(--text-muted)]";
 const ADD_LAYER_ROW_CLASS =
   "grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
@@ -151,6 +153,22 @@ function shortestAngleDelta(from: number, to: number) {
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function getLayerMaskDisplayName(layer: LayerInfo) {
+  if (!layer.mask_params) {
+    throw new Error("masked layer is missing mask parameters");
+  }
+  switch (layer.mask_params.kind) {
+    case "linear":
+      return "Linear Mask";
+    case "radial":
+      return "Radial Mask";
+    case "brush":
+      return "Brush Mask";
+    default:
+      throw new Error(`unknown mask kind: ${String(layer.mask_params.kind)}`);
+  }
 }
 
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
@@ -1781,18 +1799,7 @@ export const Inspector: Component = () => {
                   fallback={<span />}
                 >
                   {layer.has_mask ? (
-                    <Button
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleRemoveMask(realIdx);
-                      }}
-                      class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-value)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
-                      title="Remove mask"
-                    >
-                      M
-                    </Button>
+                    <span />
                   ) : (
                     <Button
                       type="button"
@@ -1828,6 +1835,34 @@ export const Inspector: Component = () => {
                   </Button>
                 </Show>
               </div>
+              <Show when={layer.has_mask}>
+                <div class={MASK_LAYER_ROW_CLASS}>
+                  <span />
+                  <span class="inline-flex h-4 w-4 items-center justify-center rounded-[2px] border border-[var(--border-medium)] bg-[linear-gradient(135deg,var(--surface-selected),var(--surface-subtle))] text-[9px] font-bold uppercase text-[var(--text-dim)]">
+                    M
+                  </span>
+                  <Button
+                    type="button"
+                    onClick={() => selectLayer(realIdx)}
+                    class="min-w-0 truncate py-1 text-left font-medium text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
+                  >
+                    {getLayerMaskDisplayName(layer)}
+                  </Button>
+                  <span />
+                  <Button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleRemoveMask(realIdx);
+                    }}
+                    class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
+                    title="Remove mask"
+                  >
+                    x
+                  </Button>
+                </div>
+              </Show>
               <Show when={maskPickerLayer() === realIdx}>
                 <div class="ml-6 grid grid-cols-3 gap-2">
                   <Button
