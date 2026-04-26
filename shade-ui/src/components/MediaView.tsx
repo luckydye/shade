@@ -1978,7 +1978,7 @@ export const MediaView: Component = () => {
         </Show>
         <div class="relative flex-1 min-h-0 flex flex-col">
         <Show when={hasImage() && state.currentView === "editor"}>
-          <div class="px-2 pt-2 w-full flex">
+          <div class="px-2 pt-2 pb-1 w-full flex">
             <ActionButton
               class="w-full"
               label="Back"
