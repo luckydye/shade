@@ -132,14 +132,14 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
   const isHighlighted = () => props.active || props.selected;
   const buttonClass = () =>
     props.compact
-      ? `group flex w-full min-w-0 flex-col gap-1.5 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      ? `group flex w-full min-w-0 flex-col rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           isHighlighted()
             ? "border border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/40 bg-[var(--surface-subtle)]"
               : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
         }`
-      : `group flex w-full min-w-0 flex-col gap-1.5 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
+      : `group flex w-full min-w-0 flex-col rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           isHighlighted()
             ? "border border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
@@ -207,9 +207,9 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
             />
           </Show>
         </div>
-        <div class="flex w-full min-w-0 items-center gap-1 px-0.5">
+        <div class="flex w-full min-w-0 items-center gap-1 px-0.5 touch-mobile:hidden m-1">
           <span
-            class={`block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[11px] font-medium ${isHighlighted() ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
+            class={`block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[10px] font-medium ${isHighlighted() ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
           >
             {props.item.name}
           </span>

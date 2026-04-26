@@ -124,12 +124,11 @@ const ADD_LAYER_ROW_CLASS =
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const VECTORSCOPE_TOGGLE_SVG = `
-<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   <circle cx="8" cy="8" r="5.5" />
   <circle cx="8" cy="8" r="1.5" />
   <line x1="8" y1="2.5" x2="8" y2="13.5" />
   <line x1="2.5" y1="8" x2="13.5" y2="8" />
-  <line x1="8" y1="8" x2="11.8" y2="4.8" />
 </svg>`;
 const HSL_WHEEL_BASE_ANGLES = {
   red: 0,
@@ -179,7 +178,7 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
 const SectionHeader: Component<{ title: string; detail?: string | (() => string) }> = (props) => (
   <div
     data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-    class="mobile-slider-fade mt-2 flex items-center justify-between gap-3 transition-opacity duration-150"
+    class="mobile-slider-fade my-2 flex items-center justify-between gap-3 transition-opacity duration-150"
   >
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
     <Show when={props.detail}>
@@ -726,8 +725,8 @@ export const Inspector: Component = () => {
         icon={toneSvg}
         value={tone().gamma}
         defaultValue={DEFAULT_TONE.gamma}
-        min={0.1}
-        max={3}
+        min={0}
+        max={2}
         onChange={(v) => applyTone({ gamma: v })}
       />
       <Slider
@@ -1463,7 +1462,7 @@ export const Inspector: Component = () => {
     return (
       <div class="flex flex-col gap-4 pt-1">
         <SectionHeader title="Image" />
-        <div class="flex flex-col gap-2 rounded-lg bg-[var(--surface-subtle)] p-3 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+        <div class="flex flex-col gap-2">
           {(
             [
               { label: "Filename", value: details().filename },

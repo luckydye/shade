@@ -18,8 +18,8 @@ type CurvesEditorProps = {
 
 export const CurvesEditor: Component<CurvesEditorProps> = (props) => (
   <CurveEditorBase
-    label="Curves"
-    valueLabel="Master"
+    label="Tone Curves"
+    valueLabel=""
     parameterRowClass={props.parameterRowClass}
     curvePointCache={props.curvePointCache}
     defaultCurvePoints={props.defaultCurvePoints}
