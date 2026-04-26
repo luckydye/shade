@@ -9,6 +9,7 @@ pub mod pipelines;
 pub mod profiler;
 mod renderer;
 pub mod sharpen2;
+pub mod text;
 pub mod texture_cache;
 pub mod timestamp;
 
@@ -37,6 +38,9 @@ pub use pipelines::{
 pub use profiler::{GpuProfiler, PassTiming};
 pub use renderer::{PreviewCrop, Renderer};
 pub use sharpen2::SharpenTwoPassPipeline;
+pub use text::{
+    FontBlobHash, FontEntry, FontId, TextAlign, TextAnchor, TextContent, TextSpan, TextStyle,
+};
 pub use texture_cache::TextureCache;
 
 /// Tone adjustment parameters — must match the WGSL uniform struct layout.
@@ -367,7 +371,7 @@ pub struct FloatImage {
 /// A unique identifier for a mask resource.
 pub type MaskId = u64;
 
-mod base64_serde {
+pub(crate) mod base64_serde {
     use base64::Engine;
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -575,6 +579,13 @@ pub enum Layer {
     Adjustment {
         ops: Vec<AdjustmentOp>,
     },
+    /// A declarative text layer rasterized at render time.
+    /// `style.font_id` must reference an entry in [`LayerStack::fonts`].
+    Text {
+        content: TextContent,
+        style: TextStyle,
+        transform: AffineTransform,
+    },
 }
 
 /// Blend modes for layer compositing.
@@ -632,6 +643,12 @@ pub struct LayerStack {
     pub mask_params: HashMap<MaskId, MaskParams>,
     next_mask_id: u64,
     pub generation: u64,
+    /// Fonts referenced by `Layer::Text` entries. Defaulted for backward
+    /// compatibility with documents serialized before text layers existed.
+    #[serde(default)]
+    pub fonts: HashMap<FontId, FontEntry>,
+    #[serde(default)]
+    next_font_id: FontId,
 }
 
 impl LayerStack {
@@ -690,6 +707,74 @@ impl LayerStack {
         });
         self.generation += 1;
         idx
+    }
+
+    /// Add a text layer referencing a font already registered via [`Self::add_font`].
+    /// Returns the layer index.
+    pub fn add_text_layer(&mut self, content: TextContent, style: TextStyle) -> usize {
+        let idx = self.layers.len();
+        self.layers.push(LayerEntry {
+            layer: Layer::Text {
+                content,
+                style,
+                transform: AffineTransform::default(),
+            },
+            name: None,
+            precision: LayerPrecision::Half,
+            blend_mode: BlendMode::Normal,
+            opacity: 1.0,
+            mask: None,
+            visible: true,
+        });
+        self.generation += 1;
+        idx
+    }
+
+    /// Register a font blob, returning a [`FontId`]. If a font with the same
+    /// content hash is already registered, returns the existing id without
+    /// duplicating the blob.
+    pub fn add_font(&mut self, family: impl Into<String>, blob: Vec<u8>) -> FontId {
+        let entry = FontEntry::new(family, blob);
+        if let Some(existing) = self.find_font_by_hash(entry.blob_hash) {
+            return existing;
+        }
+        let id = self.next_font_id;
+        self.next_font_id += 1;
+        self.fonts.insert(id, entry);
+        self.generation += 1;
+        id
+    }
+
+    /// Look up a previously registered font by its content hash.
+    pub fn find_font_by_hash(&self, hash: FontBlobHash) -> Option<FontId> {
+        self.fonts
+            .iter()
+            .find(|(_, e)| e.blob_hash == hash)
+            .map(|(id, _)| *id)
+    }
+
+    /// Drop fonts not referenced by any [`Layer::Text`] entry. Returns the
+    /// number of fonts evicted.
+    pub fn remove_unused_fonts(&mut self) -> usize {
+        let mut referenced: std::collections::HashSet<FontId> =
+            std::collections::HashSet::new();
+        for entry in &self.layers {
+            if let Layer::Text { style, content, .. } = &entry.layer {
+                referenced.insert(style.font_id);
+                for span in &content.spans {
+                    if let Some(id) = span.override_font {
+                        referenced.insert(id);
+                    }
+                }
+            }
+        }
+        let before = self.fonts.len();
+        self.fonts.retain(|id, _| referenced.contains(id));
+        let removed = before - self.fonts.len();
+        if removed > 0 {
+            self.generation += 1;
+        }
+        removed
     }
 
     pub fn set_mask(&mut self, layer_idx: usize, mask: MaskData) -> MaskId {
@@ -1099,6 +1184,124 @@ mod tests {
         stack.set_mask(0, MaskData::new_full(10, 10));
         // set_mask (not set_mask_with_params) should not store params
         assert!(stack.get_mask_params(0).is_none());
+    }
+
+    // ── Text layers & font cache ─────────────────────────────────────────
+
+    #[test]
+    fn add_font_returns_distinct_ids_for_different_blobs() {
+        let mut stack = LayerStack::new();
+        let a = stack.add_font("A", b"alpha".to_vec());
+        let b = stack.add_font("B", b"beta".to_vec());
+        assert_ne!(a, b);
+        assert_eq!(stack.fonts.len(), 2);
+    }
+
+    #[test]
+    fn add_font_dedups_identical_blobs() {
+        let mut stack = LayerStack::new();
+        let a = stack.add_font("First", b"same".to_vec());
+        let b = stack.add_font("Second-call-different-label", b"same".to_vec());
+        assert_eq!(a, b);
+        assert_eq!(stack.fonts.len(), 1);
+    }
+
+    #[test]
+    fn add_font_bumps_generation_only_when_new() {
+        let mut stack = LayerStack::new();
+        let g0 = stack.generation;
+        stack.add_font("A", b"x".to_vec());
+        let g1 = stack.generation;
+        assert!(g1 > g0);
+        stack.add_font("A2", b"x".to_vec()); // dedup hit
+        assert_eq!(stack.generation, g1, "dedup hit should not bump generation");
+    }
+
+    #[test]
+    fn add_text_layer_appends_with_defaults() {
+        let mut stack = LayerStack::new();
+        let font_id = stack.add_font("Sans", b"font-bytes".to_vec());
+        let idx = stack
+            .add_text_layer(TextContent::new("Hello"), TextStyle::new(font_id, 32.0));
+        assert_eq!(idx, 0);
+        let entry = &stack.layers[0];
+        assert!(entry.visible);
+        assert_eq!(entry.opacity, 1.0);
+        assert_eq!(entry.blend_mode, BlendMode::Normal);
+        match &entry.layer {
+            Layer::Text { content, style, .. } => {
+                assert_eq!(content.text, "Hello");
+                assert_eq!(style.font_id, font_id);
+                assert_eq!(style.size_px, 32.0);
+            }
+            other => panic!("expected text layer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_unused_fonts_keeps_referenced_and_drops_others() {
+        let mut stack = LayerStack::new();
+        let used = stack.add_font("Used", b"u".to_vec());
+        let _orphan = stack.add_font("Orphan", b"o".to_vec());
+        stack.add_text_layer(TextContent::new("hi"), TextStyle::new(used, 16.0));
+        let removed = stack.remove_unused_fonts();
+        assert_eq!(removed, 1);
+        assert!(stack.fonts.contains_key(&used));
+        assert_eq!(stack.fonts.len(), 1);
+    }
+
+    #[test]
+    fn remove_unused_fonts_keeps_span_referenced_fonts() {
+        let mut stack = LayerStack::new();
+        let primary = stack.add_font("Primary", b"p".to_vec());
+        let secondary = stack.add_font("Secondary", b"s".to_vec());
+        let mut content = TextContent::new("ab");
+        content.spans.push(TextSpan {
+            range: 1..2,
+            override_font: Some(secondary),
+            override_color: None,
+            override_size_px: None,
+            override_weight: None,
+            override_italic: None,
+        });
+        stack.add_text_layer(content, TextStyle::new(primary, 16.0));
+        assert_eq!(stack.remove_unused_fonts(), 0);
+        assert_eq!(stack.fonts.len(), 2);
+    }
+
+    #[test]
+    fn layer_stack_serde_round_trip_with_text_layer() {
+        let mut stack = LayerStack::new();
+        let font_id = stack.add_font("Sans", b"abc".to_vec());
+        stack.add_text_layer(TextContent::new("Hi"), TextStyle::new(font_id, 24.0));
+
+        let json = serde_json::to_string(&stack).unwrap();
+        let back: LayerStack = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.layers.len(), 1);
+        assert_eq!(back.fonts.len(), 1);
+        match &back.layers[0].layer {
+            Layer::Text { content, style, .. } => {
+                assert_eq!(content.text, "Hi");
+                assert_eq!(style.font_id, font_id);
+            }
+            other => panic!("expected text layer, got {other:?}"),
+        }
+        assert_eq!(back.fonts[&font_id].blob, b"abc");
+    }
+
+    #[test]
+    fn layer_stack_deserializes_from_legacy_json_without_fonts() {
+        // Documents serialized before text layers had no `fonts`/`next_font_id`
+        // fields; the `#[serde(default)]` attributes must absorb their absence.
+        let legacy = r#"{
+            "layers": [],
+            "masks": {},
+            "mask_params": {},
+            "next_mask_id": 0,
+            "generation": 0
+        }"#;
+        let stack: LayerStack = serde_json::from_str(legacy).unwrap();
+        assert!(stack.fonts.is_empty());
     }
 
     #[test]

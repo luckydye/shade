@@ -5709,6 +5709,7 @@ pub async fn get_layer_stack(
                 shade_lib::Layer::Image { .. } => "image".into(),
                 shade_lib::Layer::Crop { .. } => "crop".into(),
                 shade_lib::Layer::Adjustment { .. } => "adjustment".into(),
+                shade_lib::Layer::Text { .. } => "text".into(),
             },
             name: l.name.clone(),
             visible: l.visible,
@@ -5732,6 +5733,7 @@ pub async fn get_layer_stack(
             adjustments: match &l.layer {
                 shade_lib::Layer::Image { .. } => None,
                 shade_lib::Layer::Crop { .. } => None,
+                shade_lib::Layer::Text { .. } => None,
                 shade_lib::Layer::Adjustment { ops } => {
                     let mut adjustments = AdjustmentValues::default();
                     for op in ops {

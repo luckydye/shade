@@ -588,6 +588,7 @@ pub fn get_stack_json() -> String {
                         shade_lib::Layer::Image { .. } => "image",
                         shade_lib::Layer::Crop { .. } => "crop",
                         shade_lib::Layer::Adjustment { .. } => "adjustment",
+                        shade_lib::Layer::Text { .. } => "text",
                     },
                     "name": l.name.clone(),
                     "visible": l.visible,

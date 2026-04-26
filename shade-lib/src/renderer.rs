@@ -804,6 +804,9 @@ impl Renderer {
                         None,
                     )?
                 }
+                // Text layers are rasterized in a later phase. Skipping keeps
+                // the rest of the stack rendering as if the layer were hidden.
+                Layer::Text { .. } => continue,
             };
 
             // 2b. Optional mask texture.
