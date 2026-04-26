@@ -1,5 +1,7 @@
 {
   "workspaces": [
+    "shade-tauri",
+    "shade-web",
     "shade-ui"
   ],
   "dependencies": {
