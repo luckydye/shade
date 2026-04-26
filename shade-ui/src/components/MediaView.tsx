@@ -455,8 +455,9 @@ export const MediaView: Component = () => {
     }
     return cachedLibraryItems() ?? [];
   });
+  const normalizedFilenameFilter = createMemo(() => normalizeFilenameFilter(filenameFilter()));
   const activeFilenameFilter = createMemo(() =>
-    state.currentView === "editor" ? [] : normalizeFilenameFilter(filenameFilter()),
+    state.currentView === "editor" ? [] : normalizedFilenameFilter(),
   );
   const filteredByFilename = createMemo(() =>
     filterMediaItemsByFilename(availableItems(), activeFilenameFilter()),
@@ -950,7 +951,7 @@ export const MediaView: Component = () => {
   });
 
   createEffect(() => {
-    activeFilenameFilter();
+    normalizedFilenameFilter();
     setScrollTop(0);
     setAnchorItemId(null);
     setAnchorRowOffset(0);
