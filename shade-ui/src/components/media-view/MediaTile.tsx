@@ -207,7 +207,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
             />
           </Show>
         </div>
-        <div class={`w-full min-w-0 items-center gap-1 px-0.5 touch-mobile:hidden m-1 ${props.compact ? "hidden" : "flex"}`}>
+        <div class={`w-full min-w-0 items-center gap-1 touch-mobile:hidden my-1 px-1 ${props.compact ? "hidden" : "flex"}`}>
           <span
             class={`block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[10px] font-medium ${isHighlighted() ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
           >
