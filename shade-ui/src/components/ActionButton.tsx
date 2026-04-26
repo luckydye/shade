@@ -2,11 +2,11 @@ import type { Component, JSX } from "solid-js";
 import { Button } from "./Button";
 
 const TOOLBAR_BUTTON_BASE_CLASS =
-  "inline-flex h-7 items-center gap-2 rounded-md border px-3 text-[11px] font-semibold uppercase tracking-[0.03em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-45";
+  "inline-flex h-7 items-center gap-2 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-45";
 const TOOLBAR_BUTTON_PRIMARY_CLASS =
   "border-[var(--btn-primary-bg)] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)] enabled:hover:bg-[var(--btn-primary-hover)]";
 const TOOLBAR_BUTTON_SECONDARY_CLASS =
-  "border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-active)] enabled:hover:bg-[var(--surface-hover)] enabled:hover:text-[var(--text)]";
+  "text-[var(--text-secondary)] enabled:hover:border-[var(--border-active)] enabled:hover:bg-[var(--surface-hover)] enabled:hover:text-[var(--text)]";
 
 export const ActionButton: Component<{
   label: string;
