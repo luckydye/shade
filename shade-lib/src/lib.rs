@@ -10,6 +10,7 @@ pub mod profiler;
 mod renderer;
 pub mod sharpen2;
 pub mod text;
+pub mod text_buffer;
 pub mod text_outline;
 pub mod texture_cache;
 pub mod timestamp;
@@ -41,6 +42,9 @@ pub use renderer::{PreviewCrop, Renderer};
 pub use sharpen2::SharpenTwoPassPipeline;
 pub use text::{
     FontBlobHash, FontEntry, FontId, TextAlign, TextAnchor, TextContent, TextSpan, TextStyle,
+};
+pub use text_buffer::{
+    GlyphBufferLayout, GpuBand, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph, FLOATS_PER_CURVE,
 };
 pub use text_outline::{
     build_bands, outline_glyph, GlyphBand, GlyphCurves, QuadBezier, Rect as GlyphRect,
