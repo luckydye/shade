@@ -66,6 +66,7 @@ export interface EditorState {
   previewRenderHeight: number;
   previewContentVersion: number;
   selectedLayerIdx: number;
+  selectedLayerPart: "layer" | "mask";
   isLoading: boolean;
   isDownloading: boolean;
   webgpuAvailable: boolean;
@@ -97,6 +98,7 @@ export const [state, setState] = createStore<EditorState>({
   previewRenderHeight: 0,
   previewContentVersion: 0,
   selectedLayerIdx: -1,
+  selectedLayerPart: "layer",
   isLoading: false,
   isDownloading: false,
   webgpuAvailable: true,
@@ -177,6 +179,21 @@ export function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number)
     }
   }
   return layers.length - 1;
+}
+
+export function resolveSelectedLayerPart(
+  layers: LayerInfo[],
+  currentIdx: number,
+  nextIdx: number,
+  currentPart: EditorState["selectedLayerPart"],
+) {
+  if (currentPart === "layer") {
+    return "layer";
+  }
+  if (nextIdx !== currentIdx) {
+    return "layer";
+  }
+  return layers[nextIdx]?.has_mask ? "mask" : "layer";
 }
 
 export function getLayerDefaultName(kind: LayerInfo["kind"]) {

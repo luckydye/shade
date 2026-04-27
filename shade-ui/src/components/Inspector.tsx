@@ -40,6 +40,7 @@ import {
   state,
   backdropTile,
 } from "../store/editor";
+import { selectMaskLayer } from "../store/editor-layers";
 import {
   type ArtboardSource,
   getLayerDefaultName,
@@ -1700,7 +1701,8 @@ export const Inspector: Component = () => {
               <div
                 data-layer-idx={realIdx}
                 class={`${LAYER_ROW_CLASS} ${
-                  state.selectedLayerIdx === realIdx
+                  state.selectedLayerIdx === realIdx &&
+                  state.selectedLayerPart === "layer"
                     ? "bg-[var(--surface-active)] text-[var(--text)] shadow-[inset_0_0_0_1px_var(--border-active)]"
                     : "bg-[var(--surface-subtle)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface)]"
                 } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
@@ -1836,7 +1838,15 @@ export const Inspector: Component = () => {
                 </Show>
               </div>
               <Show when={layer.has_mask}>
-                <div class={MASK_LAYER_ROW_CLASS}>
+                <div
+                  class={`${MASK_LAYER_ROW_CLASS} ${
+                    state.selectedLayerIdx === realIdx &&
+                    state.selectedLayerPart === "mask"
+                      ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+                      : ""
+                  }`}
+                  onClick={() => selectMaskLayer(realIdx)}
+                >
                   <span class="relative h-full w-4">
                     <svg
                       viewBox="0 0 16 32"
@@ -1857,8 +1867,8 @@ export const Inspector: Component = () => {
                   </span>
                   <Button
                     type="button"
-                    onClick={() => selectLayer(realIdx)}
-                    class="min-w-0 truncate py-1 text-left font-medium text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
+                    onClick={() => selectMaskLayer(realIdx)}
+                    class="min-w-0 truncate py-1 text-left font-medium transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                   >
                     {getLayerMaskDisplayName(layer)}
                   </Button>
