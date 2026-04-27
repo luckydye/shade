@@ -2,8 +2,9 @@ use anyhow::Result;
 use futures_channel::oneshot;
 use half::f16;
 use shade_lib::{
-    AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, HslParams,
-    Layer, LayerStack, TextureId, ToneParams,
+    outline_glyph, AdjustmentOp, AffineTransform, ColorMatrix3x3, ColorSpace, FloatImage,
+    GlyphBufferLayout, HslParams, Layer, LayerStack, PlacedGlyph, TextContent, TextLayoutEngine,
+    TextStyle, TextureId, ToneParams, DEFAULT_BANDS_PER_AXIS,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -26,6 +27,7 @@ use crate::{
         VignettePipeline,
     },
     sharpen2::SharpenTwoPassPipeline,
+    text_pipeline::TextPipeline,
     texture_cache::TextureCache,
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
 };
@@ -59,6 +61,7 @@ pub struct Renderer {
     pub denoise_pipeline: DenoisePipeline,
     pub texture_cache: TextureCache,
     pub color_transform_pipeline: ColorTransformPipeline,
+    pub text_pipeline: TextPipeline,
     readback_buffer_pool: Mutex<HashMap<u64, Vec<wgpu::Buffer>>>,
 }
 
@@ -90,6 +93,7 @@ impl Renderer {
         let denoise_pipeline = DenoisePipeline::new(&ctx);
         let texture_cache = TextureCache::new();
         let color_transform_pipeline = ColorTransformPipeline::new(&ctx);
+        let text_pipeline = TextPipeline::new(&ctx)?;
         Ok(Self {
             ctx,
             tone_pipeline,
@@ -108,6 +112,7 @@ impl Renderer {
             denoise_pipeline,
             texture_cache,
             color_transform_pipeline,
+            text_pipeline,
             readback_buffer_pool: Mutex::new(HashMap::new()),
         })
     }
@@ -804,9 +809,26 @@ impl Renderer {
                         None,
                     )?
                 }
-                // Text layers are rasterized in a later phase. Skipping keeps
-                // the rest of the stack rendering as if the layer were hidden.
-                Layer::Text { .. } => continue,
+                Layer::Text {
+                    content,
+                    style,
+                    transform,
+                } => {
+                    let result = self.render_text_layer(
+                        stack,
+                        content,
+                        style,
+                        transform,
+                        target_width,
+                        target_height,
+                    )?;
+                    match result {
+                        Some(tex) => tex,
+                        // Empty content / all-whitespace: nothing to draw, the
+                        // layer is effectively transparent — skip composite.
+                        None => continue,
+                    }
+                }
             };
 
             // 2b. Optional mask texture.
@@ -921,6 +943,89 @@ impl Renderer {
         }
 
         Ok(())
+    }
+
+    /// Lay out, rasterize and place a single text layer.
+    ///
+    /// Returns `None` when there is nothing renderable (empty content,
+    /// all-whitespace, or no font registered) so the caller can skip the
+    /// composite pass entirely. Otherwise returns the `target_width × target_height`
+    /// Rgba16Float texture produced by [`TextPipeline::process`], suitable for
+    /// the existing [`CompositePipeline`] input contract.
+    fn render_text_layer(
+        &self,
+        stack: &LayerStack,
+        content: &TextContent,
+        style: &TextStyle,
+        transform: &AffineTransform,
+        target_width: u32,
+        target_height: u32,
+    ) -> Result<Option<wgpu::Texture>> {
+        // V1: build a fresh layout engine per call. Caching by `stack.generation`
+        // is a follow-up; a poster with frequent edits will pay an FT/HB
+        // re-init cost (~10ms typical) per Text layer per render.
+        let mut engine = TextLayoutEngine::new(&stack.fonts)?;
+        let placed_raw = engine.layout(content, style)?;
+        if placed_raw.is_empty() {
+            return Ok(None);
+        }
+
+        // V1: apply only the translation component of the layer transform.
+        // Rotation and per-axis scale require feeding the matrix through the
+        // vertex shader; deferred to a follow-up.
+        let placed: Vec<PlacedGlyph> = placed_raw
+            .into_iter()
+            .map(|p| PlacedGlyph {
+                x: p.x + transform.tx,
+                y: p.y + transform.ty,
+                ..p
+            })
+            .collect();
+
+        // Extract outlines for each unique (font_id, glyph_id) and pack the
+        // shared GPU storage buffers. Whitespace glyphs (no curves) are not
+        // registered — their corresponding instances are filtered below so
+        // the draw call stays tight.
+        let mut buffer_layout = GlyphBufferLayout::new();
+        for p in &placed {
+            if buffer_layout.meta_index(p.font_id, p.glyph_id).is_some() {
+                continue;
+            }
+            let entry = stack.fonts.get(&p.font_id).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "font_id {} referenced by placed glyph but not registered on the stack",
+                    p.font_id
+                )
+            })?;
+            let glyph = outline_glyph(
+                &entry.blob,
+                p.glyph_id,
+                DEFAULT_BANDS_PER_AXIS,
+                DEFAULT_BANDS_PER_AXIS,
+            )?;
+            if glyph.curves.is_empty() {
+                continue;
+            }
+            buffer_layout.add_glyph(p.font_id, p.glyph_id, &glyph);
+        }
+
+        let renderable: Vec<PlacedGlyph> = placed
+            .into_iter()
+            .filter(|p| buffer_layout.meta_index(p.font_id, p.glyph_id).is_some())
+            .collect();
+        if renderable.is_empty() {
+            return Ok(None);
+        }
+
+        let instances = buffer_layout.build_instances(&renderable)?;
+        let tex = self.text_pipeline.process(
+            &self.ctx,
+            &buffer_layout,
+            &instances,
+            target_width,
+            target_height,
+        )?;
+        Ok(Some(tex))
     }
 
     /// Apply a GPU colour transform to an existing texture.
