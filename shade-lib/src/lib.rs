@@ -13,6 +13,7 @@ pub mod text;
 pub mod text_buffer;
 pub mod text_layout;
 pub mod text_outline;
+pub mod text_pipeline;
 pub mod texture_cache;
 pub mod timestamp;
 
@@ -24,7 +25,8 @@ pub const INTERNAL_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg
 pub const WORK_TEXTURE_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::TEXTURE_BINDING
     .union(wgpu::TextureUsages::STORAGE_BINDING)
     .union(wgpu::TextureUsages::COPY_SRC)
-    .union(wgpu::TextureUsages::COPY_DST);
+    .union(wgpu::TextureUsages::COPY_DST)
+    .union(wgpu::TextureUsages::RENDER_ATTACHMENT);
 
 pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};
 pub use composite::{
@@ -52,6 +54,7 @@ pub use text_outline::{
     build_h_bands, build_v_bands, outline_glyph, GlyphBand, GlyphCurves, QuadBezier,
     Rect as GlyphRect, DEFAULT_BANDS_PER_AXIS,
 };
+pub use text_pipeline::{TextPipeline, TextViewUniform, VERTICES_PER_GLYPH};
 pub use texture_cache::TextureCache;
 
 /// Tone adjustment parameters — must match the WGSL uniform struct layout.
