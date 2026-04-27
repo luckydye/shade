@@ -1,12 +1,25 @@
-//! Glyph outline extraction in em-units.
+//! Glyph outline extraction in em-units, organized for Slug-style GPU rendering.
 //!
 //! Loads a TTF/OTF blob via `ttf-parser`, walks the outline of a single
-//! glyph, and produces a flat list of quadratic Bézier segments plus a
-//! horizontal band acceleration index. This is the per-glyph geometry that
-//! the GPU rasterizer (Slug-style direct curve rendering) consumes.
+//! glyph, and produces a flat list of quadratic Bézier segments plus the
+//! two-axis band acceleration index used by the Slug pixel shader.
+//!
+//! Each glyph carries:
+//!
+//! - `curves`: quadratic Béziers in em-units (Y-up, native TrueType).
+//! - `h_bands`: horizontal strips of the em bbox; for each strip, the indices
+//!   of curves whose y-extent overlaps it, **sorted by descending max-x** so
+//!   the fragment shader's left-of-pixel early-exit is valid.
+//! - `v_bands`: same for vertical strips, sorted by descending max-y.
+//! - `band_transform`: `(scale_x, scale_y, offset_x, offset_y)` such that
+//!   for an em-space sample coordinate `(x, y)`,
+//!     `v_band_index = clamp(floor(x · scale_x + offset_x), 0, band_max_x)`
+//!     `h_band_index = clamp(floor(y · scale_y + offset_y), 0, band_max_y)`
+//!   — matching the Slug pixel shader's `coord · bandTransform.xy + bandTransform.zw`
+//!   formulation directly.
 //!
 //! Lines are widened to degenerate quadratics with the control point at the
-//! chord midpoint so the shader's root finder uses one code path. Cubic
+//! chord midpoint so the GPU root finder uses a single code path. Cubic
 //! Béziers (CFF / `.otf`) are recursively subdivided into quadratics under
 //! a fixed em-units error tolerance.
 
@@ -46,12 +59,13 @@ impl Rect {
     }
 }
 
-/// One horizontal strip of a glyph's bounding box, listing the indices of
-/// curves whose y-extent overlaps the strip.
-#[derive(Debug, Clone, PartialEq)]
+/// One axis-aligned strip in a glyph's bbox.
+///
+/// Curve indices are sorted by descending max-coord on the band's
+/// **perpendicular** axis: H bands sort by descending max-x, V bands by
+/// descending max-y. The order enables the fragment shader's early-out.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlyphBand {
-    pub y_min: f32,
-    pub y_max: f32,
     pub curve_indices: Vec<u32>,
 }
 
@@ -59,14 +73,17 @@ pub struct GlyphBand {
 #[derive(Debug, Clone)]
 pub struct GlyphCurves {
     pub curves: Vec<QuadBezier>,
-    pub bands: Vec<GlyphBand>,
+    pub h_bands: Vec<GlyphBand>,
+    pub v_bands: Vec<GlyphBand>,
+    /// `(scale_x, scale_y, offset_x, offset_y)` — see module docs.
+    pub band_transform: [f32; 4],
     pub em_bbox: Rect,
     pub advance: f32,
     pub units_per_em: u16,
 }
 
-/// Default number of horizontal bands per glyph.
-pub const DEFAULT_BANDS: usize = 16;
+/// Default number of bands per axis. 16 is the standard Slug-paper value.
+pub const DEFAULT_BANDS_PER_AXIS: usize = 16;
 
 /// Maximum em-units error accepted when approximating a cubic with a single
 /// quadratic before subdividing.
@@ -195,53 +212,122 @@ fn midpoint(a: Point2, b: Point2) -> Point2 {
 }
 
 /// Inclusive y-range of a quadratic Bézier on t ∈ [0, 1].
+#[cfg(test)]
 fn quad_y_extent(q: &QuadBezier) -> (f32, f32) {
-    let mut y_min = q.p0[1].min(q.p2[1]);
-    let mut y_max = q.p0[1].max(q.p2[1]);
-    // Interior extremum: y'(t) = 0 ⇒ t = (p0 - p1) / (p0 - 2*p1 + p2).
-    let denom = q.p0[1] - 2.0 * q.p1[1] + q.p2[1];
-    if denom.abs() > f32::EPSILON {
-        let t = (q.p0[1] - q.p1[1]) / denom;
-        if t > 0.0 && t < 1.0 {
-            let mt = 1.0 - t;
-            let y_t = mt * mt * q.p0[1] + 2.0 * mt * t * q.p1[1] + t * t * q.p2[1];
-            y_min = y_min.min(y_t);
-            y_max = y_max.max(y_t);
-        }
-    }
-    (y_min, y_max)
+    quad_axis_extent(q, Axis::Y)
 }
 
-/// Partition `bbox` vertically into `num_bands` equal strips and assign each
-/// curve index to every strip its y-extent overlaps.
-pub fn build_bands(curves: &[QuadBezier], num_bands: usize, bbox: Rect) -> Vec<GlyphBand> {
-    assert!(num_bands >= 1, "num_bands must be at least 1");
-    let height = (bbox.max[1] - bbox.min[1]).max(f32::EPSILON);
-    let band_h = height / num_bands as f32;
-    let mut bands: Vec<GlyphBand> = (0..num_bands)
-        .map(|i| GlyphBand {
-            y_min: bbox.min[1] + band_h * i as f32,
-            y_max: bbox.min[1] + band_h * (i + 1) as f32,
-            curve_indices: Vec::new(),
-        })
-        .collect();
-    for (idx, q) in curves.iter().enumerate() {
-        let (y0, y1) = quad_y_extent(q);
-        for band in &mut bands {
-            if y1 >= band.y_min && y0 <= band.y_max {
-                band.curve_indices.push(idx as u32);
-            }
+/// Inclusive x-range of a quadratic Bézier on t ∈ [0, 1].
+#[cfg(test)]
+fn quad_x_extent(q: &QuadBezier) -> (f32, f32) {
+    quad_axis_extent(q, Axis::X)
+}
+
+#[derive(Clone, Copy)]
+enum Axis {
+    X = 0,
+    Y = 1,
+}
+
+fn quad_axis_extent(q: &QuadBezier, axis: Axis) -> (f32, f32) {
+    let i = axis as usize;
+    let mut lo = q.p0[i].min(q.p2[i]);
+    let mut hi = q.p0[i].max(q.p2[i]);
+    // Interior extremum: d/dt = 0 ⇒ t = (p0 - p1) / (p0 - 2*p1 + p2).
+    let denom = q.p0[i] - 2.0 * q.p1[i] + q.p2[i];
+    if denom.abs() > f32::EPSILON {
+        let t = (q.p0[i] - q.p1[i]) / denom;
+        if t > 0.0 && t < 1.0 {
+            let mt = 1.0 - t;
+            let v = mt * mt * q.p0[i] + 2.0 * mt * t * q.p1[i] + t * t * q.p2[i];
+            lo = lo.min(v);
+            hi = hi.max(v);
         }
     }
-    bands
+    (lo, hi)
+}
+
+/// Build the H-band index for a glyph: `num_bands` uniform horizontal strips
+/// covering `bbox`'s y range. Returns `(bands, scale_y, offset_y)` such that
+/// `h_band_index = clamp(floor(y · scale_y + offset_y), 0, num_bands - 1)`.
+///
+/// Curves within each band are sorted by descending max-x.
+pub fn build_h_bands(
+    curves: &[QuadBezier],
+    num_bands: usize,
+    bbox: Rect,
+) -> (Vec<GlyphBand>, f32, f32) {
+    build_axis_bands(curves, num_bands, bbox, Axis::Y)
+}
+
+/// Build the V-band index. Returns `(bands, scale_x, offset_x)`.
+/// Curves within each band are sorted by descending max-y.
+pub fn build_v_bands(
+    curves: &[QuadBezier],
+    num_bands: usize,
+    bbox: Rect,
+) -> (Vec<GlyphBand>, f32, f32) {
+    build_axis_bands(curves, num_bands, bbox, Axis::X)
+}
+
+fn build_axis_bands(
+    curves: &[QuadBezier],
+    num_bands: usize,
+    bbox: Rect,
+    axis: Axis,
+) -> (Vec<GlyphBand>, f32, f32) {
+    assert!(num_bands >= 1, "num_bands must be at least 1");
+    let i = axis as usize;
+    let span = (bbox.max[i] - bbox.min[i]).max(f32::EPSILON);
+    let scale = num_bands as f32 / span;
+    let offset = -bbox.min[i] * scale;
+    let max_idx = (num_bands - 1) as i32;
+
+    let mut bands: Vec<GlyphBand> = (0..num_bands)
+        .map(|_| GlyphBand::default())
+        .collect();
+
+    for (idx, q) in curves.iter().enumerate() {
+        let (lo, hi) = quad_axis_extent(q, axis);
+        let i0 = ((lo * scale + offset).floor() as i32)
+            .max(0)
+            .min(max_idx) as usize;
+        let i1 = ((hi * scale + offset).floor() as i32)
+            .max(0)
+            .min(max_idx) as usize;
+        for slot in i0..=i1 {
+            bands[slot].curve_indices.push(idx as u32);
+        }
+    }
+
+    // Sort descending by perpendicular-axis max: H bands by max-x, V by max-y.
+    let perp = match axis {
+        Axis::Y => Axis::X,
+        Axis::X => Axis::Y,
+    };
+    for band in &mut bands {
+        band.curve_indices.sort_by(|&a, &b| {
+            let ma = quad_axis_extent(&curves[a as usize], perp).1;
+            let mb = quad_axis_extent(&curves[b as usize], perp).1;
+            mb.partial_cmp(&ma).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    (bands, scale, offset)
 }
 
 /// Extract a single glyph's outline from an OTF/TTF blob in em-units.
 ///
-/// `num_bands` controls band-acceleration granularity; pass [`DEFAULT_BANDS`]
-/// if unsure. Returns an empty `GlyphCurves` (no curves, no bands) for glyphs
-/// without outlines (whitespace, control codes), preserving advance width.
-pub fn outline_glyph(blob: &[u8], glyph_id: u16, num_bands: usize) -> Result<GlyphCurves> {
+/// `num_h_bands` and `num_v_bands` control the per-axis granularity; pass
+/// [`DEFAULT_BANDS_PER_AXIS`] for both if unsure. Returns an empty
+/// `GlyphCurves` (no curves, no bands) for glyphs without outlines
+/// (whitespace, control codes), preserving advance width.
+pub fn outline_glyph(
+    blob: &[u8],
+    glyph_id: u16,
+    num_h_bands: usize,
+    num_v_bands: usize,
+) -> Result<GlyphCurves> {
     let face = Face::parse(blob, 0)
         .map_err(|e| anyhow!("ttf-parser face parse failed: {e:?}"))?;
     let units_per_em = face.units_per_em();
@@ -261,15 +347,28 @@ pub fn outline_glyph(blob: &[u8], glyph_id: u16, num_bands: usize) -> Result<Gly
         None => Rect::ZERO,
     };
 
-    let bands = if collector.curves.is_empty() {
-        Vec::new()
-    } else {
-        build_bands(&collector.curves, num_bands.max(1), em_bbox)
-    };
+    if collector.curves.is_empty() {
+        return Ok(GlyphCurves {
+            curves: collector.curves,
+            h_bands: Vec::new(),
+            v_bands: Vec::new(),
+            band_transform: [0.0; 4],
+            em_bbox,
+            advance,
+            units_per_em,
+        });
+    }
+
+    let (h_bands, scale_y, offset_y) =
+        build_h_bands(&collector.curves, num_h_bands.max(1), em_bbox);
+    let (v_bands, scale_x, offset_x) =
+        build_v_bands(&collector.curves, num_v_bands.max(1), em_bbox);
 
     Ok(GlyphCurves {
         curves: collector.curves,
-        bands,
+        h_bands,
+        v_bands,
+        band_transform: [scale_x, scale_y, offset_x, offset_y],
         em_bbox,
         advance,
         units_per_em,
@@ -314,7 +413,6 @@ mod tests {
         c.line_to(10.0, 0.0);
         c.line_to(10.0, 10.0);
         c.close();
-        // 3 segments: line + line + closing line back to (0,0).
         assert_eq!(c.curves.len(), 3);
         let last = c.curves.last().unwrap();
         assert_eq!(last.p0, [10.0, 10.0]);
@@ -326,9 +424,9 @@ mod tests {
         let mut c = OutlineCollector::new();
         c.move_to(0.0, 0.0);
         c.line_to(10.0, 0.0);
-        c.line_to(0.0, 0.0); // already returned manually
+        c.line_to(0.0, 0.0);
         c.close();
-        assert_eq!(c.curves.len(), 2, "close must not add a redundant segment");
+        assert_eq!(c.curves.len(), 2);
     }
 
     #[test]
@@ -345,34 +443,34 @@ mod tests {
 
     #[test]
     fn cubic_that_is_already_quadratic_yields_one_segment() {
-        // Pick c1 == c2 == midpoint of p0 and p3, lifted in y → exact quadratic.
-        let p0 = [0.0, 0.0];
-        let c1 = [5.0, 5.0];
-        let c2 = [5.0, 5.0];
-        let p3 = [10.0, 0.0];
         let mut out = Vec::new();
-        cubic_to_quads(p0, c1, c2, p3, CUBIC_TO_QUAD_MAX_ERROR, 0, &mut out);
-        assert_eq!(out.len(), 1, "expected single quadratic, got {out:?}");
+        cubic_to_quads(
+            [0.0, 0.0],
+            [5.0, 5.0],
+            [5.0, 5.0],
+            [10.0, 0.0],
+            CUBIC_TO_QUAD_MAX_ERROR,
+            0,
+            &mut out,
+        );
+        assert_eq!(out.len(), 1);
     }
 
     #[test]
     fn cubic_with_high_curvature_subdivides() {
-        // S-curve cubic that no single quadratic can match well.
-        let p0 = [0.0, 0.0];
-        let c1 = [100.0, 100.0];
-        let c2 = [-100.0, 100.0];
-        let p3 = [100.0, 0.0];
         let mut out = Vec::new();
-        cubic_to_quads(p0, c1, c2, p3, 0.5, 0, &mut out);
-        assert!(
-            out.len() > 1,
-            "high-curvature cubic should subdivide, got {} curves",
-            out.len()
+        cubic_to_quads(
+            [0.0, 0.0],
+            [100.0, 100.0],
+            [-100.0, 100.0],
+            [100.0, 0.0],
+            0.5,
+            0,
+            &mut out,
         );
-        // Endpoints must match the original cubic.
-        assert_eq!(out.first().unwrap().p0, p0);
-        assert_eq!(out.last().unwrap().p2, p3);
-        // Adjacent segments must share endpoints (path continuity).
+        assert!(out.len() > 1);
+        assert_eq!(out.first().unwrap().p0, [0.0, 0.0]);
+        assert_eq!(out.last().unwrap().p2, [100.0, 0.0]);
         for w in out.windows(2) {
             assert_eq!(w[0].p2, w[1].p0);
         }
@@ -380,19 +478,21 @@ mod tests {
 
     #[test]
     fn cubic_to_quads_respects_max_depth() {
-        // Pathological cubic — but capped depth must still terminate.
-        let p0 = [0.0, 0.0];
-        let c1 = [1e6, 1e6];
-        let c2 = [-1e6, 1e6];
-        let p3 = [1e6, 0.0];
         let mut out = Vec::new();
-        cubic_to_quads(p0, c1, c2, p3, 0.0001, 0, &mut out);
-        // Depth cap is 10 → at most 2^10 = 1024 segments.
+        cubic_to_quads(
+            [0.0, 0.0],
+            [1e6, 1e6],
+            [-1e6, 1e6],
+            [1e6, 0.0],
+            0.0001,
+            0,
+            &mut out,
+        );
         assert!(out.len() <= 1024);
         assert!(!out.is_empty());
     }
 
-    // ── y-extent solver ──────────────────────────────────────────────────
+    // ── y- and x-extent solver ───────────────────────────────────────────
 
     #[test]
     fn quad_y_extent_returns_endpoints_for_monotone_quad() {
@@ -408,7 +508,6 @@ mod tests {
 
     #[test]
     fn quad_y_extent_finds_interior_apex() {
-        // Symmetric arch: apex at t = 0.5 → y(0.5) = 0.25*0 + 0.5*10 + 0.25*0 = 5
         let q = QuadBezier {
             p0: [0.0, 0.0],
             p1: [5.0, 10.0],
@@ -420,46 +519,51 @@ mod tests {
     }
 
     #[test]
-    fn quad_y_extent_finds_interior_minimum() {
-        // Inverted arch: minimum at t = 0.5 → y(0.5) = -5
+    fn quad_x_extent_finds_interior_apex() {
         let q = QuadBezier {
             p0: [0.0, 0.0],
-            p1: [5.0, -10.0],
-            p2: [10.0, 0.0],
+            p1: [10.0, 5.0],
+            p2: [0.0, 10.0],
         };
-        let (lo, hi) = quad_y_extent(&q);
-        assert!(approx_eq(lo, -5.0, 1e-5));
-        assert!(approx_eq(hi, 0.0, 1e-5));
+        let (lo, hi) = quad_x_extent(&q);
+        assert!(approx_eq(lo, 0.0, 1e-5));
+        assert!(approx_eq(hi, 5.0, 1e-5));
     }
 
-    // ── build_bands ──────────────────────────────────────────────────────
+    // ── Two-axis band index ─────────────────────────────────────────────
 
-    #[test]
-    fn build_bands_partitions_bbox_into_equal_strips() {
-        let bbox = Rect {
+    fn unit_bbox() -> Rect {
+        Rect {
             min: [0.0, 0.0],
-            max: [10.0, 100.0],
-        };
-        let bands = build_bands(&[], 4, bbox);
-        assert_eq!(bands.len(), 4);
-        assert!(approx_eq(bands[0].y_min, 0.0, 1e-5));
-        assert!(approx_eq(bands[0].y_max, 25.0, 1e-5));
-        assert!(approx_eq(bands[3].y_max, 100.0, 1e-5));
+            max: [100.0, 100.0],
+        }
     }
 
     #[test]
-    fn build_bands_assigns_curve_only_to_overlapping_bands() {
+    fn build_h_bands_transform_matches_shader_formula() {
+        let bbox = unit_bbox();
+        let (_bands, scale_y, offset_y) = build_h_bands(&[], 4, bbox);
+        // 4 bands over [0, 100] → scale = 0.04, offset = 0.
+        assert!(approx_eq(scale_y, 0.04, 1e-6));
+        assert!(approx_eq(offset_y, 0.0, 1e-6));
+        // y = 30 → band 1 (range [25, 50)).
+        let idx = (30.0 * scale_y + offset_y).floor() as i32;
+        assert_eq!(idx, 1);
+        // y = 99.99 → band 3.
+        let idx = (99.99 * scale_y + offset_y).floor() as i32;
+        assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn build_h_bands_assigns_each_curve_to_overlapping_strips_only() {
         let curves = vec![QuadBezier {
             p0: [0.0, 10.0],
-            p1: [5.0, 12.0],
-            p2: [10.0, 14.0],
+            p1: [50.0, 12.0],
+            p2: [100.0, 14.0],
         }];
-        let bbox = Rect {
-            min: [0.0, 0.0],
-            max: [10.0, 100.0],
-        };
-        let bands = build_bands(&curves, 4, bbox);
-        // Curve sits in y ∈ [10, 14] → only band 0 (y ∈ [0, 25]).
+        let bbox = unit_bbox();
+        let (bands, _, _) = build_h_bands(&curves, 4, bbox);
+        // Curve y ∈ [10, 14] → only band 0 (y ∈ [0, 25)).
         assert_eq!(bands[0].curve_indices, vec![0]);
         assert!(bands[1].curve_indices.is_empty());
         assert!(bands[2].curve_indices.is_empty());
@@ -467,54 +571,77 @@ mod tests {
     }
 
     #[test]
-    fn build_bands_replicates_curves_across_multiple_overlapping_bands() {
+    fn build_h_bands_finds_apex_overlap_via_extent_solver() {
+        // Endpoints in band 0 only (y=5), but apex reaches into band 1.
+        // y(0.5) = 0.25·5 + 0.5·55 + 0.25·5 = 30 → band 1 (y ∈ [25, 50)).
         let curves = vec![QuadBezier {
-            p0: [0.0, 0.0],
-            p1: [5.0, 100.0],
-            p2: [10.0, 0.0],
+            p0: [0.0, 5.0],
+            p1: [50.0, 55.0],
+            p2: [100.0, 5.0],
         }];
-        let bbox = Rect {
-            min: [0.0, 0.0],
-            max: [10.0, 100.0],
-        };
-        // y(t) = 200·t·(1-t), peak at t=0.5 → 50. Bands of height 25:
-        // [0,25] [25,50] [50,75] [75,100]. Curve y-range is [0, 50] →
-        // overlaps bands 0, 1, 2 (band 2 by inclusive y_min boundary).
-        let bands = build_bands(&curves, 4, bbox);
-        assert_eq!(bands[0].curve_indices, vec![0]);
-        assert_eq!(bands[1].curve_indices, vec![0]);
-        assert_eq!(bands[2].curve_indices, vec![0]);
-        assert!(bands[3].curve_indices.is_empty());
+        let bbox = unit_bbox();
+        let (bands, _, _) = build_h_bands(&curves, 4, bbox);
+        assert!(bands[0].curve_indices.contains(&0));
+        assert!(bands[1].curve_indices.contains(&0));
+        assert!(!bands[2].curve_indices.contains(&0));
     }
 
     #[test]
-    fn build_bands_includes_curves_with_apex_above_endpoints() {
-        // Curve endpoints in band 0 only, but apex reaches into band 1.
-        // Without the y-extent solver this would miss band 1.
-        let curves = vec![QuadBezier {
-            p0: [0.0, 5.0],
-            p1: [5.0, 30.0],
-            p2: [10.0, 5.0],
-        }];
-        let bbox = Rect {
-            min: [0.0, 0.0],
-            max: [10.0, 40.0],
-        };
-        let bands = build_bands(&curves, 4, bbox); // bands of height 10
-        assert!(bands[0].curve_indices.contains(&0), "endpoint band");
-        assert!(
-            bands[1].curve_indices.contains(&0),
-            "apex band must be detected via interior extremum solve"
-        );
-        assert!(!bands[2].curve_indices.contains(&0));
+    fn build_h_bands_sorts_by_descending_max_x() {
+        // Three curves all sit in band 0 (y ∈ [0, 5]), differing by max-x.
+        let curves = vec![
+            QuadBezier {
+                p0: [10.0, 1.0],
+                p1: [11.0, 1.0],
+                p2: [12.0, 1.0],
+            }, // max-x = 12
+            QuadBezier {
+                p0: [80.0, 1.0],
+                p1: [85.0, 1.0],
+                p2: [90.0, 1.0],
+            }, // max-x = 90
+            QuadBezier {
+                p0: [40.0, 1.0],
+                p1: [45.0, 1.0],
+                p2: [50.0, 1.0],
+            }, // max-x = 50
+        ];
+        let bbox = unit_bbox();
+        let (bands, _, _) = build_h_bands(&curves, 4, bbox);
+        // Sorted descending by max-x: 1 (90), 2 (50), 0 (12).
+        assert_eq!(bands[0].curve_indices, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn build_v_bands_sorts_by_descending_max_y() {
+        let curves = vec![
+            QuadBezier {
+                p0: [1.0, 10.0],
+                p1: [1.0, 11.0],
+                p2: [1.0, 12.0],
+            },
+            QuadBezier {
+                p0: [1.0, 80.0],
+                p1: [1.0, 85.0],
+                p2: [1.0, 90.0],
+            },
+            QuadBezier {
+                p0: [1.0, 40.0],
+                p1: [1.0, 45.0],
+                p2: [1.0, 50.0],
+            },
+        ];
+        let bbox = unit_bbox();
+        let (bands, _, _) = build_v_bands(&curves, 4, bbox);
+        // Sorted descending by max-y: 1 (90), 2 (50), 0 (12).
+        assert_eq!(bands[0].curve_indices, vec![1, 2, 0]);
     }
 
     // ── Surface API smoke ────────────────────────────────────────────────
 
     #[test]
     fn outline_glyph_rejects_invalid_blob() {
-        let err = outline_glyph(b"not a font", 0, DEFAULT_BANDS).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("ttf-parser"), "unexpected error: {msg}");
+        let err = outline_glyph(b"not a font", 0, 16, 16).unwrap_err();
+        assert!(format!("{err}").contains("ttf-parser"));
     }
 }

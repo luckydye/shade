@@ -45,12 +45,12 @@ pub use text::{
     FontBlobHash, FontEntry, FontId, TextAlign, TextAnchor, TextContent, TextSpan, TextStyle,
 };
 pub use text_buffer::{
-    GlyphBufferLayout, GpuBand, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph, FLOATS_PER_CURVE,
+    GlyphBufferLayout, GpuBandHeader, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph, FLOATS_PER_CURVE,
 };
 pub use text_layout::{layout_text, TextLayoutEngine};
 pub use text_outline::{
-    build_bands, outline_glyph, GlyphBand, GlyphCurves, QuadBezier, Rect as GlyphRect,
-    DEFAULT_BANDS,
+    build_h_bands, build_v_bands, outline_glyph, GlyphBand, GlyphCurves, QuadBezier,
+    Rect as GlyphRect, DEFAULT_BANDS_PER_AXIS,
 };
 pub use texture_cache::TextureCache;
 
