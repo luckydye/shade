@@ -348,6 +348,7 @@ export interface LayerInfo {
   mask_params?: MaskParamsInfo | null;
   adjustments?: AdjustmentValues | null;
   crop?: CropValues | null;
+  text?: TextLayerValues | null;
 }
 
 export interface CropValues {
@@ -356,6 +357,74 @@ export interface CropValues {
   width: number;
   height: number;
   rotation: number;
+}
+
+export type TextAlignName = "left" | "center" | "right" | "justify";
+export type TextAnchorName =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "center-left"
+  | "center"
+  | "center-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right"
+  | "baseline-left"
+  | "baseline-center"
+  | "baseline-right";
+
+export interface TextStyleValues {
+  /** Font ID into the LayerStack font registry (decoded `u64` as JS number). */
+  font_id: number;
+  size_px: number;
+  line_height: number;
+  letter_spacing: number;
+  /** `null` disables wrapping. */
+  max_width: number | null;
+  align: TextAlignName;
+  anchor: TextAnchorName;
+  /** OpenType weight (100..=900). */
+  weight: number;
+  italic: boolean;
+  /** Linear sRGB straight alpha — `[r, g, b, a]`. */
+  color: [number, number, number, number];
+}
+
+export interface TextTransformValues {
+  tx: number;
+  ty: number;
+  scale_x: number;
+  scale_y: number;
+  rotation: number;
+}
+
+export interface TextLayerValues {
+  content: string;
+  style: TextStyleValues;
+  transform: TextTransformValues;
+}
+
+export interface FontInfo {
+  font_id: number;
+  family: string;
+  /** Decimal-encoded `u64` content hash (FNV-1a over the blob). */
+  blob_hash: string;
+}
+
+/** Partial style update — undefined fields leave the corresponding style
+ * field unchanged. To clear `max_width`, set it to `null` explicitly. */
+export interface TextStylePatch {
+  font_id?: number;
+  size_px?: number;
+  line_height?: number;
+  letter_spacing?: number;
+  max_width?: number | null;
+  align?: TextAlignName;
+  anchor?: TextAnchorName;
+  weight?: number;
+  italic?: boolean;
+  color?: [number, number, number, number];
 }
 
 export type PreviewFrame =
@@ -1623,6 +1692,136 @@ export async function addLayer(kind: string): Promise<number> {
     "layer_added",
   );
   return result.layerIdx;
+}
+
+// ── Text layers & fonts ────────────────────────────────────────────────
+
+export async function addTextLayer(
+  content: string,
+  fontId: number,
+  sizePx: number,
+): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("add_text_layer", {
+      params: { content, font_id: fontId, size_px: sizePx },
+    }) as Promise<number>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ layerIdx: number }>(
+    { type: "add_text_layer", content, fontId, sizePx },
+    "layer_added",
+  );
+  return result.layerIdx;
+}
+
+export async function updateTextContent(layerIdx: number, content: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("update_text_content", {
+      params: { layer_idx: layerIdx, content },
+    });
+    return;
+  }
+  await ensureWorkerReady();
+  await workerCall({ type: "update_text_content", layerIdx, content }, "text_updated");
+}
+
+export async function updateTextStyle(
+  layerIdx: number,
+  patch: TextStylePatch,
+): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("update_text_style", { params: { layer_idx: layerIdx, ...patch } });
+    return;
+  }
+  await ensureWorkerReady();
+  // The wasm side parses the patch JSON itself so it can distinguish
+  // omitted fields from explicitly-null max_width.
+  const json = JSON.stringify(patch);
+  await workerCall(
+    { type: "update_text_style", layerIdx, json },
+    "text_updated",
+  );
+}
+
+export async function setTextTransform(
+  layerIdx: number,
+  transform: TextTransformValues,
+): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("set_text_transform", {
+      params: {
+        layer_idx: layerIdx,
+        tx: transform.tx,
+        ty: transform.ty,
+        scale_x: transform.scale_x,
+        scale_y: transform.scale_y,
+        rotation: transform.rotation,
+      },
+    });
+    return;
+  }
+  await ensureWorkerReady();
+  await workerCall(
+    {
+      type: "set_text_transform",
+      layerIdx,
+      tx: transform.tx,
+      ty: transform.ty,
+      scaleX: transform.scale_x,
+      scaleY: transform.scale_y,
+      rotation: transform.rotation,
+    },
+    "text_updated",
+  );
+}
+
+/** Register a font blob with the LayerStack and return its `font_id`.
+ *  Idempotent on contents — the same bytes return the existing id. */
+export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("add_font", {
+      params: { family, bytes: Array.from(bytes) },
+    }) as Promise<number>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ fontId: number }>(
+    { type: "add_font", family, bytes },
+    "font_added",
+    [bytes.buffer as ArrayBuffer],
+  );
+  return result.fontId;
+}
+
+export async function listFonts(): Promise<FontInfo[]> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("list_fonts") as Promise<FontInfo[]>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ data: string }>(
+    { type: "list_fonts" },
+    "fonts_listed",
+  );
+  return JSON.parse(result.data) as FontInfo[];
+}
+
+/** Drop fonts that no text layer references; returns the count removed. */
+export async function pruneUnusedFonts(): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("prune_unused_fonts") as Promise<number>;
+  }
+  await ensureWorkerReady();
+  const result = await workerCall<{ removed: number }>(
+    { type: "prune_unused_fonts" },
+    "fonts_pruned",
+  );
+  return result.removed;
 }
 
 export interface LinearGradientMask {

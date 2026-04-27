@@ -1,8 +1,8 @@
 use shade_lib::{
     build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
-    CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
-    Layer, LayerStack, MaskData, MaskParams, SharpenParams, TextureId, ToneParams,
-    VignetteParams,
+    CurveControlPoint, DenoiseParams, FloatImage, FontEntry, FontId, GlowParams, GrainParams,
+    HslParams, Layer, LayerStack, MaskData, MaskParams, SharpenParams, TextAlign, TextAnchor,
+    TextContent, TextStyle, TextureId, ToneParams, VignetteParams,
 };
 use shade_io::to_linear_srgb_f32;
 use std::collections::HashMap;
@@ -512,6 +512,128 @@ impl WasmEngine {
 
     pub fn layer_count(&self) -> usize {
         self.stack.layers.len()
+    }
+
+    // ── Text layers & fonts ─────────────────────────────────────────────
+
+    /// Register a font blob, returning its FontId. Idempotent on contents.
+    pub fn add_font(&mut self, family: &str, blob: Vec<u8>) -> FontId {
+        self.stack.add_font(family, blob)
+    }
+
+    /// `(font_id, family, blob_hash)` for every registered font.
+    pub fn list_fonts(&self) -> Vec<(FontId, String, u64)> {
+        let mut out: Vec<_> = self
+            .stack
+            .fonts
+            .iter()
+            .map(|(id, e)| (*id, e.family.clone(), e.blob_hash))
+            .collect();
+        out.sort_by_key(|(id, _, _)| *id);
+        out
+    }
+
+    pub fn add_text_layer(&mut self, content: &str, font_id: FontId, size_px: f32) -> usize {
+        let mut style = TextStyle::new(font_id, size_px);
+        style.color = [1.0, 1.0, 1.0, 1.0];
+        self.stack
+            .add_text_layer(TextContent::new(content), style)
+    }
+
+    pub fn update_text_content(&mut self, layer_idx: usize, content: &str) {
+        if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
+            if let Layer::Text { content: c, .. } = &mut entry.layer {
+                *c = TextContent::new(content);
+                self.stack.generation += 1;
+            }
+        }
+    }
+
+    /// Update fields on a text layer's `TextStyle`. `None` arguments leave
+    /// the corresponding field unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_text_style(
+        &mut self,
+        layer_idx: usize,
+        font_id: Option<FontId>,
+        size_px: Option<f32>,
+        line_height: Option<f32>,
+        letter_spacing: Option<f32>,
+        max_width: Option<Option<f32>>,
+        align: Option<TextAlign>,
+        anchor: Option<TextAnchor>,
+        weight: Option<u16>,
+        italic: Option<bool>,
+        color: Option<[f32; 4]>,
+    ) {
+        let Some(entry) = self.stack.layers.get_mut(layer_idx) else {
+            return;
+        };
+        let Layer::Text { style, .. } = &mut entry.layer else {
+            return;
+        };
+        if let Some(v) = font_id {
+            style.font_id = v;
+        }
+        if let Some(v) = size_px {
+            style.size_px = v;
+        }
+        if let Some(v) = line_height {
+            style.line_height = v;
+        }
+        if let Some(v) = letter_spacing {
+            style.letter_spacing = v;
+        }
+        if let Some(v) = max_width {
+            style.max_width = v;
+        }
+        if let Some(v) = align {
+            style.align = v;
+        }
+        if let Some(v) = anchor {
+            style.anchor = v;
+        }
+        if let Some(v) = weight {
+            style.weight = v;
+        }
+        if let Some(v) = italic {
+            style.italic = v;
+        }
+        if let Some(v) = color {
+            style.color = v;
+        }
+        self.stack.generation += 1;
+    }
+
+    pub fn set_text_transform(
+        &mut self,
+        layer_idx: usize,
+        tx: f32,
+        ty: f32,
+        scale_x: f32,
+        scale_y: f32,
+        rotation: f32,
+    ) {
+        if let Some(entry) = self.stack.layers.get_mut(layer_idx) {
+            if let Layer::Text { transform, .. } = &mut entry.layer {
+                transform.tx = tx;
+                transform.ty = ty;
+                transform.scale_x = scale_x;
+                transform.scale_y = scale_y;
+                transform.rotation = rotation;
+                self.stack.generation += 1;
+            }
+        }
+    }
+
+    /// Drop fonts not referenced by any text layer. Returns count removed.
+    pub fn prune_unused_fonts(&mut self) -> usize {
+        self.stack.remove_unused_fonts()
+    }
+
+    #[allow(dead_code)]
+    pub fn font_entry(&self, font_id: FontId) -> Option<&FontEntry> {
+        self.stack.fonts.get(&font_id)
     }
 
     pub fn snapshot_render_state(

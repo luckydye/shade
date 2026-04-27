@@ -5,7 +5,7 @@ import type { RenderedTile } from "../viewport/types";
 import type { CropAspectRatioPreset } from "../crop-aspect";
 
 export interface LayerInfo {
-  kind: "image" | "adjustment" | "crop";
+  kind: "image" | "adjustment" | "crop" | "text";
   name?: string | null;
   visible: boolean;
   opacity: number;
@@ -14,6 +14,7 @@ export interface LayerInfo {
   mask_params?: bridge.MaskParamsInfo | null;
   adjustments?: bridge.AdjustmentValues | null;
   crop?: bridge.CropValues | null;
+  text?: bridge.TextLayerValues | null;
 }
 
 export interface CropRect {
@@ -80,6 +81,7 @@ export interface EditorState {
   cropDraft: CropRect | null;
   isCropMode: boolean;
   loadingMediaSrc: string | null;
+  fonts: bridge.FontInfo[];
 }
 
 export const [state, setState] = createStore<EditorState>({
@@ -111,6 +113,7 @@ export const [state, setState] = createStore<EditorState>({
   cropDraft: null,
   isCropMode: false,
   loadingMediaSrc: null,
+  fonts: [],
 });
 
 export const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);

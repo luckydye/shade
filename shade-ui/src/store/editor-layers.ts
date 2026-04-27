@@ -495,3 +495,68 @@ export async function loadSnapshot(id: string) {
   await refreshPreview();
   queueHistorySnapshot();
 }
+
+// ── Text layers & fonts ────────────────────────────────────────────────
+
+export async function addTextLayer(
+  content: string,
+  fontId: number,
+  sizePx: number,
+  position: number,
+) {
+  let idx = await bridge.addTextLayer(content, fontId, sizePx);
+  await refreshLayerStack();
+  if (position < 0 || position > state.layers.length) {
+    throw new Error("layer insertion position is out of bounds");
+  }
+  if (idx < 0 || idx >= state.layers.length) {
+    throw new Error("new layer could not be resolved after insertion");
+  }
+  if (idx !== position) {
+    await bridge.moveLayer(idx, position);
+    await refreshLayerStack();
+    idx = getMovedLayerIndex(idx, idx, position);
+  }
+  setState("selectedLayerIdx", idx);
+  await refreshPreview();
+  queueHistorySnapshot();
+  return idx;
+}
+
+export async function updateTextContent(layerIdx: number, content: string) {
+  await runLayerMutation(() => bridge.updateTextContent(layerIdx, content));
+}
+
+export async function updateTextStyle(
+  layerIdx: number,
+  patch: bridge.TextStylePatch,
+) {
+  await runLayerMutation(() => bridge.updateTextStyle(layerIdx, patch));
+}
+
+export async function setTextTransform(
+  layerIdx: number,
+  transform: bridge.TextTransformValues,
+) {
+  await runLayerMutation(() => bridge.setTextTransform(layerIdx, transform));
+}
+
+export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
+  const id = await bridge.addFont(family, bytes);
+  await refreshFontList();
+  return id;
+}
+
+export async function refreshFontList() {
+  const fonts = await bridge.listFonts();
+  setState("fonts", fonts);
+}
+
+export async function pruneUnusedFonts() {
+  const removed = await bridge.pruneUnusedFonts();
+  if (removed > 0) {
+    await refreshFontList();
+    queueHistorySnapshot();
+  }
+  return removed;
+}

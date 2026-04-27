@@ -214,6 +214,66 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
 
+      case "add_text_layer": {
+        await ensureWasmReady();
+        const layerIdx = wasm.add_text_layer(
+          msg.content ?? "",
+          BigInt(msg.fontId),
+          msg.sizePx,
+        );
+        self.postMessage({ type: "layer_added", requestId, layerIdx });
+        break;
+      }
+
+      case "update_text_content": {
+        await ensureWasmReady();
+        wasm.update_text_content(msg.layerIdx, msg.content);
+        self.postMessage({ type: "text_updated", requestId });
+        break;
+      }
+
+      case "update_text_style": {
+        await ensureWasmReady();
+        wasm.update_text_style_json(msg.layerIdx, msg.json);
+        self.postMessage({ type: "text_updated", requestId });
+        break;
+      }
+
+      case "set_text_transform": {
+        await ensureWasmReady();
+        wasm.set_text_transform(
+          msg.layerIdx,
+          msg.tx,
+          msg.ty,
+          msg.scaleX,
+          msg.scaleY,
+          msg.rotation,
+        );
+        self.postMessage({ type: "text_updated", requestId });
+        break;
+      }
+
+      case "add_font": {
+        await ensureWasmReady();
+        const fontId = wasm.add_font(msg.family, msg.bytes);
+        self.postMessage({ type: "font_added", requestId, fontId: Number(fontId) });
+        break;
+      }
+
+      case "list_fonts": {
+        await ensureWasmReady();
+        const json = wasm.list_fonts_json();
+        self.postMessage({ type: "fonts_listed", requestId, data: json });
+        break;
+      }
+
+      case "prune_unused_fonts": {
+        await ensureWasmReady();
+        const removed = wasm.prune_unused_fonts();
+        self.postMessage({ type: "fonts_pruned", requestId, removed });
+        break;
+      }
+
       case "delete_layer": {
         await ensureWasmReady();
         wasm.delete_layer(msg.layerIdx);

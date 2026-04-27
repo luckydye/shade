@@ -41,6 +41,32 @@ pub struct PreviewRenderRequest {
     pub ignore_crop_layers: Option<bool>,
 }
 
+fn text_align_to_str(a: shade_lib::TextAlign) -> &'static str {
+    match a {
+        shade_lib::TextAlign::Left => "left",
+        shade_lib::TextAlign::Center => "center",
+        shade_lib::TextAlign::Right => "right",
+        shade_lib::TextAlign::Justify => "justify",
+    }
+}
+
+fn text_anchor_to_str(a: shade_lib::TextAnchor) -> &'static str {
+    match a {
+        shade_lib::TextAnchor::TopLeft => "top-left",
+        shade_lib::TextAnchor::TopCenter => "top-center",
+        shade_lib::TextAnchor::TopRight => "top-right",
+        shade_lib::TextAnchor::CenterLeft => "center-left",
+        shade_lib::TextAnchor::Center => "center",
+        shade_lib::TextAnchor::CenterRight => "center-right",
+        shade_lib::TextAnchor::BottomLeft => "bottom-left",
+        shade_lib::TextAnchor::BottomCenter => "bottom-center",
+        shade_lib::TextAnchor::BottomRight => "bottom-right",
+        shade_lib::TextAnchor::BaselineLeft => "baseline-left",
+        shade_lib::TextAnchor::BaselineCenter => "baseline-center",
+        shade_lib::TextAnchor::BaselineRight => "baseline-right",
+    }
+}
+
 fn apply_preview_request(
     mut stack: shade_lib::LayerStack,
     canvas_width: u32,
@@ -349,6 +375,151 @@ pub fn rename_layer(layer_idx: usize, name: Option<String>) {
     ENGINE.with(|e| e.borrow_mut().rename_layer(layer_idx, name));
 }
 
+// ── Text layers & fonts ─────────────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn add_font(family: String, blob: Vec<u8>) -> u64 {
+    ENGINE.with(|e| e.borrow_mut().add_font(&family, blob))
+}
+
+/// Returns a JSON array of `{font_id, family, blob_hash}` entries.
+#[wasm_bindgen]
+pub fn list_fonts_json() -> String {
+    ENGINE.with(|e| {
+        let entries: Vec<_> = e
+            .borrow()
+            .list_fonts()
+            .into_iter()
+            .map(|(id, family, hash)| {
+                serde_json::json!({
+                    "font_id": id,
+                    "family": family,
+                    "blob_hash": hash.to_string(),
+                })
+            })
+            .collect();
+        serde_json::to_string(&entries).expect("font list serialization failed")
+    })
+}
+
+#[wasm_bindgen]
+pub fn add_text_layer(content: String, font_id: u64, size_px: f32) -> usize {
+    ENGINE.with(|e| e.borrow_mut().add_text_layer(&content, font_id, size_px))
+}
+
+#[wasm_bindgen]
+pub fn update_text_content(layer_idx: usize, content: String) {
+    ENGINE.with(|e| e.borrow_mut().update_text_content(layer_idx, &content));
+}
+
+/// Update text style fields. Pass JSON with optional fields:
+/// `{ font_id?, size_px?, line_height?, letter_spacing?, max_width? (null clears),
+///    align? ("left"|"center"|"right"|"justify"), anchor? (12 named anchors),
+///    weight? (100..=900), italic?, color? ([f32; 4] linear-sRGB straight-alpha) }`.
+#[wasm_bindgen]
+pub fn update_text_style_json(layer_idx: usize, json: String) -> Result<(), JsValue> {
+    use shade_lib::{TextAlign, TextAnchor};
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Patch {
+        #[serde(default)]
+        font_id: Option<u64>,
+        #[serde(default)]
+        size_px: Option<f32>,
+        #[serde(default)]
+        line_height: Option<f32>,
+        #[serde(default)]
+        letter_spacing: Option<f32>,
+        // `Some(None)` clears max_width; `None` leaves it untouched.
+        #[serde(default, deserialize_with = "deser_double_option")]
+        max_width: Option<Option<f32>>,
+        #[serde(default)]
+        align: Option<String>,
+        #[serde(default)]
+        anchor: Option<String>,
+        #[serde(default)]
+        weight: Option<u16>,
+        #[serde(default)]
+        italic: Option<bool>,
+        #[serde(default)]
+        color: Option<[f32; 4]>,
+    }
+    fn deser_double_option<'de, D>(d: D) -> Result<Option<Option<f32>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<f32>::deserialize(d).map(Some)
+    }
+
+    let patch: Patch = serde_json::from_str(&json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let align = patch
+        .align
+        .as_deref()
+        .map(|s| match s {
+            "left" => Ok(TextAlign::Left),
+            "center" => Ok(TextAlign::Center),
+            "right" => Ok(TextAlign::Right),
+            "justify" => Ok(TextAlign::Justify),
+            other => Err(JsValue::from_str(&format!("unknown text align: {other}"))),
+        })
+        .transpose()?;
+    let anchor = patch
+        .anchor
+        .as_deref()
+        .map(|s| match s {
+            "top-left" => Ok(TextAnchor::TopLeft),
+            "top-center" => Ok(TextAnchor::TopCenter),
+            "top-right" => Ok(TextAnchor::TopRight),
+            "center-left" => Ok(TextAnchor::CenterLeft),
+            "center" => Ok(TextAnchor::Center),
+            "center-right" => Ok(TextAnchor::CenterRight),
+            "bottom-left" => Ok(TextAnchor::BottomLeft),
+            "bottom-center" => Ok(TextAnchor::BottomCenter),
+            "bottom-right" => Ok(TextAnchor::BottomRight),
+            "baseline-left" => Ok(TextAnchor::BaselineLeft),
+            "baseline-center" => Ok(TextAnchor::BaselineCenter),
+            "baseline-right" => Ok(TextAnchor::BaselineRight),
+            other => Err(JsValue::from_str(&format!("unknown text anchor: {other}"))),
+        })
+        .transpose()?;
+    ENGINE.with(|e| {
+        e.borrow_mut().update_text_style(
+            layer_idx,
+            patch.font_id,
+            patch.size_px,
+            patch.line_height,
+            patch.letter_spacing,
+            patch.max_width,
+            align,
+            anchor,
+            patch.weight,
+            patch.italic,
+            patch.color,
+        );
+    });
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn set_text_transform(
+    layer_idx: usize,
+    tx: f32,
+    ty: f32,
+    scale_x: f32,
+    scale_y: f32,
+    rotation: f32,
+) {
+    ENGINE.with(|e| {
+        e.borrow_mut()
+            .set_text_transform(layer_idx, tx, ty, scale_x, scale_y, rotation);
+    });
+}
+
+#[wasm_bindgen]
+pub fn prune_unused_fonts() -> usize {
+    ENGINE.with(|e| e.borrow_mut().prune_unused_fonts())
+}
+
 #[wasm_bindgen]
 pub fn apply_linear_gradient_mask(layer_idx: usize, x1: f32, y1: f32, x2: f32, y2: f32) {
     ENGINE.with(|e| {
@@ -602,6 +773,31 @@ pub fn get_stack_json() -> String {
                             "width": rect.width,
                             "height": rect.height,
                             "rotation": rect.rotation,
+                        })),
+                        _ => None,
+                    },
+                    "text": match &l.layer {
+                        shade_lib::Layer::Text { content, style, transform } => Some(serde_json::json!({
+                            "content": content.text,
+                            "style": {
+                                "font_id": style.font_id,
+                                "size_px": style.size_px,
+                                "line_height": style.line_height,
+                                "letter_spacing": style.letter_spacing,
+                                "max_width": style.max_width,
+                                "align": text_align_to_str(style.align),
+                                "anchor": text_anchor_to_str(style.anchor),
+                                "weight": style.weight,
+                                "italic": style.italic,
+                                "color": style.color,
+                            },
+                            "transform": {
+                                "tx": transform.tx,
+                                "ty": transform.ty,
+                                "scale_x": transform.scale_x,
+                                "scale_y": transform.scale_y,
+                                "rotation": transform.rotation,
+                            },
                         })),
                         _ => None,
                     },
