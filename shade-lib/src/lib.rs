@@ -11,6 +11,7 @@ mod renderer;
 pub mod sharpen2;
 pub mod text;
 pub mod text_buffer;
+pub mod text_layout;
 pub mod text_outline;
 pub mod texture_cache;
 pub mod timestamp;
@@ -46,6 +47,7 @@ pub use text::{
 pub use text_buffer::{
     GlyphBufferLayout, GpuBand, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph, FLOATS_PER_CURVE,
 };
+pub use text_layout::{layout_text, TextLayoutEngine};
 pub use text_outline::{
     build_bands, outline_glyph, GlyphBand, GlyphCurves, QuadBezier, Rect as GlyphRect,
     DEFAULT_BANDS,

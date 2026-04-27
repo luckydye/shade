@@ -14,6 +14,7 @@ half = { workspace = true }
 base64 = "0.22"
 futures-channel = "0.3"
 ttf-parser = "0.25"
+cosmic-text = { version = "0.12", default-features = false, features = ["std", "swash", "shape-run-cache"] }
 
 [dev-dependencies]
 shade-io = { path = "../shade-io" }
