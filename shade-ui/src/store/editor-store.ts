@@ -207,6 +207,8 @@ export function getLayerDefaultName(kind: LayerInfo["kind"]) {
       return "Crop";
     case "adjustment":
       return "Adjustment";
+    case "text":
+      return "Text";
     default:
       throw new Error(`unknown layer kind: ${String(kind)}`);
   }

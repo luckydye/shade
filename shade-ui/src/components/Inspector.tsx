@@ -1692,7 +1692,7 @@ export const Inspector: Component = () => {
           class={ADD_LAYER_ROW_CLASS}
         >
           <span />
-          <span class="inline-flex h-4 w-4 ml-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+          <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
             +
           </span>
           <span />
@@ -1712,7 +1712,7 @@ export const Inspector: Component = () => {
           <span class="inline-flex h-4 w-4 items-center justify-center font-serif text-[13px] font-bold leading-none text-[var(--text-dim)]">
             T
           </span>
-          <span>Add Text</span>
+          <span>Add Text Layer</span>
           <span />
           <span />
         </Button>
