@@ -173,6 +173,13 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
       />
     );
   }
+  if (props.layer.kind === "text") {
+    return (
+      <span class="flex h-4 w-4 items-center justify-center font-serif text-[13px] font-bold leading-none text-[var(--text-dim)]">
+        T
+      </span>
+    );
+  }
   return (
     <span class="inline-block h-4 w-4 rounded-sm border border-[var(--border-medium)]" />
   );
@@ -1684,7 +1691,9 @@ export const Inspector: Component = () => {
           <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
             +
           </span>
-          <span />
+          <span class="inline-flex h-4 w-4 items-center justify-center font-serif text-[13px] font-bold leading-none text-[var(--text-dim)]">
+            T
+          </span>
           <span>Add Text</span>
           <span />
           <span />
