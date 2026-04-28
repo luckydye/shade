@@ -6,6 +6,7 @@ import {
   isAdjustmentSliderActive,
   type LayerInfo,
   normalizeCropRect,
+  resolveSelectedLayerPart,
   resolveSelectedLayerIdx,
   setState,
   state,
@@ -132,13 +133,20 @@ async function runLayerMutation(work: () => Promise<unknown>) {
 export async function refreshLayerStack() {
   const info = await bridge.getLayerStack();
   const layers = info.layers as LayerInfo[];
+  const selectedLayerIdx =
+    layers.length === 0 ? -1 : resolveSelectedLayerIdx(layers, state.selectedLayerIdx);
   setState({
     layers,
     canvasWidth: info.canvas_width,
     canvasHeight: info.canvas_height,
     previewContentVersion: info.generation,
-    selectedLayerIdx:
-      layers.length === 0 ? -1 : resolveSelectedLayerIdx(layers, state.selectedLayerIdx),
+    selectedLayerIdx,
+    selectedLayerPart: resolveSelectedLayerPart(
+      layers,
+      state.selectedLayerIdx,
+      selectedLayerIdx,
+      state.selectedLayerPart,
+    ),
   });
 }
 
@@ -159,8 +167,12 @@ export async function renameLayer(idx: number, name: string | null) {
 }
 
 export async function deleteLayer(idx: number) {
+  const deletedSelectedLayer = idx === state.selectedLayerIdx;
   await bridge.deleteLayer(idx);
   await refreshLayerStack();
+  if (deletedSelectedLayer) {
+    setState("selectedLayerPart", "layer");
+  }
   if (state.layers.length === 0) {
     clearPreviewTiles();
   }
@@ -327,8 +339,22 @@ export async function applyEdit(params: Record<string, unknown>) {
 }
 
 export function selectLayer(idx: number) {
-  if (idx === state.selectedLayerIdx) return;
-  setState("selectedLayerIdx", idx);
+  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "layer") return;
+  setState({
+    selectedLayerIdx: idx,
+    selectedLayerPart: "layer",
+  });
+}
+
+export function selectMaskLayer(idx: number) {
+  if (!state.layers[idx]?.has_mask) {
+    throw new Error("mask selection requires a masked layer");
+  }
+  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "mask") return;
+  setState({
+    selectedLayerIdx: idx,
+    selectedLayerPart: "mask",
+  });
 }
 
 export function startCropMode() {
@@ -394,14 +420,19 @@ export function applyCrop() {
 
 export async function applyGradientMask(params: bridge.GradientMaskParams) {
   await runLayerMutation(() => bridge.applyGradientMask(params));
+  selectMaskLayer(params.layer_idx);
 }
 
 export async function removeMask(idx: number) {
   await runLayerMutation(() => bridge.removeMask(idx));
+  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "mask") {
+    selectLayer(idx);
+  }
 }
 
 export async function createBrushMask(idx: number) {
   await runLayerMutation(() => bridge.createBrushMask(idx));
+  selectMaskLayer(idx);
 }
 
 export async function stampBrushMask(
@@ -430,6 +461,7 @@ export async function addLayer(kind: string, position: number) {
     idx = getMovedLayerIndex(idx, idx, position);
   }
   setState("selectedLayerIdx", idx);
+  setState("selectedLayerPart", "layer");
   await refreshPreview();
   queueHistorySnapshot();
   return idx;
@@ -449,10 +481,14 @@ export async function moveLayer(fromIdx: number, toIdx: number) {
     state.selectedLayerIdx < 0
       ? -1
       : getMovedLayerIndex(state.selectedLayerIdx, fromIdx, toIdx);
+  const selectedLayerPart = state.selectedLayerPart;
   await bridge.moveLayer(fromIdx, toIdx);
   await refreshLayerStack();
   if (nextSelectedIdx >= 0) {
-    setState("selectedLayerIdx", nextSelectedIdx);
+    setState({
+      selectedLayerIdx: nextSelectedIdx,
+      selectedLayerPart,
+    });
   }
   await refreshPreview();
   queueHistorySnapshot();

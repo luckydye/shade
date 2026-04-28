@@ -69,7 +69,7 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
         />
       </Show>
     <div
-      class={`flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-6 pl-4 touch-mobile:fixed touch-mobile:inset-y-0 touch-mobile:left-0 touch-mobile:z-40 touch-mobile:bg-[var(--panel-bg)] touch-mobile:shadow-xl touch-mobile:transition-transform touch-mobile:duration-300 ${
+      class={`flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-4 pl-4 touch-mobile:fixed touch-mobile:inset-y-0 touch-mobile:left-0 touch-mobile:z-40 touch-mobile:bg-[var(--panel-bg)] touch-mobile:shadow-xl touch-mobile:transition-transform touch-mobile:duration-300 ${
         props.mobileOpen ? "touch-mobile:translate-x-0" : "touch-mobile:-translate-x-full"
       }`}
     >

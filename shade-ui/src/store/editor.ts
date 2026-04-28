@@ -47,6 +47,7 @@ export {
   renamePreset,
   savePreset,
   selectLayer,
+  selectMaskLayer,
   setLayerOpacity,
   setLayerVisible,
   setTextTransform,

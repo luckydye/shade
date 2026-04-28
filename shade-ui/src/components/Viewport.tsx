@@ -191,6 +191,7 @@ export const Viewport: Component = () => {
     resolveCropAspectRatio(cropAspectRatioPreset(), state.canvasWidth, state.canvasHeight);
 
   const selectedMaskParams = (): MaskParamsInfo | null => {
+    if (state.selectedLayerPart !== "mask") return null;
     const layer = state.layers[state.selectedLayerIdx];
     if (!layer?.has_mask || !layer.mask_params) return null;
     return layer.mask_params;
@@ -990,6 +991,7 @@ export const Viewport: Component = () => {
     state.viewportCenterX;
     state.viewportCenterY;
     state.selectedLayerIdx;
+    state.selectedLayerPart;
     state.selectedArtboardId;
     state.layers;
     state.artboards;
@@ -1660,6 +1662,7 @@ export const Viewport: Component = () => {
     backdropTile();
     state.selectedArtboardId;
     state.selectedLayerIdx;
+    state.selectedLayerPart;
     if (lastStagePointer) {
       updateViewportToneFromPointer(lastStagePointer.x, lastStagePointer.y);
       return;

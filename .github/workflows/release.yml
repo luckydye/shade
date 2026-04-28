@@ -55,7 +55,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
-        working-directory: shade-ui
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
@@ -83,7 +82,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
-        working-directory: shade-web
 
       - name: Build wasm
         run: bun run build:wasm

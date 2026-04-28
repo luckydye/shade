@@ -103,6 +103,8 @@ const PANEL_SECTION_TITLE_CLASS =
   "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)]";
 const SURFACE_BUTTON_CLASS =
   "h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
+const GHOST_BUTTON_CLASS =
+  "h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
 const DANGER_BUTTON_CLASS =
   "h-8 rounded-md border border-[var(--danger-border)] bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
 const MENU_ITEM_BUTTON_CLASS =
@@ -453,8 +455,9 @@ export const MediaView: Component = () => {
     }
     return cachedLibraryItems() ?? [];
   });
+  const normalizedFilenameFilter = createMemo(() => normalizeFilenameFilter(filenameFilter()));
   const activeFilenameFilter = createMemo(() =>
-    state.currentView === "editor" ? [] : normalizeFilenameFilter(filenameFilter()),
+    state.currentView === "editor" ? [] : normalizedFilenameFilter(),
   );
   const filteredByFilename = createMemo(() =>
     filterMediaItemsByFilename(availableItems(), activeFilenameFilter()),
@@ -948,7 +951,7 @@ export const MediaView: Component = () => {
   });
 
   createEffect(() => {
-    activeFilenameFilter();
+    normalizedFilenameFilter();
     setScrollTop(0);
     setAnchorItemId(null);
     setAnchorRowOffset(0);
@@ -1517,7 +1520,7 @@ export const MediaView: Component = () => {
   const scrollClass = () =>
     isEditorStrip()
       ? "media-scroll flex-1 min-h-0 overflow-y-auto px-2 py-3"
-      : "media-scroll flex-1 min-h-0 overflow-y-auto p-6 touch-mobile:p-4";
+      : "media-scroll flex-1 min-h-0 overflow-y-auto p-4 touch-mobile:p-1";
 
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   
@@ -1712,7 +1715,7 @@ export const MediaView: Component = () => {
 
               <Button
                 type="button"
-                class={`${SURFACE_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
+                class={`${GHOST_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
                 disabled={isSubmitting() || !selectedLibrary()}
                 aria-label="Library actions"
                 aria-haspopup="menu"
@@ -1821,7 +1824,7 @@ export const MediaView: Component = () => {
                       void handleRemoveLibrary();
                     }}
                   >
-                    Remove
+                    Remove Collection
                   </Button>
                 </div>
               </Show>
@@ -1975,8 +1978,9 @@ export const MediaView: Component = () => {
         </Show>
         <div class="relative flex-1 min-h-0 flex flex-col">
         <Show when={hasImage() && state.currentView === "editor"}>
-          <div class="px-3 pt-5 pb-4 w-full flex justify-center">
+          <div class="px-2 pt-2 pb-1 w-full flex">
             <ActionButton
+              class="w-full"
               label="Back"
               icon={
                 <svg
@@ -2200,7 +2204,7 @@ export const MediaView: Component = () => {
                   <For each={visibleRows()}>
                     {(row) =>
                       row.kind === "date" ? (
-                        <h2 class="col-span-full pt-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
+                        <h2 class="px-1 col-span-full py-3 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
                           {formatModificationMonth(row.modifiedAt)}
                         </h2>
                       ) : (
@@ -2355,7 +2359,7 @@ export const MediaView: Component = () => {
       </div>
       
       <Show when={selectedLibrary()}>
-        <div class="fixed bottom-[env(safe-area-inset-bottom)] left-0 right-0 hidden w-auto px-7 touch-mobile:block">
+        <div class="fixed bottom-[env(safe-area-inset-bottom)] left-0 right-0 hidden w-auto px-2 pb-2 touch-mobile:block">
           <input
             type="text"
             value={filenameFilter()}

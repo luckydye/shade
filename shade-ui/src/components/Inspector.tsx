@@ -42,6 +42,7 @@ import {
   state,
   backdropTile,
 } from "../store/editor";
+import { selectMaskLayer } from "../store/editor-layers";
 import {
   type ArtboardSource,
   getLayerDefaultName,
@@ -121,17 +122,18 @@ const EMPTY_STATE_CLASS =
   "rounded-lg border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]";
 const LAYER_ROW_CLASS =
   "grid h-8 grid-cols-[16px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2";
+const MASK_LAYER_ROW_CLASS =
+  "ml-6.5 grid h-7 grid-cols-[16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-[12px] text-[var(--text-muted)]";
 const ADD_LAYER_ROW_CLASS =
   "grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-md px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const MOBILE_LAYER_TAB_CLASS =
   "flex min-w-[3.5rem] flex-col items-center gap-1 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.03em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const VECTORSCOPE_TOGGLE_SVG = `
-<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   <circle cx="8" cy="8" r="5.5" />
   <circle cx="8" cy="8" r="1.5" />
   <line x1="8" y1="2.5" x2="8" y2="13.5" />
   <line x1="2.5" y1="8" x2="13.5" y2="8" />
-  <line x1="8" y1="8" x2="11.8" y2="4.8" />
 </svg>`;
 const HSL_WHEEL_BASE_ANGLES = {
   red: 0,
@@ -154,6 +156,22 @@ function shortestAngleDelta(from: number, to: number) {
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function getLayerMaskDisplayName(layer: LayerInfo) {
+  if (!layer.mask_params) {
+    throw new Error("masked layer is missing mask parameters");
+  }
+  switch (layer.mask_params.kind) {
+    case "linear":
+      return "Linear Mask";
+    case "radial":
+      return "Radial Mask";
+    case "brush":
+      return "Brush Mask";
+    default:
+      throw new Error(`unknown mask kind: ${String(layer.mask_params.kind)}`);
+  }
 }
 
 const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
@@ -188,7 +206,7 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
 const SectionHeader: Component<{ title: string; detail?: string | (() => string) }> = (props) => (
   <div
     data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
-    class="mobile-slider-fade mt-2 flex items-center justify-between gap-3 transition-opacity duration-150"
+    class="mobile-slider-fade my-2 flex items-center justify-between gap-3 transition-opacity duration-150"
   >
     <div class={SECTION_TITLE_CLASS}>{props.title}</div>
     <Show when={props.detail}>
@@ -739,8 +757,8 @@ export const Inspector: Component = () => {
         icon={toneSvg}
         value={tone().gamma}
         defaultValue={DEFAULT_TONE.gamma}
-        min={0.1}
-        max={3}
+        min={0}
+        max={2}
         onChange={(v) => applyTone({ gamma: v })}
       />
       <Slider
@@ -1485,7 +1503,7 @@ export const Inspector: Component = () => {
     return (
       <div class="flex flex-col gap-4 pt-1">
         <SectionHeader title="Image" />
-        <div class="flex flex-col gap-2 rounded-lg bg-[var(--surface-subtle)] p-3 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+        <div class="flex flex-col gap-2">
           {(
             [
               { label: "Filename", value: details().filename },
@@ -1674,7 +1692,7 @@ export const Inspector: Component = () => {
           class={ADD_LAYER_ROW_CLASS}
         >
           <span />
-          <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+          <span class="inline-flex h-4 w-4 ml-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
             +
           </span>
           <span />
@@ -1709,7 +1727,7 @@ export const Inspector: Component = () => {
                   class={ADD_LAYER_ROW_CLASS}
                 >
                   <span />
-                  <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+                  <span class="inline-flex h-4 w-4 ml-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
                     +
                   </span>
                   <span />
@@ -1721,7 +1739,8 @@ export const Inspector: Component = () => {
               <div
                 data-layer-idx={realIdx}
                 class={`${LAYER_ROW_CLASS} ${
-                  state.selectedLayerIdx === realIdx
+                  state.selectedLayerIdx === realIdx &&
+                  state.selectedLayerPart === "layer"
                     ? "bg-[var(--surface-active)] text-[var(--text)] shadow-[inset_0_0_0_1px_var(--border-active)]"
                     : "bg-[var(--surface-subtle)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-subtle)] hover:bg-[var(--surface)]"
                 } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
@@ -1820,18 +1839,7 @@ export const Inspector: Component = () => {
                   fallback={<span />}
                 >
                   {layer.has_mask ? (
-                    <Button
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleRemoveMask(realIdx);
-                      }}
-                      class="ml-1 border-l border-[var(--border-subtle)] pl-2 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-value)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
-                      title="Remove mask"
-                    >
-                      M
-                    </Button>
+                    <span />
                   ) : (
                     <Button
                       type="button"
@@ -1867,6 +1875,56 @@ export const Inspector: Component = () => {
                   </Button>
                 </Show>
               </div>
+              <Show when={layer.has_mask}>
+                <div
+                  class={`${MASK_LAYER_ROW_CLASS} ${
+                    state.selectedLayerIdx === realIdx &&
+                    state.selectedLayerPart === "mask"
+                      ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
+                      : ""
+                  }`}
+                  onClick={() => selectMaskLayer(realIdx)}
+                >
+                  <span class="relative h-full w-4">
+                    <svg
+                      viewBox="0 0 16 32"
+                      class="absolute -top-3 left-0 h-8 w-4 overflow-visible text-[var(--border-active)]"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M8 1v17c0 4 2 6 12 6" />
+                      <path d="M17 21l3 3-3 3" />
+                    </svg>
+                  </span>
+                  <span class="inline-flex h-4 w-4 items-center justify-center rounded-[2px] border border-[var(--border-medium)] bg-[linear-gradient(135deg,var(--surface-selected),var(--surface-subtle))] text-[9px] font-bold uppercase text-[var(--text-dim)]">
+                    M
+                  </span>
+                  <Button
+                    type="button"
+                    onClick={() => selectMaskLayer(realIdx)}
+                    class="min-w-0 truncate py-1 text-left font-medium transition-colors hover:text-[var(--text)] focus-visible:outline-none"
+                  >
+                    {getLayerMaskDisplayName(layer)}
+                  </Button>
+                  <span />
+                  <Button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleRemoveMask(realIdx);
+                    }}
+                    class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--danger-text)] focus-visible:outline-none"
+                    title="Remove mask"
+                  >
+                    x
+                  </Button>
+                </div>
+              </Show>
               <Show when={maskPickerLayer() === realIdx}>
                 <div class="ml-6 grid grid-cols-3 gap-2">
                   <Button

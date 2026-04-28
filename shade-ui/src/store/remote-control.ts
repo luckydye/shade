@@ -665,6 +665,7 @@ function appStateSnapshot() {
     artboards: state.artboards.map((artboard) => serializeArtboard(artboard)),
     selectedArtboard: selectedArtboard ? serializeArtboard(selectedArtboard) : null,
     selectedLayerIdx: state.selectedLayerIdx,
+    selectedLayerPart: state.selectedLayerPart,
     layers: state.layers,
     canvasWidth: state.canvasWidth,
     canvasHeight: state.canvasHeight,
@@ -714,6 +715,7 @@ export async function executeRemoteControlTool(
       selectLayer(layerIndex);
       return {
         selectedLayerIdx: state.selectedLayerIdx,
+        selectedLayerPart: state.selectedLayerPart,
       };
     }
     case "add_layer":

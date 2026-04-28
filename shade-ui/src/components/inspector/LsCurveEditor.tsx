@@ -17,8 +17,8 @@ type LsCurveEditorProps = {
 
 export const LsCurveEditor: Component<LsCurveEditorProps> = (props) => (
   <CurveEditorBase
-    label="LS Curve"
-    valueLabel="Lum-Sat"
+    label="Luminance vs Saturation"
+    valueLabel=""
     parameterRowClass={props.parameterRowClass}
     curvePointCache={props.lsCurvePointCache}
     defaultCurvePoints={props.defaultLsCurvePoints}
