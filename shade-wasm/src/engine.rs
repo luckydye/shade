@@ -4,7 +4,7 @@ use shade_lib::{
     Layer, LayerStack, MaskData, MaskParams, SharpenParams, TextureId, ToneParams,
     VignetteParams,
 };
-use shade_io::to_linear_srgb_f32;
+use shade_io::to_acescct_f32;
 use std::collections::HashMap;
 
 /// Holds the in-memory editor state for the WASM context.
@@ -68,7 +68,7 @@ impl WasmEngine {
                 ]
             })
             .collect::<Vec<_>>();
-        to_linear_srgb_f32(&mut linear_pixels, &shade_lib::ColorSpace::Srgb);
+        to_acescct_f32(&mut linear_pixels, &shade_lib::ColorSpace::Srgb);
         let image = FloatImage {
             pixels: linear_pixels.into(),
             width,

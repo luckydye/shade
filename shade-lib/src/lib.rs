@@ -731,8 +731,11 @@ impl LayerStack {
 pub enum ColorSpace {
     /// Standard sRGB (IEC 61966-2-1). Gamma ≈ 2.2 (piecewise).
     Srgb,
-    /// Linear sRGB — same primaries as sRGB but no gamma. Used as internal working space.
+    /// Linear sRGB — same primaries as sRGB but no gamma.
     LinearSrgb,
+    /// ACEScct — ACES AP1 primaries with the log-with-toe transfer function.
+    /// Scene-referred, wide-gamut, log-encoded. Default internal working space.
+    AcesCct,
     /// Adobe RGB (1998). Wider gamut, gamma 2.2.
     AdobeRgb,
     /// Display P3 (DCI-P3 with D65 white point). Used in Apple displays.
@@ -757,6 +760,7 @@ impl ColorSpace {
         match self {
             ColorSpace::Srgb => "sRGB",
             ColorSpace::LinearSrgb => "Linear sRGB",
+            ColorSpace::AcesCct => "ACEScct (ACES AP1 log)",
             ColorSpace::AdobeRgb => "Adobe RGB (1998)",
             ColorSpace::DisplayP3 => "Display P3",
             ColorSpace::ProPhotoRgb => "ProPhoto RGB",
@@ -765,9 +769,9 @@ impl ColorSpace {
         }
     }
 
-    /// Whether this space uses a gamma transfer function (vs linear).
+    /// Whether this space uses a non-linear transfer function (gamma or log).
     pub fn is_gamma_encoded(&self) -> bool {
-        !matches!(self, ColorSpace::LinearSrgb)
+        !matches!(self, ColorSpace::LinearSrgb | ColorSpace::AcesCct)
     }
 }
 
@@ -828,12 +832,44 @@ impl ColorMatrix3x3 {
             [0.0171, 0.0724, 0.9105],
         ],
     };
+
+    /// Linear sRGB → ACES AP1 (gamut matrix; apply ACEScct OETF afterwards for ACEScct).
+    /// Source: ACES S-2014-004 reference matrices.
+    pub const LINEAR_SRGB_TO_AP1: Self = Self {
+        m: [
+            [0.6130974, 0.3395229, 0.0473796],
+            [0.0701442, 0.9163569, 0.0134989],
+            [0.0205687, 0.1095698, 0.8698615],
+        ],
+    };
+
+    /// ACES AP1 → linear sRGB (inverse of LINEAR_SRGB_TO_AP1).
+    pub const AP1_TO_LINEAR_SRGB: Self = Self {
+        m: [
+            [ 1.7049908, -0.6217721, -0.0832185],
+            [-0.1301592,  1.1407727, -0.0106135],
+            [-0.0239210, -0.1289920,  1.1529130],
+        ],
+    };
+
+    /// Multiply two matrices: self * rhs (apply rhs first, then self).
+    pub fn mul(&self, rhs: &Self) -> Self {
+        let mut m = [[0.0f32; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    m[i][j] += self.m[i][k] * rhs.m[k][j];
+                }
+            }
+        }
+        Self { m }
+    }
 }
 
 /// Project-level colour settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectColorSettings {
-    /// Internal working colour space (always LinearSrgb in practice).
+    /// Internal working colour space for editing operations.
     pub working_space: ColorSpace,
     /// Display colour space (for viewport tone-mapping).
     pub display_space: ColorSpace,
@@ -844,7 +880,7 @@ pub struct ProjectColorSettings {
 impl Default for ProjectColorSettings {
     fn default() -> Self {
         Self {
-            working_space: ColorSpace::LinearSrgb,
+            working_space: ColorSpace::AcesCct,
             display_space: ColorSpace::Srgb,
             export_space: ColorSpace::Srgb,
         }

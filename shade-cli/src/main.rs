@@ -7,9 +7,9 @@ use shade_lib::{
     VignetteParams,
 };
 use shade_io::{
-    from_linear_srgb_f32, generate_desktop_thumbnail, load_image,
+    from_acescct_f32, from_linear_srgb_f32, generate_desktop_thumbnail, load_image,
     load_image_f32_with_info, quantize_rgba_f32, save_image, scan_directory_images,
-    to_linear_srgb_f32,
+    to_acescct_f32, to_linear_srgb_f32,
 };
 #[cfg(feature = "video")]
 use shade_io::{VideoCodec, VideoDecoder, VideoEncoder};
@@ -563,8 +563,8 @@ async fn main() -> Result<()> {
             log::info!("Source colour space: {}", src_cs.name());
             log::info!("Display colour space: {}", display_cs.name());
 
-            // Convert source pixels to linear sRGB (internal working space).
-            to_linear_srgb_f32(&mut pixels, &src_cs);
+            // Convert source pixels to ACEScct (internal working space).
+            to_acescct_f32(&mut pixels, &src_cs);
 
             let mut ops: Vec<AdjustmentOp> = Vec::new();
 
@@ -646,8 +646,8 @@ async fn main() -> Result<()> {
                 .render_with_ops_f32(&pixels, width, height, &ops)
                 .await?;
 
-            // Apply display/export colour space transform (linear sRGB → display_cs).
-            from_linear_srgb_f32(&mut result, &display_cs);
+            // Apply display/export colour space transform (ACEScct → display_cs).
+            from_acescct_f32(&mut result, &display_cs);
 
             log::info!("Saving output: {}", output.display());
             save_image(&output, &quantize_rgba_f32(&result), width, height)?;

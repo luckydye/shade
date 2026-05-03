@@ -18,20 +18,33 @@ const SPATIAL: array<f32, 11> = array<f32, 11>(
     0.1515, 0.1191, 0.0799, 0.0456, 0.0222
 );
 
+// ACEScct transfer functions for linearising before YCbCr conversion.
+fn acescct_to_linear(v: f32) -> f32 {
+    if v < 0.1552511416 { return (v - 0.0729055342) / 10.5402377417; }
+    return pow(2.0, v * 17.52 - 9.72);
+}
+fn linear_to_acescct(v: f32) -> f32 {
+    if v <= 0.0078125 { return 10.5402377417 * v + 0.0729055342; }
+    return (log2(max(v, 1.1754944e-38)) + 9.72) / 17.52;
+}
+
+// YCbCr using AP1 primaries (ACES S-2014-004 luma: Y = 0.2722287 R + 0.6740818 G + 0.0536895 B).
 fn to_ycbcr(c: vec3<f32>) -> vec3<f32> {
+    let lin = vec3<f32>(acescct_to_linear(c.r), acescct_to_linear(c.g), acescct_to_linear(c.b));
     return vec3<f32>(
-         0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b,
-        -0.1146 * c.r - 0.3854 * c.g + 0.5000 * c.b,
-         0.5000 * c.r - 0.4542 * c.g - 0.0458 * c.b,
+         0.2722287 * lin.r + 0.6740818 * lin.g + 0.0536895 * lin.b,
+        -0.1438369 * lin.r - 0.3561631 * lin.g + 0.5000000 * lin.b,
+         0.5000000 * lin.r - 0.4631138 * lin.g - 0.0368862 * lin.b,
     );
 }
 
 fn from_ycbcr(ycc: vec3<f32>) -> vec3<f32> {
-    return vec3<f32>(
-        ycc.x + 1.5748 * ycc.z,
-        ycc.x - 0.1873 * ycc.y - 0.4681 * ycc.z,
-        ycc.x + 1.8556 * ycc.y,
+    let lin = vec3<f32>(
+        ycc.x + 1.4555426 * ycc.z,
+        ycc.x - 0.1507441 * ycc.y - 0.5878225 * ycc.z,
+        ycc.x + 1.8926210 * ycc.y,
     );
+    return vec3<f32>(linear_to_acescct(lin.r), linear_to_acescct(lin.g), linear_to_acescct(lin.b));
 }
 
 fn sample_linear(tex: texture_2d<f32>, p: vec2<f32>, dims: vec2<u32>) -> vec4<f32> {

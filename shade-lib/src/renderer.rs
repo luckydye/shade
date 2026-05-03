@@ -1397,16 +1397,30 @@ fn encode_preview_pixels(pixels: &mut [f32], dst: &ColorSpace) {
     }
 }
 
+fn acescct_to_linear_f32(v: f32) -> f32 {
+    if v < 0.155_251_141_6 {
+        (v - 0.072_905_534_2) / 10.540_237_74
+    } else {
+        f32::powf(2.0, v * 17.52 - 9.72)
+    }
+}
+
 fn encode_preview_rgb(rgb: [f32; 3], dst: &ColorSpace) -> [f32; 3] {
+    // Input is ACEScct (working space). Decode to linear AP1 then to linear sRGB first.
+    let (r, g, b) = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(
+        acescct_to_linear_f32(rgb[0]),
+        acescct_to_linear_f32(rgb[1]),
+        acescct_to_linear_f32(rgb[2]),
+    );
     match dst {
         ColorSpace::DisplayP3 => encode_linear_rgb_to_display_p3(
-            rgb,
+            [r, g, b],
             &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3,
         ),
         _ => [
-            linear_to_srgb_display(rgb[0]),
-            linear_to_srgb_display(rgb[1]),
-            linear_to_srgb_display(rgb[2]),
+            linear_to_srgb_display(r),
+            linear_to_srgb_display(g),
+            linear_to_srgb_display(b),
         ],
     }
 }

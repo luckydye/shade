@@ -132,7 +132,7 @@ pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8
     if is_exr(name_hint, bytes) || is_camera_raw(name_hint, bytes) {
         let (image, info) = load_image_bytes_f32_with_info(bytes, name_hint)?;
         let mut pixels = image.pixels.to_vec();
-        from_linear_srgb_f32(&mut pixels, &info.color_space);
+        from_acescct_f32(&mut pixels, &ColorSpace::Srgb);
         return Ok((quantize_rgba_f32(&pixels), image.width, image.height));
     }
     let img = apply_orientation(
@@ -316,6 +316,7 @@ pub fn to_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
                 &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB,
             );
         }
+        ColorSpace::AcesCct => { /* already in working space */ }
         ColorSpace::Custom(_) => {
             // Fallback: assume sRGB for unknown embedded profiles
             for chunk in pixels.chunks_exact_mut(4) {
@@ -374,6 +375,148 @@ pub fn from_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
     }
 }
 
+fn acescct_to_linear_channel(v: f32) -> f32 {
+    // Y_BRK = (log2(0.0078125) + 9.72) / 17.52
+    if v < 0.155_251_141_6 {
+        (v - 0.072_905_534_2) / 10.540_237_74
+    } else {
+        f32::powf(2.0, v * 17.52 - 9.72)
+    }
+}
+
+fn linear_to_acescct_channel(v: f32) -> f32 {
+    if v <= 0.007_812_5 {
+        10.540_237_74 * v + 0.072_905_534_2
+    } else {
+        (v.max(f32::MIN_POSITIVE).log2() + 9.72) / 17.52
+    }
+}
+
+/// Convert RGBA f32 pixels from `src` colour space into ACEScct (AP1 log, the internal working space).
+pub fn to_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
+    match color_space {
+        ColorSpace::AcesCct => {}
+        ColorSpace::LinearSrgb => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(chunk[0], chunk[1], chunk[2]);
+                chunk[0] = linear_to_acescct_channel(r);
+                chunk[1] = linear_to_acescct_channel(g);
+                chunk[2] = linear_to_acescct_channel(b);
+            }
+        }
+        ColorSpace::Srgb | ColorSpace::Unknown => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(
+                    srgb_to_linear(chunk[0]),
+                    srgb_to_linear(chunk[1]),
+                    srgb_to_linear(chunk[2]),
+                );
+                chunk[0] = linear_to_acescct_channel(r);
+                chunk[1] = linear_to_acescct_channel(g);
+                chunk[2] = linear_to_acescct_channel(b);
+            }
+        }
+        ColorSpace::AdobeRgb => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB.apply(
+                    chunk[0].powf(2.2),
+                    chunk[1].powf(2.2),
+                    chunk[2].powf(2.2),
+                );
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
+                chunk[0] = linear_to_acescct_channel(r);
+                chunk[1] = linear_to_acescct_channel(g);
+                chunk[2] = linear_to_acescct_channel(b);
+            }
+        }
+        ColorSpace::DisplayP3 => {
+            // P3 uses the sRGB transfer function
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB.apply(
+                    srgb_to_linear(chunk[0]),
+                    srgb_to_linear(chunk[1]),
+                    srgb_to_linear(chunk[2]),
+                );
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
+                chunk[0] = linear_to_acescct_channel(r);
+                chunk[1] = linear_to_acescct_channel(g);
+                chunk[2] = linear_to_acescct_channel(b);
+            }
+        }
+        ColorSpace::ProPhotoRgb => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB.apply(
+                    chunk[0].powf(1.8),
+                    chunk[1].powf(1.8),
+                    chunk[2].powf(1.8),
+                );
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
+                chunk[0] = linear_to_acescct_channel(r);
+                chunk[1] = linear_to_acescct_channel(g);
+                chunk[2] = linear_to_acescct_channel(b);
+            }
+        }
+        ColorSpace::Custom(_) => {
+            // Treat as sRGB
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(
+                    srgb_to_linear(chunk[0]),
+                    srgb_to_linear(chunk[1]),
+                    srgb_to_linear(chunk[2]),
+                );
+                chunk[0] = linear_to_acescct_channel(r);
+                chunk[1] = linear_to_acescct_channel(g);
+                chunk[2] = linear_to_acescct_channel(b);
+            }
+        }
+    }
+}
+
+/// Convert RGBA f32 pixels from ACEScct (AP1 log, the internal working space) to `dst` colour space.
+pub fn from_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
+    match color_space {
+        ColorSpace::AcesCct => {}
+        ColorSpace::LinearSrgb => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(
+                    acescct_to_linear_channel(chunk[0]),
+                    acescct_to_linear_channel(chunk[1]),
+                    acescct_to_linear_channel(chunk[2]),
+                );
+                chunk[0] = r;
+                chunk[1] = g;
+                chunk[2] = b;
+            }
+        }
+        ColorSpace::DisplayP3 => {
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(
+                    acescct_to_linear_channel(chunk[0]),
+                    acescct_to_linear_channel(chunk[1]),
+                    acescct_to_linear_channel(chunk[2]),
+                );
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3.apply(r, g, b);
+                chunk[0] = linear_to_srgb(r);
+                chunk[1] = linear_to_srgb(g);
+                chunk[2] = linear_to_srgb(b);
+            }
+        }
+        _ => {
+            // Default: sRGB output
+            for chunk in pixels.chunks_exact_mut(4) {
+                let (r, g, b) = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(
+                    acescct_to_linear_channel(chunk[0]),
+                    acescct_to_linear_channel(chunk[1]),
+                    acescct_to_linear_channel(chunk[2]),
+                );
+                chunk[0] = linear_to_srgb(r);
+                chunk[1] = linear_to_srgb(g);
+                chunk[2] = linear_to_srgb(b);
+            }
+        }
+    }
+}
+
 pub fn to_linear_srgb_f32(pixels: &mut [f32], color_space: &ColorSpace) {
     match color_space {
         ColorSpace::LinearSrgb => {}
@@ -399,6 +542,7 @@ pub fn to_linear_srgb_f32(pixels: &mut [f32], color_space: &ColorSpace) {
             1.8,
             &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB,
         ),
+        ColorSpace::AcesCct => { /* already in working space */ }
         ColorSpace::Custom(_) => {
             for chunk in pixels.chunks_exact_mut(4) {
                 chunk[0] = srgb_to_linear(chunk[0]);
@@ -605,7 +749,7 @@ fn into_linear_float_image(
             let rgba = image.into_rgba32f();
             let (width, height) = rgba.dimensions();
             let mut pixels = rgba.into_raw();
-            to_linear_srgb_f32(&mut pixels, color_space);
+            to_acescct_f32(&mut pixels, color_space);
             FloatImage {
                 pixels: pixels.into(),
                 width,
@@ -713,7 +857,7 @@ fn rgba16_to_linear_float_image(
                     ]
                 })
                 .collect::<Vec<_>>();
-            to_linear_srgb_f32(&mut pixels, color_space);
+            to_acescct_f32(&mut pixels, color_space);
             pixels
         }
     };
