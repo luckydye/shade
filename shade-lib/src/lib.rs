@@ -852,17 +852,50 @@ impl ColorMatrix3x3 {
         ],
     };
 
-    /// Multiply two matrices: self * rhs (apply rhs first, then self).
-    pub fn mul(&self, rhs: &Self) -> Self {
-        let mut m = [[0.0f32; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                for k in 0..3 {
-                    m[i][j] += self.m[i][k] * rhs.m[k][j];
-                }
-            }
+    /// Adobe RGB → AP1 directly (= LINEAR_SRGB_TO_AP1 × ADOBE_RGB_TO_LINEAR_SRGB).
+    pub const ADOBE_RGB_TO_AP1: Self =
+        Self::LINEAR_SRGB_TO_AP1.const_mul(&Self::ADOBE_RGB_TO_LINEAR_SRGB);
+
+    /// Display P3 → AP1 directly (= LINEAR_SRGB_TO_AP1 × DISPLAY_P3_TO_LINEAR_SRGB).
+    pub const DISPLAY_P3_TO_AP1: Self =
+        Self::LINEAR_SRGB_TO_AP1.const_mul(&Self::DISPLAY_P3_TO_LINEAR_SRGB);
+
+    /// ProPhoto RGB → AP1 directly (= LINEAR_SRGB_TO_AP1 × PROPHOTO_TO_LINEAR_SRGB).
+    pub const PROPHOTO_TO_AP1: Self =
+        Self::LINEAR_SRGB_TO_AP1.const_mul(&Self::PROPHOTO_TO_LINEAR_SRGB);
+
+    /// AP1 → Display P3 directly (= LINEAR_SRGB_TO_DISPLAY_P3 × AP1_TO_LINEAR_SRGB).
+    pub const AP1_TO_DISPLAY_P3: Self =
+        Self::LINEAR_SRGB_TO_DISPLAY_P3.const_mul(&Self::AP1_TO_LINEAR_SRGB);
+
+    /// Multiply two matrices at compile time: self × rhs (apply rhs first, then self).
+    pub const fn const_mul(&self, rhs: &Self) -> Self {
+        let a = &self.m;
+        let b = &rhs.m;
+        Self {
+            m: [
+                [
+                    a[0][0]*b[0][0] + a[0][1]*b[1][0] + a[0][2]*b[2][0],
+                    a[0][0]*b[0][1] + a[0][1]*b[1][1] + a[0][2]*b[2][1],
+                    a[0][0]*b[0][2] + a[0][1]*b[1][2] + a[0][2]*b[2][2],
+                ],
+                [
+                    a[1][0]*b[0][0] + a[1][1]*b[1][0] + a[1][2]*b[2][0],
+                    a[1][0]*b[0][1] + a[1][1]*b[1][1] + a[1][2]*b[2][1],
+                    a[1][0]*b[0][2] + a[1][1]*b[1][2] + a[1][2]*b[2][2],
+                ],
+                [
+                    a[2][0]*b[0][0] + a[2][1]*b[1][0] + a[2][2]*b[2][0],
+                    a[2][0]*b[0][1] + a[2][1]*b[1][1] + a[2][2]*b[2][1],
+                    a[2][0]*b[0][2] + a[2][1]*b[1][2] + a[2][2]*b[2][2],
+                ],
+            ],
         }
-        Self { m }
+    }
+
+    /// Multiply two matrices at runtime: self × rhs (apply rhs first, then self).
+    pub fn mul(&self, rhs: &Self) -> Self {
+        self.const_mul(rhs)
     }
 }
 

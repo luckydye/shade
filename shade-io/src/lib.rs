@@ -418,12 +418,11 @@ pub fn to_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
         }
         ColorSpace::AdobeRgb => {
             for chunk in pixels.chunks_exact_mut(4) {
-                let (r, g, b) = ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB.apply(
+                let (r, g, b) = ColorMatrix3x3::ADOBE_RGB_TO_AP1.apply(
                     chunk[0].powf(2.2),
                     chunk[1].powf(2.2),
                     chunk[2].powf(2.2),
                 );
-                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
                 chunk[0] = linear_to_acescct_channel(r);
                 chunk[1] = linear_to_acescct_channel(g);
                 chunk[2] = linear_to_acescct_channel(b);
@@ -432,12 +431,11 @@ pub fn to_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
         ColorSpace::DisplayP3 => {
             // P3 uses the sRGB transfer function
             for chunk in pixels.chunks_exact_mut(4) {
-                let (r, g, b) = ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB.apply(
+                let (r, g, b) = ColorMatrix3x3::DISPLAY_P3_TO_AP1.apply(
                     srgb_to_linear(chunk[0]),
                     srgb_to_linear(chunk[1]),
                     srgb_to_linear(chunk[2]),
                 );
-                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
                 chunk[0] = linear_to_acescct_channel(r);
                 chunk[1] = linear_to_acescct_channel(g);
                 chunk[2] = linear_to_acescct_channel(b);
@@ -445,12 +443,11 @@ pub fn to_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
         }
         ColorSpace::ProPhotoRgb => {
             for chunk in pixels.chunks_exact_mut(4) {
-                let (r, g, b) = ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB.apply(
+                let (r, g, b) = ColorMatrix3x3::PROPHOTO_TO_AP1.apply(
                     chunk[0].powf(1.8),
                     chunk[1].powf(1.8),
                     chunk[2].powf(1.8),
                 );
-                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
                 chunk[0] = linear_to_acescct_channel(r);
                 chunk[1] = linear_to_acescct_channel(g);
                 chunk[2] = linear_to_acescct_channel(b);
@@ -490,12 +487,11 @@ pub fn from_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
         }
         ColorSpace::DisplayP3 => {
             for chunk in pixels.chunks_exact_mut(4) {
-                let (r, g, b) = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(
+                let (r, g, b) = ColorMatrix3x3::AP1_TO_DISPLAY_P3.apply(
                     acescct_to_linear_channel(chunk[0]),
                     acescct_to_linear_channel(chunk[1]),
                     acescct_to_linear_channel(chunk[2]),
                 );
-                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3.apply(r, g, b);
                 chunk[0] = linear_to_srgb(r);
                 chunk[1] = linear_to_srgb(g);
                 chunk[2] = linear_to_srgb(b);

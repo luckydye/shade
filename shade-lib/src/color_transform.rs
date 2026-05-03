@@ -43,20 +43,13 @@ impl ColorTransformUniform {
                 Self::with_matrix(6, 1.0, &ColorMatrix3x3::LINEAR_SRGB_TO_AP1)
             }
             ColorSpace::DisplayP3 => {
-                // P3 uses the sRGB transfer function; combined P3→sRGB→AP1 matrix
-                let m = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
-                    .mul(&ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB);
-                Self::with_matrix(6, 1.0, &m)
+                Self::with_matrix(6, 1.0, &ColorMatrix3x3::DISPLAY_P3_TO_AP1)
             }
             ColorSpace::AdobeRgb => {
-                let m = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
-                    .mul(&ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB);
-                Self::with_matrix(8, 2.2, &m)
+                Self::with_matrix(8, 2.2, &ColorMatrix3x3::ADOBE_RGB_TO_AP1)
             }
             ColorSpace::ProPhotoRgb => {
-                let m = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
-                    .mul(&ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB);
-                Self::with_matrix(8, 1.8, &m)
+                Self::with_matrix(8, 1.8, &ColorMatrix3x3::PROPHOTO_TO_AP1)
             }
         }
     }
@@ -74,10 +67,7 @@ impl ColorTransformUniform {
                 Self::with_matrix(7, 1.0, &ColorMatrix3x3::AP1_TO_LINEAR_SRGB)
             }
             ColorSpace::DisplayP3 => {
-                // ACEScct → AP1 linear → sRGB linear → P3 linear → P3 (sRGB OETF)
-                let m = ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3
-                    .mul(&ColorMatrix3x3::AP1_TO_LINEAR_SRGB);
-                Self::with_matrix(7, 1.0, &m)
+                Self::with_matrix(7, 1.0, &ColorMatrix3x3::AP1_TO_DISPLAY_P3)
             }
             _ => Self::with_matrix(7, 1.0, &ColorMatrix3x3::AP1_TO_LINEAR_SRGB),
         }
