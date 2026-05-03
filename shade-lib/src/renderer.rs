@@ -1593,11 +1593,19 @@ mod tests {
 
     #[test]
     fn display_preview_u8_path_only_clamps_at_quantization() {
-        let mut pixel = [0.25, 0.25, 0.25, 1.0];
+        // Input is ACEScct-encoded. 18% grey (linear 0.18) encodes to ~0.4136 in ACEScct.
+        // After decode + AP1→sRGB matrix + sRGB OETF, 18% grey maps to ~0.461 sRGB.
+        let acescct_midgrey = 0.4136_f32;
+        let mut pixel = [acescct_midgrey, acescct_midgrey, acescct_midgrey, 1.0];
         encode_preview_pixels(&mut pixel, &ColorSpace::Srgb);
         let encoded = rgba_display_f32_to_u8(&pixel);
 
-        assert!(pixel[0] > 0.25);
+        // sRGB-encoded 18% grey should be around 0.46 — meaningfully brighter than linear 0.18.
+        assert!(
+            pixel[0] > 0.40 && pixel[0] < 0.55,
+            "18% grey sRGB display value out of range: {}",
+            pixel[0]
+        );
         assert_eq!(encoded[3], 255);
     }
 
