@@ -1,0 +1,2 @@
+shade-lib/tests/snapshots/* filter=lfs diff=lfs merge=lfs -text
+shade-lib/tests/snapshots/*.png filter=lfs diff=lfs merge=lfs -text

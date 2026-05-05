@@ -11,7 +11,7 @@ export default defineConfig({
     strictPort: true,
     fs: {
       allow: [
-        resolve(__dirname, "."),
+        resolve(__dirname, "../"),
         resolve(__dirname, "../shade-ui"),
         resolve(__dirname, "../shade-wasm"),
       ],

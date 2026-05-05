@@ -10,7 +10,7 @@ use shade_io::{
     has_persisted_library_index_by_root, is_supported_library_image,
     library_index_db_path as shared_library_index_db_path, load_image_bytes,
     load_image_bytes_f32_with_info, picture_display_name,
-    replace_persisted_library_index_by_root, scan_directory_images, to_linear_srgb_f32,
+    replace_persisted_library_index_by_root, scan_directory_images, to_acescct_f32,
     SourceImageInfo,
 };
 use std::collections::HashMap;
@@ -2929,8 +2929,8 @@ impl EditorState {
         source_bit_depth: String,
         color_space: shade_lib::ColorSpace,
     ) -> LayerInfoResponse {
-        // Convert source pixels to linear sRGB (the internal working space).
-        to_linear_srgb_f32(&mut pixels, &color_space);
+        // Convert source pixels to ACEScct (the internal working space).
+        to_acescct_f32(&mut pixels, &color_space);
         let texture_id = self.next_texture_id;
         self.next_texture_id += 1;
         self.stack = LayerStack::new();

@@ -731,8 +731,11 @@ impl LayerStack {
 pub enum ColorSpace {
     /// Standard sRGB (IEC 61966-2-1). Gamma ≈ 2.2 (piecewise).
     Srgb,
-    /// Linear sRGB — same primaries as sRGB but no gamma. Used as internal working space.
+    /// Linear sRGB — same primaries as sRGB but no gamma.
     LinearSrgb,
+    /// ACEScct — ACES AP1 primaries with the log-with-toe transfer function.
+    /// Scene-referred, wide-gamut, log-encoded. Default internal working space.
+    AcesCct,
     /// Adobe RGB (1998). Wider gamut, gamma 2.2.
     AdobeRgb,
     /// Display P3 (DCI-P3 with D65 white point). Used in Apple displays.
@@ -757,6 +760,7 @@ impl ColorSpace {
         match self {
             ColorSpace::Srgb => "sRGB",
             ColorSpace::LinearSrgb => "Linear sRGB",
+            ColorSpace::AcesCct => "ACEScct (ACES AP1 log)",
             ColorSpace::AdobeRgb => "Adobe RGB (1998)",
             ColorSpace::DisplayP3 => "Display P3",
             ColorSpace::ProPhotoRgb => "ProPhoto RGB",
@@ -765,9 +769,9 @@ impl ColorSpace {
         }
     }
 
-    /// Whether this space uses a gamma transfer function (vs linear).
+    /// Whether this space uses a non-linear transfer function (gamma or log).
     pub fn is_gamma_encoded(&self) -> bool {
-        !matches!(self, ColorSpace::LinearSrgb)
+        !matches!(self, ColorSpace::LinearSrgb | ColorSpace::AcesCct)
     }
 }
 
@@ -828,12 +832,77 @@ impl ColorMatrix3x3 {
             [0.0171, 0.0724, 0.9105],
         ],
     };
+
+    /// Linear sRGB → ACES AP1 (gamut matrix; apply ACEScct OETF afterwards for ACEScct).
+    /// Source: ACES S-2014-004 reference matrices.
+    pub const LINEAR_SRGB_TO_AP1: Self = Self {
+        m: [
+            [0.6130974, 0.3395229, 0.0473796],
+            [0.0701442, 0.9163569, 0.0134989],
+            [0.0205687, 0.1095698, 0.8698615],
+        ],
+    };
+
+    /// ACES AP1 → linear sRGB (inverse of LINEAR_SRGB_TO_AP1).
+    pub const AP1_TO_LINEAR_SRGB: Self = Self {
+        m: [
+            [ 1.7049908, -0.6217721, -0.0832185],
+            [-0.1301592,  1.1407727, -0.0106135],
+            [-0.0239210, -0.1289920,  1.1529130],
+        ],
+    };
+
+    /// Adobe RGB → AP1 directly (= LINEAR_SRGB_TO_AP1 × ADOBE_RGB_TO_LINEAR_SRGB).
+    pub const ADOBE_RGB_TO_AP1: Self =
+        Self::LINEAR_SRGB_TO_AP1.const_mul(&Self::ADOBE_RGB_TO_LINEAR_SRGB);
+
+    /// Display P3 → AP1 directly (= LINEAR_SRGB_TO_AP1 × DISPLAY_P3_TO_LINEAR_SRGB).
+    pub const DISPLAY_P3_TO_AP1: Self =
+        Self::LINEAR_SRGB_TO_AP1.const_mul(&Self::DISPLAY_P3_TO_LINEAR_SRGB);
+
+    /// ProPhoto RGB → AP1 directly (= LINEAR_SRGB_TO_AP1 × PROPHOTO_TO_LINEAR_SRGB).
+    pub const PROPHOTO_TO_AP1: Self =
+        Self::LINEAR_SRGB_TO_AP1.const_mul(&Self::PROPHOTO_TO_LINEAR_SRGB);
+
+    /// AP1 → Display P3 directly (= LINEAR_SRGB_TO_DISPLAY_P3 × AP1_TO_LINEAR_SRGB).
+    pub const AP1_TO_DISPLAY_P3: Self =
+        Self::LINEAR_SRGB_TO_DISPLAY_P3.const_mul(&Self::AP1_TO_LINEAR_SRGB);
+
+    /// Multiply two matrices at compile time: self × rhs (apply rhs first, then self).
+    pub const fn const_mul(&self, rhs: &Self) -> Self {
+        let a = &self.m;
+        let b = &rhs.m;
+        Self {
+            m: [
+                [
+                    a[0][0]*b[0][0] + a[0][1]*b[1][0] + a[0][2]*b[2][0],
+                    a[0][0]*b[0][1] + a[0][1]*b[1][1] + a[0][2]*b[2][1],
+                    a[0][0]*b[0][2] + a[0][1]*b[1][2] + a[0][2]*b[2][2],
+                ],
+                [
+                    a[1][0]*b[0][0] + a[1][1]*b[1][0] + a[1][2]*b[2][0],
+                    a[1][0]*b[0][1] + a[1][1]*b[1][1] + a[1][2]*b[2][1],
+                    a[1][0]*b[0][2] + a[1][1]*b[1][2] + a[1][2]*b[2][2],
+                ],
+                [
+                    a[2][0]*b[0][0] + a[2][1]*b[1][0] + a[2][2]*b[2][0],
+                    a[2][0]*b[0][1] + a[2][1]*b[1][1] + a[2][2]*b[2][1],
+                    a[2][0]*b[0][2] + a[2][1]*b[1][2] + a[2][2]*b[2][2],
+                ],
+            ],
+        }
+    }
+
+    /// Multiply two matrices at runtime: self × rhs (apply rhs first, then self).
+    pub fn mul(&self, rhs: &Self) -> Self {
+        self.const_mul(rhs)
+    }
 }
 
 /// Project-level colour settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectColorSettings {
-    /// Internal working colour space (always LinearSrgb in practice).
+    /// Internal working colour space for editing operations.
     pub working_space: ColorSpace,
     /// Display colour space (for viewport tone-mapping).
     pub display_space: ColorSpace,
@@ -844,7 +913,7 @@ pub struct ProjectColorSettings {
 impl Default for ProjectColorSettings {
     fn default() -> Self {
         Self {
-            working_space: ColorSpace::LinearSrgb,
+            working_space: ColorSpace::AcesCct,
             display_space: ColorSpace::Srgb,
             export_space: ColorSpace::Srgb,
         }
@@ -1118,5 +1187,207 @@ mod tests {
             (lut[255] - 0.8).abs() < 0.0001,
             "right clamp should drive lut[255]"
         );
+    }
+
+    // ── Colour-space conversion tests ────────────────────────────────────────
+
+    const EPSILON: f32 = 1e-4;
+
+    fn assert_approx_eq(a: f32, b: f32, label: &str) {
+        assert!(
+            (a - b).abs() < EPSILON,
+            "{label}: expected {b:.6}, got {a:.6} (diff {:.2e})",
+            (a - b).abs()
+        );
+    }
+
+    fn assert_triple_approx_eq(got: (f32, f32, f32), want: (f32, f32, f32), label: &str) {
+        assert_approx_eq(got.0, want.0, &format!("{label} R"));
+        assert_approx_eq(got.1, want.1, &format!("{label} G"));
+        assert_approx_eq(got.2, want.2, &format!("{label} B"));
+    }
+
+    // Matrix × its inverse should equal identity.
+    fn assert_matrix_inverse(m: &ColorMatrix3x3, inv: &ColorMatrix3x3, label: &str) {
+        let product = m.const_mul(inv);
+        let id = ColorMatrix3x3::IDENTITY;
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_approx_eq(product.m[i][j], id.m[i][j], &format!("{label} [{i}][{j}]"));
+            }
+        }
+    }
+
+    #[test]
+    fn linear_srgb_to_ap1_inverse_is_identity() {
+        assert_matrix_inverse(
+            &ColorMatrix3x3::LINEAR_SRGB_TO_AP1,
+            &ColorMatrix3x3::AP1_TO_LINEAR_SRGB,
+            "LINEAR_SRGB_TO_AP1 × AP1_TO_LINEAR_SRGB",
+        );
+    }
+
+    #[test]
+    fn ap1_to_linear_srgb_inverse_is_identity() {
+        assert_matrix_inverse(
+            &ColorMatrix3x3::AP1_TO_LINEAR_SRGB,
+            &ColorMatrix3x3::LINEAR_SRGB_TO_AP1,
+            "AP1_TO_LINEAR_SRGB × LINEAR_SRGB_TO_AP1",
+        );
+    }
+
+    #[test]
+    fn display_p3_to_linear_srgb_inverse_is_identity() {
+        assert_matrix_inverse(
+            &ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB,
+            &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3,
+            "DISPLAY_P3_TO_LINEAR_SRGB × LINEAR_SRGB_TO_DISPLAY_P3",
+        );
+    }
+
+    // ACEScct transfer function round-trips.
+
+    fn acescct_to_linear(v: f32) -> f32 {
+        if v < 0.155_251_141_6 {
+            (v - 0.072_905_534_2) / 10.540_237_74
+        } else {
+            f32::powf(2.0, v * 17.52 - 9.72)
+        }
+    }
+
+    fn linear_to_acescct(v: f32) -> f32 {
+        if v <= 0.007_812_5 {
+            10.540_237_74 * v + 0.072_905_534_2
+        } else {
+            (v.max(f32::MIN_POSITIVE).log2() + 9.72) / 17.52
+        }
+    }
+
+    #[test]
+    fn acescct_transfer_function_round_trips() {
+        for &lin in &[0.0, 0.001, 0.007, 0.0078125, 0.01, 0.18, 0.5, 1.0, 2.0, 10.0] {
+            let encoded = linear_to_acescct(lin);
+            let decoded = acescct_to_linear(encoded);
+            assert_approx_eq(decoded, lin, &format!("ACEScct round-trip @ {lin}"));
+        }
+    }
+
+    #[test]
+    fn acescct_midgrey_encodes_near_0_413() {
+        // 18% grey (0.18 linear) should encode to ~0.4135884 in ACEScct.
+        let encoded = linear_to_acescct(0.18);
+        assert!(
+            (encoded - 0.4135884).abs() < 1e-4,
+            "18% grey ACEScct encoding: expected ~0.4135884, got {encoded:.7}"
+        );
+    }
+
+    // sRGB → AP1 → sRGB round-trip via combined matrix.
+    #[test]
+    fn srgb_to_ap1_to_srgb_round_trips() {
+        let test_colors: &[(f32, f32, f32)] = &[
+            (0.0, 0.0, 0.0),
+            (1.0, 1.0, 1.0),
+            (0.18, 0.18, 0.18), // mid-grey
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.5, 0.25, 0.75),
+        ];
+        for &(r, g, b) in test_colors {
+            let ap1 = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
+            let back = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(ap1.0, ap1.1, ap1.2);
+            assert_triple_approx_eq(back, (r, g, b), &format!("sRGB→AP1→sRGB ({r},{g},{b})"));
+        }
+    }
+
+    // Combined matrices must equal their two-step equivalents.
+    #[test]
+    fn adobe_rgb_to_ap1_equals_chained() {
+        let chained = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
+            .const_mul(&ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB);
+        let combined = ColorMatrix3x3::ADOBE_RGB_TO_AP1;
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_approx_eq(
+                    combined.m[i][j],
+                    chained.m[i][j],
+                    &format!("ADOBE_RGB_TO_AP1 [{i}][{j}]"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn display_p3_to_ap1_equals_chained() {
+        let chained = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
+            .const_mul(&ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB);
+        let combined = ColorMatrix3x3::DISPLAY_P3_TO_AP1;
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_approx_eq(
+                    combined.m[i][j],
+                    chained.m[i][j],
+                    &format!("DISPLAY_P3_TO_AP1 [{i}][{j}]"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prophoto_to_ap1_equals_chained() {
+        let chained = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
+            .const_mul(&ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB);
+        let combined = ColorMatrix3x3::PROPHOTO_TO_AP1;
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_approx_eq(
+                    combined.m[i][j],
+                    chained.m[i][j],
+                    &format!("PROPHOTO_TO_AP1 [{i}][{j}]"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ap1_to_display_p3_equals_chained() {
+        let chained = ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3
+            .const_mul(&ColorMatrix3x3::AP1_TO_LINEAR_SRGB);
+        let combined = ColorMatrix3x3::AP1_TO_DISPLAY_P3;
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_approx_eq(
+                    combined.m[i][j],
+                    chained.m[i][j],
+                    &format!("AP1_TO_DISPLAY_P3 [{i}][{j}]"),
+                );
+            }
+        }
+    }
+
+    // Full sRGB → ACEScct → sRGB round-trip (encode, apply matrices, decode).
+    #[test]
+    fn srgb_to_acescct_to_srgb_round_trips() {
+        let test_colors: &[(f32, f32, f32)] = &[
+            (0.0, 0.0, 0.0),
+            (1.0, 1.0, 1.0),
+            (0.18, 0.18, 0.18),
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (0.5, 0.3, 0.8),
+        ];
+        for &(r, g, b) in test_colors {
+            // Forward: linear sRGB → AP1 → ACEScct
+            let (ar, ag, ab) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
+            let enc = (linear_to_acescct(ar), linear_to_acescct(ag), linear_to_acescct(ab));
+
+            // Reverse: ACEScct → AP1 → linear sRGB
+            let dec = (acescct_to_linear(enc.0), acescct_to_linear(enc.1), acescct_to_linear(enc.2));
+            let back = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(dec.0, dec.1, dec.2);
+
+            assert_triple_approx_eq(back, (r, g, b), &format!("sRGB→ACEScct→sRGB ({r},{g},{b})"));
+        }
     }
 }
