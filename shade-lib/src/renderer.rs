@@ -1109,6 +1109,7 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
+        let rgb_lut = acescct_to_srgb_u8_lut_from_f16();
         let alpha_lut = preview_alpha_u8_lut_from_f16();
         self.readback_texture(
             tex,
@@ -1119,13 +1120,13 @@ impl Renderer {
             (width * height * 4) as usize,
             |row, rgba| {
                 for pixel in row.chunks_exact(8) {
-                    let r = f16::from_bits(u16::from_ne_bytes([pixel[0], pixel[1]])).to_f32();
-                    let g = f16::from_bits(u16::from_ne_bytes([pixel[2], pixel[3]])).to_f32();
-                    let b = f16::from_bits(u16::from_ne_bytes([pixel[4], pixel[5]])).to_f32();
+                    let r = u16::from_ne_bytes([pixel[0], pixel[1]]);
+                    let g = u16::from_ne_bytes([pixel[2], pixel[3]]);
+                    let b = u16::from_ne_bytes([pixel[4], pixel[5]]);
                     let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
-                    rgba.push(preview_rgb_channel_to_u8(r));
-                    rgba.push(preview_rgb_channel_to_u8(g));
-                    rgba.push(preview_rgb_channel_to_u8(b));
+                    rgba.push(rgb_lut[r as usize]);
+                    rgba.push(rgb_lut[g as usize]);
+                    rgba.push(rgb_lut[b as usize]);
                     rgba.push(alpha_lut[a as usize]);
                 }
             },
@@ -1139,7 +1140,7 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        let rgb_lut = preview_srgb_u8_lut_from_f16();
+        let rgb_lut = acescct_to_srgb_u8_lut_from_f16();
         let alpha_lut = preview_alpha_u8_lut_from_f16();
         self.readback_texture(
             tex,
@@ -1462,12 +1463,18 @@ fn preview_srgb_lut() -> &'static [f32; PREVIEW_SRGB_LUT_SIZE + 1] {
     })
 }
 
-fn preview_srgb_u8_lut_from_f16() -> &'static [u8; 65536] {
+/// LUT from f16 bit-pattern → sRGB u8, treating input as ACEScct working-space.
+/// Decodes ACEScct → linear then applies the sRGB OETF. The AP1→sRGB gamut matrix
+/// is skipped for per-channel speed; neutral greys are exact, saturated wide-gamut
+/// colours have a small hue shift which is acceptable for live preview.
+fn acescct_to_srgb_u8_lut_from_f16() -> &'static [u8; 65536] {
     static LUT: OnceLock<Box<[u8; 65536]>> = OnceLock::new();
     LUT.get_or_init(|| {
         let srgb_lut = preview_srgb_lut();
         Box::new(std::array::from_fn(|bits| {
-            linear_to_srgb_u8(f16::from_bits(bits as u16).to_f32(), srgb_lut)
+            let acescct = f16::from_bits(bits as u16).to_f32();
+            let linear = acescct_to_linear_f32(acescct).max(0.0);
+            linear_to_srgb_u8(linear, srgb_lut)
         }))
     })
 }
@@ -1490,21 +1497,6 @@ fn rgba_display_f32_to_u8(pixels: &[f32]) -> Vec<u8> {
         .collect()
 }
 
-fn preview_rgb_channel_to_u8(value: f32) -> u8 {
-    if value.is_nan() {
-        return 0;
-    }
-    if value.is_infinite() {
-        return u8::MAX;
-    }
-    let mapped = value.max(0.0) / (1.0 + value.max(0.0));
-    let encoded = if mapped <= 0.0031308 {
-        mapped * 12.92
-    } else {
-        1.055 * mapped.powf(1.0 / 2.4) - 0.055
-    };
-    (encoded * 255.0).round() as u8
-}
 
 
 #[cfg(test)]
