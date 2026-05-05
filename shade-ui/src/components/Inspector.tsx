@@ -11,9 +11,11 @@ import {
   Switch,
 } from "solid-js";
 import { Slider } from "./Slider";
+import { TextLayerEditor } from "./TextLayerEditor";
 import type { LayerInfo } from "../store/editor";
 import {
   addLayer,
+  addTextLayer,
   applyEdit,
   applyGradientMask,
   createBrushMask,
@@ -189,6 +191,13 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
       />
     );
   }
+  if (props.layer.kind === "text") {
+    return (
+      <span class="flex h-4 w-4 items-center justify-center font-serif text-[13px] font-bold leading-none text-[var(--text-dim)]">
+        T
+      </span>
+    );
+  }
   return (
     <span class="inline-block h-4 w-4 rounded-sm border border-[var(--border-medium)]" />
   );
@@ -304,6 +313,10 @@ export const Inspector: Component = () => {
   const selectedAdjustmentLayer = () => {
     const layer = selectedLayer();
     return layer?.kind === "adjustment" ? layer : null;
+  };
+  const selectedTextLayer = () => {
+    const layer = selectedLayer();
+    return layer?.kind === "text" ? layer : null;
   };
   const selectedAdjustmentLayerOrThrow = () => {
     const layer = selectedAdjustmentLayer();
@@ -1177,6 +1190,15 @@ export const Inspector: Component = () => {
     return imageLayerIdx + 1;
   };
 
+  /** "Add text" entry: picks the first registered font, or `font_id = 0` as
+   * a placeholder when none exist (the user is expected to upload a font
+   * via the editor's font picker afterwards). */
+  const handleAddTextLayer = async () => {
+    const fonts = state.fonts;
+    const fontId = fonts.length > 0 ? fonts[0].font_id : 0;
+    await addTextLayer("Text", fontId, 32, topLayerInsertPosition());
+  };
+
   const withPresetBusy = async (fn: () => Promise<void>) => {
     setIsPresetBusy(true);
     try {
@@ -1671,11 +1693,27 @@ export const Inspector: Component = () => {
           class={ADD_LAYER_ROW_CLASS}
         >
           <span />
-          <span class="inline-flex h-4 w-4 ml-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+          <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
             +
           </span>
           <span />
           <span>Add Adjustment</span>
+          <span />
+          <span />
+        </Button>
+        <Button
+          type="button"
+          onClick={() => void handleAddTextLayer()}
+          class={ADD_LAYER_ROW_CLASS}
+        >
+          <span />
+          <span class="inline-flex h-4 w-4 items-center justify-center text-[12px] leading-none text-[var(--text-dim)]">
+            +
+          </span>
+          <span class="inline-flex h-4 w-4 items-center justify-center font-serif text-[13px] font-bold leading-none text-[var(--text-dim)]">
+            T
+          </span>
+          <span>Add Text Layer</span>
           <span />
           <span />
         </Button>
@@ -1927,41 +1965,55 @@ export const Inspector: Component = () => {
       <Show
         when={selectedCropLayer()}
         fallback={
-          <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
-            <div class="flex flex-col gap-3 pt-2">
-              <ControlSection title="Light">
-                <LightSliders />
-                <LevelSliders />
-                <CurvesEditor
-                  curvePointCache={curvePointCache}
-                  defaultCurvePoints={defaultCurvePoints}
-                  onApplyCurves={applyCurves}
-                  parameterRowClass={PARAMETER_ROW_CLASS}
+          <Show
+            when={selectedTextLayer()}
+            fallback={
+              <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
+                <div class="flex flex-col gap-3 pt-2">
+                  <ControlSection title="Light">
+                    <LightSliders />
+                    <LevelSliders />
+                    <CurvesEditor
+                      curvePointCache={curvePointCache}
+                      defaultCurvePoints={defaultCurvePoints}
+                      onApplyCurves={applyCurves}
+                      parameterRowClass={PARAMETER_ROW_CLASS}
+                    />
+                  </ControlSection>
+                  <ControlSection title="Color">
+                    <WhiteBalanceSliders />
+                    <SaturationSliders />
+                    <LsCurveEditor
+                      lsCurvePointCache={lsCurvePointCache}
+                      defaultLsCurvePoints={defaultLsCurvePoints}
+                      onApplyLsCurve={applyLsCurve}
+                      parameterRowClass={PARAMETER_ROW_CLASS}
+                    />
+                  </ControlSection>
+                  <ControlSection title="HSL Color Balance">
+                    <HslSection />
+                  </ControlSection>
+                  <ControlSection title="Effects">
+                    <GlowSlider />
+                    <VignetteSlider />
+                    <SharpenSlider />
+                    <GrainSliders />
+                  </ControlSection>
+                  <ControlSection title="Denoise">
+                    <DenoiseSliders />
+                  </ControlSection>
+                </div>
+              </Show>
+            }
+          >
+            {(layer) => (
+              <ControlSection title="Text">
+                <TextLayerEditor
+                  layer={layer()}
+                  layerIdx={state.selectedLayerIdx}
                 />
               </ControlSection>
-              <ControlSection title="Color">
-                <WhiteBalanceSliders />
-                <SaturationSliders />
-                <LsCurveEditor
-                  lsCurvePointCache={lsCurvePointCache}
-                  defaultLsCurvePoints={defaultLsCurvePoints}
-                  onApplyLsCurve={applyLsCurve}
-                  parameterRowClass={PARAMETER_ROW_CLASS}
-                />
-              </ControlSection>
-              <ControlSection title="HSL Color Balance">
-                <HslSection />
-              </ControlSection>
-              <ControlSection title="Effects">
-                <GlowSlider />
-                <VignetteSlider />
-                <SharpenSlider />
-                <GrainSliders />
-              </ControlSection>
-              <ControlSection title="Denoise">
-                <DenoiseSliders />
-              </ControlSection>
-            </div>
+            )}
           </Show>
         }
       >
@@ -1981,10 +2033,22 @@ export const Inspector: Component = () => {
         <Show
           when={selectedCropLayer()}
           fallback={
-            <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
-              <div>
-                <MobileLayerBody />
-              </div>
+            <Show
+              when={selectedTextLayer()}
+              fallback={
+                <Show when={selectedAdjustmentLayer()} fallback={<ImageInfoPanel />}>
+                  <div>
+                    <MobileLayerBody />
+                  </div>
+                </Show>
+              }
+            >
+              {(layer) => (
+                <TextLayerEditor
+                  layer={layer()}
+                  layerIdx={state.selectedLayerIdx}
+                />
+              )}
             </Show>
           }
         >
