@@ -1502,12 +1502,13 @@ fn rgba_display_f32_to_u8(pixels: &[f32]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_preview_pixels, normalize_preview_crop, resample_mask_region,
-        rgba_display_f32_to_u8, view_uv_mapping, FloatImage, PreviewCrop, Renderer,
+        acescct_to_linear_f32, acescct_to_srgb_u8_lut_from_f16, encode_preview_pixels,
+        normalize_preview_crop, resample_mask_region, rgba_display_f32_to_u8, view_uv_mapping,
+        FloatImage, PreviewCrop, Renderer,
     };
     use shade_lib::{
-        AdjustmentOp, ColorSpace, CropRect, GlowParams, LayerStack, MaskData, TextureId,
-        VignetteParams,
+        AdjustmentOp, ColorSpace, ColorTransformUniform, CropRect, GlowParams, LayerStack,
+        MaskData, TextureId, ToneParams, VignetteParams,
     };
     use std::collections::HashMap;
 
@@ -3484,6 +3485,187 @@ mod tests {
             assert!(
                 *val >= 4.5 && *val <= 8.5,
                 "preview crop pixel R={val} outside expected range [5,8]"
+            );
+        }
+    }
+
+    // ── Color pipeline correctness tests ─────────────────────────────────────
+
+    /// The fast readback LUT must decode ACEScct before applying the sRGB OETF.
+    /// Checks three anchor points and monotonicity across the visible range.
+    #[test]
+    fn acescct_display_lut_maps_key_luminances_to_correct_bytes() {
+        use half::f16;
+        let lut = acescct_to_srgb_u8_lut_from_f16();
+        let lookup = |v: f32| lut[f16::from_f32(v).to_bits() as usize];
+
+        // Linear 0 (ACEScct ≈ 0.073, the toe zero) → sRGB u8 0.
+        assert_eq!(lookup(0.0), 0, "ACEScct 0.0 should map to u8 0");
+
+        // ACEScct 0.4136 = 18% grey (linear 0.18) → sRGB ~0.461 → u8 ~118.
+        let mid = lookup(0.4136);
+        assert!(
+            (mid as i32 - 118).abs() <= 3,
+            "ACEScct midgrey (0.4136) → expected u8 ~118, got {mid}"
+        );
+
+        // ACEScct for linear 1.0 = (log2(1)+9.72)/17.52 ≈ 0.5548 → sRGB 1.0 → u8 255.
+        let white_acescct = 9.72_f32 / 17.52; // ≈ 0.5548
+        assert_eq!(
+            lookup(white_acescct),
+            255,
+            "diffuse white (ACEScct {white_acescct:.4}) should be u8 255"
+        );
+
+        // Values well above diffuse white should still clip to 255.
+        assert_eq!(lookup(0.80), 255, "over-white should clip to u8 255");
+
+        // Monotonically non-decreasing through the normal display range.
+        let mut prev = 0u8;
+        for i in 0..=60 {
+            let v = i as f32 * 0.01; // 0.00 … 0.60
+            let byte = lookup(v);
+            assert!(
+                byte >= prev,
+                "LUT dropped at v={v:.2}: {prev} → {byte} (must be non-decreasing)"
+            );
+            prev = byte;
+        }
+    }
+
+    /// GPU color-transform pipeline converts linear sRGB neutral grey to ACEScct.
+    /// Exercises mode 9 (linear → AP1 matrix → ACEScct OETF) in color_transform.wgsl.
+    #[tokio::test]
+    async fn color_transform_converts_linear_srgb_grey_to_acescct() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        // 18% grey: neutral channels are unchanged by any primary matrix, so
+        // the output should be ACEScct(0.18) ≈ 0.4136.
+        let input = vec![0.18_f32, 0.18, 0.18, 1.0];
+        let in_tex = renderer.upload_float_texture(&input, 1, 1, "ct_grey_in");
+        let out_tex = renderer.apply_color_transform(
+            &in_tex,
+            ColorTransformUniform::to_linear_srgb(&ColorSpace::LinearSrgb),
+        );
+        let pixels = renderer
+            .readback_work_texture_to_f32(&out_tex, 1, 1)
+            .await
+            .expect("readback");
+
+        let acescct = pixels[0];
+        assert!(
+            (acescct - 0.4136).abs() < 0.005,
+            "linear sRGB 0.18 → ACEScct: expected ~0.4136, got {acescct:.4}"
+        );
+        // Neutral grey: all three channels must be equal.
+        assert!(
+            (pixels[0] - pixels[1]).abs() < 0.003,
+            "R≠G after grey transform: {:?}",
+            &pixels[..3]
+        );
+        assert!(
+            (pixels[0] - pixels[2]).abs() < 0.003,
+            "R≠B after grey transform: {:?}",
+            &pixels[..3]
+        );
+    }
+
+    /// Forward + inverse color-transform round-trips back to the original pixel value.
+    /// Covers neutral greys (AP1 matrix is identity for neutral) and a chromatic value
+    /// (exercises the full 3×3 matrix in both directions). Tests both linear sRGB and
+    /// gamma-encoded sRGB paths.
+    #[tokio::test]
+    async fn color_transform_round_trips_for_linear_and_srgb_sources() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        let cases: &[(&str, ColorSpace, [f32; 4])] = &[
+            ("linear grey 0.01", ColorSpace::LinearSrgb, [0.01, 0.01, 0.01, 1.0]),
+            ("linear grey 0.18", ColorSpace::LinearSrgb, [0.18, 0.18, 0.18, 1.0]),
+            ("linear grey 1.0",  ColorSpace::LinearSrgb, [1.0,  1.0,  1.0,  1.0]),
+            // Chromatic pixel: exercises the full AP1 ↔ linear sRGB matrix paths.
+            ("linear warm",      ColorSpace::LinearSrgb, [0.8,  0.2,  0.05, 1.0]),
+            // sRGB-encoded grey (mode 6 / mode 7 paths).
+            ("sRGB grey 0.46",   ColorSpace::Srgb,       [0.46, 0.46, 0.46, 1.0]),
+            ("sRGB warm",        ColorSpace::Srgb,       [0.8,  0.2,  0.05, 1.0]),
+        ];
+
+        for (label, cs, input) in cases {
+            let in_tex = renderer.upload_float_texture(input, 1, 1, "rt_in");
+            let fwd_tex = renderer
+                .apply_color_transform(&in_tex, ColorTransformUniform::to_linear_srgb(cs));
+            let inv_tex = renderer
+                .apply_color_transform(&fwd_tex, ColorTransformUniform::from_linear_srgb(cs));
+            let pixels = renderer
+                .readback_work_texture_to_f32(&inv_tex, 1, 1)
+                .await
+                .expect("readback");
+
+            for ch in 0..3usize {
+                assert!(
+                    (pixels[ch] - input[ch]).abs() < 0.01,
+                    "{label} ch{ch}: round-trip expected {:.3}, got {:.4}",
+                    input[ch],
+                    pixels[ch]
+                );
+            }
+        }
+    }
+
+    /// +1 EV exposure must shift ACEScct values by exactly 1/17.52 (the log step for one
+    /// stop), which in linear space corresponds to a 2× luminance increase.
+    /// Verified at shadow, midgrey, and highlight positions.
+    #[tokio::test]
+    async fn exposure_one_stop_doubles_linear_luminance() {
+        let Some(renderer) = renderer_or_skip().await else {
+            return;
+        };
+
+        // The shader's LOG_STEP constant: 1 EV = 1/17.52 in ACEScct units.
+        let log_step = 1.0_f32 / 17.52;
+
+        // Inline ACEScct→linear matching tone.wgsl / acescct_to_linear_f32.
+        let decode =
+            |v: f32| -> f32 { acescct_to_linear_f32(v) };
+
+        // Shadow (0.25), midgrey (0.4136), highlight (0.52).
+        for &acescct_in in &[0.25_f32, 0.4136, 0.52] {
+            let input = vec![acescct_in, acescct_in, acescct_in, 1.0];
+            let in_tex = renderer.upload_float_texture(&input, 1, 1, "exp_in");
+            let out_tex = renderer
+                .tone_pipeline
+                .process(
+                    &renderer.ctx,
+                    &in_tex,
+                    ToneParams {
+                        exposure: 1.0,
+                        gamma: 1.0,
+                        ..Default::default()
+                    },
+                )
+                .expect("tone pipeline");
+            let pixels = renderer
+                .readback_work_texture_to_f32(&out_tex, 1, 1)
+                .await
+                .expect("readback");
+
+            let acescct_out = pixels[0];
+
+            // 1. ACEScct shift equals log_step (tolerance accounts for f16 quantisation).
+            assert!(
+                (acescct_out - acescct_in - log_step).abs() < 0.005,
+                "+1 EV @ ACEScct {acescct_in:.4}: expected shift {log_step:.4}, got {:.4}",
+                acescct_out - acescct_in
+            );
+
+            // 2. Equivalent linear-space ratio ≈ 2.0 (±5 %).
+            let ratio = decode(acescct_out) / decode(acescct_in);
+            assert!(
+                (ratio - 2.0).abs() < 0.10,
+                "+1 EV @ ACEScct {acescct_in:.4}: linear ratio should be ~2.0, got {ratio:.3}"
             );
         }
     }
