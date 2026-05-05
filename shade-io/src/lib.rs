@@ -130,7 +130,7 @@ pub fn load_image(path: &Path) -> Result<(Vec<u8>, u32, u32)> {
 
 pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
     if is_exr(name_hint, bytes) || is_camera_raw(name_hint, bytes) {
-        let (image, info) = load_image_bytes_f32_with_info(bytes, name_hint)?;
+        let (image, _info) = load_image_bytes_f32_with_info(bytes, name_hint)?;
         let mut pixels = image.pixels.to_vec();
         from_acescct_f32(&mut pixels, &ColorSpace::Srgb);
         return Ok((quantize_rgba_f32(&pixels), image.width, image.height));
@@ -180,8 +180,9 @@ pub fn load_image_bytes_f32_with_info(
     name_hint: Option<&str>,
 ) -> Result<(FloatImage, SourceImageInfo)> {
     if is_exr(name_hint, bytes) {
+        let image = working_space_image(decode_exr_f32(bytes)?, &ColorSpace::LinearSrgb);
         return Ok((
-            decode_exr_f32(bytes)?,
+            image,
             SourceImageInfo {
                 bit_depth: detect_exr_bit_depth(bytes)?,
                 color_space: ColorSpace::LinearSrgb,
@@ -196,7 +197,10 @@ pub fn load_image_bytes_f32_with_info(
         let raw_image = rawler::decode(&raw_source, &RawDecodeParams::default())
             .context("RAW decode failed")?;
         let bit_depth = format!("{}-bit RAW", raw_image.bps);
-        let image = develop_raw_image_linear_srgb(&raw_image)?;
+        let image = working_space_image(
+            develop_raw_image_linear_srgb(&raw_image)?,
+            &ColorSpace::LinearSrgb,
+        );
         return Ok((
             image,
             SourceImageInfo {
@@ -800,7 +804,7 @@ fn into_linear_float_image_raw_srgb_oriented(
 fn rgba8_to_linear_float_image(image: image::RgbaImage) -> FloatImage {
     let (width, height) = image.dimensions();
     let linear_lut = linear_srgb_lut_u8();
-    let pixels = image
+    let mut pixels = image
         .into_raw()
         .chunks_exact(4)
         .flat_map(|rgba| {
@@ -812,6 +816,7 @@ fn rgba8_to_linear_float_image(image: image::RgbaImage) -> FloatImage {
             ]
         })
         .collect::<Vec<_>>();
+    to_acescct_f32(&mut pixels, &ColorSpace::LinearSrgb);
     FloatImage {
         pixels: pixels.into(),
         width,
@@ -824,7 +829,7 @@ fn rgba16_to_linear_float_image(
     color_space: &ColorSpace,
 ) -> FloatImage {
     let (width, height) = image.dimensions();
-    let pixels = match color_space {
+    let mut pixels = match color_space {
         ColorSpace::Srgb | ColorSpace::Unknown | ColorSpace::Custom(_) => {
             let linear_lut = linear_srgb_lut_u16();
             image
@@ -857,6 +862,12 @@ fn rgba16_to_linear_float_image(
             pixels
         }
     };
+    if matches!(
+        color_space,
+        ColorSpace::Srgb | ColorSpace::Unknown | ColorSpace::Custom(_)
+    ) {
+        to_acescct_f32(&mut pixels, &ColorSpace::LinearSrgb);
+    }
     FloatImage {
         pixels: pixels.into(),
         width,
@@ -1057,14 +1068,29 @@ fn apply_linear_matrix_and_gamma_f32(
     }
 }
 
+fn working_space_image(image: FloatImage, color_space: &ColorSpace) -> FloatImage {
+    let mut pixels = image.pixels.to_vec();
+    to_acescct_f32(&mut pixels, color_space);
+    FloatImage {
+        pixels: pixels.into(),
+        width: image.width,
+        height: image.height,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_orientation, into_linear_float_image, load_image,
-        load_image_f32_with_info, raw_orientation_to_exif,
+        acescct_to_linear_channel, apply_orientation, into_linear_float_image,
+        load_image, load_image_bytes_f32_with_info, load_image_f32_with_info,
+        raw_orientation_to_exif,
     };
-    use image::DynamicImage;
-    use rawler::{decoders::RawDecodeParams, rawsource::RawSource};
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use rawler::{
+        decoders::RawDecodeParams,
+        imgop::develop::RawDevelop,
+        rawsource::RawSource,
+    };
     use shade_lib::ColorSpace;
     use std::path::Path;
     use std::time::{Duration, Instant};
@@ -1112,6 +1138,31 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/Desk.exr");
         let (_, info) = load_image_f32_with_info(&path).expect("fixture should decode");
         assert_eq!(info.bit_depth, "16-bit float");
+    }
+
+    #[test]
+    fn loads_srgb_png_into_acescct_working_space() {
+        let mut encoded = Vec::new();
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+            1,
+            1,
+            Rgba([118, 118, 118, 255]),
+        ))
+        .write_to(&mut std::io::Cursor::new(&mut encoded), ImageFormat::Png)
+        .expect("PNG should encode");
+
+        let (image, info) = load_image_bytes_f32_with_info(&encoded, Some("midgrey.png"))
+            .expect("PNG should decode");
+
+        assert!(matches!(info.color_space, ColorSpace::Srgb | ColorSpace::Unknown));
+        let rgb = &image.pixels[..3];
+        for channel in rgb {
+            let linear = acescct_to_linear_channel(*channel);
+            assert!(
+                (linear - 0.18).abs() < 0.01,
+                "expected working-space pixel to decode to ~0.18 linear, got {linear}"
+            );
+        }
     }
 
     #[test]
