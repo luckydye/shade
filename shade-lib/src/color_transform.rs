@@ -30,65 +30,46 @@ impl ColorTransformUniform {
         }
     }
 
-    /// Build a uniform for converting from `src` colour space to linear sRGB.
+    /// Build a uniform for converting from `src` colour space into the ACEScct working space.
     pub fn to_linear_srgb(src: &ColorSpace) -> Self {
         match src {
-            ColorSpace::LinearSrgb => Self::identity(),
-            ColorSpace::Srgb | ColorSpace::Unknown => Self {
-                mode: 2, // sRGB → linear
-                gamma: 2.4,
-                _pad0: 0.0,
-                _pad1: 0.0,
-                row0: [1.0, 0.0, 0.0, 0.0],
-                row1: [0.0, 1.0, 0.0, 0.0],
-                row2: [0.0, 0.0, 1.0, 0.0],
-            },
-            ColorSpace::AdobeRgb => {
-                Self::with_matrix(4, 2.2, &ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB)
+            ColorSpace::AcesCct => Self::identity(),
+            ColorSpace::LinearSrgb => {
+                // linear sRGB → AP1 linear → ACEScct (matrix + OETF, no gamma decode)
+                Self::with_matrix(9, 1.0, &ColorMatrix3x3::LINEAR_SRGB_TO_AP1)
+            }
+            ColorSpace::Srgb | ColorSpace::Unknown | ColorSpace::Custom(_) => {
+                // sRGB EOTF → AP1 matrix → ACEScct OETF
+                Self::with_matrix(6, 1.0, &ColorMatrix3x3::LINEAR_SRGB_TO_AP1)
             }
             ColorSpace::DisplayP3 => {
-                Self::with_matrix(4, 2.2, &ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB)
+                Self::with_matrix(6, 1.0, &ColorMatrix3x3::DISPLAY_P3_TO_AP1)
+            }
+            ColorSpace::AdobeRgb => {
+                Self::with_matrix(8, 2.2, &ColorMatrix3x3::ADOBE_RGB_TO_AP1)
             }
             ColorSpace::ProPhotoRgb => {
-                Self::with_matrix(4, 1.8, &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB)
+                Self::with_matrix(8, 1.8, &ColorMatrix3x3::PROPHOTO_TO_AP1)
             }
-            ColorSpace::Custom(_) => Self {
-                mode: 2,
-                gamma: 2.4,
-                _pad0: 0.0,
-                _pad1: 0.0,
-                row0: [1.0, 0.0, 0.0, 0.0],
-                row1: [0.0, 1.0, 0.0, 0.0],
-                row2: [0.0, 0.0, 1.0, 0.0],
-            },
         }
     }
 
-    /// Build a uniform for converting from linear sRGB to `dst` colour space.
+    /// Build a uniform for converting from the ACEScct working space to `dst` colour space.
     pub fn from_linear_srgb(dst: &ColorSpace) -> Self {
         match dst {
-            ColorSpace::LinearSrgb => Self::identity(),
-            ColorSpace::Srgb | ColorSpace::Unknown => Self {
-                mode: 1, // linear → sRGB
-                gamma: 2.4,
-                _pad0: 0.0,
-                _pad1: 0.0,
-                row0: [1.0, 0.0, 0.0, 0.0],
-                row1: [0.0, 1.0, 0.0, 0.0],
-                row2: [0.0, 0.0, 1.0, 0.0],
-            },
-            ColorSpace::DisplayP3 => {
-                Self::with_matrix(5, 2.2, &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3)
+            ColorSpace::AcesCct => Self::identity(),
+            ColorSpace::LinearSrgb => {
+                // ACEScct EOTF → AP1 inverse → linear sRGB (no output gamma)
+                Self::with_matrix(10, 1.0, &ColorMatrix3x3::AP1_TO_LINEAR_SRGB)
             }
-            _ => Self {
-                mode: 1,
-                gamma: 2.4,
-                _pad0: 0.0,
-                _pad1: 0.0,
-                row0: [1.0, 0.0, 0.0, 0.0],
-                row1: [0.0, 1.0, 0.0, 0.0],
-                row2: [0.0, 0.0, 1.0, 0.0],
-            },
+            ColorSpace::Srgb | ColorSpace::Unknown => {
+                // ACEScct EOTF → AP1 inverse → sRGB OETF
+                Self::with_matrix(7, 1.0, &ColorMatrix3x3::AP1_TO_LINEAR_SRGB)
+            }
+            ColorSpace::DisplayP3 => {
+                Self::with_matrix(7, 1.0, &ColorMatrix3x3::AP1_TO_DISPLAY_P3)
+            }
+            _ => Self::with_matrix(7, 1.0, &ColorMatrix3x3::AP1_TO_LINEAR_SRGB),
         }
     }
 
