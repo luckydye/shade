@@ -1140,7 +1140,7 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        let rgb_lut = acescct_to_srgb_u8_lut_from_f16();
+        let srgb_lut = preview_srgb_lut();
         let alpha_lut = preview_alpha_u8_lut_from_f16();
         self.readback_texture(
             tex,
@@ -1155,9 +1155,15 @@ impl Renderer {
                     let g = u16::from_ne_bytes([pixel[2], pixel[3]]);
                     let b = u16::from_ne_bytes([pixel[4], pixel[5]]);
                     let a = u16::from_ne_bytes([pixel[6], pixel[7]]);
-                    rgba.push(rgb_lut[r as usize]);
-                    rgba.push(rgb_lut[g as usize]);
-                    rgba.push(rgb_lut[b as usize]);
+                    let (linear_r, linear_g, linear_b) =
+                        ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(
+                            acescct_to_linear_f32(f16::from_bits(r).to_f32()),
+                            acescct_to_linear_f32(f16::from_bits(g).to_f32()),
+                            acescct_to_linear_f32(f16::from_bits(b).to_f32()),
+                        );
+                    rgba.push(linear_to_srgb_u8(linear_r.max(0.0), srgb_lut));
+                    rgba.push(linear_to_srgb_u8(linear_g.max(0.0), srgb_lut));
+                    rgba.push(linear_to_srgb_u8(linear_b.max(0.0), srgb_lut));
                     rgba.push(alpha_lut[a as usize]);
                 }
             },

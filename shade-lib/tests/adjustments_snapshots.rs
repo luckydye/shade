@@ -1,7 +1,7 @@
 use shade_lib::{
     build_curve_lut_from_points, AdjustmentOp, ColorParams, CurveControlPoint, DenoiseParams,
-    FloatImage, GlowParams, GrainParams, HslParams, LayerStack, Renderer, SharpenParams,
-    VignetteParams,
+    ColorSpace, FloatImage, GlowParams, GrainParams, HslParams, LayerStack, Renderer,
+    SharpenParams, VignetteParams,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -36,7 +36,10 @@ fn fixture_paths() -> Vec<PathBuf> {
             .extension()
             .and_then(|value| value.to_str())
             .map(|value| value.to_ascii_lowercase());
-        if matches!(ext.as_deref(), Some("jpg") | Some("jpeg") | Some("png")) {
+        if matches!(
+            ext.as_deref(),
+            Some("jpg") | Some("jpeg") | Some("png") | Some("exr")
+        ) {
             fixtures.push(path);
         }
     }
@@ -210,8 +213,10 @@ fn adjustment_cases() -> Vec<SnapshotCase> {
     ]
 }
 
-fn load_fixture(path: &Path) -> FloatImage {
-    shade_io::load_image_f32(path).unwrap_or_else(|error| {
+fn load_fixture(path: &Path) -> (FloatImage, ColorSpace) {
+    shade_io::load_image_f32_with_info(path)
+        .map(|(image, info)| (image, info.color_space))
+        .unwrap_or_else(|error| {
         panic!("failed to load fixture {}: {error}", path.display());
     })
 }
@@ -276,7 +281,26 @@ fn read_rgba(path: &Path) -> (Vec<u8>, u32, u32) {
 }
 
 fn load_fixture_rgba(path: &Path) -> (Vec<u8>, u32, u32) {
-    read_rgba(path)
+    shade_io::load_image(path).unwrap_or_else(|error| {
+        panic!("failed to decode fixture {}: {error}", path.display());
+    })
+}
+
+fn expected_srgb_from_working(image: &FloatImage) -> (Vec<u8>, u32, u32) {
+    let mut pixels = image.pixels.to_vec();
+    shade_io::from_acescct_f32(&mut pixels, &ColorSpace::Srgb);
+    let bytes = pixels
+        .chunks_exact(4)
+        .flat_map(|chunk| {
+            [
+                (chunk[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (chunk[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (chunk[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (chunk[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+            ]
+        })
+        .collect::<Vec<_>>();
+    (bytes, image.width, image.height)
 }
 
 fn write_png(path: &Path, pixels: &[u8], width: u32, height: u32) {
@@ -318,6 +342,34 @@ fn assert_image_match(
     );
 }
 
+fn assert_image_original_match(
+    actual: &[u8],
+    expected: &[u8],
+    width: u32,
+    height: u32,
+    fixture_path: &Path,
+    allowed_max_diff: u8,
+) {
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "original comparison byte length mismatch"
+    );
+    let mut max_diff = 0u8;
+    for (left, right) in actual.iter().zip(expected.iter()) {
+        max_diff = max_diff.max(left.abs_diff(*right));
+    }
+    assert!(
+        max_diff <= allowed_max_diff,
+        "noop diverges from source: {} ({}x{}), max_diff={} (allowed={})",
+        fixture_path.display(),
+        width,
+        height,
+        max_diff,
+        allowed_max_diff
+    );
+}
+
 #[tokio::test]
 async fn adjustments_match_snapshots() {
     let Some(renderer) = renderer_or_skip().await else {
@@ -333,7 +385,7 @@ async fn adjustments_match_snapshots() {
             .file_stem()
             .and_then(|value| value.to_str())
             .expect("fixture filename must be valid utf-8");
-        let image = load_fixture(&fixture_path);
+        let (image, source_color_space) = load_fixture(&fixture_path);
         let texture_id = texture_id_for_fixture(&fixture_path);
 
         for case in adjustment_cases() {
@@ -347,14 +399,36 @@ async fn adjustments_match_snapshots() {
             .await;
             let snapshot_path = snapshots_dir.join(format!("{fixture_stem}__{}.png", case.name));
 
-            if case.compare_to_original {
-                let (original, original_width, original_height) = load_fixture_rgba(&fixture_path);
+            if case.compare_to_original && !update_snapshots {
+                let (original, original_width, original_height) = if matches!(
+                    source_color_space,
+                    ColorSpace::Srgb | ColorSpace::Unknown
+                ) {
+                    load_fixture_rgba(&fixture_path)
+                } else {
+                    expected_srgb_from_working(&image)
+                };
                 assert_eq!(
                     (original_width, original_height),
                     (width, height),
                     "noop render dimensions must match original fixture dimensions"
                 );
-                assert_image_match(&actual, &original, width, height, &fixture_path);
+                let allowed_max_diff = if matches!(
+                    source_color_space,
+                    ColorSpace::Srgb | ColorSpace::Unknown
+                ) {
+                    1
+                } else {
+                    8
+                };
+                assert_image_original_match(
+                    &actual,
+                    &original,
+                    width,
+                    height,
+                    &fixture_path,
+                    allowed_max_diff,
+                );
             }
 
             if update_snapshots || !snapshot_path.exists() {
