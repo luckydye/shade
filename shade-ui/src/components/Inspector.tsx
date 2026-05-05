@@ -736,7 +736,7 @@ export const Inspector: Component = () => {
         defaultValue={DEFAULT_TONE.exposure}
         min={-5}
         max={5}
-        step={0.05}
+        step={0.001}
         onChange={(v) => applyTone({ exposure: v })}
       />
       <Slider
@@ -746,6 +746,7 @@ export const Inspector: Component = () => {
         defaultValue={DEFAULT_TONE.gamma}
         min={0}
         max={2}
+        step={0.001}
         onChange={(v) => applyTone({ gamma: v })}
       />
       <Slider
@@ -755,7 +756,7 @@ export const Inspector: Component = () => {
         defaultValue={DEFAULT_TONE.contrast}
         min={-1.0}
         max={1.0}
-        step={0.01}
+        step={0.001}
         onChange={(v) => applyTone({ contrast: v })}
       />
     </>
@@ -768,7 +769,7 @@ export const Inspector: Component = () => {
         icon={toneSvg}
         value={tone().blacks}
         defaultValue={DEFAULT_TONE.blacks}
-        min={-0.05}
+        min={-0.1}
         max={0.1}
         step={0.001}
         onChange={(v) => applyTone({ blacks: v })}
@@ -779,7 +780,7 @@ export const Inspector: Component = () => {
         value={tone().whites}
         defaultValue={DEFAULT_TONE.whites}
         min={-0.1}
-        max={0.2}
+        max={0.1}
         step={0.001}
         onChange={(v) => applyTone({ whites: v })}
       />
