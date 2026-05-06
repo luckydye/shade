@@ -271,16 +271,17 @@ export const Inspector: Component = () => {
   const [lsCurvePointCache, setLsCurvePointCache] = createSignal(
     new Map<number, ControlPoint[]>(),
   );
-  const [lastCanvasKey, setLastCanvasKey] = createSignal<string>("");
-  createEffect(() => {
-    const key = `${state.canvasWidth}x${state.canvasHeight}`;
-    const prev = lastCanvasKey();
-    if (prev && prev !== key) {
-      setCurvePointCache(new Map());
-      setLsCurvePointCache(new Map());
-    }
-    setLastCanvasKey(key);
-  });
+  createEffect(
+    on(
+      () => `${state.canvasWidth}x${state.canvasHeight}`,
+      (key, prevKey) => {
+        if (prevKey !== undefined && prevKey !== key) {
+          setCurvePointCache(new Map());
+          setLsCurvePointCache(new Map());
+        }
+      },
+    ),
+  );
   const [pendingAddedLayerFocus, setPendingAddedLayerFocus] =
     createSignal<MobileLayerFocus | null>(null);
   const [isPickerOpen, setIsPickerOpen] = createSignal(false);

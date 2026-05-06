@@ -1,4 +1,4 @@
-import { type Component, createMemo, For, Show } from "solid-js";
+import { type Component, createMemo, For, onMount, Show } from "solid-js";
 import { Slider } from "./Slider";
 import {
   addFont,
@@ -136,8 +136,9 @@ export const TextLayerEditor: Component<{
     input.value = "";
   };
 
-  // Lazy-load the font list when the editor first mounts.
-  void refreshFontList();
+  onMount(() => {
+    void refreshFontList();
+  });
 
   return (
     <div class="flex flex-col gap-3 px-3 py-2">
