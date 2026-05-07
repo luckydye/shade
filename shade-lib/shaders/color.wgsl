@@ -1,13 +1,17 @@
 struct ColorParams {
     saturation: f32,   // 1.0 = unchanged, 0.0 = monochrome, 2.0 = double
     vibrancy: f32,     // selective saturation boost for less-saturated pixels
-    temperature: f32,  // -1.0 to 1.0 (cool to warm)
-    tint: f32,         // -1.0 to 1.0 (green to magenta)
+    temperature: f32,  // -1.0 to 1.0 (cool to warm), +/- 0.5 stop split
+    tint: f32,         // -1.0 to 1.0 (green to magenta), +/- 0.5 stop split
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
 @group(0) @binding(1) var output_tex: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: ColorParams;
+
+// One linear-light exposure stop expressed as an additive ACEScct printer-light offset.
+const LOG_STEP: f32 = 1.0 / 17.52;
+const WB_STOP_RANGE: f32 = 0.5;
 
 fn rgb_to_hsl(c: vec3<f32>) -> vec3<f32> {
     let maxC = max(c.r, max(c.g, c.b));
@@ -54,15 +58,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
     var c = textureLoad(input_tex, vec2<i32>(gid.xy), 0);
 
-    // Temperature: von Kries white balance along blue-yellow axis.
-    // Multiplicative in linear light — positive = warm (more red, less blue).
-    let temp_gain = pow(2.0, params.temperature * 0.5);
-    c = vec4<f32>(c.r * temp_gain, c.g, c.b / temp_gain, c.a);
+    // White balance in ACEScct is a per-channel additive offset: equivalent to
+    // multiplying linear AP1 channels by exposure gains, but without decoding.
+    let temp_offset = params.temperature * WB_STOP_RANGE * LOG_STEP;
+    let tint_offset = params.tint * WB_STOP_RANGE * LOG_STEP;
 
-    // Tint: shift along green-magenta axis.
-    // Positive = magenta (reduce green). Multiplicative in linear light.
-    let tint_gain = pow(2.0, params.tint * 0.5);
-    c = vec4<f32>(c.r, c.g / tint_gain, c.b, c.a);
+    // Temperature: positive warms by raising red and lowering blue.
+    // Tint: positive shifts magenta by raising red/blue and lowering green.
+    c = vec4<f32>(
+        c.r + temp_offset + tint_offset * 0.5,
+        c.g - tint_offset,
+        c.b - temp_offset + tint_offset * 0.5,
+        c.a
+    );
 
     // Saturation
     let hsl = rgb_to_hsl(c.rgb);
