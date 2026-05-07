@@ -2438,6 +2438,32 @@ fn resolve_s3_library_config(
     Err(format!("unknown S3 media library: {library_id}"))
 }
 
+fn move_library_identity(
+    config: &mut shade_io::AppConfig,
+    old_id: &str,
+    new_id: &str,
+) {
+    if old_id == new_id {
+        return;
+    }
+    for library_id in &mut config.library_order {
+        if library_id == old_id {
+            *library_id = new_id.to_string();
+        }
+    }
+    if let Some(mode) = config.library_modes.remove(old_id) {
+        config.library_modes.insert(new_id.to_string(), mode);
+    }
+    if let Some(target) = config.sync_targets.remove(old_id) {
+        config.sync_targets.insert(new_id.to_string(), target);
+    }
+    for target in config.sync_targets.values_mut() {
+        if target == old_id {
+            *target = new_id.to_string();
+        }
+    }
+}
+
 fn resolve_s3_library_for_media_path(
     picture_id: &str,
 ) -> Result<(shade_io::S3LibraryConfig, String), String> {
@@ -5009,6 +5035,69 @@ pub async fn add_s3_media_library<R: tauri::Runtime>(
             .await?;
     }
     Ok(persisted_library)
+}
+
+#[tauri::command]
+pub async fn get_s3_media_library(
+    library_id: String,
+) -> Result<shade_io::AddS3LibraryParams, String> {
+    let library = resolve_s3_library_config(&library_id)?;
+    Ok(shade_io::AddS3LibraryParams {
+        name: library.name,
+        endpoint: library.endpoint,
+        bucket: library.bucket,
+        region: library.region,
+        access_key_id: library.access_key_id,
+        secret_access_key: library.secret_access_key,
+        prefix: library.prefix,
+    })
+}
+
+#[tauri::command]
+pub async fn update_s3_media_library<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    library_id: String,
+    params: shade_io::AddS3LibraryParams,
+) -> Result<MediaLibrary, String> {
+    resolve_s3_library_config(&library_id)?;
+    let updated = shade_io::normalize_s3_library_input(params)?;
+    let updated_library_id = s3_library_id(&updated.id);
+    let mut config = load_app_config()?;
+
+    if updated_library_id != library_id
+        && config.libraries.iter().any(|library| {
+            shade_io::library_config_id(library) == updated_library_id
+        })
+    {
+        return Err(format!(
+            "another media library already uses this S3 source: {updated_library_id}"
+        ));
+    }
+
+    config
+        .libraries
+        .retain(|library| shade_io::library_config_id(library) != library_id);
+    config
+        .libraries
+        .push(shade_io::LibraryConfig::S3(updated.clone()));
+    move_library_identity(&mut config, &library_id, &updated_library_id);
+    shade_io::normalize_library_order(&mut config.library_order, &config.libraries);
+    save_app_config(&config)?;
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        if updated_library_id != library_id {
+            delete_persisted_library_index(library_index_db(), &library_id).await?;
+            _app.state::<crate::S3LibraryScanService>()
+                .0
+                .remove_library(&library_id)?;
+        }
+        _app.state::<crate::S3LibraryScanService>()
+            .0
+            .refresh_library(_app.clone(), &updated)
+            .await?;
+    }
+    Ok(library_for_s3(&updated))
 }
 
 #[tauri::command]

@@ -1090,6 +1090,30 @@ export async function addS3MediaLibrary(
   return inv("add_s3_media_library", { params }) as Promise<MediaLibrary>;
 }
 
+export async function getS3MediaLibrary(
+  libraryId: string,
+): Promise<S3MediaLibraryInput> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("S3 media libraries are only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  return inv("get_s3_media_library", { libraryId }) as Promise<S3MediaLibraryInput>;
+}
+
+export async function updateS3MediaLibrary(
+  libraryId: string,
+  params: S3MediaLibraryInput,
+): Promise<MediaLibrary> {
+  if (!(await isTauriRuntime())) {
+    throw new Error("S3 media libraries are only implemented for Tauri");
+  }
+  const inv = await getTauriInvoke();
+  return inv("update_s3_media_library", {
+    libraryId,
+    params,
+  }) as Promise<MediaLibrary>;
+}
+
 export async function uploadMediaLibraryUrl(
   libraryId: string,
   url: string,

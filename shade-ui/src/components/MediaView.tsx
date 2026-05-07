@@ -23,6 +23,7 @@ import {
   createCollection,
   deleteCollection,
   deleteMediaLibraryItem,
+  getS3MediaLibrary,
   isTauriRuntime,
   listCollectionItems,
   listCollections,
@@ -44,6 +45,7 @@ import {
   setLibraryMode,
   setMediaLibraryOrder,
   syncLibrary,
+  updateS3MediaLibrary,
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
   uploadMediaLibraryUrl,
@@ -164,6 +166,7 @@ export const MediaView: Component = () => {
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
   const [showS3Form, setShowS3Form] = createSignal(false);
+  const [editingS3LibraryId, setEditingS3LibraryId] = createSignal<string | null>(null);
   const [showLibraryActions, setShowLibraryActions] = createSignal(false);
   const [showAddDropdown, setShowAddDropdown] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
@@ -1074,11 +1077,42 @@ export const MediaView: Component = () => {
     });
   }
 
-  async function handleAddS3Library() {
+  function closeS3Form() {
+    resetS3Draft();
+    setEditingS3LibraryId(null);
+    setShowS3Form(false);
+  }
+
+  async function openAddS3Form() {
+    resetS3Draft();
+    setEditingS3LibraryId(null);
+    setShowS3Form(true);
+  }
+
+  async function openEditS3Form() {
+    const library = selectedLibrary();
+    if (!library || !isS3Library(library)) {
+      return;
+    }
     await withSubmitting(async () => {
-      const library = await addS3MediaLibrary(s3Draft());
-      resetS3Draft();
-      setShowS3Form(false);
+      const draft = await getS3MediaLibrary(library.id);
+      setS3Draft({
+        ...draft,
+        name: draft.name ?? "",
+        prefix: draft.prefix ?? "",
+      });
+      setEditingS3LibraryId(library.id);
+      setShowS3Form(true);
+    });
+  }
+
+  async function handleSubmitS3Library() {
+    await withSubmitting(async () => {
+      const editingLibraryId = editingS3LibraryId();
+      const library = editingLibraryId
+        ? await updateS3MediaLibrary(editingLibraryId, s3Draft())
+        : await addS3MediaLibrary(s3Draft());
+      closeS3Form();
       await refetchLibraries();
       setSelectedLibraryId(library.id);
       await refetchItems();
@@ -1690,7 +1724,7 @@ export const MediaView: Component = () => {
                       disabled={isSubmitting()}
                       onClick={() => {
                         setShowAddDropdown(false);
-                        setShowS3Form((current) => !current);
+                        void openAddS3Form();
                       }}
                     >
                       S3
@@ -1814,6 +1848,20 @@ export const MediaView: Component = () => {
                       )}
                     </For>
                   </Show>
+                  <Show when={supportsS3Libraries() && isS3Library(selectedLibrary())}>
+                    <Button
+                      type="button"
+                      role="menuitem"
+                      class={MENU_ITEM_BUTTON_CLASS}
+                      disabled={isSubmitting()}
+                      onClick={() => {
+                        setShowLibraryActions(false);
+                        void openEditS3Form();
+                      }}
+                    >
+                      Edit S3
+                    </Button>
+                  </Show>
                   <Button
                     type="button"
                     role="menuitem"
@@ -1833,7 +1881,9 @@ export const MediaView: Component = () => {
             <Show when={showS3Form()}>
               <div class="absolute left-1/4 top-full z-10 mt-2 grid grid-cols-3 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-3 touch-mobile:grid-cols-1">
                 <div class="col-span-3 touch-mobile:col-span-1">
-                  <div class={PANEL_SECTION_TITLE_CLASS}>S3 Library</div>
+                  <div class={PANEL_SECTION_TITLE_CLASS}>
+                    {editingS3LibraryId() ? "Edit S3 Library" : "S3 Library"}
+                  </div>
                 </div>
                 <label class="flex flex-col gap-1">
                   <span class={PANEL_SECTION_TITLE_CLASS}>Name</span>
@@ -1917,18 +1967,15 @@ export const MediaView: Component = () => {
                     type="button"
                     class={SURFACE_BUTTON_CLASS}
                     disabled={isSubmitting()}
-                    onClick={() => void handleAddS3Library()}
+                    onClick={() => void handleSubmitS3Library()}
                   >
-                    Add S3 Library
+                    {editingS3LibraryId() ? "Save S3 Library" : "Add S3 Library"}
                   </Button>
                   <Button
                     type="button"
                     class="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
                     disabled={isSubmitting()}
-                    onClick={() => {
-                      resetS3Draft();
-                      setShowS3Form(false);
-                    }}
+                    onClick={closeS3Form}
                   >
                     Cancel
                   </Button>
