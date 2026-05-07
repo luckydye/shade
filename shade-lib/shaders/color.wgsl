@@ -13,43 +13,50 @@ struct ColorParams {
 const LOG_STEP: f32 = 1.0 / 17.52;
 const WB_STOP_RANGE: f32 = 0.5;
 
-fn rgb_to_hsl(c: vec3<f32>) -> vec3<f32> {
-    let maxC = max(c.r, max(c.g, c.b));
-    let minC = min(c.r, min(c.g, c.b));
-    let l = (maxC + minC) * 0.5;
-    let delta = maxC - minC;
-    if (delta < 0.0001) { return vec3<f32>(0.0, 0.0, l); }
-    let s = select(delta / (2.0 - maxC - minC), delta / (maxC + minC), l < 0.5);
-    var h: f32;
-    if (maxC == c.r) {
-        h = (c.g - c.b) / delta + select(6.0, 0.0, c.g >= c.b);
-    } else if (maxC == c.g) {
-        h = (c.b - c.r) / delta + 2.0;
-    } else {
-        h = (c.r - c.g) / delta + 4.0;
+// AP1 luminance coefficients (ACES S-2014-004).
+fn luminance(rgb: vec3<f32>) -> f32 {
+    return dot(rgb, vec3<f32>(0.2722287, 0.6740818, 0.0536895));
+}
+
+// ACEScct EOTF: encoded log value -> linear AP1 scene light.
+fn acescct_to_linear(v: f32) -> f32 {
+    if v < 0.1552511416 {
+        return (v - 0.0729055342) / 10.5402377417;
     }
-    return vec3<f32>(h / 6.0, s, l);
+    return pow(2.0, v * 17.52 - 9.72);
 }
 
-fn hue_to_rgb(p: f32, q: f32, t_in: f32) -> f32 {
-    var t = t_in;
-    if (t < 0.0) { t += 1.0; }
-    if (t > 1.0) { t -= 1.0; }
-    if (t < 1.0/6.0) { return p + (q - p) * 6.0 * t; }
-    if (t < 1.0/2.0) { return q; }
-    if (t < 2.0/3.0) { return p + (q - p) * (2.0/3.0 - t) * 6.0; }
-    return p;
+// ACEScct OETF: linear AP1 scene light -> encoded log value.
+fn linear_to_acescct(v: f32) -> f32 {
+    if v <= 0.0078125 {
+        return 10.5402377417 * v + 0.0729055342;
+    }
+    return (log2(max(v, 1.1754944e-38)) + 9.72) / 17.52;
 }
 
-fn hsl_to_rgb(hsl: vec3<f32>) -> vec3<f32> {
-    if (hsl.y < 0.0001) { return vec3<f32>(hsl.z); }
-    let q = select(hsl.z + hsl.y - hsl.z * hsl.y, hsl.z * (1.0 + hsl.y), hsl.z < 0.5);
-    let p = 2.0 * hsl.z - q;
+fn acescct_to_linear_rgb(rgb: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(
-        hue_to_rgb(p, q, hsl.x + 1.0/3.0),
-        hue_to_rgb(p, q, hsl.x),
-        hue_to_rgb(p, q, hsl.x - 1.0/3.0)
+        acescct_to_linear(rgb.r),
+        acescct_to_linear(rgb.g),
+        acescct_to_linear(rgb.b)
     );
+}
+
+fn linear_to_acescct_rgb(rgb: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(
+        linear_to_acescct(rgb.r),
+        linear_to_acescct(rgb.g),
+        linear_to_acescct(rgb.b)
+    );
+}
+
+fn channel_saturation(rgb: vec3<f32>) -> f32 {
+    let max_c = max(rgb.r, max(rgb.g, rgb.b));
+    let min_c = min(rgb.r, min(rgb.g, rgb.b));
+    if max_c <= 1e-6 {
+        return 0.0;
+    }
+    return clamp((max_c - min_c) / max_c, 0.0, 1.0);
 }
 
 @compute @workgroup_size(16, 16)
@@ -72,17 +79,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         c.a
     );
 
-    // Saturation
-    let hsl = rgb_to_hsl(c.rgb);
-    let new_sat = clamp(hsl.y * params.saturation, 0.0, 1.0);
-    var rgb_new = hsl_to_rgb(vec3<f32>(hsl.x, new_sat, hsl.z));
+    // Saturation/vibrancy operate in linear AP1. HSL in ACEScct log space is not meaningful
+    // and causes large hue/lightness errors, especially near the toe and in HDR values.
+    var lin = acescct_to_linear_rgb(c.rgb);
+    let grey = vec3<f32>(luminance(lin));
+    lin = grey + (lin - grey) * max(params.saturation, 0.0);
 
-    // Vibrancy: boost less-saturated pixels more
-    let vibrancy_boost = params.vibrancy * (1.0 - hsl.y);
-    let hsl2 = rgb_to_hsl(rgb_new);
-    let vib_sat = clamp(hsl2.y + vibrancy_boost * 0.5, 0.0, 1.0);
-    rgb_new = hsl_to_rgb(vec3<f32>(hsl2.x, vib_sat, hsl2.z));
+    // Vibrancy is a selective chroma scale: low-saturation colours get more positive boost,
+    // while already-saturated colours are protected. Negative values reduce low/mid chroma first.
+    let vib_weight = 1.0 - channel_saturation(lin);
+    let vib_scale = max(0.0, 1.0 + params.vibrancy * vib_weight);
+    lin = grey + (lin - grey) * vib_scale;
 
-    c = vec4<f32>(rgb_new, c.a);
+    c = vec4<f32>(linear_to_acescct_rgb(lin), c.a);
     textureStore(output_tex, vec2<i32>(gid.xy), c);
 }
