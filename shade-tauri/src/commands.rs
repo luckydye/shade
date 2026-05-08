@@ -475,6 +475,18 @@ fn decode_image_bytes_with_info(
     .map_err(|e| e.to_string())
 }
 
+fn open_local_image_sync(path: &str) -> Result<shade_io::OpenedImage, String> {
+    let source = std::path::Path::new(path);
+    let (image, info) = shade_io::load_image_f32_with_info(source)
+        .map_err(|e| e.to_string())?;
+    Ok(shade_io::OpenedImage {
+        file_hash: shade_io::hash_file(source)?,
+        source_name: Some(path.to_string()),
+        image,
+        info,
+    })
+}
+
 fn lock_editor_state<'a>(
     state: &'a tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<std::sync::MutexGuard<'a, EditorState>, String> {
@@ -2581,20 +2593,27 @@ async fn load_s3_thumbnail_from_tauri(picture_id: &str) -> Result<Vec<u8>, Strin
     } else {
         shade_io::get_s3_object_bytes(&config, &key).await?
     };
-    let (pixels, width, height) =
-        load_image_bytes(&bytes, Some(&picture_display_name(&key)))
+    let key_display = picture_display_name(&key);
+    let picture_id_owned = picture_id.to_string();
+    let jpeg = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let (pixels, width, height) =
+            load_image_bytes(&bytes, Some(&key_display))
+                .map_err(|error| error.to_string())?;
+        let image = image::RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
+            format!("failed to decode S3 image for thumbnail: {picture_id_owned}")
+        })?;
+        let thumbnail = image::DynamicImage::ImageRgba8(image).thumbnail(320, 320);
+        let mut jpeg = Vec::new();
+        thumbnail
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
             .map_err(|error| error.to_string())?;
-    let image = image::RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
-        format!("failed to decode S3 image for thumbnail: {picture_id}")
-    })?;
-    let thumbnail = image::DynamicImage::ImageRgba8(image).thumbnail(320, 320);
-    let mut jpeg = Vec::new();
-    thumbnail
-        .write_to(
-            &mut std::io::Cursor::new(&mut jpeg),
-            image::ImageFormat::Jpeg,
-        )
-        .map_err(|error| error.to_string())?;
+        Ok(jpeg)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(jpeg)
 }
 
@@ -3391,7 +3410,13 @@ pub async fn open_peer_image(
     .await;
     register_image_source(&file_hash, Some(&picture_id)).await?;
     let persisted = load_latest_edit_version(&file_hash).await?;
-    let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
+    let bytes_clone = bytes.clone();
+    let file_name_clone = file_name.clone();
+    let (image, info) = tokio::task::spawn_blocking(move || {
+        decode_image_bytes_with_info(&bytes_clone, file_name_clone.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let response = {
         let mut st = lock_editor_state(&state)?;
         if !st.is_current_open_request(open_request_id) {
@@ -3429,7 +3454,33 @@ pub async fn open_image<R: tauri::Runtime>(
     };
     let photo_app = app.clone();
     let s3_app = app.clone();
-    let opened =
+    let is_local = !path.starts_with("ccapi://") && !path.starts_with("s3://");
+    let opened = if is_local {
+        let photo_bytes = {
+            let app = photo_app.clone();
+            load_photo_image_from_tauri(&app, &path).await?
+        };
+        if let Some(bytes) = photo_bytes {
+            let path_clone = path.clone();
+            tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
+                let file_hash = blake3::hash(&bytes).to_hex().to_string();
+                let (image, info) = decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
+                Ok(shade_io::OpenedImage {
+                    file_hash,
+                    source_name: Some(path_clone),
+                    image,
+                    info,
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())??
+        } else {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || open_local_image_sync(&path))
+                .await
+                .map_err(|e| e.to_string())??
+        }
+    } else {
         shade_io::open_image(
             &path,
             |host, file_path| async move {
@@ -3448,7 +3499,8 @@ pub async fn open_image<R: tauri::Runtime>(
                 async move { load_photo_image_from_tauri(&app, &picture_id).await }
             },
         )
-        .await?;
+        .await?
+    };
     let file_hash = opened.file_hash;
     if let Some(source_name) = opened.source_name.as_deref() {
         register_image_source(&file_hash, Some(source_name)).await?;
@@ -3508,7 +3560,13 @@ pub async fn open_image_encoded_bytes(
         let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
     }
     let persisted = load_latest_edit_version(&file_hash).await?;
-    let (image, info) = decode_image_bytes_with_info(&bytes, file_name.as_deref())?;
+    let bytes_clone = bytes.clone();
+    let file_name_clone = file_name.clone();
+    let (image, info) = tokio::task::spawn_blocking(move || {
+        decode_image_bytes_with_info(&bytes_clone, file_name_clone.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let response = {
         let mut st = lock_editor_state(&state)?;
         if !st.is_current_open_request(open_request_id) {
@@ -3768,7 +3826,33 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         return Ok(None);
     }
     let photo_app = app.clone();
-    let opened =
+    let is_local = !picture_id.starts_with("ccapi://") && !picture_id.starts_with("s3://");
+    let opened = if is_local {
+        let photo_bytes = {
+            let app = photo_app.clone();
+            load_photo_image_from_tauri(&app, picture_id).await?
+        };
+        if let Some(bytes) = photo_bytes {
+            let picture_id_owned = picture_id.to_string();
+            tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
+                let file_hash = blake3::hash(&bytes).to_hex().to_string();
+                let (image, info) = decode_image_bytes_with_info(&bytes, Some(&picture_id_owned))?;
+                Ok(shade_io::OpenedImage {
+                    file_hash,
+                    source_name: Some(picture_id_owned),
+                    image,
+                    info,
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())??
+        } else {
+            let picture_id = picture_id.to_string();
+            tokio::task::spawn_blocking(move || open_local_image_sync(&picture_id))
+                .await
+                .map_err(|e| e.to_string())??
+        }
+    } else {
         shade_io::open_image(
             picture_id,
             |host, file_path| async move {
@@ -3780,7 +3864,8 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
                 async move { load_photo_image_from_tauri(&app, &photo_id).await }
             },
         )
-        .await?;
+        .await?
+    };
     let Some(persisted) = load_latest_edit_version(&opened.file_hash).await? else {
         return Ok(None);
     };
