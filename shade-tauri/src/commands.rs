@@ -1078,6 +1078,32 @@ async fn load_latest_edit_version(
     Ok(Some(PersistedEditVersion { id, data }))
 }
 
+async fn load_latest_edit_version_by_source(
+    source_name: &str,
+) -> Result<Option<PersistedEditVersion>, String> {
+    let conn = library_db_conn().await;
+    let mut rows = conn
+        .query(
+            "SELECT ev.id, ev.layers_json
+             FROM images i
+             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             WHERE i.source_name = ?1
+             ORDER BY ev.created_at DESC
+             LIMIT 1",
+            [source_name],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let id = row.get::<String>(0).map_err(|e| e.to_string())?;
+    let layers_json = row.get::<String>(1).map_err(|e| e.to_string())?;
+    let data = parse_layer_data(&layers_json)?;
+    ensure_non_image_layers(&data.layers)?;
+    Ok(Some(PersistedEditVersion { id, data }))
+}
+
 async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
@@ -1150,12 +1176,14 @@ fn restore_persisted_layers(
     source_name: Option<String>,
     persisted: Option<PersistedEditVersion>,
 ) -> Result<(), String> {
-    state.current_image_hash = Some(file_hash);
+    state.current_image_hash = Some(file_hash.clone());
     state.current_image_source = source_name;
     state.current_snapshot_id = persisted.as_ref().map(|v| v.id.clone());
     let Some(persisted) = persisted else {
+        eprintln!("[restore_persisted_layers] no persisted data for file_hash={}", file_hash);
         return Ok(());
     };
+    eprintln!("[restore_persisted_layers] file_hash={} snapshot_id={} persisted_layers={} image_layers_before={}", file_hash, persisted.id, persisted.data.layers.len(), state.stack.layers.len());
     ensure_non_image_layers(&persisted.data.layers)?;
     let image_layers: Vec<_> = state
         .stack
@@ -1171,7 +1199,8 @@ fn restore_persisted_layers(
     state.stack.masks.clear();
     state.stack.mask_params.clear();
     let base_idx = state.stack.layers.len();
-    state.stack.layers.extend(persisted.data.layers);
+    state.stack.layers.extend(persisted.data.layers.clone());
+    eprintln!("[restore_persisted_layers] after extend total_layers={} base_idx={}", state.stack.layers.len(), base_idx);
     restore_masks_from_params(
         &mut state.stack,
         base_idx,
@@ -2614,8 +2643,19 @@ async fn load_camera_image_from_tauri(
 }
 
 async fn load_s3_image_from_tauri(path: &str) -> Result<Vec<u8>, String> {
-    let (config, key) = resolve_s3_library_for_media_path(path)?;
-    shade_io::get_s3_object_bytes(&config, &key).await
+    let (source_id, key) = shade_io::parse_s3_media_path(path).map_err(|e| e.to_string())?;
+    let library_id = s3_library_id(source_id);
+    let sync_dir = library_sync_dir(&library_id)?;
+    let file_name = std::path::Path::new(key)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| key.to_string());
+    let local_path = sync_dir.join(&file_name);
+    if local_path.is_file() {
+        return std::fs::read(&local_path).map_err(|e| e.to_string());
+    }
+    let config = resolve_s3_library_config(&library_id)?;
+    shade_io::get_s3_object_bytes(&config, key).await
 }
 
 async fn load_photo_image_from_tauri<R: tauri::Runtime>(
@@ -3408,7 +3448,21 @@ pub async fn open_image<R: tauri::Runtime>(
     if let Some(peer) = p2p.0.read().await.clone() {
         let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
     }
-    let persisted = load_latest_edit_version(&file_hash).await?;
+    let persisted = match load_latest_edit_version(&file_hash).await? {
+        Some(p) => Some(p),
+        None => {
+            if let Some(source_name) = opened.source_name.as_deref() {
+                let by_source = load_latest_edit_version_by_source(source_name).await?;
+                if by_source.is_some() {
+                    eprintln!("[open_image] found snapshot by source_name={} instead of file_hash={}", source_name, file_hash);
+                }
+                by_source
+            } else {
+                None
+            }
+        }
+    };
+    eprintln!("[open_image] path={} file_hash={} persisted={}", path, file_hash, persisted.is_some());
     let response = {
         let mut st = lock_editor_state(&state)?;
         if !st.is_current_open_request(open_request_id) {
@@ -4747,7 +4801,8 @@ async fn enrich_listing_metadata(
                  AND ev.created_at = (
                      SELECT MAX(ev2.created_at)
                      FROM edit_versions ev2
-                     WHERE ev2.file_hash = i.file_hash
+                     JOIN images i2 ON i2.file_hash = ev2.file_hash
+                     WHERE i2.source_name = i.source_name
                  )",
                 (),
             )
@@ -5503,7 +5558,7 @@ pub struct BatchPresetItem {
 pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
     items: Vec<BatchPresetItem>,
     name: String,
-    app: tauri::AppHandle<R>,
+    _app: tauri::AppHandle<R>,
 ) -> Result<u32, String> {
     let preset_path = preset_file_path(&name)?;
     let json = std::fs::read_to_string(&preset_path).map_err(|e| e.to_string())?;
@@ -5519,29 +5574,18 @@ pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
                 if item.path.starts_with("s3://") || item.path.starts_with("ccapi://") {
                     hash_bytes(item.path.as_bytes())
                 } else {
-                    let photo_app = app.clone();
-                    let bytes = shade_io::load_picture_bytes(
-                        &item.path,
-                        |host, file_path| async move {
-                            load_camera_image_from_tauri(&host, &file_path).await
-                        },
-                        |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
-                        move |picture_id| {
-                            let app = photo_app.clone();
-                            async move { load_photo_image_from_tauri(&app, &picture_id).await }
-                        },
-                    )
-                    .await?;
-                    hash_bytes(&bytes)
+                    shade_io::hash_file(std::path::Path::new(&item.path))?
                 }
             }
         };
+        eprintln!("[batch_apply_preset_snapshot] path={:?} len={} bytes={:02x?} file_hash={}", item.path, item.path.len(), item.path.as_bytes(), file_hash);
         let mut stack = shade_lib::LayerStack::new();
         stack.add_image_layer(0, 1, 1);
         stack.layers.extend(file.layers.clone());
         stack.mask_params = file.mask_params.clone();
         let data = non_image_layer_data(&stack);
-        persist_snapshot(&file_hash, Some(&item.path), None, None, &data).await?;
+        let snapshot_id = persist_snapshot(&file_hash, Some(&item.path), None, None, &data).await?;
+        eprintln!("[batch_apply_preset_snapshot] persisted snapshot_id={} for file_hash={}", snapshot_id, file_hash);
         count += 1;
     }
     Ok(count)

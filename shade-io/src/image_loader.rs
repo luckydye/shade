@@ -150,8 +150,10 @@ where
         let (image, info) =
             load_image_bytes_f32_with_info(&bytes, Some(&picture_display_name(key)))
                 .map_err(|error| error.to_string())?;
+        let file_hash = blake3::hash(path.as_bytes()).to_hex().to_string();
+        eprintln!("[open_image s3] path={:?} len={} bytes={:02x?} file_hash={}", path, path.len(), path.as_bytes(), file_hash);
         return Ok(OpenedImage {
-            file_hash: blake3::hash(path.as_bytes()).to_hex().to_string(),
+            file_hash,
             source_name: Some(path.to_string()),
             image,
             info,
