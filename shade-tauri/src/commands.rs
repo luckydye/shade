@@ -2569,7 +2569,18 @@ async fn load_camera_thumbnail_from_tauri<R: tauri::Runtime>(
 
 async fn load_s3_thumbnail_from_tauri(picture_id: &str) -> Result<Vec<u8>, String> {
     let (config, key) = resolve_s3_library_for_media_path(picture_id)?;
-    let bytes = shade_io::get_s3_object_bytes(&config, &key).await?;
+    let library_id = s3_library_id(&config.id);
+    let sync_dir = library_sync_dir(&library_id)?;
+    let file_name = std::path::Path::new(&key)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| key.clone());
+    let local_path = sync_dir.join(&file_name);
+    let bytes = if local_path.is_file() {
+        std::fs::read(&local_path).map_err(|e| e.to_string())?
+    } else {
+        shade_io::get_s3_object_bytes(&config, &key).await?
+    };
     let (pixels, width, height) =
         load_image_bytes(&bytes, Some(&picture_display_name(&key)))
             .map_err(|error| error.to_string())?;
