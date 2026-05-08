@@ -3003,6 +3003,9 @@ pub fn spawn_thumbnail_render_worker() -> crossbeam_channel::Sender<ThumbnailRen
                     Err(error) => Err(error.clone()),
                 };
                 let _ = job.response.send(result);
+                if let Ok(renderer) = &renderer {
+                    renderer.clear_image_cache();
+                }
             }
         })
         .expect("failed to spawn thumbnail render worker thread");

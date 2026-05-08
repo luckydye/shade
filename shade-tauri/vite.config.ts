@@ -28,7 +28,7 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
   },
   optimizeDeps: {
-    exclude: ["shade-ui", "shade-wasm"],
+    exclude: ["shade-ui", "../shade-ui", "shade-wasm"],
   },
   worker: {
     format: "es",
