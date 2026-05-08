@@ -919,6 +919,7 @@ async fn load_media_tags_map(
 
 async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
+    eprintln!("[persist_media_rating] file_hash={} rating={:?} normalized={:?}", file_hash, rating, normalized);
     let conn = library_db_conn().await;
     if let Some(value) = normalized {
         conn.execute(
@@ -5016,6 +5017,7 @@ pub async fn list_media_ratings(
 
 #[tauri::command]
 pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
+    eprintln!("[set_media_rating] file_hash={} rating={:?}", params.file_hash, params.rating);
     if params.file_hash.trim().is_empty() {
         return Err("file hash cannot be empty".to_string());
     }
