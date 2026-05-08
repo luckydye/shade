@@ -37,6 +37,7 @@ export {
   listSnapshots,
   loadPreset,
   loadSnapshot,
+  applyPresetSnapshot,
   saveSnapshot,
   refreshLayerStack,
   resetCrop,

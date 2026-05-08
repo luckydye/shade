@@ -5456,6 +5456,93 @@ pub async fn load_preset(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn apply_preset_snapshot(
+    name: String,
+    state: tauri::State<'_, Mutex<EditorState>>,
+) -> Result<EditSnapshotInfo, String> {
+    let path = preset_file_path(&name)?;
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let file: PresetFile = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    if file.version != 1 {
+        return Err(format!("unsupported preset version: {}", file.version));
+    }
+    {
+        let mut st = lock_editor_state(&state)?;
+        let image_layers: Vec<_> = st
+            .stack
+            .layers
+            .iter()
+            .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
+            .cloned()
+            .collect();
+        if image_layers.is_empty() {
+            return Err("cannot apply a preset without a loaded image".into());
+        }
+        st.stack.layers = image_layers;
+        st.stack.masks.clear();
+        st.stack.mask_params.clear();
+        let base_idx = st.stack.layers.len();
+        st.stack.layers.extend(file.layers);
+        let w = st.canvas_width;
+        let h = st.canvas_height;
+        restore_masks_from_params(&mut st.stack, base_idx, &file.mask_params, w, h);
+        st.stack.generation += 1;
+    }
+    let id = save_new_snapshot(&state).await?;
+    Ok(EditSnapshotInfo { id })
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BatchPresetItem {
+    path: String,
+    file_hash: Option<String>,
+}
+
+#[tauri::command]
+pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
+    items: Vec<BatchPresetItem>,
+    name: String,
+    app: tauri::AppHandle<R>,
+) -> Result<u32, String> {
+    let preset_path = preset_file_path(&name)?;
+    let json = std::fs::read_to_string(&preset_path).map_err(|e| e.to_string())?;
+    let file: PresetFile = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    if file.version != 1 {
+        return Err(format!("unsupported preset version: {}", file.version));
+    }
+    let mut count = 0u32;
+    for item in items {
+        let file_hash = match item.file_hash {
+            Some(hash) => hash,
+            None => {
+                let photo_app = app.clone();
+                let bytes = shade_io::load_picture_bytes(
+                    &item.path,
+                    |host, file_path| async move {
+                        load_camera_image_from_tauri(&host, &file_path).await
+                    },
+                    |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
+                    move |picture_id| {
+                        let app = photo_app.clone();
+                        async move { load_photo_image_from_tauri(&app, &picture_id).await }
+                    },
+                )
+                .await?;
+                hash_bytes(&bytes)
+            }
+        };
+        let mut stack = shade_lib::LayerStack::new();
+        stack.add_image_layer(0, 1, 1);
+        stack.layers.extend(file.layers.clone());
+        stack.mask_params = file.mask_params.clone();
+        let data = non_image_layer_data(&stack);
+        persist_snapshot(&file_hash, Some(&item.path), None, None, &data).await?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 #[derive(Serialize, Deserialize)]
 struct StackSnapshot {
     layers: Vec<shade_lib::LayerEntry>,

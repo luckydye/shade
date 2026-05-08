@@ -7,6 +7,8 @@ import { checkWebGPU } from "./bridge/webgpu-check";
 import { showEditorView, showMediaView } from "./store/editor";
 import { setState, state } from "./store/editor-store";
 import { undo, redo } from "./store/history";
+import { targetAcceptsTextInput } from "./components/media-view/media-utils";
+import { actions, buildActionContext } from "./store/actions";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };
@@ -44,17 +46,37 @@ const App: Component = () => {
   });
 
   onMount(() => {
+    actions.register({
+      id: "editor.undo",
+      title: "Undo",
+      group: "Editor",
+      when: (ctx) => ctx.hasImage,
+      run: () => undo(),
+    });
+
+    actions.register({
+      id: "editor.redo",
+      title: "Redo",
+      group: "Editor",
+      when: (ctx) => ctx.hasImage,
+      run: () => redo(),
+    });
+
+    actions.mapShortcut("mod+z", "editor.undo");
+    actions.mapShortcut("mod+shift+z", "editor.redo");
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-      e.preventDefault();
-      if (e.shiftKey) {
-        redo();
-      } else {
-        undo();
-      }
+      if (targetAcceptsTextInput(e.target)) return;
+      if (e.defaultPrevented) return;
+      const handled = actions.handleKey(e, buildActionContext());
+      if (handled) return;
     };
     document.addEventListener("keydown", handleKeyDown);
-    onCleanup(() => document.removeEventListener("keydown", handleKeyDown));
+    onCleanup(() => {
+      document.removeEventListener("keydown", handleKeyDown);
+      actions.unregister("editor.undo");
+      actions.unregister("editor.redo");
+    });
   });
 
   onMount(() => {

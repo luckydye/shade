@@ -519,6 +519,16 @@ export async function loadPreset(name: string) {
   queueHistorySnapshot();
 }
 
+export async function applyPresetSnapshot(name: string) {
+  const artboard = getSelectedArtboard();
+  const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;
+  const snapshot = await bridge.applyPresetSnapshot(name, imagePath);
+  await refreshLayerStack();
+  await refreshPreview();
+  queueHistorySnapshot();
+  return snapshot;
+}
+
 export async function saveSnapshot() {
   const artboard = getSelectedArtboard();
   const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;

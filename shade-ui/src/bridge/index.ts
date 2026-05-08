@@ -1525,6 +1525,33 @@ export async function loadPreset(name: string): Promise<void> {
   }
 }
 
+export async function applyPresetSnapshot(
+  name: string,
+  imagePath?: string | null,
+): Promise<EditSnapshotInfo> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("apply_preset_snapshot", { name }) as Promise<EditSnapshotInfo>;
+  }
+  await loadPreset(name);
+  return saveSnapshot(imagePath);
+}
+
+export async function batchApplyPresetSnapshot(
+  items: { path: string; file_hash: string | null }[],
+  name: string,
+): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("batch_apply_preset_snapshot", { items, name }) as Promise<number>;
+  }
+  for (const item of items) {
+    await loadPreset(name);
+    await saveSnapshot(item.path);
+  }
+  return items.length;
+}
+
 export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();

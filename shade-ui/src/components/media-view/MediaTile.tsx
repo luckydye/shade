@@ -14,6 +14,7 @@ type MediaTileProps = {
   compact?: boolean;
   active?: boolean;
   selected?: boolean;
+  focused?: boolean;
   showSelectionControls?: boolean;
   offline?: boolean;
   disableThumbnailLoad?: boolean;
@@ -21,6 +22,7 @@ type MediaTileProps = {
   onThumbnailLoaded?: (src: string) => void;
   onToggleSelection: () => void;
   onShiftSelect: () => void;
+  onFocus?: () => void;
 };
 
 export const MediaTile: Component<MediaTileProps> = (props) => {
@@ -53,24 +55,24 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
     onCleanup(() => observer.disconnect());
   });
 
-  createEffect(() => {
+  createEffect((prevIdentity: string | undefined) => {
+    const identity = `${props.item.modifiedAt ?? "none"}::${props.item.metadata.latestSnapshotId ?? "none"}`;
     const cachedSrc = props.cachedSrc;
-    if (!cachedSrc || src() === cachedSrc) {
-      return;
-    }
-    setLoadError(null);
-    setSrc(cachedSrc);
-  });
-
-  createEffect((prevModified: number | null | undefined) => {
-    const modified = props.item.modifiedAt;
-    if (prevModified !== undefined && prevModified !== modified && src()) {
-      setSrc(undefined);
+    if (prevIdentity !== undefined && prevIdentity !== identity) {
+      if (cachedSrc && src() !== cachedSrc) {
+        setLoadError(null);
+        setSrc(cachedSrc);
+      } else if (!cachedSrc) {
+        setSrc(undefined);
+        setLoadError(null);
+        setLoadRequestVersion((v) => v + 1);
+      }
+    } else if (cachedSrc && src() !== cachedSrc) {
       setLoadError(null);
-      setLoadRequestVersion((v) => v + 1);
+      setSrc(cachedSrc);
     }
-    return modified;
-  }, undefined as number | null | undefined);
+    return identity;
+  }, undefined);
 
   createEffect(() => {
     loadRequestVersion();
@@ -107,6 +109,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
     });
   });
   function handleClick(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
+    props.onFocus?.();
     if (event.shiftKey) {
       props.onShiftSelect();
       return;
@@ -130,6 +133,8 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
   }
 
   const isHighlighted = () => props.active || props.selected;
+  const keyboardFocusClass = () =>
+    props.focused ? "ring-2 ring-[var(--border-active)] ring-offset-2 ring-offset-[var(--surface)]" : "";
   const buttonClass = () =>
     props.compact
       ? `group flex w-full min-w-0 flex-col rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
@@ -138,14 +143,14 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
             : loadError()
               ? "border-red-500/40 bg-[var(--surface-subtle)]"
               : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
-        }`
+        } ${keyboardFocusClass()}`
       : `group flex w-full min-w-0 flex-col rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
           isHighlighted()
             ? "border border-[var(--border-active)] bg-[var(--surface-active)]"
             : loadError()
               ? "border-red-500/50 bg-[var(--surface-subtle)]"
               : "border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-hover)] data-[pressed=true]:bg-[var(--surface-active)]"
-        }`;
+        } ${keyboardFocusClass()}`;
 
   return (
     <div

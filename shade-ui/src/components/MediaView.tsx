@@ -34,6 +34,8 @@ import {
   listenNativeDragDrop,
   listenPeerPaired,
   listMediaLibraries,
+  openImage,
+  openPeerImage,
   pairPeerDevice,
   pickDirectory,
   refreshLibraryIndex,
@@ -49,10 +51,23 @@ import {
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
   uploadMediaLibraryUrl,
+  applyPresetSnapshot,
+  batchApplyPresetSnapshot,
 } from "../bridge/index";
-import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor";
+import {
+  isAdjustmentSliderActive,
+  listPresets,
+  showMediaView,
+  state,
+} from "../store/editor";
 import { registerMediaBrowserController } from "../store/media-browser-control";
 import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
+import {
+  setMediaViewFocusedItemId,
+  setMediaViewSelectedItemIds,
+  setMediaViewSelectedLibraryId,
+} from "../store/media-view-context";
+import { actions, buildActionContext } from "../store/actions";
 import { Button } from "./Button";
 import { ActionButton } from "./ActionButton";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
@@ -124,7 +139,7 @@ const LIBRARY_TAB_BASE_CLASS =
 const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
 
 function toErrorMessage(err: unknown): string {
-  return toErrorMessage(err);
+  return err instanceof Error ? err.message : String(err);
 }
 
 export const MediaView: Component = () => {
@@ -134,6 +149,7 @@ export const MediaView: Component = () => {
     selectedLibraryId,
     loadLibraryData,
   );
+  const [presets, { refetch: refetchPresets }] = createResource(listPresets);
   const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] = createResource(
     selectedLibraryId,
     async (libraryId) => {
@@ -171,6 +187,8 @@ export const MediaView: Component = () => {
   const [showAddDropdown, setShowAddDropdown] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
   const [lastSelectedMediaItemId, setLastSelectedMediaItemId] = createSignal<string | null>(null);
+  const [showApplyPresetMenu, setShowApplyPresetMenu] = createSignal(false);
+  const [mediaActionStatus, setMediaActionStatus] = createSignal<string | null>(null);
   const [filenameFilter, setFilenameFilter] = createSignal("");
   const [libraryOrder, setLibraryOrder] = createSignal<string[]>([]);
   const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
@@ -214,6 +232,8 @@ export const MediaView: Component = () => {
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const [syncProgress, setSyncProgress] = createSignal<LibrarySyncProgress | null>(null);
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
+  const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
+  const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
   const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | null>(null);
@@ -225,6 +245,18 @@ export const MediaView: Component = () => {
     left: number;
     top: number;
   } | null>(null);
+  createEffect(() => {
+    setMediaViewFocusedItemId(focusedItemId());
+  });
+
+  createEffect(() => {
+    setMediaViewSelectedItemIds(selectedMediaItemIds());
+  });
+
+  createEffect(() => {
+    setMediaViewSelectedLibraryId(selectedLibraryId());
+  });
+
   const thumbnailMemoryBuffer = new Map<string, string>();
 
   const thumbnailBufferKey = (item: MediaItem) =>
@@ -261,6 +293,61 @@ export const MediaView: Component = () => {
       if (oldestSrc !== state.loadingMediaSrc) {
         URL.revokeObjectURL(oldestSrc);
       }
+    }
+  };
+
+  const navigateFocus = (direction: "left" | "right" | "up" | "down") => {
+    const ids = flatItemIds();
+    if (ids.length === 0) return;
+    let index = focusedItemId() ? ids.indexOf(focusedItemId()!) : -1;
+    if (index === -1) {
+      setFocusedItemId(ids[0]);
+      return;
+    }
+    const colCount = columns();
+    switch (direction) {
+      case "left":
+        index -= 1;
+        break;
+      case "right":
+        index += 1;
+        break;
+      case "up":
+        index -= colCount;
+        break;
+      case "down":
+        index += colCount;
+        break;
+    }
+    if (index >= 0 && index < ids.length) {
+      setFocusedItemId(ids[index]);
+    }
+  };
+
+  const scrollFocusedItemIntoView = () => {
+    const id = focusedItemId();
+    if (!id || !keyboardNavActive()) return;
+    const rows = stableGridRows();
+    const offsets = rowOffsets();
+    const rowHeight = tileRowHeight();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.kind !== "items" || !row.ids.includes(id)) continue;
+      const rowTop = offsets[i];
+      const rowBottom = rowTop + rowHeight;
+      const container = scrollRef();
+      if (!container) return;
+      const viewTop = scrollTop();
+      const viewBottom = viewTop + viewportHeight();
+      if (rowTop < viewTop) {
+        container.scrollTop = rowTop - 4;
+        setScrollTop(rowTop - 4);
+      } else if (rowBottom > viewBottom) {
+        const newTop = rowBottom - viewportHeight() + 4;
+        container.scrollTop = newTop;
+        setScrollTop(newTop);
+      }
+      break;
     }
   };
 
@@ -475,6 +562,7 @@ export const MediaView: Component = () => {
       (item) => item.kind === "local" && fileHashes.has(item.fileHash ?? item.path),
     );
   });
+  const flatItemIds = createMemo(() => displayedItems().map((item) => mediaItemKey(item)));
   const itemsById = createMemo(
     () => new Map(displayedItems().map((item) => [mediaItemKey(item), item])),
   );
@@ -869,11 +957,125 @@ export const MediaView: Component = () => {
   });
 
   onMount(() => {
+    const mediaWhen = (ctx: { currentView: string; selectedLibraryId: string | null }) =>
+      ctx.currentView === "media" && ctx.selectedLibraryId !== null;
+
+    actions.register({
+      id: "media.select-all",
+      title: "Select All Images",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setKeyboardNavActive(true);
+        const ids = flatItemIds();
+        setSelectedMediaItemIds(ids);
+        if (!focusedItemId() && ids.length > 0) {
+          setFocusedItemId(ids[0]);
+        }
+      },
+    });
+
+    actions.register({
+      id: "media.toggle-selection",
+      title: "Toggle Image Selection",
+      group: "Media",
+      when: (ctx) => ctx.currentView === "media" && ctx.mediaViewFocusedItemId !== null,
+      run: () => {
+        const id = focusedItemId();
+        if (id) {
+          setKeyboardNavActive(true);
+          toggleMediaSelection(id);
+        }
+      },
+    });
+
+    actions.register({
+      id: "media.navigate-up",
+      title: "Navigate Up",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setKeyboardNavActive(true);
+        navigateFocus("up");
+      },
+    });
+
+    actions.register({
+      id: "media.navigate-down",
+      title: "Navigate Down",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setKeyboardNavActive(true);
+        navigateFocus("down");
+      },
+    });
+
+    actions.register({
+      id: "media.navigate-left",
+      title: "Navigate Left",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setKeyboardNavActive(true);
+        navigateFocus("left");
+      },
+    });
+
+    actions.register({
+      id: "media.navigate-right",
+      title: "Navigate Right",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setKeyboardNavActive(true);
+        navigateFocus("right");
+      },
+    });
+
+    actions.register({
+      id: "media.prev-library",
+      title: "Previous Library",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        const entries = orderedLibraryEntries();
+        if (entries.length === 0) return;
+        const idx = entries.findIndex((lib) => lib.id === selectedLibraryId());
+        const nextIdx = idx <= 0 ? entries.length - 1 : idx - 1;
+        setSelectedLibraryId(entries[nextIdx].id);
+      },
+    });
+
+    actions.register({
+      id: "media.next-library",
+      title: "Next Library",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        const entries = orderedLibraryEntries();
+        if (entries.length === 0) return;
+        const idx = entries.findIndex((lib) => lib.id === selectedLibraryId());
+        const nextIdx = idx === -1 || idx >= entries.length - 1 ? 0 : idx + 1;
+        setSelectedLibraryId(entries[nextIdx].id);
+      },
+    });
+
+    actions.mapShortcut("mod+a", "media.select-all");
+    actions.mapShortcut("[", "media.prev-library");
+    actions.mapShortcut("]", "media.next-library");
+    actions.mapShortcut(" ", "media.toggle-selection");
+    actions.mapShortcut("arrowup", "media.navigate-up");
+    actions.mapShortcut("arrowdown", "media.navigate-down");
+    actions.mapShortcut("arrowleft", "media.navigate-left");
+    actions.mapShortcut("arrowright", "media.navigate-right");
+
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) {
         throw new Error("pointer event target must be a node");
       }
+      setKeyboardNavActive(false);
       if (showLibraryActions() && !libraryActionsRef?.contains(target)) {
         setShowLibraryActions(false);
       }
@@ -886,9 +1088,13 @@ export const MediaView: Component = () => {
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (targetAcceptsTextInput(event.target)) return;
+      if (event.defaultPrevented) return;
+
       if (event.key === "Escape") {
         setShowLibraryActions(false);
         setShowAddDropdown(false);
+        return;
       }
     };
     document.addEventListener("pointerdown", handlePointerDown);
@@ -896,6 +1102,14 @@ export const MediaView: Component = () => {
     onCleanup(() => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
+      actions.unregister("media.select-all");
+      actions.unregister("media.toggle-selection");
+      actions.unregister("media.navigate-up");
+      actions.unregister("media.navigate-down");
+      actions.unregister("media.navigate-left");
+      actions.unregister("media.navigate-right");
+      actions.unregister("media.prev-library");
+      actions.unregister("media.next-library");
     });
   });
 
@@ -1004,6 +1218,21 @@ export const MediaView: Component = () => {
       });
     }, 300);
     onCleanup(() => clearTimeout(timer));
+  });
+
+  createEffect(() => {
+    const id = focusedItemId();
+    if (!id) return;
+    const ids = new Set(flatItemIds());
+    if (!ids.has(id)) {
+      setFocusedItemId(null);
+    }
+  });
+
+  createEffect(() => {
+    const id = focusedItemId();
+    if (!id || !keyboardNavActive()) return;
+    scrollFocusedItemIntoView();
   });
 
   onMount(() => {
@@ -1363,6 +1592,7 @@ export const MediaView: Component = () => {
 
   function toggleMediaSelection(itemId: string) {
     setLastSelectedMediaItemId(itemId);
+    setMediaActionStatus(null);
     setSelectedMediaItemIds((current) =>
       current.includes(itemId)
         ? current.filter((candidate) => candidate !== itemId)
@@ -1388,6 +1618,7 @@ export const MediaView: Component = () => {
       for (const id of rangeIds) result.add(id);
       return [...result];
     });
+    setMediaActionStatus(null);
     setLastSelectedMediaItemId(itemId);
   }
 
@@ -1421,6 +1652,70 @@ export const MediaView: Component = () => {
       }
     } catch (err) {
       setError(toErrorMessage(err));
+    }
+  }
+
+  async function handleApplyPresetToSelected(name: string) {
+    const libraryId = selectedLibraryId();
+    if (!libraryId) {
+      throw new Error("cannot apply a preset without a selected library");
+    }
+    const itemIds = selectedMediaItemIds();
+    if (itemIds.length === 0) {
+      throw new Error("select at least one image to apply a preset");
+    }
+    setShowApplyPresetMenu(false);
+    setIsSubmitting(true);
+    setError(null);
+    setMediaActionStatus(
+      `Applying ${name} to ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
+    );
+    try {
+      const items = itemIds.map((id) => itemsById().get(id)).filter(Boolean) as MediaItem[];
+      const hasPeer = items.some((item) => item.kind === "peer");
+      const isTauri = await isTauriRuntime();
+      if (isTauri && !hasPeer) {
+        const batchItems = items.map((item) => ({
+          path: item.path,
+          file_hash: item.fileHash,
+        }));
+        const count = await batchApplyPresetSnapshot(batchItems, name);
+        setMediaActionStatus(
+          `Applied ${name} and saved ${count} snapshot${count > 1 ? "s" : ""}`,
+        );
+      } else {
+        for (const [index, item] of items.entries()) {
+          if (item.kind === "peer") {
+            const picture = {
+              id: item.id,
+              name: item.name,
+              modified_at: item.modifiedAt,
+              has_snapshots: item.metadata.hasSnapshots,
+              latest_snapshot_id: item.metadata.latestSnapshotId,
+            };
+            await openPeerImage(item.peerId, picture);
+            await applyPresetSnapshot(name);
+          } else {
+            await openImage(item.path);
+            await applyPresetSnapshot(name, item.path);
+          }
+          setMediaActionStatus(
+            `Applying ${name}... (${index + 1}/${items.length})`,
+          );
+        }
+        setMediaActionStatus(
+          `Applied ${name} and saved ${items.length} snapshot${items.length > 1 ? "s" : ""}`,
+        );
+      }
+      await Promise.all([
+        refetchItems(),
+        refetchCachedLibraryItems(),
+      ]);
+    } catch (err) {
+      setError(toErrorMessage(err));
+      setMediaActionStatus(null);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -2215,6 +2510,7 @@ export const MediaView: Component = () => {
                                     disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
                                     active={activeMediaItemId() === id}
                                     selected={selectedMediaItemIdSet().has(id)}
+                                    focused={keyboardNavActive() && focusedItemId() === id}
                                     showSelectionControls={showSelectionControls()}
                                     onThumbnailLoaded={(src) =>
                                       rememberThumbnailSrc(item()!, src)
@@ -2228,6 +2524,10 @@ export const MediaView: Component = () => {
                                     }}
                                     onToggleSelection={() => toggleMediaSelection(id)}
                                     onShiftSelect={() => rangeSelectMedia(id)}
+                                    onFocus={() => {
+                                      setFocusedItemId(id);
+                                      setKeyboardNavActive(false);
+                                    }}
                                   />
                                 </Show>
                               );
@@ -2266,6 +2566,7 @@ export const MediaView: Component = () => {
                                   offline={selectedLibraryIsOffline()}
                                   active={activeMediaItemId() === id}
                                   selected={selectedMediaItemIdSet().has(id)}
+                                  focused={keyboardNavActive() && focusedItemId() === id}
                                   showSelectionControls={showSelectionControls()}
                                   onThumbnailLoaded={(src) =>
                                     rememberThumbnailSrc(item()!, src)
@@ -2279,6 +2580,10 @@ export const MediaView: Component = () => {
                                   }}
                                   onToggleSelection={() => toggleMediaSelection(id)}
                                   onShiftSelect={() => rangeSelectMedia(id)}
+                                  onFocus={() => {
+                                    setFocusedItemId(id);
+                                    setKeyboardNavActive(false);
+                                  }}
                                 />
                               </Show>
                             );
@@ -2313,6 +2618,11 @@ export const MediaView: Component = () => {
         {displayedError() && (
           <p class="text-sm py-3 text-[var(--danger-text)]">{displayedError()}</p>
         )}
+        <Show when={mediaActionStatus()}>
+          {(status) => (
+            <p class="text-sm py-3 text-[var(--text-value)]">{status()}</p>
+          )}
+        </Show>
         <Show when={selectedMediaItemIds().length > 0}>
           <div class="flex items-center justify-between gap-2 py-3">
             <p class="text-[11px] font-medium text-[var(--text-dim)]">
@@ -2326,6 +2636,50 @@ export const MediaView: Component = () => {
               >
                 Open Selected
               </Button>
+              <div class="relative">
+                <Button
+                  type="button"
+                  class={SURFACE_BUTTON_CLASS}
+                  disabled={
+                    isSubmitting() ||
+                    selectedMediaItemIds().length === 0 ||
+                    (presets()?.length ?? 0) === 0
+                  }
+                  onClick={() => {
+                    setShowApplyPresetMenu(!showApplyPresetMenu());
+                    if (!presets()) {
+                      void refetchPresets();
+                    }
+                  }}
+                >
+                  Apply Preset
+                </Button>
+                <Show when={showApplyPresetMenu()}>
+                  <div class="absolute bottom-full right-0 mb-1 min-w-[180px] rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] py-1 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
+                    <Show
+                      when={(presets()?.length ?? 0) > 0}
+                      fallback={
+                        <div class="px-3 py-2 text-[11px] font-medium text-[var(--text-faint)]">
+                          No presets saved
+                        </div>
+                      }
+                    >
+                      <For each={presets() ?? []}>
+                        {(preset) => (
+                          <button
+                            type="button"
+                            class="flex h-7 w-full items-center px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
+                            disabled={isSubmitting()}
+                            onClick={() => void handleApplyPresetToSelected(preset.name)}
+                          >
+                            {preset.name}
+                          </button>
+                        )}
+                      </For>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
               <div class="relative">
                 <Button
                   type="button"
@@ -2385,7 +2739,11 @@ export const MediaView: Component = () => {
               <Button
                 type="button"
                 class={SURFACE_BUTTON_CLASS}
-                onClick={() => setSelectedMediaItemIds([])}
+                onClick={() => {
+                  setSelectedMediaItemIds([]);
+                  setShowApplyPresetMenu(false);
+                  setMediaActionStatus(null);
+                }}
               >
                 Clear
               </Button>

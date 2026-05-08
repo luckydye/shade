@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import solid from "vite-plugin-solid";
@@ -31,5 +32,10 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+  },
+  test: {
+    environment: "happy-dom",
+    globals: true,
+    include: ["test/**/*.test.ts"],
   },
 });
