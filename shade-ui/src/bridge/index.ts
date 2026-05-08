@@ -60,6 +60,9 @@ export interface TauriPlatform {
   listenImageOpenPhase(
     listener: (phase: string) => void,
   ): Promise<() => void>;
+  listenBatchExportProgress(
+    listener: (payload: BatchExportProgress) => void,
+  ): Promise<() => void>;
 }
 
 export interface BrowserRatingsPlatform {
@@ -613,6 +616,12 @@ export function listenImageOpenPhase(
   return tauriListen(listener, (p, l) => p.listenImageOpenPhase(l));
 }
 
+export function listenBatchExportProgress(
+  listener: (payload: BatchExportProgress) => void,
+): Promise<() => void> {
+  return tauriListen(listener, (p, l) => p.listenBatchExportProgress(l));
+}
+
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
   if (!(await isTauriRuntime())) {
     return {
@@ -889,6 +898,12 @@ export type LibraryMode = "browse" | "sync";
 
 export type LibrarySyncProgress = {
   library_id: string;
+  total: number;
+  completed: number;
+  current_name: string | null;
+};
+
+export type BatchExportProgress = {
   total: number;
   completed: number;
   current_name: string | null;
@@ -1574,6 +1589,23 @@ export async function batchClearEdits(paths: string[]): Promise<number> {
     return inv("batch_clear_edits", { paths }) as Promise<number>;
   }
   return paths.length;
+}
+
+export interface BatchExportItem {
+  path: string;
+  file_hash: string | null;
+  name: string;
+}
+
+export async function batchExportImages(
+  items: BatchExportItem[],
+  targetDir: string,
+): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("batch_export_images", { items, targetDir }) as Promise<number>;
+  }
+  throw new Error("batch export is only implemented for Tauri");
 }
 
 export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo> {

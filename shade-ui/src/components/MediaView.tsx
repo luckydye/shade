@@ -31,6 +31,8 @@ import {
   listenLibraryScanProgress,
   listenLibrarySyncProgress,
   type LibrarySyncProgress,
+  listenBatchExportProgress,
+  type BatchExportProgress,
   listenNativeDragDrop,
   listenPeerPaired,
   listMediaLibraries,
@@ -54,6 +56,7 @@ import {
   applyPresetSnapshot,
   batchApplyPresetSnapshot,
   batchClearEdits,
+  batchExportImages,
 } from "../bridge/index";
 import {
   isAdjustmentSliderActive,
@@ -232,6 +235,7 @@ export const MediaView: Component = () => {
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const [syncProgress, setSyncProgress] = createSignal<LibrarySyncProgress | null>(null);
+  const [exportProgress, setExportProgress] = createSignal<BatchExportProgress | null>(null);
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
   const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
@@ -923,6 +927,16 @@ export const MediaView: Component = () => {
     }).then((unlisten) => {
       unlistenSyncProgress = unlisten;
     });
+    let unlistenExportProgress: (() => void) | null = null;
+    void listenBatchExportProgress((progress) => {
+      if (progress.completed >= progress.total) {
+        setExportProgress(null);
+      } else {
+        setExportProgress(progress);
+      }
+    }).then((unlisten) => {
+      unlistenExportProgress = unlisten;
+    });
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
       syncSelectedLibraryIfNeeded();
@@ -934,6 +948,7 @@ export const MediaView: Component = () => {
       stopP2pPolling();
       void unlistenPeerPaired?.();
       unlistenSyncProgress?.();
+      unlistenExportProgress?.();
       for (const src of thumbnailMemoryBuffer.values()) {
         if (src !== state.loadingMediaSrc) {
           URL.revokeObjectURL(src);
@@ -1813,6 +1828,54 @@ export const MediaView: Component = () => {
       await refetchItems();
     } catch (err) {
       setError(toErrorMessage(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleExportSelected() {
+    const libraryId = selectedLibraryId();
+    if (!libraryId) {
+      throw new Error("cannot export without a selected library");
+    }
+    const itemIds = selectedMediaItemIds();
+    if (itemIds.length === 0) {
+      throw new Error("select at least one image to export");
+    }
+    const targetDir = await pickDirectory();
+    if (!targetDir || typeof targetDir !== "string") {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    setMediaActionStatus(
+      `Exporting ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
+    );
+    try {
+      const items = itemIds
+        .map((id) => itemsById().get(id))
+        .filter(Boolean) as MediaItem[];
+      const localItems = items.filter((item) => item.kind === "local");
+      if (localItems.length === 0) {
+        throw new Error("export is only supported for local images");
+      }
+      const isTauri = await isTauriRuntime();
+      if (!isTauri) {
+        setMediaActionStatus("Export is only supported in the native app");
+        return;
+      }
+      const batchItems = localItems.map((item) => ({
+        path: item.path,
+        file_hash: item.fileHash,
+        name: item.name,
+      }));
+      const count = await batchExportImages(batchItems, targetDir);
+      setMediaActionStatus(
+        `Exported ${count} image${count > 1 ? "s" : ""} to ${targetDir}`,
+      );
+    } catch (err) {
+      setError(toErrorMessage(err));
+      setMediaActionStatus(null);
     } finally {
       setIsSubmitting(false);
     }
@@ -2724,6 +2787,14 @@ export const MediaView: Component = () => {
               >
                 Open Selected
               </Button>
+              <Button
+                type="button"
+                class={SURFACE_BUTTON_CLASS}
+                disabled={isSubmitting()}
+                onClick={() => void handleExportSelected()}
+              >
+                Export Selected
+              </Button>
               <div class="relative">
                 <Button
                   type="button"
@@ -2902,6 +2973,30 @@ export const MediaView: Component = () => {
           <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
             <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
               <span>Syncing Library</span>
+              <span class="text-[var(--text-dim)]">
+                {progress().completed}/{progress().total}
+              </span>
+            </div>
+            <Show when={progress().current_name}>
+              <p class="mt-1 overflow-hidden whitespace-nowrap text-ellipsis text-[12px] font-medium text-[var(--text-dim)]">
+                {progress().current_name}
+              </p>
+            </Show>
+            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              <div
+                class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
+                style={{ width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={exportProgress()}>
+        {(progress) => (
+          <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
+            <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
+              <span>Exporting Images</span>
               <span class="text-[var(--text-dim)]">
                 {progress().completed}/{progress().total}
               </span>
