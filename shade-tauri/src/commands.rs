@@ -5516,20 +5516,24 @@ pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
         let file_hash = match item.file_hash {
             Some(hash) => hash,
             None => {
-                let photo_app = app.clone();
-                let bytes = shade_io::load_picture_bytes(
-                    &item.path,
-                    |host, file_path| async move {
-                        load_camera_image_from_tauri(&host, &file_path).await
-                    },
-                    |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
-                    move |picture_id| {
-                        let app = photo_app.clone();
-                        async move { load_photo_image_from_tauri(&app, &picture_id).await }
-                    },
-                )
-                .await?;
-                hash_bytes(&bytes)
+                if item.path.starts_with("s3://") || item.path.starts_with("ccapi://") {
+                    hash_bytes(item.path.as_bytes())
+                } else {
+                    let photo_app = app.clone();
+                    let bytes = shade_io::load_picture_bytes(
+                        &item.path,
+                        |host, file_path| async move {
+                            load_camera_image_from_tauri(&host, &file_path).await
+                        },
+                        |s3_path| async move { load_s3_image_from_tauri(&s3_path).await },
+                        move |picture_id| {
+                            let app = photo_app.clone();
+                            async move { load_photo_image_from_tauri(&app, &picture_id).await }
+                        },
+                    )
+                    .await?;
+                    hash_bytes(&bytes)
+                }
             }
         };
         let mut stack = shade_lib::LayerStack::new();

@@ -151,7 +151,7 @@ where
             load_image_bytes_f32_with_info(&bytes, Some(&picture_display_name(key)))
                 .map_err(|error| error.to_string())?;
         return Ok(OpenedImage {
-            file_hash: hash_bytes(&bytes),
+            file_hash: blake3::hash(path.as_bytes()).to_hex().to_string(),
             source_name: Some(path.to_string()),
             image,
             info,
