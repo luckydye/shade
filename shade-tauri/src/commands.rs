@@ -1176,14 +1176,12 @@ fn restore_persisted_layers(
     source_name: Option<String>,
     persisted: Option<PersistedEditVersion>,
 ) -> Result<(), String> {
-    state.current_image_hash = Some(file_hash.clone());
+    state.current_image_hash = Some(file_hash);
     state.current_image_source = source_name;
     state.current_snapshot_id = persisted.as_ref().map(|v| v.id.clone());
     let Some(persisted) = persisted else {
-        eprintln!("[restore_persisted_layers] no persisted data for file_hash={}", file_hash);
         return Ok(());
     };
-    eprintln!("[restore_persisted_layers] file_hash={} snapshot_id={} persisted_layers={} image_layers_before={}", file_hash, persisted.id, persisted.data.layers.len(), state.stack.layers.len());
     ensure_non_image_layers(&persisted.data.layers)?;
     let image_layers: Vec<_> = state
         .stack
@@ -1200,7 +1198,6 @@ fn restore_persisted_layers(
     state.stack.mask_params.clear();
     let base_idx = state.stack.layers.len();
     state.stack.layers.extend(persisted.data.layers.clone());
-    eprintln!("[restore_persisted_layers] after extend total_layers={} base_idx={}", state.stack.layers.len(), base_idx);
     restore_masks_from_params(
         &mut state.stack,
         base_idx,
@@ -3452,17 +3449,12 @@ pub async fn open_image<R: tauri::Runtime>(
         Some(p) => Some(p),
         None => {
             if let Some(source_name) = opened.source_name.as_deref() {
-                let by_source = load_latest_edit_version_by_source(source_name).await?;
-                if by_source.is_some() {
-                    eprintln!("[open_image] found snapshot by source_name={} instead of file_hash={}", source_name, file_hash);
-                }
-                by_source
+                load_latest_edit_version_by_source(source_name).await?
             } else {
                 None
             }
         }
     };
-    eprintln!("[open_image] path={} file_hash={} persisted={}", path, file_hash, persisted.is_some());
     let response = {
         let mut st = lock_editor_state(&state)?;
         if !st.is_current_open_request(open_request_id) {
@@ -5578,15 +5570,41 @@ pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
                 }
             }
         };
-        eprintln!("[batch_apply_preset_snapshot] path={:?} len={} bytes={:02x?} file_hash={}", item.path, item.path.len(), item.path.as_bytes(), file_hash);
         let mut stack = shade_lib::LayerStack::new();
         stack.add_image_layer(0, 1, 1);
         stack.layers.extend(file.layers.clone());
         stack.mask_params = file.mask_params.clone();
         let data = non_image_layer_data(&stack);
-        let snapshot_id = persist_snapshot(&file_hash, Some(&item.path), None, None, &data).await?;
-        eprintln!("[batch_apply_preset_snapshot] persisted snapshot_id={} for file_hash={}", snapshot_id, file_hash);
+        persist_snapshot(&file_hash, Some(&item.path), None, None, &data).await?;
         count += 1;
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+pub async fn batch_clear_edits(
+    paths: Vec<String>,
+) -> Result<u32, String> {
+    let conn = library_db_conn().await;
+    let mut count = 0u32;
+    for path in paths {
+        let mut rows = conn
+            .query(
+                "SELECT file_hash FROM images WHERE source_name = ?1",
+                [path],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+            let file_hash: String = row.get(0).map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM edit_versions WHERE file_hash = ?1",
+                [file_hash],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            count += 1;
+        }
     }
     Ok(count)
 }

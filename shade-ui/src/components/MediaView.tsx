@@ -53,6 +53,7 @@ import {
   uploadMediaLibraryUrl,
   applyPresetSnapshot,
   batchApplyPresetSnapshot,
+  batchClearEdits,
 } from "../bridge/index";
 import {
   isAdjustmentSliderActive,
@@ -1064,6 +1065,26 @@ export const MediaView: Component = () => {
       },
     });
 
+    actions.register({
+      id: "media.zoom-in",
+      title: "Zoom In",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1));
+      },
+    });
+
+    actions.register({
+      id: "media.zoom-out",
+      title: "Zoom Out",
+      group: "Media",
+      when: mediaWhen,
+      run: () => {
+        setZoomIndex((i) => Math.max(0, i - 1));
+      },
+    });
+
     actions.mapShortcut("mod+a", "media.select-all");
     actions.mapShortcut("[", "media.prev-library");
     actions.mapShortcut("]", "media.next-library");
@@ -1072,6 +1093,9 @@ export const MediaView: Component = () => {
     actions.mapShortcut("arrowdown", "media.navigate-down");
     actions.mapShortcut("arrowleft", "media.navigate-left");
     actions.mapShortcut("arrowright", "media.navigate-right");
+    actions.mapShortcut("+", "media.zoom-in");
+    actions.mapShortcut("=", "media.zoom-in");
+    actions.mapShortcut("-", "media.zoom-out");
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
@@ -1113,6 +1137,8 @@ export const MediaView: Component = () => {
       actions.unregister("media.navigate-right");
       actions.unregister("media.prev-library");
       actions.unregister("media.next-library");
+      actions.unregister("media.zoom-in");
+      actions.unregister("media.zoom-out");
     });
   });
 
@@ -1709,6 +1735,45 @@ export const MediaView: Component = () => {
         setMediaActionStatus(
           `Applied ${name} and saved ${items.length} snapshot${items.length > 1 ? "s" : ""}`,
         );
+      }
+      await Promise.all([
+        refetchItems(),
+        refetchCachedLibraryItems(),
+      ]);
+    } catch (err) {
+      setError(toErrorMessage(err));
+      setMediaActionStatus(null);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleClearEditsForSelected() {
+    const libraryId = selectedLibraryId();
+    if (!libraryId) {
+      throw new Error("cannot clear edits without a selected library");
+    }
+    const itemIds = selectedMediaItemIds();
+    if (itemIds.length === 0) {
+      throw new Error("select at least one image to clear edits");
+    }
+    setShowApplyPresetMenu(false);
+    setIsSubmitting(true);
+    setError(null);
+    setMediaActionStatus(
+      `Clearing edits for ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
+    );
+    try {
+      const items = itemIds.map((id) => itemsById().get(id)).filter(Boolean) as MediaItem[];
+      const isTauri = await isTauriRuntime();
+      if (isTauri) {
+        const paths = items.map((item) => item.path);
+        const count = await batchClearEdits(paths);
+        setMediaActionStatus(
+          `Cleared edits for ${count} image${count > 1 ? "s" : ""}`,
+        );
+      } else {
+        setMediaActionStatus("Clear edits is only supported in the native app");
       }
       await Promise.all([
         refetchItems(),
@@ -2665,8 +2730,7 @@ export const MediaView: Component = () => {
                   class={SURFACE_BUTTON_CLASS}
                   disabled={
                     isSubmitting() ||
-                    selectedMediaItemIds().length === 0 ||
-                    (presets()?.length ?? 0) === 0
+                    selectedMediaItemIds().length === 0
                   }
                   onClick={() => {
                     setShowApplyPresetMenu(!showApplyPresetMenu());
@@ -2699,6 +2763,14 @@ export const MediaView: Component = () => {
                           </button>
                         )}
                       </For>
+                      <button
+                        type="button"
+                        class="flex h-7 w-full items-center border-t border-[var(--border)] px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] hover:bg-[var(--surface-hover)] disabled:opacity-40"
+                        disabled={isSubmitting()}
+                        onClick={() => void handleClearEditsForSelected()}
+                      >
+                        Clear Edits
+                      </button>
                     </Show>
                   </div>
                 </Show>

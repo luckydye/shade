@@ -1552,6 +1552,14 @@ export async function batchApplyPresetSnapshot(
   return items.length;
 }
 
+export async function batchClearEdits(paths: string[]): Promise<number> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    return inv("batch_clear_edits", { paths }) as Promise<number>;
+  }
+  return paths.length;
+}
+
 export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();

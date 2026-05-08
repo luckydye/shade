@@ -141,6 +141,7 @@ pub fn run() {
             commands::load_preset,
             commands::apply_preset_snapshot,
             commands::batch_apply_preset_snapshot,
+            commands::batch_clear_edits,
             commands::get_stack_snapshot,
             commands::replace_stack,
             commands::save_snapshot,
