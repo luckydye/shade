@@ -281,10 +281,6 @@ export const MediaView: Component = () => {
       return;
     }
     const key = thumbnailBufferKey(item);
-    const previous = thumbnailMemoryBuffer.get(key);
-    if (previous && previous !== src && previous !== state.loadingMediaSrc) {
-      URL.revokeObjectURL(previous);
-    }
     thumbnailMemoryBuffer.delete(key);
     thumbnailMemoryBuffer.set(key, src);
     while (thumbnailMemoryBuffer.size > THUMBNAIL_MEMORY_BUFFER_SIZE) {

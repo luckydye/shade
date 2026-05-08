@@ -32,7 +32,6 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
   const [loadRequestVersion, setLoadRequestVersion] = createSignal(0);
   let containerRef: HTMLDivElement | undefined;
   let isLoadingSrc = false;
-  let lastBlobUrl: string | undefined;
 
   const loadErrorSummary = () => {
     const error = loadError();
@@ -109,21 +108,6 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
       isLoadingSrc = false;
     });
   });
-
-  createEffect(() => {
-    const current = src();
-    if (lastBlobUrl && lastBlobUrl !== current && lastBlobUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(lastBlobUrl);
-    }
-    lastBlobUrl = current;
-  });
-
-  onCleanup(() => {
-    if (lastBlobUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(lastBlobUrl);
-    }
-  });
-
   function handleClick(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
     props.onFocus?.();
     if (event.shiftKey) {
