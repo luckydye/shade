@@ -919,7 +919,6 @@ async fn load_media_tags_map(
 
 async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
-    eprintln!("[persist_media_rating] file_hash={} rating={:?} normalized={:?}", file_hash, rating, normalized);
     let conn = library_db_conn().await;
     if let Some(value) = normalized {
         conn.execute(
@@ -1156,7 +1155,6 @@ async fn register_image_source(
     file_hash: &str,
     source_name: Option<&str>,
 ) -> Result<(), String> {
-    eprintln!("[register_image_source] file_hash={} source_name={:?}", file_hash, source_name);
     let conn = library_db_conn().await;
     let now = unix_timestamp_millis()?;
     conn.execute(
@@ -4986,9 +4984,6 @@ async fn enrich_listing_metadata(
     .await?;
     for item in &mut listing.items {
         item.file_hash = file_hashes_by_source.get(&item.path).cloned();
-        if item.file_hash.is_none() {
-            eprintln!("[enrich_listing_metadata] no file_hash for path={}", item.path);
-        }
         item.metadata.latest_snapshot_id = snapshot_ids.get(&item.path).cloned();
         item.metadata.latest_snapshot_created_at = snapshot_created_ats.get(&item.path).copied();
         item.metadata.has_snapshots = item.metadata.latest_snapshot_id.is_some();
@@ -5021,7 +5016,6 @@ pub async fn list_media_ratings(
 
 #[tauri::command]
 pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
-    eprintln!("[set_media_rating] file_hash={} rating={:?}", params.file_hash, params.rating);
     if params.file_hash.trim().is_empty() {
         return Err("file hash cannot be empty".to_string());
     }

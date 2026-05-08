@@ -107,20 +107,22 @@ where
 {
     if picture_id.starts_with("ccapi://") {
         let (host, file_path) = parse_ccapi_media_path(picture_id)?;
+        let file_hash = blake3::hash(picture_id.as_bytes()).to_hex().to_string();
         return load_camera_thumbnail(host.to_string(), file_path.to_string())
             .await
             .map(|bytes| LoadedThumbnail {
                 bytes,
-                file_hash: None,
+                file_hash: Some(file_hash),
             });
     }
     if picture_id.starts_with("s3://") {
         let _ = parse_s3_media_path(picture_id)?;
+        let file_hash = blake3::hash(picture_id.as_bytes()).to_hex().to_string();
         return load_s3_thumbnail(picture_id.to_string())
             .await
             .map(|bytes| LoadedThumbnail {
                 bytes,
-                file_hash: None,
+                file_hash: Some(file_hash),
             });
     }
     if let Some(bytes) = load_photo_thumbnail(picture_id.to_string()).await? {
