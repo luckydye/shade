@@ -263,7 +263,7 @@ export const MediaView: Component = () => {
   const thumbnailMemoryBuffer = new Map<string, string>();
 
   const thumbnailBufferKey = (item: MediaItem) =>
-    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}::modified:${item.modifiedAt ?? "none"}`;
+    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}::ev:${item.metadata.latestSnapshotCreatedAt ?? "none"}::modified:${item.modifiedAt ?? "none"}`;
 
   const getBufferedThumbnailSrc = (item: MediaItem) => {
     const key = thumbnailBufferKey(item);

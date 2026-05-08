@@ -46,6 +46,7 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
       latest_snapshot_id: normalizeSnapshotVersion(
         image.metadata?.latest_snapshot_id,
       ),
+      latest_snapshot_created_at: image.metadata?.latest_snapshot_created_at ?? null,
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
     },

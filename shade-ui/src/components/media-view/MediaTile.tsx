@@ -56,7 +56,7 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
   });
 
   createEffect((prevIdentity: string | undefined) => {
-    const identity = `${props.item.modifiedAt ?? "none"}::${props.item.metadata.latestSnapshotId ?? "none"}`;
+    const identity = `${props.item.modifiedAt ?? "none"}::${props.item.metadata.latestSnapshotId ?? "none"}::${props.item.metadata.latestSnapshotCreatedAt ?? "none"}`;
     const cachedSrc = props.cachedSrc;
     if (prevIdentity !== undefined && prevIdentity !== identity) {
       if (cachedSrc && src() !== cachedSrc) {

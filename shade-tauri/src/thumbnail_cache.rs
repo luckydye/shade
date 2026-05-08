@@ -134,6 +134,28 @@ impl ThumbnailCacheDb {
         }
         Ok(entries)
     }
+
+    pub async fn delete(&self, picture_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM thumbnails WHERE picture_id = ?1",
+            [picture_id],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_by_prefix(&self, prefix: &str) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM thumbnails WHERE picture_id LIKE ?1",
+            [format!("{prefix}%")],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 fn current_millis() -> Result<i64, String> {

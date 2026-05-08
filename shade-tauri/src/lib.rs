@@ -18,6 +18,7 @@ pub struct ThumbnailService {
     pub raw_queue:
         std::sync::Arc<shade_io::ThumbnailQueue<shade_io::ThumbnailResponseSender>>,
     pub render_sender: crossbeam_channel::Sender<commands::ThumbnailRenderJob>,
+    pub decode_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
 pub struct S3LibraryScanService(pub std::sync::Arc<commands::S3LibraryScanState>);
@@ -35,8 +36,9 @@ pub fn run() {
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
         .manage(RenderService(commands::spawn_render_worker()))
         .manage(ThumbnailService {
-            raw_queue: shade_io::spawn_thumbnail_workers(),
+            raw_queue: shade_io::spawn_thumbnail_workers(1),
             render_sender: commands::spawn_thumbnail_render_worker(),
+            decode_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
         })
         .manage(CameraDiscoveryService(
             shade_io::CameraDiscoveryService::new(),

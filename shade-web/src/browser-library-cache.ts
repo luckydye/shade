@@ -28,6 +28,7 @@ type CachedLocalItem = {
   file_hash: string | null;
   has_snapshots: boolean;
   latest_snapshot_id: string | null;
+  latest_snapshot_created_at: number | null;
   rating: number | null;
   tags: string[];
 };
@@ -71,6 +72,7 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
       latest_snapshot_id: normalizeSnapshotVersion(
         image.metadata?.latest_snapshot_id,
       ),
+      latest_snapshot_created_at: image.metadata?.latest_snapshot_created_at ?? null,
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
     },
@@ -91,6 +93,7 @@ function toCachedLocalItem(libraryId: string, image: LibraryImage): CachedLocalI
     latest_snapshot_id: normalizeSnapshotVersion(
       image.metadata?.latest_snapshot_id,
     ),
+    latest_snapshot_created_at: image.metadata?.latest_snapshot_created_at ?? null,
     rating: normalizeRating(image.metadata?.rating),
     tags: normalizeTags(image.metadata?.tags),
   };
@@ -108,6 +111,7 @@ function toLibraryImage(item: CachedLocalItem): LibraryImage {
     metadata: {
       has_snapshots: item.has_snapshots,
       latest_snapshot_id: normalizeSnapshotVersion(item.latest_snapshot_id),
+      latest_snapshot_created_at: item.latest_snapshot_created_at ?? null,
       rating: normalizeRating(item.rating),
       tags: normalizeTags(item.tags),
     },

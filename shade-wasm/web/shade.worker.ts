@@ -305,6 +305,38 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
 
+      case "render_snapshot_thumbnail": {
+        await ensureWasmReady();
+        if (!(msg.bytes instanceof ArrayBuffer)) {
+          throw new Error("render_snapshot_thumbnail expects bytes as ArrayBuffer");
+        }
+        const frame = await retryWithFreshRenderer(async () => {
+          await ensureRendererReady();
+          return wasm.render_snapshot_thumbnail(
+            new Uint8Array(msg.bytes),
+            msg.fileName ?? null,
+            msg.layersJson ?? "{\"layers\":[]}",
+            msg.targetWidth ?? 320,
+            msg.targetHeight ?? 320,
+          );
+        });
+        const pixels =
+          frame.pixels instanceof Uint8Array
+            ? frame.pixels
+            : Uint8Array.from(frame.pixels);
+        self.postMessage(
+          {
+            type: "snapshot_thumbnail_rendered",
+            requestId,
+            pixels,
+            width: frame.width,
+            height: frame.height,
+          },
+          { transfer: [pixels.buffer as ArrayBuffer] },
+        );
+        break;
+      }
+
       case "render_preview": {
         const frame = await retryWithFreshRenderer(async () => {
           await ensureRendererReady();

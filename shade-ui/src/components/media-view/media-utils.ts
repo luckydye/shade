@@ -19,6 +19,7 @@ export type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };
 export type MediaItemMetadata = {
   hasSnapshots: boolean;
   latestSnapshotId: string | null;
+  latestSnapshotCreatedAt: number | null;
   baseRating: number | null;
   rating: number | null;
   tags: string[];
@@ -354,6 +355,7 @@ export function localMediaItem(image: LibraryImage): MediaItem {
     metadata: {
       hasSnapshots: image.metadata?.has_snapshots ?? false,
       latestSnapshotId: image.metadata?.latest_snapshot_id ?? null,
+      latestSnapshotCreatedAt: image.metadata?.latest_snapshot_created_at ?? null,
       baseRating: normalizeRating(image.metadata?.rating),
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
@@ -372,6 +374,7 @@ export function peerMediaItem(image: PeerLibraryItem): MediaItem {
     metadata: {
       hasSnapshots: image.has_snapshots,
       latestSnapshotId: image.latest_snapshot_id,
+      latestSnapshotCreatedAt: null,
       baseRating: null,
       rating: null,
       tags: [],

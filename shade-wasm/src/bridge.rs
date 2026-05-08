@@ -2,8 +2,9 @@ use crate::engine::WasmEngine;
 use js_sys::{Object, Reflect, Uint8Array};
 use serde::{Deserialize, Serialize};
 use shade_lib::{
-    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, MaskParams,
-    PreviewCrop as GpuPreviewCrop, Renderer, ToneParams,
+    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams,
+    LayerStack, MaskData, MaskParams, PreviewCrop as GpuPreviewCrop,
+    Renderer, TextureId, ToneParams,
 };
 use shade_io::load_image_bytes_f32_with_info;
 use std::cell::RefCell;
@@ -732,6 +733,86 @@ pub async fn render_preview_rgba(request: JsValue) -> Result<JsValue, JsValue> {
         &frame,
         &JsValue::from_str("height"),
         &JsValue::from_f64(request.target_height as f64),
+    )?;
+    Ok(frame.into())
+}
+
+/// Render a snapshot thumbnail from raw image bytes and persisted layers.
+/// Creates its own stack — does not affect the shared editor engine state.
+#[wasm_bindgen]
+pub async fn render_snapshot_thumbnail(
+    bytes: Vec<u8>,
+    file_name: Option<String>,
+    layers_json: String,
+    target_width: u32,
+    target_height: u32,
+) -> Result<JsValue, JsValue> {
+    let renderer = RENDERER
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| JsValue::from_str("renderer is not initialized"))?;
+    let (image, _info) =
+        load_image_bytes_f32_with_info(&bytes, file_name.as_deref())
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    let snap: StackSnapshot =
+        serde_json::from_str(&layers_json).map_err(|err| JsValue::from_str(&err.to_string()))?;
+    let canvas_width = image.width;
+    let canvas_height = image.height;
+    let texture_id: TextureId = 1;
+    let mut stack = LayerStack::new();
+    stack.add_image_layer(texture_id, canvas_width, canvas_height);
+    stack.layers.extend(snap.layers.clone());
+    let base_idx = 1;
+    for i in base_idx..stack.layers.len() {
+        let Some(old_id) = stack.layers[i].mask else {
+            continue;
+        };
+        let Some(params) = snap.mask_params.get(&old_id) else {
+            stack.layers[i].mask = None;
+            continue;
+        };
+        let mask = match params {
+            MaskParams::Linear { x1, y1, x2, y2 } => {
+                let mut m = MaskData::new_empty(canvas_width, canvas_height);
+                m.fill_linear_gradient(*x1, *y1, *x2, *y2);
+                m
+            }
+            MaskParams::Radial { cx, cy, radius } => {
+                let mut m = MaskData::new_empty(canvas_width, canvas_height);
+                m.fill_radial_gradient(*cx, *cy, *radius);
+                m
+            }
+            MaskParams::Brush {
+                width: bw,
+                height: bh,
+                pixels,
+            } => MaskData {
+                width: *bw,
+                height: *bh,
+                pixels: pixels.clone().into(),
+            },
+        };
+        stack.set_mask_with_params(i, mask, params.clone());
+    }
+    let sources = HashMap::from([(texture_id, image)]);
+    let pixels = renderer
+        .render_stack_preview(&stack, &sources, canvas_width, canvas_height, target_width, target_height, None)
+        .await
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    let frame = Object::new();
+    Reflect::set(
+        &frame,
+        &JsValue::from_str("pixels"),
+        &Uint8Array::from(pixels.as_slice()),
+    )?;
+    Reflect::set(
+        &frame,
+        &JsValue::from_str("width"),
+        &JsValue::from_f64(target_width as f64),
+    )?;
+    Reflect::set(
+        &frame,
+        &JsValue::from_str("height"),
+        &JsValue::from_f64(target_height as f64),
     )?;
     Ok(frame.into())
 }

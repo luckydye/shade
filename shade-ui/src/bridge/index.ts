@@ -249,6 +249,7 @@ export interface SharedPicture {
 export interface LibraryImageMetadata {
   has_snapshots: boolean;
   latest_snapshot_id: string | null;
+  latest_snapshot_created_at?: number | null;
   rating: number | null;
   tags: string[];
 }
@@ -440,6 +441,21 @@ function toByteView(value: ArrayBuffer | Uint8Array): ByteView {
         byteOffset: 0,
         byteLength: value.byteLength,
       };
+}
+
+export async function renderSnapshotThumbnail(
+  bytes: ArrayBuffer,
+  fileName: string | null,
+  layersJson: string,
+  targetWidth: number,
+  targetHeight: number,
+): Promise<{ pixels: Uint8Array; width: number; height: number }> {
+  await ensureWorkerReady();
+  return workerCall<{ pixels: Uint8Array; width: number; height: number }>(
+    { type: "render_snapshot_thumbnail", bytes, fileName, layersJson, targetWidth, targetHeight },
+    "snapshot_thumbnail_rendered",
+    [bytes],
+  );
 }
 
 export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {

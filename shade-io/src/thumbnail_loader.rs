@@ -65,9 +65,9 @@ pub fn generate_desktop_thumbnail(path: &str) -> Result<LoadedThumbnail, String>
     })
 }
 
-pub fn spawn_thumbnail_workers() -> Arc<ThumbnailQueue<ThumbnailResponseSender>> {
+pub fn spawn_thumbnail_workers(worker_count: usize) -> Arc<ThumbnailQueue<ThumbnailResponseSender>> {
     let queue = Arc::new(ThumbnailQueue::<ThumbnailResponseSender>::new());
-    for worker_idx in 0..3 {
+    for worker_idx in 0..worker_count {
         let worker_queue = queue.clone();
         std::thread::Builder::new()
             .name(format!("shade-thumbnail-{worker_idx}"))

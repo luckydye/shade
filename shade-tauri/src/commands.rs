@@ -80,6 +80,8 @@ pub struct MediaLibrary {
 pub struct LibraryImageMetadata {
     pub has_snapshots: bool,
     pub latest_snapshot_id: Option<String>,
+    #[serde(default)]
+    pub latest_snapshot_created_at: Option<i64>,
     pub rating: Option<u8>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -1116,6 +1118,23 @@ async fn load_latest_edit_version_by_source(
     Ok(Some(PersistedEditVersion { id, data }))
 }
 
+async fn latest_snapshot_created_at(source_name: &str) -> Option<i64> {
+    let conn = library_db_conn().await;
+    let mut rows = conn
+        .query(
+            "SELECT ev.created_at
+             FROM images i
+             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             WHERE i.source_name = ?1
+             ORDER BY ev.created_at DESC
+             LIMIT 1",
+            [source_name],
+        )
+        .await
+        .ok()?;
+    rows.next().await.ok()??.get::<i64>(0).ok()
+}
+
 async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
@@ -1264,10 +1283,12 @@ async fn persist_current_edit_version(
         // Update the existing snapshot in place.
         ensure_non_image_layers(&data.layers)?;
         let conn = library_db_conn().await;
+        let now = unix_timestamp_millis()?;
         conn.execute(
-            "UPDATE edit_versions SET layers_json = ?1 WHERE id = ?2",
+            "UPDATE edit_versions SET layers_json = ?1, created_at = ?2 WHERE id = ?3",
             libsql::params![
                 serde_json::to_string(&data).map_err(|e| e.to_string())?,
+                now,
                 existing_id.as_str(),
             ],
         )
@@ -2401,6 +2422,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             metadata: LibraryImageMetadata {
                 has_snapshots: false,
                 latest_snapshot_id: None,
+                latest_snapshot_created_at: None,
                 rating: item.rating,
                 tags: Vec::new(),
             },
@@ -2449,6 +2471,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                 metadata: LibraryImageMetadata {
                     has_snapshots: false,
                     latest_snapshot_id: None,
+                    latest_snapshot_created_at: None,
                     rating,
                     tags: Vec::new(),
                 },
@@ -2556,6 +2579,7 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
         metadata: LibraryImageMetadata {
             has_snapshots: false,
             latest_snapshot_id: None,
+            latest_snapshot_created_at: None,
             rating: item.rating,
             tags: Vec::new(),
         },
@@ -3825,6 +3849,11 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
     if !has_snapshot_for_source(picture_id).await? {
         return Ok(None);
     }
+    let semaphore = app
+        .state::<crate::ThumbnailService>()
+        .decode_semaphore
+        .clone();
+    let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
     let photo_app = app.clone();
     let is_local = !picture_id.starts_with("ccapi://") && !picture_id.starts_with("s3://");
     let opened = if is_local {
@@ -3866,8 +3895,12 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         )
         .await?
     };
-    let Some(persisted) = load_latest_edit_version(&opened.file_hash).await? else {
-        return Ok(None);
+    let persisted = match load_latest_edit_version(&opened.file_hash).await? {
+        Some(p) => p,
+        None => match load_latest_edit_version_by_source(picture_id).await? {
+            Some(p) => p,
+            None => return Ok(None),
+        },
     };
     let image = FloatImage {
         pixels: opened.image.pixels.clone(),
@@ -4637,7 +4670,16 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     // Strip it for the actual load path, keep the original for the cache key.
     let load_path = picture_id.split_once('#').map_or(picture_id, |(p, _)| p);
     let cache = app.state::<crate::ThumbnailCacheDb>();
-    let cache_key = crate::thumbnail_cache::thumbnail_cache_key(picture_id);
+    let is_snapshot = picture_id.contains("#snapshot:");
+    let cache_key = if is_snapshot {
+        // Include edit version created_at so in-place edits invalidate the cache.
+        match latest_snapshot_created_at(load_path).await {
+            Some(created_at) => format!("{}#ev_{created_at}", crate::thumbnail_cache::thumbnail_cache_key(picture_id)),
+            None => crate::thumbnail_cache::thumbnail_cache_key(picture_id),
+        }
+    } else {
+        crate::thumbnail_cache::thumbnail_cache_key(picture_id)
+    };
     if let Ok(Some((cached_file_hash, cached_bytes))) = cache.0.get(&cache_key).await {
         if let Some(file_hash) = cached_file_hash.as_deref() {
             register_image_source(file_hash, Some(load_path)).await?;
@@ -4877,12 +4919,13 @@ async fn enrich_listing_metadata(
     listing: &mut LibraryImageListing,
 ) -> Result<(), String> {
     let mut snapshot_ids: HashMap<String, String> = HashMap::new();
+    let mut snapshot_created_ats: HashMap<String, i64> = HashMap::new();
     let mut file_hashes_by_source: HashMap<String, String> = HashMap::new();
     {
         let conn = library_db_conn().await;
         let mut rows = conn
             .query(
-                "SELECT i.source_name, i.file_hash, ev.id
+                "SELECT i.source_name, i.file_hash, ev.id, ev.created_at
                  FROM images i
                  JOIN edit_versions ev ON ev.file_hash = i.file_hash
                  WHERE i.source_name IS NOT NULL
@@ -4900,8 +4943,10 @@ async fn enrich_listing_metadata(
             let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
             let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
             let id = row.get::<String>(2).map_err(|e| e.to_string())?;
+            let created_at = row.get::<i64>(3).map_err(|e| e.to_string())?;
             file_hashes_by_source.insert(source_name.clone(), file_hash);
-            snapshot_ids.insert(source_name, id);
+            snapshot_ids.insert(source_name.clone(), id);
+            snapshot_created_ats.insert(source_name, created_at);
         }
         if listing
             .items
@@ -4937,6 +4982,7 @@ async fn enrich_listing_metadata(
     for item in &mut listing.items {
         item.file_hash = file_hashes_by_source.get(&item.path).cloned();
         item.metadata.latest_snapshot_id = snapshot_ids.get(&item.path).cloned();
+        item.metadata.latest_snapshot_created_at = snapshot_created_ats.get(&item.path).copied();
         item.metadata.has_snapshots = item.metadata.latest_snapshot_id.is_some();
         item.metadata.tags = item
             .file_hash
