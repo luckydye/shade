@@ -234,6 +234,8 @@ export const MediaView: Component = () => {
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
   const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
+  const ZOOM_LEVELS = [80, 100, 120, 160, 200, 260, 320];
+  const [zoomIndex, setZoomIndex] = createSignal(3);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
   const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | null>(null);
@@ -669,10 +671,11 @@ export const MediaView: Component = () => {
     setLibraryOrder(nextOrder);
   });
   const tileMinWidth = createMemo(() => {
+    const base = ZOOM_LEVELS[zoomIndex()] ?? 160;
     if (viewportWidth() < 640) {
-      return 100;
+      return Math.min(base, 140);
     }
-    return 160;
+    return base;
   });
   const columns = createMemo(() =>
     Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (tileMinWidth() + GRID_GAP))),
@@ -2040,6 +2043,26 @@ export const MediaView: Component = () => {
                     aria-label="Search names or tags"
                   />
                 </label>
+                <div class="flex items-center gap-0.5 touch-mobile:hidden">
+                  <Button
+                    type="button"
+                    class={`${GHOST_BUTTON_CLASS} min-w-7 px-1.5 text-[13px] leading-none`}
+                    disabled={zoomIndex() === 0}
+                    onClick={() => setZoomIndex((i) => Math.max(0, i - 1))}
+                    aria-label="Decrease thumbnail size"
+                  >
+                    -
+                  </Button>
+                  <Button
+                    type="button"
+                    class={`${GHOST_BUTTON_CLASS} min-w-7 px-1.5 text-[13px] leading-none`}
+                    disabled={zoomIndex() === ZOOM_LEVELS.length - 1}
+                    onClick={() => setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1))}
+                    aria-label="Increase thumbnail size"
+                  >
+                    +
+                  </Button>
+                </div>
               </Show>
 
               <Button
