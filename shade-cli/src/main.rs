@@ -302,7 +302,7 @@ impl ServePeerProvider {
         Ok(Self {
             awareness: AwarenessState {
                 display_name: Some(serve_peer_name(&root)?),
-                active_file_hash: None,
+                active_fingerprint: None,
                 active_snapshot_id: None,
             },
             root,
@@ -350,7 +350,7 @@ impl PeerProvider for ServePeerProvider {
         Ok(self.awareness.clone())
     }
 
-    async fn list_snapshots(&self, _file_hash: &str) -> Result<Vec<SyncSnapshotInfo>> {
+    async fn list_snapshots(&self, _fingerprint: &str) -> Result<Vec<SyncSnapshotInfo>> {
         Ok(Vec::new())
     }
 
@@ -360,7 +360,7 @@ impl PeerProvider for ServePeerProvider {
 
     async fn get_metadata(
         &self,
-        _file_hashes: &[String],
+        _fingerprints: &[String],
     ) -> Result<Vec<PictureMetadata>> {
         Ok(Vec::new())
     }
@@ -1001,7 +1001,7 @@ mod tests {
 
         async fn list_snapshots(
             &self,
-            _file_hash: &str,
+            _fingerprint: &str,
         ) -> Result<Vec<SyncSnapshotInfo>> {
             Ok(Vec::new())
         }
@@ -1012,7 +1012,7 @@ mod tests {
 
         async fn get_metadata(
             &self,
-            _file_hashes: &[String],
+            _fingerprints: &[String],
         ) -> Result<Vec<PictureMetadata>> {
             Ok(Vec::new())
         }

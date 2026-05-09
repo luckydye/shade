@@ -23,7 +23,7 @@ const PEER_PICTURE_PAGE_SIZE: usize = 256;
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct AwarenessState {
     pub display_name: Option<String>,
-    pub active_file_hash: Option<String>,
+    pub active_fingerprint: Option<String>,
     pub active_snapshot_id: Option<String>,
 }
 
@@ -37,7 +37,7 @@ pub struct SyncSnapshotInfo {
 /// Metadata for a picture, used for batch sync of ratings and tags.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PictureMetadata {
-    pub file_hash: String,
+    pub fingerprint: String,
     pub rating: Option<u8>,
     pub tags: Vec<String>,
     pub rating_updated_at: Option<i64>,
@@ -55,9 +55,9 @@ pub trait PeerProvider: Send + Sync + 'static {
     async fn get_image_bytes(&self, picture_id: &str) -> Result<Vec<u8>>;
 
     async fn get_awareness(&self) -> Result<AwarenessState>;
-    async fn list_snapshots(&self, file_hash: &str) -> Result<Vec<SyncSnapshotInfo>>;
+    async fn list_snapshots(&self, fingerprint: &str) -> Result<Vec<SyncSnapshotInfo>>;
     async fn get_snapshot_data(&self, id: &str) -> Result<Vec<u8>>;
-    async fn get_metadata(&self, file_hashes: &[String]) -> Result<Vec<PictureMetadata>>;
+    async fn get_metadata(&self, fingerprints: &[String]) -> Result<Vec<PictureMetadata>>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -76,10 +76,10 @@ enum Request {
     // presence
     GetAwareness,
     // snapshot sync
-    ListSnapshots { file_hash: String },
+    ListSnapshots { fingerprint: String },
     GetSnapshotData { id: String },
     // metadata sync
-    GetMetadata { file_hashes: Vec<String> },
+    GetMetadata { fingerprints: Vec<String> },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -288,13 +288,13 @@ impl LocalPeerDiscovery {
     pub async fn list_peer_snapshots(
         &self,
         peer_endpoint_id: &str,
-        file_hash: &str,
+        fingerprint: &str,
     ) -> Result<Vec<SyncSnapshotInfo>> {
         match self
             .send_request(
                 peer_endpoint_id,
                 Request::ListSnapshots {
-                    file_hash: file_hash.to_owned(),
+                    fingerprint: fingerprint.to_owned(),
                 },
                 MAX_REQUEST_MESSAGE_BYTES,
             )
@@ -330,13 +330,13 @@ impl LocalPeerDiscovery {
     pub async fn get_peer_metadata(
         &self,
         peer_endpoint_id: &str,
-        file_hashes: &[String],
+        fingerprints: &[String],
     ) -> Result<Vec<PictureMetadata>> {
         match self
             .send_request(
                 peer_endpoint_id,
                 Request::GetMetadata {
-                    file_hashes: file_hashes.to_vec(),
+                    fingerprints: fingerprints.to_vec(),
                 },
                 MAX_REQUEST_MESSAGE_BYTES,
             )
@@ -518,8 +518,8 @@ impl ProtocolHandler for ShadeProtocol {
                 Ok(state) => Response::Awareness(state),
                 Err(error) => Response::Error(error.to_string()),
             },
-            Request::ListSnapshots { file_hash } => {
-                match self.peer_provider.list_snapshots(&file_hash).await {
+            Request::ListSnapshots { fingerprint } => {
+                match self.peer_provider.list_snapshots(&fingerprint).await {
                     Ok(list) => Response::SnapshotList(list),
                     Err(error) => Response::Error(error.to_string()),
                 }
@@ -530,8 +530,8 @@ impl ProtocolHandler for ShadeProtocol {
                     Err(error) => Response::Error(error.to_string()),
                 }
             }
-            Request::GetMetadata { file_hashes } => {
-                match self.peer_provider.get_metadata(&file_hashes).await {
+            Request::GetMetadata { fingerprints } => {
+                match self.peer_provider.get_metadata(&fingerprints).await {
                     Ok(meta) => Response::Metadata(meta),
                     Err(error) => Response::Error(error.to_string()),
                 }
@@ -592,7 +592,7 @@ mod tests {
 
         async fn list_snapshots(
             &self,
-            _file_hash: &str,
+            _fingerprint: &str,
         ) -> Result<Vec<SyncSnapshotInfo>> {
             Ok(Vec::new())
         }
@@ -603,7 +603,7 @@ mod tests {
 
         async fn get_metadata(
             &self,
-            _file_hashes: &[String],
+            _fingerprints: &[String],
         ) -> Result<Vec<PictureMetadata>> {
             Ok(Vec::new())
         }

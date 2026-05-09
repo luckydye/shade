@@ -188,7 +188,7 @@ function toLibraryImage(
     path: record.path,
     name: record.name,
     modified_at: record.modified_at,
-    file_hash: null,
+    fingerprint: null,
     metadata: {
       has_snapshots: latestSnapshotId !== null,
       latest_snapshot_id: latestSnapshotId,

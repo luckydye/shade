@@ -81,7 +81,7 @@ const App: Component = () => {
         if (ctx.currentView === "media") {
           const item = mediaViewFocusedItem();
           if (!item) return;
-          json = await getSnapshotPresetJson(item.fileHash, item.path);
+          json = await getSnapshotPresetJson(item.fingerprint, item.path);
           if (!json) { showToast("No edits to copy"); return; }
         } else {
           json = await serializeCurrentPreset();

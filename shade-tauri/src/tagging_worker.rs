@@ -7,7 +7,7 @@ use tauri::Manager;
 #[derive(Clone)]
 pub struct ThumbnailTaggingService {
     pub sender: Option<crossbeam_channel::Sender<ThumbnailCacheEntry>>,
-    pub pending_file_hashes:
+    pub pending_fingerprints:
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub _lock_file: std::sync::Arc<Option<std::fs::File>>,
 }
@@ -20,28 +20,28 @@ impl ThumbnailTaggingService {
         };
         {
             let mut pending = self
-                .pending_file_hashes
+                .pending_fingerprints
                 .lock()
                 .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?;
-            if !pending.insert(entry.file_hash.clone()) {
+            if !pending.insert(entry.fingerprint.clone()) {
                 return Ok(());
             }
         }
         if let Err(error) = sender.send(entry.clone()) {
-            self.pending_file_hashes
+            self.pending_fingerprints
                 .lock()
                 .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?
-                .remove(&entry.file_hash);
+                .remove(&entry.fingerprint);
             return Err(error.to_string());
         }
         Ok(())
     }
 
-    pub fn finish(&self, file_hash: &str) -> Result<(), String> {
-        self.pending_file_hashes
+    pub fn finish(&self, fingerprint: &str) -> Result<(), String> {
+        self.pending_fingerprints
             .lock()
             .map_err(|_| "thumbnail tagging pending set lock poisoned".to_string())?
-            .remove(file_hash);
+            .remove(fingerprint);
         Ok(())
     }
 }
@@ -60,7 +60,7 @@ pub fn spawn_thumbnail_tagging_worker() -> Result<ThumbnailTaggingService, Strin
         log::info!("thumbnail tagging worker passive pid={pid}");
         let service = ThumbnailTaggingService {
             sender: None,
-            pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
+            pending_fingerprints: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
             _lock_file: std::sync::Arc::new(None),
@@ -76,7 +76,7 @@ pub fn spawn_thumbnail_tagging_worker() -> Result<ThumbnailTaggingService, Strin
             log::warn!("thumbnail tagging disabled pid={pid}: {error}");
             let service = ThumbnailTaggingService {
                 sender: None,
-                pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
+                pending_fingerprints: std::sync::Arc::new(std::sync::Mutex::new(
                     std::collections::HashSet::new(),
                 )),
                 _lock_file: std::sync::Arc::new(None),
@@ -95,7 +95,7 @@ pub fn spawn_thumbnail_tagging_worker() -> Result<ThumbnailTaggingService, Strin
     log::info!("thumbnail tagging worker active pid={pid}");
     let service = ThumbnailTaggingService {
         sender: Some(sender),
-        pending_file_hashes: std::sync::Arc::new(std::sync::Mutex::new(
+        pending_fingerprints: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashSet::new(),
         )),
         _lock_file: std::sync::Arc::new(Some(lock_file)),
@@ -141,14 +141,14 @@ pub fn spawn_thumbnail_tagging_worker() -> Result<ThumbnailTaggingService, Strin
                     }
                     log::info!("thumbnail tagging model loaded pid={pid}");
                 }
-                let file_hash = entry.file_hash.clone();
+                let fingerprint = entry.fingerprint.clone();
                 if let Err(error) =
                     process_thumbnail_tagging_entry(&runtime, tagger.as_mut().expect("tagger loaded above"), &vocabulary, entry)
                 {
-                    eprintln!("thumbnail tagging failed for {file_hash}: {error}");
+                    eprintln!("thumbnail tagging failed for {fingerprint}: {error}");
                 }
                 worker_service
-                    .finish(&file_hash)
+                    .finish(&fingerprint)
                     .expect("failed to mark thumbnail tagging job as finished");
             }
         })
@@ -166,11 +166,11 @@ pub fn process_thumbnail_tagging_entry(
     vocabulary: &[shade_tagging::TagVocabularyEntry],
     entry: ThumbnailCacheEntry,
 ) -> Result<(), String> {
-    log::info!("thumbnail tagging processing file_hash={}", entry.file_hash);
-    if runtime.block_on(crate::commands::media_tags_exist(&entry.file_hash))? {
+    log::info!("thumbnail tagging processing fingerprint={}", entry.fingerprint);
+    if runtime.block_on(crate::commands::media_tags_exist(&entry.fingerprint))? {
         log::info!(
-            "thumbnail tagging skipped existing tags file_hash={}",
-            entry.file_hash
+            "thumbnail tagging skipped existing tags fingerprint={}",
+            entry.fingerprint
         );
         return Ok(());
     }
@@ -182,8 +182,8 @@ pub fn process_thumbnail_tagging_entry(
         )
         .map_err(|e| e.to_string())?;
     if result.tags.is_empty() {
-        runtime.block_on(crate::commands::persist_media_tags_empty(&entry.file_hash))?;
-        log::info!("thumbnail tagging no tags file_hash={}", entry.file_hash);
+        runtime.block_on(crate::commands::persist_media_tags_empty(&entry.fingerprint))?;
+        log::info!("thumbnail tagging no tags fingerprint={}", entry.fingerprint);
         return Ok(());
     }
     let tags = result
@@ -191,10 +191,10 @@ pub fn process_thumbnail_tagging_entry(
         .iter()
         .map(|tag| tag.label.clone())
         .collect::<Vec<_>>();
-    runtime.block_on(crate::commands::persist_media_tags(&entry.file_hash, &tags))?;
+    runtime.block_on(crate::commands::persist_media_tags(&entry.fingerprint, &tags))?;
     log::info!(
-        "thumbnail tagging persisted file_hash={} tags={}",
-        entry.file_hash,
+        "thumbnail tagging persisted fingerprint={} tags={}",
+        entry.fingerprint,
         tags.join(",")
     );
     Ok(())

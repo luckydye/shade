@@ -37,9 +37,9 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
     modified_at: normalizeModifiedAt(
       (image as LibraryImage & { modified_at?: unknown }).modified_at,
     ),
-    file_hash:
-      typeof image.file_hash === "string" && image.file_hash.length > 0
-        ? image.file_hash
+    fingerprint:
+      typeof image.fingerprint === "string" && image.fingerprint.length > 0
+        ? image.fingerprint
         : null,
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,

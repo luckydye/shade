@@ -261,8 +261,8 @@ export const MediaView: Component = () => {
     setMediaViewFocusedItem(
       item
         ? item.kind === "peer"
-          ? { path: item.name, fileHash: item.fileHash, kind: "peer", peerId: item.peerId, id: item.id }
-          : { path: item.path, fileHash: item.fileHash, kind: "local" }
+          ? { path: item.name, fingerprint: item.fingerprint, kind: "peer", peerId: item.peerId, id: item.id }
+          : { path: item.path, fingerprint: item.fingerprint, kind: "local" }
         : null,
     );
   });
@@ -282,8 +282,8 @@ export const MediaView: Component = () => {
       .filter((item): item is MediaItem => !!item)
       .map((item) =>
         item.kind === "peer"
-          ? { path: item.name, fileHash: item.fileHash, kind: "peer" as const, peerId: item.peerId, id: item.id }
-          : { path: item.path, fileHash: item.fileHash, kind: "local" as const },
+          ? { path: item.name, fingerprint: item.fingerprint, kind: "peer" as const, peerId: item.peerId, id: item.id }
+          : { path: item.path, fingerprint: item.fingerprint, kind: "local" as const },
       );
     setMediaViewSelectedBatchItems(batchItems);
   });
@@ -585,12 +585,12 @@ export const MediaView: Component = () => {
   );
   const displayedItems = createMemo(() => {
     const items = filteredByFilename();
-    const fileHashes = collectionItemPaths();
-    if (selectedCollectionId() === null || fileHashes.size === 0) {
+    const fingerprints = collectionItemPaths();
+    if (selectedCollectionId() === null || fingerprints.size === 0) {
       return items;
     }
     return items.filter(
-      (item) => item.kind === "local" && fileHashes.has(item.fileHash ?? item.path),
+      (item) => item.kind === "local" && fingerprints.has(item.fingerprint ?? item.path),
     );
   });
   const flatItemIds = createMemo(() => displayedItems().map((item) => mediaItemKey(item)));
@@ -1748,7 +1748,7 @@ export const MediaView: Component = () => {
       if (isTauri && !hasPeer) {
         const batchItems = items.map((item) => ({
           path: item.path,
-          file_hash: item.fileHash,
+          fingerprint: item.fingerprint,
         }));
         const count = await batchApplyPresetSnapshot(batchItems, name);
         setMediaActionStatus(
@@ -1893,7 +1893,7 @@ export const MediaView: Component = () => {
       }
       const batchItems = localItems.map((item) => ({
         path: item.path,
-        file_hash: item.fileHash,
+        fingerprint: item.fingerprint,
         name: item.name,
       }));
       const count = await batchExportImages(batchItems, targetDir);
@@ -1924,7 +1924,7 @@ export const MediaView: Component = () => {
       return;
     }
     const items = await listCollectionItems(colId);
-    setCollectionItemPaths(new Set(items.map((i) => i.file_hash)));
+    setCollectionItemPaths(new Set(items.map((i) => i.fingerprint)));
   }
 
   function selectedCollectionFileHashes() {
@@ -1936,7 +1936,7 @@ export const MediaView: Component = () => {
       if (item.kind !== "local") {
         throw new Error(`collection item is not local: ${itemId}`);
       }
-      return item.fileHash ?? item.path;
+      return item.fingerprint ?? item.path;
     });
   }
 
@@ -1962,9 +1962,9 @@ export const MediaView: Component = () => {
   }
 
   async function handleAddToCollection(collectionId: string) {
-    const fileHashes = selectedCollectionFileHashes();
-    if (fileHashes.length === 0) return;
-    await addToCollection(collectionId, fileHashes);
+    const fingerprints = selectedCollectionFileHashes();
+    if (fingerprints.length === 0) return;
+    await addToCollection(collectionId, fingerprints);
     setShowAddToCollectionMenu(false);
     if (selectedCollectionId() === collectionId) {
       await refreshCollectionItems();
@@ -1975,9 +1975,9 @@ export const MediaView: Component = () => {
   async function handleRemoveFromCollection() {
     const colId = selectedCollectionId();
     if (!colId) return;
-    const fileHashes = selectedCollectionFileHashes();
-    if (fileHashes.length === 0) return;
-    await removeFromCollection(colId, fileHashes);
+    const fingerprints = selectedCollectionFileHashes();
+    if (fingerprints.length === 0) return;
+    await removeFromCollection(colId, fingerprints);
     setSelectedMediaItemIds([]);
     await refreshCollectionItems();
     await refreshCollections();

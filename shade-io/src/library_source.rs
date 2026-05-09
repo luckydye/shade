@@ -394,6 +394,125 @@ pub async fn put_s3_object_bytes_with_atime(
     Ok(())
 }
 
+/// Metadata returned by `HEAD` on an S3 object — enough to drive
+/// fingerprinting (`Content-Length`, `ETag`, `x-amz-server-side-encryption`).
+#[derive(Debug, Clone)]
+pub struct S3ObjectMetadata {
+    pub size: u64,
+    pub etag: Option<String>,
+    pub sse_mode: Option<String>,
+    pub modified_at: Option<u64>,
+}
+
+pub async fn head_s3_object_metadata(
+    config: &S3LibraryConfig,
+    key: &str,
+) -> Result<S3ObjectMetadata, String> {
+    let _permit = s3_head_semaphore()
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
+    let client = http_client()?;
+    let request = signed_request("HEAD", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
+    let response = client
+        .head(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date)
+        .send()
+        .await
+        .map_err(|error| format!("S3 request failed for {}: {}", config.endpoint, error))?
+        .error_for_status()
+        .map_err(|error| {
+            format!(
+                "S3 head request failed for s3://{}/{} at {}: {}",
+                config.bucket, key, config.endpoint, error
+            )
+        })?;
+    let headers = response.headers();
+    let size = headers
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| {
+            format!(
+                "S3 HEAD missing Content-Length for s3://{}/{}",
+                config.bucket, key
+            )
+        })?;
+    let etag = headers
+        .get(reqwest::header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim_matches('"').to_string())
+        .filter(|value| !value.is_empty());
+    let sse_mode = headers
+        .get("x-amz-server-side-encryption")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let modified_at = headers
+        .get("x-amz-meta-atime")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            let trimmed = value.trim();
+            trimmed.parse::<u64>().ok().or_else(|| {
+                DateTime::parse_from_rfc3339(trimmed)
+                    .ok()
+                    .map(|dt| dt.timestamp_millis() as u64)
+            })
+        });
+    Ok(S3ObjectMetadata {
+        size,
+        etag,
+        sse_mode,
+        modified_at,
+    })
+}
+
+pub async fn get_s3_object_range(
+    config: &S3LibraryConfig,
+    key: &str,
+    offset: u64,
+    len: u32,
+) -> Result<Vec<u8>, String> {
+    let _permit = s3_get_semaphore()
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
+    let client = http_client()?;
+    let end = offset
+        .checked_add(u64::from(len.saturating_sub(1)))
+        .ok_or_else(|| format!("S3 range overflow for s3://{}/{}", config.bucket, key))?;
+    let range_value = format!("bytes={offset}-{end}");
+    let extra = vec![("range".to_string(), range_value.clone())];
+    let request = signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX, &extra)?;
+    let mut builder = client
+        .get(&request.url)
+        .header("authorization", request.authorization)
+        .header("x-amz-content-sha256", request.content_sha256)
+        .header("x-amz-date", request.amz_date);
+    for (name, value) in &request.extra_headers {
+        builder = builder.header(name, value);
+    }
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| {
+            format!("S3 request failed for {}: {}", config.endpoint, error)
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            format!(
+                "S3 ranged GET failed for s3://{}/{} ({}) at {}: {}",
+                config.bucket, key, range_value, config.endpoint, error
+            )
+        })?;
+    response
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| error.to_string())
+}
+
 pub async fn head_s3_object_modified_at(
     config: &S3LibraryConfig,
     key: &str,

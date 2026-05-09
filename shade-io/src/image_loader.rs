@@ -1,35 +1,17 @@
+use crate::file_fingerprint::{fingerprint_from_bytes, fingerprint_local};
 use crate::{
     load_image_bytes_f32_with_info, load_image_f32_with_info, picture_display_name,
     SourceImageInfo,
 };
 use shade_lib::FloatImage;
-use std::io::Read;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub struct OpenedImage {
-    pub file_hash: String,
+    pub fingerprint: String,
     pub source_name: Option<String>,
     pub image: FloatImage,
     pub info: SourceImageInfo,
-}
-
-pub fn hash_bytes(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
-}
-
-pub fn hash_file(path: &Path) -> Result<String, String> {
-    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher.finalize().to_hex().to_string())
 }
 
 fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
@@ -132,7 +114,7 @@ where
         )
         .map_err(|error| error.to_string())?;
         return Ok(OpenedImage {
-            file_hash: hash_bytes(&bytes),
+            fingerprint: fingerprint_from_bytes(&bytes).to_hex(),
             source_name: Some(path.to_string()),
             image,
             info,
@@ -150,10 +132,8 @@ where
         let (image, info) =
             load_image_bytes_f32_with_info(&bytes, Some(&picture_display_name(key)))
                 .map_err(|error| error.to_string())?;
-        let file_hash = blake3::hash(path.as_bytes()).to_hex().to_string();
-        eprintln!("[open_image s3] path={:?} len={} bytes={:02x?} file_hash={}", path, path.len(), path.as_bytes(), file_hash);
         return Ok(OpenedImage {
-            file_hash,
+            fingerprint: fingerprint_from_bytes(&bytes).to_hex(),
             source_name: Some(path.to_string()),
             image,
             info,
@@ -163,7 +143,7 @@ where
         let (image, info) = load_image_bytes_f32_with_info(&bytes, None)
             .map_err(|error| error.to_string())?;
         return Ok(OpenedImage {
-            file_hash: hash_bytes(&bytes),
+            fingerprint: fingerprint_from_bytes(&bytes).to_hex(),
             source_name: Some(path.to_string()),
             image,
             info,
@@ -173,7 +153,10 @@ where
     let (image, info) =
         load_image_f32_with_info(source).map_err(|error| error.to_string())?;
     Ok(OpenedImage {
-        file_hash: hash_file(source)?,
+        fingerprint: fingerprint_local(source)
+            .map_err(|error| error.to_string())?
+            .fingerprint
+            .to_hex(),
         source_name: Some(path.to_string()),
         image,
         info,

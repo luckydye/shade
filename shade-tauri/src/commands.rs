@@ -93,7 +93,7 @@ pub struct LibraryImage {
     pub name: String,
     pub modified_at: Option<u64>,
     #[serde(default)]
-    pub file_hash: Option<String>,
+    pub fingerprint: Option<String>,
     #[serde(default)]
     pub metadata: LibraryImageMetadata,
 }
@@ -146,7 +146,7 @@ async fn init_library_db() -> Result<LibraryDb, String> {
         .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS images (
-            file_hash TEXT PRIMARY KEY NOT NULL,
+            fingerprint TEXT PRIMARY KEY NOT NULL,
             source_name TEXT,
             created_at INTEGER NOT NULL
         )",
@@ -154,6 +154,11 @@ async fn init_library_db() -> Result<LibraryDb, String> {
     )
     .await
     .map_err(|e| e.to_string())?;
+    rename_file_hash_column(&conn, "images").await?;
+    rename_file_hash_column(&conn, "edit_versions").await?;
+    rename_file_hash_column(&conn, "media_ratings").await?;
+    rename_file_hash_column(&conn, "media_tags").await?;
+    rename_file_hash_column(&conn, "collection_items").await?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_images_source_name ON images(source_name)",
         (),
@@ -179,14 +184,14 @@ async fn init_library_db() -> Result<LibraryDb, String> {
              ALTER TABLE edit_versions RENAME TO edit_versions_old;
              CREATE TABLE edit_versions (
                  id TEXT PRIMARY KEY NOT NULL,
-                 file_hash TEXT NOT NULL,
+                 fingerprint TEXT NOT NULL,
                  created_at INTEGER NOT NULL,
                  layers_json TEXT NOT NULL,
                  peer_origin TEXT,
-                 FOREIGN KEY (file_hash) REFERENCES images(file_hash)
+                 FOREIGN KEY (fingerprint) REFERENCES images(fingerprint)
              );
-             INSERT INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
-                 SELECT lower(hex(randomblob(16))), file_hash, created_at, layers_json, NULL
+             INSERT INTO edit_versions (id, fingerprint, created_at, layers_json, peer_origin)
+                 SELECT lower(hex(randomblob(16))), fingerprint, created_at, layers_json, NULL
                  FROM edit_versions_old;
              DROP TABLE edit_versions_old;
              COMMIT;",
@@ -197,11 +202,11 @@ async fn init_library_db() -> Result<LibraryDb, String> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS edit_versions (
                 id TEXT PRIMARY KEY NOT NULL,
-                file_hash TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 layers_json TEXT NOT NULL,
                 peer_origin TEXT,
-                FOREIGN KEY (file_hash) REFERENCES images(file_hash)
+                FOREIGN KEY (fingerprint) REFERENCES images(fingerprint)
             )",
             (),
         )
@@ -210,7 +215,7 @@ async fn init_library_db() -> Result<LibraryDb, String> {
     }
     conn.execute(
         "CREATE TABLE IF NOT EXISTS media_ratings (
-            file_hash TEXT PRIMARY KEY NOT NULL,
+            fingerprint TEXT PRIMARY KEY NOT NULL,
             rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
             updated_at INTEGER NOT NULL
         )",
@@ -220,10 +225,10 @@ async fn init_library_db() -> Result<LibraryDb, String> {
     .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS media_tags (
-            file_hash TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
             tag TEXT NOT NULL,
             updated_at INTEGER NOT NULL,
-            PRIMARY KEY (file_hash, tag)
+            PRIMARY KEY (fingerprint, tag)
         )",
         (),
     )
@@ -234,12 +239,12 @@ async fn init_library_db() -> Result<LibraryDb, String> {
             "BEGIN;
              ALTER TABLE media_ratings RENAME TO media_ratings_old;
              CREATE TABLE media_ratings (
-                 file_hash TEXT PRIMARY KEY NOT NULL,
+                 fingerprint TEXT PRIMARY KEY NOT NULL,
                  rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
                  updated_at INTEGER NOT NULL
              );
-             INSERT INTO media_ratings (file_hash, rating, updated_at)
-                 SELECT images.file_hash, old.rating, old.updated_at
+             INSERT INTO media_ratings (fingerprint, rating, updated_at)
+                 SELECT images.fingerprint, old.rating, old.updated_at
                  FROM media_ratings_old old
                  JOIN images ON images.source_name = old.media_id;
              DROP TABLE media_ratings_old;
@@ -253,13 +258,13 @@ async fn init_library_db() -> Result<LibraryDb, String> {
             "BEGIN;
              ALTER TABLE media_tags RENAME TO media_tags_old;
              CREATE TABLE media_tags (
-                 file_hash TEXT NOT NULL,
+                 fingerprint TEXT NOT NULL,
                  tag TEXT NOT NULL,
                  updated_at INTEGER NOT NULL,
-                 PRIMARY KEY (file_hash, tag)
+                 PRIMARY KEY (fingerprint, tag)
              );
-             INSERT INTO media_tags (file_hash, tag, updated_at)
-                 SELECT images.file_hash, old.tag, old.updated_at
+             INSERT INTO media_tags (fingerprint, tag, updated_at)
+                 SELECT images.fingerprint, old.tag, old.updated_at
                  FROM media_tags_old old
                  JOIN images ON images.source_name = old.media_id;
              DROP TABLE media_tags_old;
@@ -482,7 +487,10 @@ fn open_local_image_sync(path: &str) -> Result<shade_io::OpenedImage, String> {
     let (image, info) = shade_io::load_image_f32_with_info(source)
         .map_err(|e| e.to_string())?;
     Ok(shade_io::OpenedImage {
-        file_hash: shade_io::hash_file(source)?,
+        fingerprint: shade_io::fingerprint_local(source)
+            .map_err(|error| error.to_string())?
+            .fingerprint
+            .to_hex(),
         source_name: Some(path.to_string()),
         image,
         info,
@@ -507,14 +515,14 @@ async fn require_p2p(
         .ok_or_else(|| "p2p is unavailable on this platform".to_string())
 }
 
-async fn sync_peer_snapshots_for_file_hash(
+async fn sync_peer_snapshots_for_fingerprint(
     peer_endpoint_id: &str,
-    file_hash: &str,
+    fingerprint: &str,
     p2p: &std::sync::Arc<shade_p2p::LocalPeerDiscovery>,
     source_name: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let peer_snapshots = p2p
-        .list_peer_snapshots(peer_endpoint_id, file_hash)
+        .list_peer_snapshots(peer_endpoint_id, fingerprint)
         .await
         .map_err(|e| e.to_string())?;
     if peer_snapshots.is_empty() {
@@ -525,8 +533,8 @@ async fn sync_peer_snapshots_for_file_hash(
         let conn = library_db_conn().await;
         let mut rows = conn
             .query(
-                "SELECT id FROM edit_versions WHERE file_hash = ?1",
-                [file_hash],
+                "SELECT id FROM edit_versions WHERE fingerprint = ?1",
+                [fingerprint],
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -545,8 +553,8 @@ async fn sync_peer_snapshots_for_file_hash(
             if let Some(source_name) = source_name {
                 let conn = library_db_conn().await;
                 conn.execute(
-                    "UPDATE images SET source_name = ?1 WHERE file_hash = ?2",
-                    libsql::params![source_name, file_hash],
+                    "UPDATE images SET source_name = ?1 WHERE fingerprint = ?2",
+                    libsql::params![source_name, fingerprint],
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -576,7 +584,7 @@ async fn sync_peer_snapshots_for_file_hash(
             }
         };
         if let Err(e) = persist_snapshot(
-            file_hash,
+            fingerprint,
             source_name,
             Some(&snap.id),
             Some(peer_endpoint_id),
@@ -593,15 +601,15 @@ async fn sync_peer_snapshots_for_file_hash(
     Ok(synced_ids)
 }
 
-async fn sync_snapshots_from_all_peers_for_file_hash(
+async fn sync_snapshots_from_all_peers_for_fingerprint(
     p2p: &std::sync::Arc<shade_p2p::LocalPeerDiscovery>,
-    file_hash: &str,
+    fingerprint: &str,
 ) -> Result<Vec<String>, String> {
     let snapshot = p2p.snapshot().await;
     let mut synced_ids = Vec::new();
     for peer in snapshot.peers {
         synced_ids.extend(
-            sync_peer_snapshots_for_file_hash(&peer.endpoint_id, file_hash, p2p, None)
+            sync_peer_snapshots_for_fingerprint(&peer.endpoint_id, fingerprint, p2p, None)
                 .await?,
         );
     }
@@ -668,10 +676,10 @@ pub async fn open_thumbnail_cache_db() -> Result<shade_io::ThumbnailCacheDb, Str
     shade_io::ThumbnailCacheDb::open(&thumbnail_cache_db_path()?).await
 }
 
-fn texture_id_for_file_hash(file_hash: &str) -> Result<shade_lib::TextureId, String> {
-    let prefix = file_hash
+fn texture_id_for_fingerprint(fingerprint: &str) -> Result<shade_lib::TextureId, String> {
+    let prefix = fingerprint
         .get(..16)
-        .ok_or_else(|| format!("invalid file hash: {file_hash}"))?;
+        .ok_or_else(|| format!("invalid file hash: {fingerprint}"))?;
     u64::from_str_radix(prefix, 16).map_err(|e| e.to_string())
 }
 
@@ -770,6 +778,23 @@ fn restore_masks_from_params(
     }
 }
 
+/// One-shot rename of a legacy `file_hash` column to `fingerprint` on an
+/// existing table. Idempotent — does nothing if the table doesn't exist
+/// or already uses the new name.
+async fn rename_file_hash_column(
+    conn: &libsql::Connection,
+    table: &str,
+) -> Result<(), String> {
+    if !table_has_column(conn, table, "file_hash").await? {
+        return Ok(());
+    }
+    let stmt = format!("ALTER TABLE {table} RENAME COLUMN file_hash TO fingerprint");
+    conn.execute(stmt.as_str(), ())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 async fn table_has_column(
     conn: &libsql::Connection,
     table: &str,
@@ -818,31 +843,31 @@ fn normalize_media_tags(tags: &[String]) -> Vec<String> {
 }
 
 async fn load_media_ratings_map(
-    file_hashes: &[String],
+    fingerprints: &[String],
 ) -> Result<HashMap<String, u8>, String> {
-    if file_hashes.is_empty() {
+    if fingerprints.is_empty() {
         return Ok(HashMap::new());
     }
-    let requested_hashes = file_hashes
+    let requested_hashes = fingerprints
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
     let conn = library_db_conn().await;
     let mut rows = conn
-        .query("SELECT file_hash, rating FROM media_ratings", ())
+        .query("SELECT fingerprint, rating FROM media_ratings", ())
         .await
         .map_err(|error| error.to_string())?;
     let mut ratings = HashMap::new();
     while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
-        let file_hash = row.get::<String>(0).map_err(|error| error.to_string())?;
-        if !requested_hashes.contains(&file_hash) {
+        let fingerprint = row.get::<String>(0).map_err(|error| error.to_string())?;
+        if !requested_hashes.contains(&fingerprint) {
             continue;
         }
         let rating = row
             .get::<i64>(1)
             .map_err(|error| error.to_string())
             .and_then(|value| u8::try_from(value).map_err(|error| error.to_string()))?;
-        ratings.insert(file_hash, rating);
+        ratings.insert(fingerprint, rating);
     }
     Ok(ratings)
 }
@@ -853,12 +878,12 @@ async fn snapshot_ids_by_source_name() -> Result<HashMap<String, String>, String
         .query(
             "SELECT i.source_name, ev.id
              FROM images i
-             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             JOIN edit_versions ev ON ev.fingerprint = i.fingerprint
              WHERE i.source_name IS NOT NULL
              AND ev.created_at = (
                  SELECT MAX(ev2.created_at)
                  FROM edit_versions ev2
-                 WHERE ev2.file_hash = i.file_hash
+                 WHERE ev2.fingerprint = i.fingerprint
              )",
             (),
         )
@@ -883,53 +908,53 @@ pub struct PeerPictureInfo {
 }
 
 async fn load_media_tags_map(
-    file_hashes: &[String],
+    fingerprints: &[String],
 ) -> Result<HashMap<String, Vec<String>>, String> {
-    if file_hashes.is_empty() {
+    if fingerprints.is_empty() {
         return Ok(HashMap::new());
     }
-    let requested_hashes = file_hashes
+    let requested_hashes = fingerprints
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
     let conn = library_db_conn().await;
     let mut rows = conn
-        .query("SELECT file_hash, tag FROM media_tags ORDER BY tag ASC", ())
+        .query("SELECT fingerprint, tag FROM media_tags ORDER BY tag ASC", ())
         .await
         .map_err(|error| error.to_string())?;
     let mut tags = HashMap::<String, Vec<String>>::new();
     while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
-        let file_hash = row.get::<String>(0).map_err(|error| error.to_string())?;
-        if !requested_hashes.contains(&file_hash) {
+        let fingerprint = row.get::<String>(0).map_err(|error| error.to_string())?;
+        if !requested_hashes.contains(&fingerprint) {
             continue;
         }
         let tag = row.get::<String>(1).map_err(|error| error.to_string())?;
         if tag.is_empty() {
             continue;
         }
-        tags.entry(file_hash).or_default().push(tag);
+        tags.entry(fingerprint).or_default().push(tag);
     }
     Ok(tags)
 }
 
-async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(), String> {
+async fn persist_media_rating(fingerprint: &str, rating: Option<u8>) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
     let conn = library_db_conn().await;
     if let Some(value) = normalized {
         conn.execute(
-            "INSERT INTO media_ratings (file_hash, rating, updated_at)
+            "INSERT INTO media_ratings (fingerprint, rating, updated_at)
              VALUES (?1, ?2, ?3)
-             ON CONFLICT(file_hash)
+             ON CONFLICT(fingerprint)
              DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
-            libsql::params![file_hash, i64::from(value), unix_timestamp_millis()?],
+            libsql::params![fingerprint, i64::from(value), unix_timestamp_millis()?],
         )
         .await
         .map_err(|error| error.to_string())?;
         return Ok(());
     }
     conn.execute(
-        "DELETE FROM media_ratings WHERE file_hash = ?1",
-        [file_hash],
+        "DELETE FROM media_ratings WHERE fingerprint = ?1",
+        [fingerprint],
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -938,7 +963,7 @@ async fn persist_media_rating(file_hash: &str, rating: Option<u8>) -> Result<(),
 
 // Reads the XMP sidecar rating for a local file path and stores it with INSERT OR IGNORE,
 // so it never overwrites a rating the user has set explicitly.
-async fn import_xmp_rating(picture_id: &str, file_hash: &str) {
+async fn import_xmp_rating(picture_id: &str, fingerprint: &str) {
     if picture_id.contains("://") {
         return; // skip non-local paths (ccapi://, s3://, etc.)
     }
@@ -954,28 +979,28 @@ async fn import_xmp_rating(picture_id: &str, file_hash: &str) {
         library_db_conn(),
     ).await {
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO media_ratings (file_hash, rating, updated_at) VALUES (?1, ?2, ?3)",
-            libsql::params![file_hash, i64::from(rating), now],
+            "INSERT OR IGNORE INTO media_ratings (fingerprint, rating, updated_at) VALUES (?1, ?2, ?3)",
+            libsql::params![fingerprint, i64::from(rating), now],
         ).await;
     }
 }
 
-pub async fn persist_media_tags(file_hash: &str, tags: &[String]) -> Result<(), String> {
+pub async fn persist_media_tags(fingerprint: &str, tags: &[String]) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
     let conn = library_db_conn().await;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
     let result = async {
-        conn.execute("DELETE FROM media_tags WHERE file_hash = ?1", [file_hash])
+        conn.execute("DELETE FROM media_tags WHERE fingerprint = ?1", [fingerprint])
             .await
             .map_err(|error| error.to_string())?;
         let updated_at = unix_timestamp_millis()?;
         for tag in normalized {
             conn.execute(
-                "INSERT INTO media_tags (file_hash, tag, updated_at)
+                "INSERT INTO media_tags (fingerprint, tag, updated_at)
                  VALUES (?1, ?2, ?3)",
-                libsql::params![file_hash, tag, updated_at],
+                libsql::params![fingerprint, tag, updated_at],
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -997,19 +1022,19 @@ pub async fn persist_media_tags(file_hash: &str, tags: &[String]) -> Result<(), 
     }
 }
 
-pub async fn persist_media_tags_empty(file_hash: &str) -> Result<(), String> {
+pub async fn persist_media_tags_empty(fingerprint: &str) -> Result<(), String> {
     let conn = library_db_conn().await;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
     let result = async {
-        conn.execute("DELETE FROM media_tags WHERE file_hash = ?1", [file_hash])
+        conn.execute("DELETE FROM media_tags WHERE fingerprint = ?1", [fingerprint])
             .await
             .map_err(|error| error.to_string())?;
         conn.execute(
-            "INSERT INTO media_tags (file_hash, tag, updated_at)
+            "INSERT INTO media_tags (fingerprint, tag, updated_at)
              VALUES (?1, '', ?2)",
-            libsql::params![file_hash, unix_timestamp_millis()?],
+            libsql::params![fingerprint, unix_timestamp_millis()?],
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -1046,12 +1071,12 @@ pub async fn max_media_tag_updated_at() -> Result<i64, String> {
     Ok(max)
 }
 
-pub async fn media_tags_exist(file_hash: &str) -> Result<bool, String> {
+pub async fn media_tags_exist(fingerprint: &str) -> Result<bool, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
         .query(
-            "SELECT 1 FROM media_tags WHERE file_hash = ?1 LIMIT 1",
-            [file_hash],
+            "SELECT 1 FROM media_tags WHERE fingerprint = ?1 LIMIT 1",
+            [fingerprint],
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -1063,17 +1088,17 @@ pub async fn media_tags_exist(file_hash: &str) -> Result<bool, String> {
 }
 
 async fn load_latest_edit_version(
-    file_hash: &str,
+    fingerprint: &str,
 ) -> Result<Option<PersistedEditVersion>, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
         .query(
             "SELECT id, layers_json
              FROM edit_versions
-             WHERE file_hash = ?1
+             WHERE fingerprint = ?1
              ORDER BY created_at DESC
              LIMIT 1",
-            [file_hash],
+            [fingerprint],
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -1095,7 +1120,7 @@ async fn load_latest_edit_version_by_source(
         .query(
             "SELECT ev.id, ev.layers_json
              FROM images i
-             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             JOIN edit_versions ev ON ev.fingerprint = i.fingerprint
              WHERE i.source_name = ?1
              ORDER BY ev.created_at DESC
              LIMIT 1",
@@ -1119,7 +1144,7 @@ async fn latest_snapshot_created_at(source_name: &str) -> Option<i64> {
         .query(
             "SELECT ev.created_at
              FROM images i
-             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             JOIN edit_versions ev ON ev.fingerprint = i.fingerprint
              WHERE i.source_name = ?1
              ORDER BY ev.created_at DESC
              LIMIT 1",
@@ -1136,7 +1161,7 @@ async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
         .query(
             "SELECT 1
              FROM images i
-             JOIN edit_versions ev ON ev.file_hash = i.file_hash
+             JOIN edit_versions ev ON ev.fingerprint = i.fingerprint
              WHERE i.source_name = ?1
              LIMIT 1",
             [source_name],
@@ -1147,16 +1172,16 @@ async fn has_snapshot_for_source(source_name: &str) -> Result<bool, String> {
 }
 
 async fn register_image_source(
-    file_hash: &str,
+    fingerprint: &str,
     source_name: Option<&str>,
 ) -> Result<(), String> {
     let conn = library_db_conn().await;
     let now = unix_timestamp_millis()?;
     conn.execute(
-        "INSERT INTO images (file_hash, source_name, created_at)
+        "INSERT INTO images (fingerprint, source_name, created_at)
          VALUES (?1, ?2, ?3)
-         ON CONFLICT(file_hash) DO UPDATE SET source_name = excluded.source_name",
-        libsql::params![file_hash, source_name, now],
+         ON CONFLICT(fingerprint) DO UPDATE SET source_name = excluded.source_name",
+        libsql::params![fingerprint, source_name, now],
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -1167,25 +1192,25 @@ async fn register_image_source(
 /// If `id` is given (e.g. when inserting a synced peer snapshot), that id is used;
 /// otherwise a new UUID v4 is generated.
 async fn persist_snapshot(
-    file_hash: &str,
+    fingerprint: &str,
     source_name: Option<&str>,
     id: Option<&str>,
     peer_origin: Option<&str>,
     data: &PersistedLayerData,
 ) -> Result<String, String> {
     ensure_non_image_layers(&data.layers)?;
-    register_image_source(file_hash, source_name).await?;
+    register_image_source(fingerprint, source_name).await?;
     let conn = library_db_conn().await;
     let now = unix_timestamp_millis()?;
     let snapshot_id = id
         .map(|s| s.to_owned())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     conn.execute(
-        "INSERT OR IGNORE INTO edit_versions (id, file_hash, created_at, layers_json, peer_origin)
+        "INSERT OR IGNORE INTO edit_versions (id, fingerprint, created_at, layers_json, peer_origin)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         libsql::params![
             snapshot_id.as_str(),
-            file_hash,
+            fingerprint,
             now,
             serde_json::to_string(data).map_err(|e| e.to_string())?,
             peer_origin,
@@ -1198,11 +1223,11 @@ async fn persist_snapshot(
 
 fn restore_persisted_layers(
     state: &mut EditorState,
-    file_hash: String,
+    fingerprint: String,
     source_name: Option<String>,
     persisted: Option<PersistedEditVersion>,
 ) -> Result<(), String> {
-    state.current_image_hash = Some(file_hash);
+    state.current_image_hash = Some(fingerprint);
     state.current_image_source = source_name;
     state.current_snapshot_id = persisted.as_ref().map(|v| v.id.clone());
     let Some(persisted) = persisted else {
@@ -1262,13 +1287,13 @@ fn build_persisted_layer_stack(
 async fn persist_current_edit_version(
     state: &tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<String, String> {
-    let (file_hash, source_name, data, current_snapshot_id) = {
+    let (fingerprint, source_name, data, current_snapshot_id) = {
         let st = lock_editor_state(state)?;
-        let file_hash = st.current_image_hash.clone().ok_or_else(|| {
+        let fingerprint = st.current_image_hash.clone().ok_or_else(|| {
             "cannot persist edits without a loaded image hash".to_string()
         })?;
         (
-            file_hash,
+            fingerprint,
             st.current_image_source.clone(),
             non_image_layer_data(&st.stack),
             st.current_snapshot_id.clone(),
@@ -1291,7 +1316,7 @@ async fn persist_current_edit_version(
         .map_err(|e| e.to_string())?;
         existing_id
     } else {
-        persist_snapshot(&file_hash, source_name.as_deref(), None, None, &data).await?
+        persist_snapshot(&fingerprint, source_name.as_deref(), None, None, &data).await?
     };
     let mut st = lock_editor_state(state)?;
     st.current_snapshot_id = Some(id.clone());
@@ -1301,26 +1326,26 @@ async fn persist_current_edit_version(
 async fn save_new_snapshot(
     state: &tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<String, String> {
-    let (file_hash, source_name, data) = {
+    let (fingerprint, source_name, data) = {
         let st = lock_editor_state(state)?;
-        let file_hash = st.current_image_hash.clone().ok_or_else(|| {
+        let fingerprint = st.current_image_hash.clone().ok_or_else(|| {
             "cannot save a snapshot without a loaded image hash".to_string()
         })?;
         (
-            file_hash,
+            fingerprint,
             st.current_image_source.clone(),
             non_image_layer_data(&st.stack),
         )
     };
     let id =
-        persist_snapshot(&file_hash, source_name.as_deref(), None, None, &data).await?;
+        persist_snapshot(&fingerprint, source_name.as_deref(), None, None, &data).await?;
     let mut st = lock_editor_state(state)?;
     st.current_snapshot_id = Some(id.clone());
     Ok(id)
 }
 
 async fn list_snapshots_for_file(
-    file_hash: &str,
+    fingerprint: &str,
     current_snapshot_id: Option<&str>,
 ) -> Result<Vec<SnapshotInfo>, String> {
     let conn = library_db_conn().await;
@@ -1330,9 +1355,9 @@ async fn list_snapshots_for_file(
             "SELECT id, created_at, peer_origin,
                     ROW_NUMBER() OVER (ORDER BY created_at) AS display_index
              FROM edit_versions
-             WHERE file_hash = ?1
+             WHERE fingerprint = ?1
              ORDER BY created_at DESC",
-            [file_hash],
+            [fingerprint],
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -1354,7 +1379,7 @@ async fn list_snapshots_for_file(
 }
 
 async fn load_snapshot_by_id(
-    file_hash: &str,
+    fingerprint: &str,
     id: &str,
 ) -> Result<PersistedEditVersion, String> {
     let conn = library_db_conn().await;
@@ -1362,9 +1387,9 @@ async fn load_snapshot_by_id(
         .query(
             "SELECT layers_json
              FROM edit_versions
-             WHERE file_hash = ?1 AND id = ?2
+             WHERE fingerprint = ?1 AND id = ?2
              LIMIT 1",
-            libsql::params![file_hash, id],
+            libsql::params![fingerprint, id],
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -1423,13 +1448,13 @@ pub struct SnapshotInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MediaRatingParams {
-    pub file_hash: String,
+    pub fingerprint: String,
     pub rating: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MediaTagsParams {
-    pub file_hash: String,
+    pub fingerprint: String,
     pub tags: Vec<String>,
 }
 
@@ -2414,7 +2439,7 @@ fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> 
             name: item.name,
             path: item.path,
             modified_at: item.modified_at,
-            file_hash: None,
+            fingerprint: None,
             metadata: LibraryImageMetadata {
                 has_snapshots: false,
                 latest_snapshot_id: None,
@@ -2463,7 +2488,7 @@ async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, St
                 name: picture_display_name(&file_path),
                 path: ccapi_media_path(host, &file_path),
                 modified_at,
-                file_hash: None,
+                fingerprint: None,
                 metadata: LibraryImageMetadata {
                     has_snapshots: false,
                     latest_snapshot_id: None,
@@ -2571,7 +2596,7 @@ fn local_library_image(item: shade_io::IndexedLibraryImage) -> LibraryImage {
         name: item.name,
         path: item.path,
         modified_at: item.modified_at,
-        file_hash: None,
+        fingerprint: None,
         metadata: LibraryImageMetadata {
             has_snapshots: false,
             latest_snapshot_id: None,
@@ -3079,7 +3104,7 @@ impl EditorState {
             canvas_width: width,
             canvas_height: height,
             source_bit_depth,
-            file_hash: None,
+            fingerprint: None,
         }
     }
 
@@ -3122,7 +3147,7 @@ impl EditorState {
             canvas_width: width,
             canvas_height: height,
             source_bit_depth,
-            file_hash: None,
+            fingerprint: None,
         }
     }
 }
@@ -3135,7 +3160,7 @@ pub struct LayerInfoResponse {
     pub canvas_width: u32,
     pub canvas_height: u32,
     pub source_bit_depth: String,
-    pub file_hash: Option<String>,
+    pub fingerprint: Option<String>,
 }
 
 #[tauri::command]
@@ -3243,7 +3268,7 @@ pub async fn get_peer_image_bytes(
 #[tauri::command]
 pub async fn set_local_awareness(
     display_name: Option<String>,
-    file_hash: Option<String>,
+    fingerprint: Option<String>,
     snapshot_id: Option<String>,
     awareness: tauri::State<'_, crate::AwarenessStateHandle>,
 ) -> Result<(), String> {
@@ -3251,7 +3276,7 @@ pub async fn set_local_awareness(
     if display_name.is_some() {
         state.display_name = display_name;
     }
-    state.active_file_hash = file_hash;
+    state.active_fingerprint = fingerprint;
     state.active_snapshot_id = snapshot_id;
     Ok(())
 }
@@ -3274,19 +3299,19 @@ pub struct SyncPeerSnapshotsResult {
     pub synced_ids: Vec<String>,
 }
 
-/// Pull snapshots from a peer for the given file_hash that we don't have locally.
+/// Pull snapshots from a peer for the given fingerprint that we don't have locally.
 /// Returns the list of newly inserted snapshot IDs.
 #[tauri::command]
 pub async fn sync_peer_snapshots(
     peer_endpoint_id: String,
-    file_hash: String,
+    fingerprint: String,
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<SyncPeerSnapshotsResult, String> {
     let p2p = require_p2p(&p2p).await?;
     Ok(SyncPeerSnapshotsResult {
-        synced_ids: sync_peer_snapshots_for_file_hash(
+        synced_ids: sync_peer_snapshots_for_fingerprint(
             &peer_endpoint_id,
-            &file_hash,
+            &fingerprint,
             &p2p,
             None,
         )
@@ -3299,12 +3324,12 @@ pub async fn sync_peer_snapshots(
 #[tauri::command]
 pub async fn apply_peer_metadata(
     peer_endpoint_id: String,
-    file_hashes: Vec<String>,
+    fingerprints: Vec<String>,
     p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<ApplyPeerMetadataResult, String> {
     let p2p = require_p2p(&p2p).await?;
 
-    if file_hashes.is_empty() {
+    if fingerprints.is_empty() {
         return Ok(ApplyPeerMetadataResult {
             ratings_updated: 0,
             tags_added: 0,
@@ -3312,7 +3337,7 @@ pub async fn apply_peer_metadata(
     }
 
     let peer_metadata = p2p
-        .get_peer_metadata(&peer_endpoint_id, &file_hashes)
+        .get_peer_metadata(&peer_endpoint_id, &fingerprints)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -3333,8 +3358,8 @@ pub async fn apply_peer_metadata(
             let peer_ts = meta.rating_updated_at.unwrap_or(0);
             let local_ts: i64 = conn
                 .query(
-                    "SELECT updated_at FROM media_ratings WHERE file_hash = ?1 LIMIT 1",
-                    [meta.file_hash.as_str()],
+                    "SELECT updated_at FROM media_ratings WHERE fingerprint = ?1 LIMIT 1",
+                    [meta.fingerprint.as_str()],
                 )
                 .await
                 .map_err(|e| e.to_string())?
@@ -3346,11 +3371,11 @@ pub async fn apply_peer_metadata(
 
             if peer_ts > local_ts {
                 conn.execute(
-                    "INSERT INTO media_ratings (file_hash, rating, updated_at)
+                    "INSERT INTO media_ratings (fingerprint, rating, updated_at)
                      VALUES (?1, ?2, ?3)
-                     ON CONFLICT(file_hash)
+                     ON CONFLICT(fingerprint)
                      DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
-                    libsql::params![meta.file_hash.as_str(), i64::from(peer_rating), peer_ts],
+                    libsql::params![meta.fingerprint.as_str(), i64::from(peer_rating), peer_ts],
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -3364,8 +3389,8 @@ pub async fn apply_peer_metadata(
             let mut existing_tags = std::collections::HashSet::new();
             let mut tag_rows = conn
                 .query(
-                    "SELECT tag FROM media_tags WHERE file_hash = ?1",
-                    [meta.file_hash.as_str()],
+                    "SELECT tag FROM media_tags WHERE fingerprint = ?1",
+                    [meta.fingerprint.as_str()],
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -3377,10 +3402,10 @@ pub async fn apply_peer_metadata(
             for tag in &meta.tags {
                 if !existing_tags.contains(tag) {
                     conn.execute(
-                        "INSERT INTO media_tags (file_hash, tag, updated_at)
+                        "INSERT INTO media_tags (fingerprint, tag, updated_at)
                          VALUES (?1, ?2, ?3)",
                         libsql::params![
-                            meta.file_hash.as_str(),
+                            meta.fingerprint.as_str(),
                             tag.as_str(),
                             peer_tags_ts
                         ],
@@ -3422,17 +3447,17 @@ pub async fn open_peer_image(
         .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
         .await
         .map_err(|error| error.to_string())?;
-    let file_hash = shade_io::hash_bytes(&bytes);
+    let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
     let peer = require_p2p(&p2p).await?;
-    let _ = sync_peer_snapshots_for_file_hash(
+    let _ = sync_peer_snapshots_for_fingerprint(
         &peer_endpoint_id,
-        &file_hash,
+        &fingerprint,
         &peer,
         Some(&picture_id),
     )
     .await;
-    register_image_source(&file_hash, Some(&picture_id)).await?;
-    let persisted = load_latest_edit_version(&file_hash).await?;
+    register_image_source(&fingerprint, Some(&picture_id)).await?;
+    let persisted = load_latest_edit_version(&fingerprint).await?;
     let bytes_clone = bytes.clone();
     let file_name_clone = file_name.clone();
     let (image, info) = tokio::task::spawn_blocking(move || {
@@ -3453,11 +3478,11 @@ pub async fn open_peer_image(
         );
         restore_persisted_layers(
             &mut st,
-            file_hash.clone(),
+            fingerprint.clone(),
             Some(picture_id),
             persisted,
         )?;
-        response.file_hash = Some(file_hash);
+        response.fingerprint = Some(fingerprint);
         response
     };
     Ok(response)
@@ -3486,10 +3511,10 @@ pub async fn open_image<R: tauri::Runtime>(
         if let Some(bytes) = photo_bytes {
             let path_clone = path.clone();
             tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let file_hash = shade_io::hash_bytes(&bytes);
+                let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
                 let (image, info) = decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
                 Ok(shade_io::OpenedImage {
-                    file_hash,
+                    fingerprint,
                     source_name: Some(path_clone),
                     image,
                     info,
@@ -3524,14 +3549,14 @@ pub async fn open_image<R: tauri::Runtime>(
         )
         .await?
     };
-    let file_hash = opened.file_hash;
+    let fingerprint = opened.fingerprint;
     if let Some(source_name) = opened.source_name.as_deref() {
-        register_image_source(&file_hash, Some(source_name)).await?;
+        register_image_source(&fingerprint, Some(source_name)).await?;
     }
     if let Some(peer) = p2p.0.read().await.clone() {
-        let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
+        let _ = sync_snapshots_from_all_peers_for_fingerprint(&peer, &fingerprint).await;
     }
-    let persisted = match load_latest_edit_version(&file_hash).await? {
+    let persisted = match load_latest_edit_version(&fingerprint).await? {
         Some(p) => Some(p),
         None => {
             if let Some(source_name) = opened.source_name.as_deref() {
@@ -3554,11 +3579,11 @@ pub async fn open_image<R: tauri::Runtime>(
         );
         restore_persisted_layers(
             &mut st,
-            file_hash.clone(),
+            fingerprint.clone(),
             opened.source_name,
             persisted,
         )?;
-        response.file_hash = Some(file_hash);
+        response.fingerprint = Some(fingerprint);
         response
     };
     Ok(response)
@@ -3575,14 +3600,14 @@ pub async fn open_image_encoded_bytes(
         let mut st = lock_editor_state(&state)?;
         st.begin_open_request()
     };
-    let file_hash = shade_io::hash_bytes(&bytes);
+    let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
     if let Some(file_name) = file_name.as_deref() {
-        register_image_source(&file_hash, Some(file_name)).await?;
+        register_image_source(&fingerprint, Some(file_name)).await?;
     }
     if let Some(peer) = p2p.0.read().await.clone() {
-        let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
+        let _ = sync_snapshots_from_all_peers_for_fingerprint(&peer, &fingerprint).await;
     }
-    let persisted = load_latest_edit_version(&file_hash).await?;
+    let persisted = load_latest_edit_version(&fingerprint).await?;
     let bytes_clone = bytes.clone();
     let file_name_clone = file_name.clone();
     let (image, info) = tokio::task::spawn_blocking(move || {
@@ -3601,8 +3626,8 @@ pub async fn open_image_encoded_bytes(
             image.height,
             info.bit_depth,
         );
-        restore_persisted_layers(&mut st, file_hash.clone(), file_name, persisted)?;
-        response.file_hash = Some(file_hash);
+        restore_persisted_layers(&mut st, fingerprint.clone(), file_name, persisted)?;
+        response.fingerprint = Some(fingerprint);
         response
     };
     Ok(response)
@@ -3632,11 +3657,11 @@ pub async fn open_image_bytes(
             pixels.len()
         ));
     }
-    let file_hash = shade_io::hash_bytes(&pixels);
+    let fingerprint = shade_io::fingerprint_from_bytes(&pixels).to_hex();
     if let Some(peer) = p2p.0.read().await.clone() {
-        let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
+        let _ = sync_snapshots_from_all_peers_for_fingerprint(&peer, &fingerprint).await;
     }
-    let persisted = load_latest_edit_version(&file_hash).await?;
+    let persisted = load_latest_edit_version(&fingerprint).await?;
     let response = {
         let mut st = lock_editor_state(&state)?;
         if !st.is_current_open_request(open_request_id) {
@@ -3652,8 +3677,8 @@ pub async fn open_image_bytes(
             "8-bit".into(),
             shade_lib::ColorSpace::Srgb,
         );
-        restore_persisted_layers(&mut st, file_hash.clone(), None, persisted)?;
-        response.file_hash = Some(file_hash);
+        restore_persisted_layers(&mut st, fingerprint.clone(), None, persisted)?;
+        response.fingerprint = Some(fingerprint);
         response
     };
     Ok(response)
@@ -3863,10 +3888,10 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         if let Some(bytes) = photo_bytes {
             let picture_id_owned = picture_id.to_string();
             tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let file_hash = shade_io::hash_bytes(&bytes);
+                let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
                 let (image, info) = decode_image_bytes_with_info(&bytes, Some(&picture_id_owned))?;
                 Ok(shade_io::OpenedImage {
-                    file_hash,
+                    fingerprint,
                     source_name: Some(picture_id_owned),
                     image,
                     info,
@@ -3894,7 +3919,7 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         )
         .await?
     };
-    let persisted = match load_latest_edit_version(&opened.file_hash).await? {
+    let persisted = match load_latest_edit_version(&opened.fingerprint).await? {
         Some(p) => p,
         None => match load_latest_edit_version_by_source(picture_id).await? {
             Some(p) => p,
@@ -3906,7 +3931,7 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         width: opened.image.width,
         height: opened.image.height,
     };
-    let texture_id = texture_id_for_file_hash(&opened.file_hash)?;
+    let texture_id = texture_id_for_fingerprint(&opened.fingerprint)?;
     let canvas_width = image.width;
     let canvas_height = image.height;
     let stack =
@@ -3926,7 +3951,7 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         })
         .map_err(|e| e.to_string())?;
     let bytes = response_rx.await.map_err(|error| error.to_string())??;
-    Ok(Some((bytes, opened.file_hash)))
+    Ok(Some((bytes, opened.fingerprint)))
 }
 
 /// Run the full GPU render pipeline and return raw RGBA8 pixels.
@@ -4679,9 +4704,9 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     } else {
         shade_io::thumbnail_cache_key(picture_id)
     };
-    if let Ok(Some((cached_file_hash, cached_bytes))) = cache.0.get(&cache_key).await {
-        if let Some(file_hash) = cached_file_hash.as_deref() {
-            register_image_source(file_hash, Some(load_path)).await?;
+    if let Ok(Some((cached_fingerprint, cached_bytes))) = cache.0.get(&cache_key).await {
+        if let Some(fingerprint) = cached_fingerprint.as_deref() {
+            register_image_source(fingerprint, Some(load_path)).await?;
             return Ok(cached_bytes);
         }
         let is_local_path =
@@ -4690,9 +4715,9 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
             return Ok(cached_bytes);
         }
     }
-    if let Some((bytes, file_hash)) = render_snapshot_thumbnail_bytes(&app, load_path).await? {
-        register_image_source(&file_hash, Some(load_path)).await?;
-        cache.0.put(&cache_key, Some(&file_hash), &bytes).await?;
+    if let Some((bytes, fingerprint)) = render_snapshot_thumbnail_bytes(&app, load_path).await? {
+        register_image_source(&fingerprint, Some(load_path)).await?;
+        cache.0.put(&cache_key, Some(&fingerprint), &bytes).await?;
         return Ok(bytes);
     }
     let thumbnail_queue = app.state::<crate::ThumbnailService>().raw_queue.clone();
@@ -4716,21 +4741,21 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         },
     )
     .await?;
-    if let Some(file_hash) = thumbnail.file_hash.as_deref() {
-        register_image_source(file_hash, Some(load_path)).await?;
+    if let Some(fingerprint) = thumbnail.fingerprint.as_deref() {
+        register_image_source(fingerprint, Some(load_path)).await?;
     }
     cache
         .0
-        .put(&cache_key, thumbnail.file_hash.as_deref(), &thumbnail.bytes)
+        .put(&cache_key, thumbnail.fingerprint.as_deref(), &thumbnail.bytes)
         .await?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    if let Some(file_hash) = thumbnail.file_hash.clone() {
-        import_xmp_rating(picture_id, &file_hash).await;
+    if let Some(fingerprint) = thumbnail.fingerprint.clone() {
+        import_xmp_rating(picture_id, &fingerprint).await;
         crate::tagging_worker::enqueue_thumbnail_for_tagging(
             &app,
             shade_io::ThumbnailCacheEntry {
                 picture_id: cache_key,
-                file_hash,
+                fingerprint,
                 data: thumbnail.bytes.clone(),
             },
         )?;
@@ -4919,19 +4944,19 @@ async fn enrich_listing_metadata(
 ) -> Result<(), String> {
     let mut snapshot_ids: HashMap<String, String> = HashMap::new();
     let mut snapshot_created_ats: HashMap<String, i64> = HashMap::new();
-    let mut file_hashes_by_source: HashMap<String, String> = HashMap::new();
+    let mut fingerprints_by_source: HashMap<String, String> = HashMap::new();
     {
         let conn = library_db_conn().await;
         let mut rows = conn
             .query(
-                "SELECT i.source_name, i.file_hash, ev.id, ev.created_at
+                "SELECT i.source_name, i.fingerprint, ev.id, ev.created_at
                  FROM images i
-                 JOIN edit_versions ev ON ev.file_hash = i.file_hash
+                 JOIN edit_versions ev ON ev.fingerprint = i.fingerprint
                  WHERE i.source_name IS NOT NULL
                  AND ev.created_at = (
                      SELECT MAX(ev2.created_at)
                      FROM edit_versions ev2
-                     JOIN images i2 ON i2.file_hash = ev2.file_hash
+                     JOIN images i2 ON i2.fingerprint = ev2.fingerprint
                      WHERE i2.source_name = i.source_name
                  )",
                 (),
@@ -4940,21 +4965,21 @@ async fn enrich_listing_metadata(
             .map_err(|e| e.to_string())?;
         while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
             let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
-            let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
+            let fingerprint = row.get::<String>(1).map_err(|e| e.to_string())?;
             let id = row.get::<String>(2).map_err(|e| e.to_string())?;
             let created_at = row.get::<i64>(3).map_err(|e| e.to_string())?;
-            file_hashes_by_source.insert(source_name.clone(), file_hash);
+            fingerprints_by_source.insert(source_name.clone(), fingerprint);
             snapshot_ids.insert(source_name.clone(), id);
             snapshot_created_ats.insert(source_name, created_at);
         }
         if listing
             .items
             .iter()
-            .any(|item| !file_hashes_by_source.contains_key(&item.path))
+            .any(|item| !fingerprints_by_source.contains_key(&item.path))
         {
             let mut hash_rows = conn
                 .query(
-                    "SELECT source_name, file_hash
+                    "SELECT source_name, fingerprint
                      FROM images
                      WHERE source_name IS NOT NULL",
                     (),
@@ -4963,10 +4988,10 @@ async fn enrich_listing_metadata(
                 .map_err(|e| e.to_string())?;
             while let Some(row) = hash_rows.next().await.map_err(|e| e.to_string())? {
                 let source_name = row.get::<String>(0).map_err(|e| e.to_string())?;
-                let file_hash = row.get::<String>(1).map_err(|e| e.to_string())?;
-                file_hashes_by_source
+                let fingerprint = row.get::<String>(1).map_err(|e| e.to_string())?;
+                fingerprints_by_source
                     .entry(source_name)
-                    .or_insert(file_hash);
+                    .or_insert(fingerprint);
             }
         }
     }
@@ -4974,19 +4999,19 @@ async fn enrich_listing_metadata(
         &listing
             .items
             .iter()
-            .filter_map(|item| file_hashes_by_source.get(&item.path).cloned())
+            .filter_map(|item| fingerprints_by_source.get(&item.path).cloned())
             .collect::<Vec<_>>(),
     )
     .await?;
     for item in &mut listing.items {
-        item.file_hash = file_hashes_by_source.get(&item.path).cloned();
+        item.fingerprint = fingerprints_by_source.get(&item.path).cloned();
         item.metadata.latest_snapshot_id = snapshot_ids.get(&item.path).cloned();
         item.metadata.latest_snapshot_created_at = snapshot_created_ats.get(&item.path).copied();
         item.metadata.has_snapshots = item.metadata.latest_snapshot_id.is_some();
         item.metadata.tags = item
-            .file_hash
+            .fingerprint
             .as_ref()
-            .and_then(|file_hash| tags.get(file_hash))
+            .and_then(|fingerprint| tags.get(fingerprint))
             .cloned()
             .unwrap_or_default();
     }
@@ -5005,25 +5030,25 @@ pub async fn list_library_images<R: tauri::Runtime>(
 
 #[tauri::command]
 pub async fn list_media_ratings(
-    file_hashes: Vec<String>,
+    fingerprints: Vec<String>,
 ) -> Result<HashMap<String, u8>, String> {
-    load_media_ratings_map(&file_hashes).await
+    load_media_ratings_map(&fingerprints).await
 }
 
 #[tauri::command]
 pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
-    if params.file_hash.trim().is_empty() {
+    if params.fingerprint.trim().is_empty() {
         return Err("file hash cannot be empty".to_string());
     }
-    persist_media_rating(&params.file_hash, params.rating).await
+    persist_media_rating(&params.fingerprint, params.rating).await
 }
 
 #[tauri::command]
 pub async fn set_media_tags(params: MediaTagsParams) -> Result<(), String> {
-    if params.file_hash.trim().is_empty() {
+    if params.fingerprint.trim().is_empty() {
         return Err("file hash cannot be empty".to_string());
     }
-    persist_media_tags(&params.file_hash, &params.tags).await
+    persist_media_tags(&params.fingerprint, &params.tags).await
 }
 
 async fn build_library_listing<R: tauri::Runtime>(
@@ -5046,7 +5071,7 @@ async fn build_library_listing<R: tauri::Runtime>(
                         name: picture_display_name(&photo.uri),
                         path: photo.uri,
                         modified_at: photo.modified_at,
-                        file_hash: None,
+                        fingerprint: None,
                         metadata: Default::default(),
                     })
                     .collect(),
@@ -5080,7 +5105,7 @@ async fn build_library_listing<R: tauri::Runtime>(
                             name: picture_display_name(&photo.id),
                             path: photo.id,
                             modified_at: photo.modified_at,
-                            file_hash: None,
+                            fingerprint: None,
                             metadata: Default::default(),
                         })
                         .collect(),
@@ -5616,12 +5641,12 @@ pub async fn get_preset_json(name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn get_snapshot_preset_json(file_hash: String) -> Result<Option<String>, String> {
+pub async fn get_snapshot_preset_json(fingerprint: String) -> Result<Option<String>, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
         .query(
-            "SELECT layers_json FROM edit_versions WHERE file_hash = ?1 ORDER BY created_at DESC LIMIT 1",
-            libsql::params![file_hash],
+            "SELECT layers_json FROM edit_versions WHERE fingerprint = ?1 ORDER BY created_at DESC LIMIT 1",
+            libsql::params![fingerprint],
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -5756,7 +5781,7 @@ pub async fn apply_preset_snapshot(
 #[derive(Serialize, Deserialize)]
 pub struct BatchPresetItem {
     path: String,
-    file_hash: Option<String>,
+    fingerprint: Option<String>,
 }
 
 #[tauri::command]
@@ -5773,14 +5798,19 @@ pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
     }
     let mut count = 0u32;
     for item in items {
-        let file_hash = match item.file_hash {
+        let fingerprint = match item.fingerprint {
             Some(hash) => hash,
             None => {
                 if item.path.starts_with("s3://") || item.path.starts_with("ccapi://") {
-                    shade_io::hash_bytes(item.path.as_bytes())
-                } else {
-                    shade_io::hash_file(std::path::Path::new(&item.path))?
+                    return Err(format!(
+                        "remote items must arrive with fingerprint populated: {}",
+                        item.path
+                    ));
                 }
+                shade_io::fingerprint_local(std::path::Path::new(&item.path))
+                    .map_err(|error| error.to_string())?
+                    .fingerprint
+                    .to_hex()
             }
         };
         let mut stack = shade_lib::LayerStack::new();
@@ -5788,7 +5818,7 @@ pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
         stack.layers.extend(file.layers.clone());
         stack.mask_params = file.mask_params.clone();
         let data = non_image_layer_data(&stack);
-        persist_snapshot(&file_hash, Some(&item.path), None, None, &data).await?;
+        persist_snapshot(&fingerprint, Some(&item.path), None, None, &data).await?;
         count += 1;
     }
     Ok(count)
@@ -5803,16 +5833,16 @@ pub async fn batch_clear_edits(
     for path in paths {
         let mut rows = conn
             .query(
-                "SELECT file_hash FROM images WHERE source_name = ?1",
+                "SELECT fingerprint FROM images WHERE source_name = ?1",
                 [path],
             )
             .await
             .map_err(|e| e.to_string())?;
         while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
-            let file_hash: String = row.get(0).map_err(|e| e.to_string())?;
+            let fingerprint: String = row.get(0).map_err(|e| e.to_string())?;
             conn.execute(
-                "DELETE FROM edit_versions WHERE file_hash = ?1",
-                [file_hash],
+                "DELETE FROM edit_versions WHERE fingerprint = ?1",
+                [fingerprint],
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -5825,7 +5855,7 @@ pub async fn batch_clear_edits(
 #[derive(Serialize, Deserialize)]
 pub struct BatchExportItem {
     pub path: String,
-    pub file_hash: Option<String>,
+    pub fingerprint: Option<String>,
     pub name: String,
 }
 
@@ -5846,10 +5876,10 @@ async fn open_image_for_batch<R: tauri::Runtime>(
         if let Some(bytes) = photo_bytes {
             let path_clone = path.to_string();
             tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let file_hash = shade_io::hash_bytes(&bytes);
+                let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
                 let (image, info) = decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
                 Ok(shade_io::OpenedImage {
-                    file_hash,
+                    fingerprint,
                     source_name: Some(path_clone),
                     image,
                     info,
@@ -5927,9 +5957,9 @@ pub async fn batch_export_images<R: tauri::Runtime>(
         );
 
         let opened = open_image_for_batch(&app, &item.path).await?;
-        let file_hash = item.file_hash.unwrap_or_else(|| opened.file_hash.clone());
+        let fingerprint = item.fingerprint.unwrap_or_else(|| opened.fingerprint.clone());
 
-        let persisted = match load_latest_edit_version(&file_hash).await? {
+        let persisted = match load_latest_edit_version(&fingerprint).await? {
             Some(p) => Some(p),
             None => {
                 if let Some(source_name) = opened.source_name.as_deref() {
@@ -5940,7 +5970,7 @@ pub async fn batch_export_images<R: tauri::Runtime>(
             }
         };
 
-        let texture_id = texture_id_for_file_hash(&file_hash)?;
+        let texture_id = texture_id_for_fingerprint(&fingerprint)?;
         let canvas_width = opened.image.width;
         let canvas_height = opened.image.height;
         let stack = match persisted {
@@ -6074,17 +6104,17 @@ pub async fn save_snapshot(
 pub async fn list_snapshots(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<Vec<SnapshotInfo>, String> {
-    let (file_hash, current_snapshot_id) = {
+    let (fingerprint, current_snapshot_id) = {
         let st = lock_editor_state(&state)?;
         (
             st.current_image_hash.clone(),
             st.current_snapshot_id.clone(),
         )
     };
-    let Some(file_hash) = file_hash else {
+    let Some(fingerprint) = fingerprint else {
         return Ok(Vec::new());
     };
-    list_snapshots_for_file(&file_hash, current_snapshot_id.as_deref()).await
+    list_snapshots_for_file(&fingerprint, current_snapshot_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -6092,13 +6122,13 @@ pub async fn load_snapshot(
     params: LoadSnapshotParams,
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<(), String> {
-    let file_hash = {
+    let fingerprint = {
         let st = lock_editor_state(&state)?;
         st.current_image_hash
             .clone()
             .ok_or_else(|| "cannot load a snapshot without a loaded image".to_string())?
     };
-    let snapshot = load_snapshot_by_id(&file_hash, &params.id).await?;
+    let snapshot = load_snapshot_by_id(&fingerprint, &params.id).await?;
     {
         let mut st = lock_editor_state(&state)?;
         let image_layers: Vec<_> = st
@@ -6211,13 +6241,13 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
 
     async fn list_snapshots(
         &self,
-        file_hash: &str,
+        fingerprint: &str,
     ) -> anyhow::Result<Vec<shade_p2p::SyncSnapshotInfo>> {
         let conn = library_db_conn().await;
         let mut rows = conn
             .query(
-                "SELECT id, created_at FROM edit_versions WHERE file_hash = ?1 ORDER BY created_at DESC",
-                [file_hash],
+                "SELECT id, created_at FROM edit_versions WHERE fingerprint = ?1 ORDER BY created_at DESC",
+                [fingerprint],
             )
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -6262,18 +6292,18 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
 
     async fn get_metadata(
         &self,
-        file_hashes: &[String],
+        fingerprints: &[String],
     ) -> anyhow::Result<Vec<shade_p2p::PictureMetadata>> {
-        if file_hashes.is_empty() {
+        if fingerprints.is_empty() {
             return Ok(Vec::new());
         }
         let conn = library_db_conn().await;
         let mut result = Vec::new();
-        for file_hash in file_hashes {
+        for fingerprint in fingerprints {
             let mut rating_rows = conn
                 .query(
-                    "SELECT rating, updated_at FROM media_ratings WHERE file_hash = ?1 LIMIT 1",
-                    [file_hash.as_str()],
+                    "SELECT rating, updated_at FROM media_ratings WHERE fingerprint = ?1 LIMIT 1",
+                    [fingerprint.as_str()],
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -6293,8 +6323,8 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
             };
             let mut tag_rows = conn
                 .query(
-                    "SELECT tag, updated_at FROM media_tags WHERE file_hash = ?1",
-                    [file_hash.as_str()],
+                    "SELECT tag, updated_at FROM media_tags WHERE fingerprint = ?1",
+                    [fingerprint.as_str()],
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -6316,7 +6346,7 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
                 }
             }
             result.push(shade_p2p::PictureMetadata {
-                file_hash: file_hash.clone(),
+                fingerprint: fingerprint.clone(),
                 rating,
                 tags,
                 rating_updated_at,
@@ -6730,19 +6760,19 @@ pub async fn list_collection_items(
 #[tauri::command]
 pub async fn add_to_collection(
     collection_id: String,
-    file_hashes: Vec<String>,
+    fingerprints: Vec<String>,
 ) -> Result<(), String> {
     let conn = library_db_conn().await;
-    shade_io::add_collection_items(&conn, &collection_id, file_hashes).await
+    shade_io::add_collection_items(&conn, &collection_id, fingerprints).await
 }
 
 #[tauri::command]
 pub async fn remove_from_collection(
     collection_id: String,
-    file_hashes: Vec<String>,
+    fingerprints: Vec<String>,
 ) -> Result<(), String> {
     let conn = library_db_conn().await;
-    shade_io::remove_collection_items(&conn, &collection_id, file_hashes).await
+    shade_io::remove_collection_items(&conn, &collection_id, fingerprints).await
 }
 
 #[cfg(test)]

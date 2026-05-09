@@ -9,7 +9,7 @@ pub struct ThumbnailCacheDb {
 #[derive(Clone, Debug)]
 pub struct ThumbnailCacheEntry {
     pub picture_id: String,
-    pub file_hash: String,
+    pub fingerprint: String,
     pub data: Vec<u8>,
 }
 
@@ -31,35 +31,18 @@ impl ThumbnailCacheDb {
             .map_err(|e| e.to_string())?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
-                picture_id TEXT PRIMARY KEY NOT NULL,
-                file_hash TEXT,
-                data BLOB NOT NULL
+                picture_id  TEXT PRIMARY KEY NOT NULL,
+                fingerprint TEXT,
+                data        BLOB NOT NULL,
+                created_at  INTEGER NOT NULL DEFAULT 0
             )",
             (),
         )
         .await
         .map_err(|e| e.to_string())?;
-        let mut columns = conn
-            .query("PRAGMA table_info(thumbnails)", ())
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut has_file_hash = false;
-        let mut has_created_at = false;
-        while let Some(row) = columns.next().await.map_err(|e| e.to_string())? {
-            match row.get::<String>(1).map_err(|e| e.to_string())?.as_str() {
-                "file_hash" => has_file_hash = true,
-                "created_at" => has_created_at = true,
-                _ => {}
-            }
-        }
-        if !has_file_hash {
-            conn.execute("ALTER TABLE thumbnails ADD COLUMN file_hash TEXT", ())
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        if !has_created_at {
+        if has_column(&conn, "thumbnails", "file_hash").await? {
             conn.execute(
-                "ALTER TABLE thumbnails ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE thumbnails RENAME COLUMN file_hash TO fingerprint",
                 (),
             )
             .await
@@ -78,7 +61,7 @@ impl ThumbnailCacheDb {
         let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
-                "SELECT file_hash, data FROM thumbnails WHERE picture_id = ?1",
+                "SELECT fingerprint, data FROM thumbnails WHERE picture_id = ?1",
                 [picture_id],
             )
             .await
@@ -95,14 +78,15 @@ impl ThumbnailCacheDb {
     pub async fn put(
         &self,
         picture_id: &str,
-        file_hash: Option<&str>,
+        fingerprint: Option<&str>,
         data: &[u8],
     ) -> Result<(), String> {
         let created_at = current_millis()?;
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT OR REPLACE INTO thumbnails (picture_id, file_hash, data, created_at) VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![picture_id, file_hash, data.to_vec(), created_at],
+            "INSERT OR REPLACE INTO thumbnails (picture_id, fingerprint, data, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![picture_id, fingerprint, data.to_vec(), created_at],
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -116,9 +100,9 @@ impl ThumbnailCacheDb {
         let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
-                "SELECT picture_id, file_hash, data
+                "SELECT picture_id, fingerprint, data
                  FROM thumbnails
-                 WHERE created_at > ?1 AND file_hash IS NOT NULL AND file_hash != ''
+                 WHERE created_at > ?1 AND fingerprint IS NOT NULL AND fingerprint != ''
                  ORDER BY created_at ASC",
                 [since_millis],
             )
@@ -128,7 +112,7 @@ impl ThumbnailCacheDb {
         while let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
             entries.push(ThumbnailCacheEntry {
                 picture_id: row.get::<String>(0).map_err(|e| e.to_string())?,
-                file_hash: row.get::<String>(1).map_err(|e| e.to_string())?,
+                fingerprint: row.get::<String>(1).map_err(|e| e.to_string())?,
                 data: row.get::<Vec<u8>>(2).map_err(|e| e.to_string())?,
             });
         }
@@ -156,6 +140,25 @@ impl ThumbnailCacheDb {
         .map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+async fn has_column(
+    conn: &libsql::Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, String> {
+    let stmt = format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1");
+    let mut rows = conn
+        .query(stmt.as_str(), libsql::params![column])
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .next()
+        .await
+        .map_err(|e| e.to_string())?
+        .and_then(|row| row.get::<i64>(0).ok())
+        .unwrap_or(0)
+        > 0)
 }
 
 fn current_millis() -> Result<i64, String> {

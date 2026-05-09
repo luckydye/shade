@@ -168,7 +168,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       ? {
           libraryId: artboard.activeMediaLibraryId,
           itemId: artboard.activeMediaItemId,
-          fileHash: artboard.activeFileHash,
+          fingerprint: artboard.activeFingerprint,
           rating: artboard.activeMediaRating,
           baseRating: artboard.activeMediaBaseRating,
         }
@@ -192,7 +192,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       width: info.canvas_width,
       height: info.canvas_height,
       sourceBitDepth: info.source_bit_depth,
-      activeFileHash: info.file_hash ?? artboard.activeFileHash,
+      activeFingerprint: info.fingerprint ?? artboard.activeFingerprint,
       previewTile: null,
       backdropTile: null,
     });
@@ -284,7 +284,7 @@ function setPendingEditorState(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
-    fileHash: string | null;
+    fingerprint: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null,
@@ -315,14 +315,14 @@ async function openImageFrom(
     canvas_width: number;
     canvas_height: number;
     source_bit_depth: string;
-    file_hash: string | null;
+    fingerprint: string | null;
   }>,
   source: ArtboardSource,
   loadingMediaSrc: string | null,
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
-    fileHash: string | null;
+    fingerprint: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null,
@@ -378,7 +378,7 @@ async function openImageFrom(
     source,
     activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
     activeMediaItemId: activeMediaSelection?.itemId ?? null,
-    activeFileHash: activeMediaSelection?.fileHash ?? null,
+    activeFingerprint: activeMediaSelection?.fingerprint ?? null,
     activeMediaRating: activeMediaSelection?.rating ?? null,
     activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
     previewTile: null,
@@ -418,7 +418,7 @@ async function openImageFrom(
       source,
       activeMediaLibraryId: activeMediaSelection?.libraryId ?? null,
       activeMediaItemId: activeMediaSelection?.itemId ?? null,
-      activeFileHash: info.file_hash ?? activeMediaSelection?.fileHash ?? null,
+      activeFingerprint: info.fingerprint ?? activeMediaSelection?.fingerprint ?? null,
       activeMediaRating: activeMediaSelection?.rating ?? null,
       activeMediaBaseRating: activeMediaSelection?.baseRating ?? null,
       previewTile: null,
@@ -541,7 +541,7 @@ export async function openImage(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
-    fileHash: string | null;
+    fingerprint: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null = null,
@@ -590,7 +590,7 @@ export async function openPeerImage(
   activeMediaSelection: {
     libraryId: string;
     itemId: string;
-    fileHash: string | null;
+    fingerprint: string | null;
     rating: number | null;
     baseRating: number | null;
   } | null = null,

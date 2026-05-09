@@ -20,7 +20,7 @@ type CollectionRecord = {
 
 type CollectionItemRecord = {
   collection_id: string;
-  file_hash: string;
+  fingerprint: string;
   position: number;
   added_at: number;
 };
@@ -52,8 +52,8 @@ function collectionKey(id: string) {
   return id;
 }
 
-function itemKey(collectionId: string, fileHash: string) {
-  return `${collectionId}::${fileHash}`;
+function itemKey(collectionId: string, fingerprint: string) {
+  return `${collectionId}::${fingerprint}`;
 }
 
 async function countItems(
@@ -185,14 +185,14 @@ export const browserCollectionsPlatform: CollectionsPlatform = {
         .filter((r) => r.collection_id === collectionId)
         .sort((a, b) => a.position - b.position || a.added_at - b.added_at);
       return items.map((r) => ({
-        file_hash: r.file_hash,
+        fingerprint: r.fingerprint,
         position: r.position,
         added_at: r.added_at,
       }));
     });
   },
 
-  async addToCollection(collectionId, fileHashes) {
+  async addToCollection(collectionId, fingerprints) {
     await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
       const all = await requestToPromise(stores[ITEMS_STORE].getAll());
       const existing = (all as CollectionItemRecord[]).filter(
@@ -200,29 +200,29 @@ export const browserCollectionsPlatform: CollectionsPlatform = {
       );
       let maxPos = existing.reduce((m, r) => Math.max(m, r.position), -1);
       const now = Date.now();
-      const existingFileHashes = new Set(existing.map((r) => r.file_hash));
-      for (const fileHash of fileHashes) {
-        if (existingFileHashes.has(fileHash)) continue;
+      const existingFingerprints = new Set(existing.map((r) => r.fingerprint));
+      for (const fingerprint of fingerprints) {
+        if (existingFingerprints.has(fingerprint)) continue;
         maxPos += 1;
         const record: CollectionItemRecord = {
           collection_id: collectionId,
-          file_hash: fileHash,
+          fingerprint: fingerprint,
           position: maxPos,
           added_at: now,
         };
         await requestToPromise(
-          stores[ITEMS_STORE].put(record, itemKey(collectionId, fileHash)),
+          stores[ITEMS_STORE].put(record, itemKey(collectionId, fingerprint)),
         );
       }
     });
   },
 
-  async removeFromCollection(collectionId, fileHashes) {
+  async removeFromCollection(collectionId, fingerprints) {
     await withStores(openDb, [ITEMS_STORE], "readwrite", async (stores) => {
       await Promise.all(
-        fileHashes.map((fileHash) =>
+        fingerprints.map((fingerprint) =>
           requestToPromise(
-            stores[ITEMS_STORE].delete(itemKey(collectionId, fileHash)),
+            stores[ITEMS_STORE].delete(itemKey(collectionId, fingerprint)),
           ),
         ),
       );

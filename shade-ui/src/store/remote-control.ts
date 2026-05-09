@@ -182,7 +182,7 @@ function resolveMediaItem(items: MediaItem[], args: JsonObject) {
   const mediaId = readOptionalString(args, "mediaId");
   const path = readOptionalString(args, "path");
   const name = readOptionalString(args, "name");
-  const fileHash = readOptionalString(args, "fileHash");
+  const fingerprint = readOptionalString(args, "fingerprint");
   const matches = items.filter((item) => {
     if (mediaId && mediaItemKey(item) === mediaId) {
       return true;
@@ -193,7 +193,7 @@ function resolveMediaItem(items: MediaItem[], args: JsonObject) {
     if (name && item.name === name) {
       return true;
     }
-    if (fileHash && item.fileHash === fileHash) {
+    if (fingerprint && item.fingerprint === fingerprint) {
       return true;
     }
     return false;
@@ -320,7 +320,7 @@ function serializeArtboard(artboard: NonNullable<ReturnType<typeof getSelectedAr
     source: serializeArtboardSource(artboard.source),
     activeMediaLibraryId: artboard.activeMediaLibraryId,
     activeMediaItemId: artboard.activeMediaItemId,
-    activeFileHash: artboard.activeFileHash,
+    activeFingerprint: artboard.activeFingerprint,
     activeMediaRating: artboard.activeMediaRating,
     activeMediaBaseRating: artboard.activeMediaBaseRating,
   };
@@ -364,7 +364,7 @@ async function handleListLibraryImages(args: unknown) {
       name: item.name,
       path: item.kind === "local" ? item.path : null,
       peerId: item.kind === "peer" ? item.peerId : null,
-      fileHash: item.fileHash,
+      fingerprint: item.fingerprint,
       modifiedAt: item.modifiedAt,
       metadata: item.metadata,
     })),

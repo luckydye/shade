@@ -394,7 +394,7 @@ fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "open_library_image",
-            "Open one image from library by id, path, name, or file hash.",
+            "Open one image from library by id, path, name, or fingerprint.",
             json!({
                 "type": "object",
                 "properties": {
@@ -402,7 +402,7 @@ fn tool_definitions() -> Vec<Value> {
                     "mediaId": { "type": "string" },
                     "path": { "type": "string" },
                     "name": { "type": "string" },
-                    "fileHash": { "type": "string" },
+                    "fingerprint": { "type": "string" },
                     "mode": {
                         "type": "string",
                         "enum": ["replace", "append"],

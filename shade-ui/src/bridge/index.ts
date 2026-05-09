@@ -225,7 +225,7 @@ export interface OpenImageInfo {
   canvas_width: number;
   canvas_height: number;
   source_bit_depth: string;
-  file_hash: string | null;
+  fingerprint: string | null;
 }
 
 export interface LocalPeer {
@@ -261,7 +261,7 @@ export interface LibraryImage {
   path: string;
   name: string;
   modified_at: number | null;
-  file_hash: string | null;
+  fingerprint: string | null;
   metadata: LibraryImageMetadata;
 }
 
@@ -719,7 +719,7 @@ async function _loadEncodedBytes(
     canvas_width: result.canvasWidth,
     canvas_height: result.canvasHeight,
     source_bit_depth: result.source_bit_depth,
-    file_hash: null,
+    fingerprint: null,
   };
 }
 
@@ -1075,7 +1075,7 @@ export interface SnapshotInfo {
 }
 
 export interface MediaRatingParams {
-  file_hash: string;
+  fingerprint: string;
   rating: number | null;
 }
 
@@ -1530,13 +1530,13 @@ export async function savePreset(name: string): Promise<PresetInfo> {
 }
 
 export async function getSnapshotPresetJson(
-  fileHash: string | null,
+  fingerprint: string | null,
   imagePath: string,
 ): Promise<string | null> {
   if (await isTauriRuntime()) {
-    if (!fileHash) return null;
+    if (!fingerprint) return null;
     const inv = await getTauriInvoke();
-    return inv("get_snapshot_preset_json", { fileHash }) as Promise<string | null>;
+    return inv("get_snapshot_preset_json", { fingerprint }) as Promise<string | null>;
   }
   const snapshot = await getBrowserPlatform().snapshots.getCurrentSnapshot(imagePath);
   if (!snapshot) return null;
@@ -1620,7 +1620,7 @@ export async function applyPresetSnapshot(
 }
 
 export async function batchApplyPresetSnapshot(
-  items: { path: string; file_hash: string | null }[],
+  items: { path: string; fingerprint: string | null }[],
   name: string,
 ): Promise<number> {
   if (await isTauriRuntime()) {
@@ -1644,7 +1644,7 @@ export async function batchClearEdits(paths: string[]): Promise<number> {
 
 export interface BatchExportItem {
   path: string;
-  file_hash: string | null;
+  fingerprint: string | null;
   name: string;
 }
 
@@ -1691,7 +1691,7 @@ export async function listMediaRatings(
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("list_media_ratings", {
-      fileHashes: ids,
+      fingerprints: ids,
     }) as Promise<Record<string, number>>;
   }
   return getBrowserPlatform().ratings.listRatings(ids);
@@ -1703,7 +1703,7 @@ export async function setMediaRating(params: MediaRatingParams): Promise<void> {
     await inv("set_media_rating", { params });
     return;
   }
-  await getBrowserPlatform().ratings.setRating(params.file_hash, params.rating);
+  await getBrowserPlatform().ratings.setRating(params.fingerprint, params.rating);
 }
 
 /**
@@ -1826,7 +1826,7 @@ export async function applyGradientMask(params: GradientMaskParams): Promise<voi
 
 export interface AwarenessState {
   display_name: string | null;
-  active_file_hash: string | null;
+  active_fingerprint: string | null;
   active_snapshot_id: string | null;
 }
 
@@ -1841,14 +1841,14 @@ export interface ApplyPeerMetadataResult {
 
 export async function setLocalAwareness(
   displayName: string | null,
-  fileHash: string | null,
+  fingerprint: string | null,
   snapshotId: string | null,
 ): Promise<void> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     await inv("set_local_awareness", {
       displayName: displayName ?? null,
-      fileHash: fileHash ?? null,
+      fingerprint: fingerprint ?? null,
       snapshotId: snapshotId ?? null,
     });
     return;
@@ -1866,13 +1866,13 @@ export async function getPeerAwareness(peerEndpointId: string): Promise<Awarenes
 
 export async function syncPeerSnapshots(
   peerEndpointId: string,
-  fileHash: string,
+  fingerprint: string,
 ): Promise<SyncPeerSnapshotsResult> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("sync_peer_snapshots", {
       peerEndpointId,
-      fileHash,
+      fingerprint,
     }) as Promise<SyncPeerSnapshotsResult>;
   }
   throw new Error("syncPeerSnapshots is only implemented for Tauri");
@@ -1880,13 +1880,13 @@ export async function syncPeerSnapshots(
 
 export async function applyPeerMetadata(
   peerEndpointId: string,
-  fileHashes: string[],
+  fingerprints: string[],
 ): Promise<ApplyPeerMetadataResult> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
     return inv("apply_peer_metadata", {
       peerEndpointId,
-      fileHashes,
+      fingerprints,
     }) as Promise<ApplyPeerMetadataResult>;
   }
   throw new Error("applyPeerMetadata is only implemented for Tauri");
@@ -1966,7 +1966,7 @@ export interface Collection {
 }
 
 export interface CollectionItem {
-  file_hash: string;
+  fingerprint: string;
   position: number;
   added_at: number;
 }
@@ -1978,8 +1978,8 @@ export interface CollectionsPlatform {
   deleteCollection(collectionId: string): Promise<void>;
   reorderCollection(collectionId: string, newPosition: number): Promise<void>;
   listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
-  addToCollection(collectionId: string, fileHashes: string[]): Promise<void>;
-  removeFromCollection(collectionId: string, fileHashes: string[]): Promise<void>;
+  addToCollection(collectionId: string, fingerprints: string[]): Promise<void>;
+  removeFromCollection(collectionId: string, fingerprints: string[]): Promise<void>;
 }
 
 export function listCollections(libraryId: string): Promise<Collection[]> {
@@ -2006,10 +2006,10 @@ export function listCollectionItems(collectionId: string): Promise<CollectionIte
   return getPlatform().collections.listCollectionItems(collectionId);
 }
 
-export function addToCollection(collectionId: string, fileHashes: string[]): Promise<void> {
-  return getPlatform().collections.addToCollection(collectionId, fileHashes);
+export function addToCollection(collectionId: string, fingerprints: string[]): Promise<void> {
+  return getPlatform().collections.addToCollection(collectionId, fingerprints);
 }
 
-export function removeFromCollection(collectionId: string, fileHashes: string[]): Promise<void> {
-  return getPlatform().collections.removeFromCollection(collectionId, fileHashes);
+export function removeFromCollection(collectionId: string, fingerprints: string[]): Promise<void> {
+  return getPlatform().collections.removeFromCollection(collectionId, fingerprints);
 }

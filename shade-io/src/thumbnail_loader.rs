@@ -1,3 +1,4 @@
+use crate::file_fingerprint::fingerprint_from_bytes;
 use crate::{ThumbnailJob, ThumbnailQueue};
 use std::path::Path;
 use std::sync::Arc;
@@ -5,7 +6,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct LoadedThumbnail {
     pub bytes: Vec<u8>,
-    pub file_hash: Option<String>,
+    pub fingerprint: Option<String>,
 }
 
 pub type ThumbnailResponseSender =
@@ -43,7 +44,7 @@ fn parse_s3_media_path(path: &str) -> Result<(&str, &str), String> {
 pub fn generate_desktop_thumbnail(path: &str) -> Result<LoadedThumbnail, String> {
     let source = Path::new(path);
     let encoded = std::fs::read(source).map_err(|error| error.to_string())?;
-    let file_hash = blake3::hash(&encoded).to_hex().to_string();
+    let fingerprint = fingerprint_from_bytes(&encoded).to_hex();
     let (pixels, width, height) = crate::load_image_bytes(
         &encoded,
         source.file_name().and_then(|name| name.to_str()),
@@ -61,7 +62,7 @@ pub fn generate_desktop_thumbnail(path: &str) -> Result<LoadedThumbnail, String>
         .map_err(|error| error.to_string())?;
     Ok(LoadedThumbnail {
         bytes: jpeg,
-        file_hash: Some(file_hash),
+        fingerprint: Some(fingerprint),
     })
 }
 
@@ -107,28 +108,26 @@ where
 {
     if picture_id.starts_with("ccapi://") {
         let (host, file_path) = parse_ccapi_media_path(picture_id)?;
-        let file_hash = blake3::hash(picture_id.as_bytes()).to_hex().to_string();
         return load_camera_thumbnail(host.to_string(), file_path.to_string())
             .await
             .map(|bytes| LoadedThumbnail {
                 bytes,
-                file_hash: Some(file_hash),
+                fingerprint: None,
             });
     }
     if picture_id.starts_with("s3://") {
         let _ = parse_s3_media_path(picture_id)?;
-        let file_hash = blake3::hash(picture_id.as_bytes()).to_hex().to_string();
         return load_s3_thumbnail(picture_id.to_string())
             .await
             .map(|bytes| LoadedThumbnail {
                 bytes,
-                file_hash: Some(file_hash),
+                fingerprint: None,
             });
     }
     if let Some(bytes) = load_photo_thumbnail(picture_id.to_string()).await? {
         return Ok(LoadedThumbnail {
             bytes,
-            file_hash: None,
+            fingerprint: None,
         });
     }
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();

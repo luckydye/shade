@@ -44,7 +44,7 @@ export interface ArtboardState {
   source: ArtboardSource;
   activeMediaLibraryId: string | null;
   activeMediaItemId: string | null;
-  activeFileHash: string | null;
+  activeFingerprint: string | null;
   activeMediaRating: number | null;
   activeMediaBaseRating: number | null;
   previewTile: RenderedTile | null;

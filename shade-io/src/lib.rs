@@ -16,8 +16,14 @@ use shade_lib::{ColorMatrix3x3, ColorSpace, FloatImage};
 use std::path::Path;
 use std::{convert::TryFrom, io::Cursor};
 
+pub mod file_fingerprint;
+
 #[cfg(feature = "native")]
 pub mod app_config;
+#[cfg(feature = "native")]
+pub mod file_fingerprint_cache;
+#[cfg(feature = "native")]
+pub mod file_fingerprint_io;
 #[cfg(feature = "native")]
 pub mod camera_services;
 #[cfg(feature = "native")]
@@ -43,6 +49,23 @@ pub mod video_decoder;
 #[cfg(feature = "ffmpeg")]
 pub mod video_encoder;
 
+pub use file_fingerprint::{
+    fingerprint_from_bytes, fingerprint_from_s3_etag, fingerprint_from_samples,
+    fingerprint_local, fingerprint_with_source, sample_offsets, sample_plan, Fingerprint,
+    FingerprintError, LocalFile, LocalFingerprint, SampleSource, ALGO_V1_SAMPLES,
+    ALGO_V_S3_ETAG, SAMPLE_SIZE, WHOLE_FILE_THRESHOLD,
+};
+
+#[cfg(feature = "native")]
+pub use file_fingerprint_cache::{
+    file_fingerprints_db_path, get_or_compute, FileFingerprintDb, FingerprintRow, LocatorKind,
+};
+#[cfg(feature = "native")]
+pub use file_fingerprint_io::{
+    coalesce, etag_is_content_hash, fingerprint_http, fingerprint_local_async,
+    fingerprint_s3, FingerprintHints, FingerprintResult,
+};
+
 #[cfg(feature = "native")]
 pub use app_config::{
     app_config_path, append_library_order_id, is_peer_paired, load_app_config,
@@ -58,7 +81,7 @@ pub use collections::{
     rename_collection, reorder_collection, Collection, CollectionItem,
 };
 #[cfg(feature = "native")]
-pub use image_loader::{hash_bytes, hash_file, load_picture_bytes, open_image, OpenedImage};
+pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
     delete_persisted_library_index, delete_persisted_library_index_item, has_persisted_library_index,
@@ -82,10 +105,10 @@ pub use library_source::{
     list_s3_objects_page, local_library_id, media_path_for_s3_object,
     normalize_s3_library_input, parse_s3_media_path, peer_library_id,
     put_s3_object_bytes, put_s3_object_bytes_with_atime, put_s3_object_bytes_with_modified,
-    fetch_url_bytes, resolve_s3_source_id_from_library_id, s3_library_id,
-    AddS3LibraryParams, CameraLibraryConfig, LibraryConfig, LibraryMode,
-    LocalLibraryConfig, PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry,
-    S3ObjectListPage,
+    fetch_url_bytes, get_s3_object_range, head_s3_object_metadata,
+    resolve_s3_source_id_from_library_id, s3_library_id, AddS3LibraryParams,
+    CameraLibraryConfig, LibraryConfig, LibraryMode, LocalLibraryConfig, PeerLibraryConfig,
+    S3LibraryConfig, S3ObjectEntry, S3ObjectListPage, S3ObjectMetadata,
 };
 #[cfg(feature = "native")]
 pub use thumbnail_cache::{thumbnail_cache_key, ThumbnailCacheDb, ThumbnailCacheEntry};

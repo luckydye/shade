@@ -43,3 +43,6 @@ sha2 = { version = "0.10", optional = true }
 uuid = { workspace = true, optional = true }
 video-rs = { version = "0.10", features = ["ndarray"], optional = true }
 ndarray = { version = "0.16.1", optional = true }
+
+[dev-dependencies]
+wiremock = "0.6"
