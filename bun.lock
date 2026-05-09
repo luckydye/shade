@@ -15,7 +15,7 @@
         "@tailwindcss/vite": "^4.2.1",
         "@tauri-apps/api": "^2.0.0",
         "@tauri-apps/plugin-dialog": "2.6.0",
-        "shade-ui": "../shade-ui",
+        "shade-ui": "workspace:*",
         "solid-js": "^1.8.0",
       },
       "devDependencies": {
@@ -787,8 +787,6 @@
     "jsdom/whatwg-mimetype": ["whatwg-mimetype@5.0.0", "", {}, "sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw=="],
 
     "parse5/entities": ["entities@8.0.0", "", {}, "sha512-zwfzJecQ/Uej6tusMqwAqU/6KL2XaB2VZ2Jg54Je6ahNBGNH6Ek6g3jjNCF0fG9EWQKGZNddNjU5F1ZQn/sBnA=="],
-
-    "shade-tauri-ui/shade-ui": ["shade-ui@file:shade-ui", { "dependencies": { "@tailwindcss/vite": "^4.2.1", "@types/node": "^20.0.0", "i18next": "^26.0.3", "solid-js": "^1.8.0", "tailwindcss": "^4", "typescript": "^5.0.0", "vite": "^5.0.0", "vite-plugin-solid": "^2.8.0", "vite-plugin-terminal": "^1.4.0", "yjs": "^13.6.30" } }],
 
     "vitest/vite": ["vite@8.0.11", "", { "dependencies": { "lightningcss": "^1.32.0", "picomatch": "^4.0.4", "postcss": "^8.5.14", "rolldown": "1.0.0-rc.18", "tinyglobby": "^0.2.16" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "@vitejs/devtools": "^0.1.18", "esbuild": "^0.27.0 || ^0.28.0", "jiti": ">=1.21.0", "less": "^4.0.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "@vitejs/devtools", "esbuild", "jiti", "less", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-Jz1mxtUBR5xTT65VOdJZUUeoyLtqljmFkiUXhPTLZka3RDc9vpi/xXkyrnsdRcm2lIi3l3GPMnAidTsEGIj3Ow=="],
 

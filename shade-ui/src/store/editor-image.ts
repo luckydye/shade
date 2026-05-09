@@ -155,6 +155,10 @@ async function focusExistingArtboard(artboardId: string) {
 
 async function loadArtboardIntoEditor(artboard: ArtboardState) {
   const loadToken = beginLoadToken();
+  const previousArtboard = state.artboards.find(
+    (candidate) => candidate.id === state.selectedArtboardId,
+  );
+  const preserveViewport = previousArtboard !== undefined;
   setPendingEditorState(
     artboard.id,
     artboard.width,
@@ -170,7 +174,12 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
         }
       : null,
     null,
+    preserveViewport,
   );
+  if (preserveViewport && previousArtboard) {
+    setState("viewportCenterX", (prev) => prev + previousArtboard.worldX - artboard.worldX);
+    setState("viewportCenterY", (prev) => prev + previousArtboard.worldY - artboard.worldY);
+  }
   try {
     const info = await loadArtboardSource(artboard.source);
     if (!isActiveLoadToken(loadToken)) {
@@ -187,7 +196,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       previewTile: null,
       backdropTile: null,
     });
-    resetViewportState(info.canvas_width, info.canvas_height);
+    resetViewportState(info.canvas_width, info.canvas_height, preserveViewport);
     setState({
       sourceBitDepth: info.source_bit_depth,
     });
@@ -216,18 +225,28 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
   }
 }
 
-function resetViewportState(canvasWidth: number, canvasHeight: number) {
+function resetViewportState(canvasWidth: number, canvasHeight: number, preserveViewport: boolean = false) {
   const crop = fullCanvasCrop(canvasWidth, canvasHeight);
-  setState({
-    canvasWidth,
-    canvasHeight,
-    viewportZoom: 1,
-    viewportCenterX: crop.width * 0.5,
-    viewportCenterY: crop.height * 0.5,
-    crop,
-    cropDraft: null,
-    isCropMode: false,
-  });
+  if (preserveViewport) {
+    setState({
+      canvasWidth,
+      canvasHeight,
+      crop,
+      cropDraft: null,
+      isCropMode: false,
+    });
+  } else {
+    setState({
+      canvasWidth,
+      canvasHeight,
+      viewportZoom: 1,
+      viewportCenterX: crop.width * 0.5,
+      viewportCenterY: crop.height * 0.5,
+      crop,
+      cropDraft: null,
+      isCropMode: false,
+    });
+  }
 }
 
 function clearLoadedImageState() {
@@ -270,9 +289,10 @@ function setPendingEditorState(
     baseRating: number | null;
   } | null,
   loadingMediaSrc: string | null,
+  preserveViewport: boolean = false,
 ) {
   suspendPreview();
-  resetViewportState(canvasWidth, canvasHeight);
+  resetViewportState(canvasWidth, canvasHeight, preserveViewport);
   setState({
     currentView: "editor",
     selectedArtboardId: artboardId,

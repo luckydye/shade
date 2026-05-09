@@ -12,7 +12,7 @@
     "@tailwindcss/vite": "^4.2.1",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "2.6.0",
-    "shade-ui": "../shade-ui",
+    "shade-ui": "workspace:*",
     "solid-js": "^1.8.0"
   },
   "devDependencies": {
