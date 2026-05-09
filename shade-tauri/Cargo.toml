@@ -10,7 +10,6 @@ tauri-build = { version = "2", features = [] }
 async-trait = "0.1"
 tauri = { version = "2", features = ["protocol-asset", "devtools"] }
 tauri-plugin-dialog = "2.6.0"
-blake3 = "1"
 crossbeam-channel = "0.5"
 iroh = { version = "0.96.1", features = ["address-lookup-mdns"] }
 shade-lib = { path = "../shade-lib" }

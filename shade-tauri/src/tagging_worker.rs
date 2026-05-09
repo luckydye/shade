@@ -1,5 +1,5 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-use crate::thumbnail_cache::ThumbnailCacheEntry;
+use shade_io::ThumbnailCacheEntry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use tauri::Manager;
 

@@ -664,13 +664,8 @@ fn library_sync_dir(library_id: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-pub async fn open_thumbnail_cache_db(
-) -> Result<crate::thumbnail_cache::ThumbnailCacheDb, String> {
-    crate::thumbnail_cache::ThumbnailCacheDb::open(&thumbnail_cache_db_path()?).await
-}
-
-fn hash_bytes(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
+pub async fn open_thumbnail_cache_db() -> Result<shade_io::ThumbnailCacheDb, String> {
+    shade_io::ThumbnailCacheDb::open(&thumbnail_cache_db_path()?).await
 }
 
 fn texture_id_for_file_hash(file_hash: &str) -> Result<shade_lib::TextureId, String> {
@@ -3427,7 +3422,7 @@ pub async fn open_peer_image(
         .get_peer_image_bytes(&peer_endpoint_id, &picture_id)
         .await
         .map_err(|error| error.to_string())?;
-    let file_hash = hash_bytes(&bytes);
+    let file_hash = shade_io::hash_bytes(&bytes);
     let peer = require_p2p(&p2p).await?;
     let _ = sync_peer_snapshots_for_file_hash(
         &peer_endpoint_id,
@@ -3491,7 +3486,7 @@ pub async fn open_image<R: tauri::Runtime>(
         if let Some(bytes) = photo_bytes {
             let path_clone = path.clone();
             tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let file_hash = blake3::hash(&bytes).to_hex().to_string();
+                let file_hash = shade_io::hash_bytes(&bytes);
                 let (image, info) = decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
                 Ok(shade_io::OpenedImage {
                     file_hash,
@@ -3580,7 +3575,7 @@ pub async fn open_image_encoded_bytes(
         let mut st = lock_editor_state(&state)?;
         st.begin_open_request()
     };
-    let file_hash = hash_bytes(&bytes);
+    let file_hash = shade_io::hash_bytes(&bytes);
     if let Some(file_name) = file_name.as_deref() {
         register_image_source(&file_hash, Some(file_name)).await?;
     }
@@ -3637,7 +3632,7 @@ pub async fn open_image_bytes(
             pixels.len()
         ));
     }
-    let file_hash = hash_bytes(&pixels);
+    let file_hash = shade_io::hash_bytes(&pixels);
     if let Some(peer) = p2p.0.read().await.clone() {
         let _ = sync_snapshots_from_all_peers_for_file_hash(&peer, &file_hash).await;
     }
@@ -3868,7 +3863,7 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         if let Some(bytes) = photo_bytes {
             let picture_id_owned = picture_id.to_string();
             tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let file_hash = blake3::hash(&bytes).to_hex().to_string();
+                let file_hash = shade_io::hash_bytes(&bytes);
                 let (image, info) = decode_image_bytes_with_info(&bytes, Some(&picture_id_owned))?;
                 Ok(shade_io::OpenedImage {
                     file_hash,
@@ -4678,11 +4673,11 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     let cache_key = if is_snapshot {
         // Include edit version created_at so in-place edits invalidate the cache.
         match latest_snapshot_created_at(load_path).await {
-            Some(created_at) => format!("{}#ev_{created_at}", crate::thumbnail_cache::thumbnail_cache_key(picture_id)),
-            None => crate::thumbnail_cache::thumbnail_cache_key(picture_id),
+            Some(created_at) => format!("{}#ev_{created_at}", shade_io::thumbnail_cache_key(picture_id)),
+            None => shade_io::thumbnail_cache_key(picture_id),
         }
     } else {
-        crate::thumbnail_cache::thumbnail_cache_key(picture_id)
+        shade_io::thumbnail_cache_key(picture_id)
     };
     if let Ok(Some((cached_file_hash, cached_bytes))) = cache.0.get(&cache_key).await {
         if let Some(file_hash) = cached_file_hash.as_deref() {
@@ -4733,7 +4728,7 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
         import_xmp_rating(picture_id, &file_hash).await;
         crate::tagging_worker::enqueue_thumbnail_for_tagging(
             &app,
-            crate::thumbnail_cache::ThumbnailCacheEntry {
+            shade_io::ThumbnailCacheEntry {
                 picture_id: cache_key,
                 file_hash,
                 data: thumbnail.bytes.clone(),
@@ -5782,7 +5777,7 @@ pub async fn batch_apply_preset_snapshot<R: tauri::Runtime>(
             Some(hash) => hash,
             None => {
                 if item.path.starts_with("s3://") || item.path.starts_with("ccapi://") {
-                    hash_bytes(item.path.as_bytes())
+                    shade_io::hash_bytes(item.path.as_bytes())
                 } else {
                     shade_io::hash_file(std::path::Path::new(&item.path))?
                 }
@@ -5851,7 +5846,7 @@ async fn open_image_for_batch<R: tauri::Runtime>(
         if let Some(bytes) = photo_bytes {
             let path_clone = path.to_string();
             tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let file_hash = blake3::hash(&bytes).to_hex().to_string();
+                let file_hash = shade_io::hash_bytes(&bytes);
                 let (image, info) = decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
                 Ok(shade_io::OpenedImage {
                     file_hash,

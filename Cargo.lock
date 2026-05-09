@@ -7778,7 +7778,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "blake3",
  "chrono",
  "crossbeam-channel",
  "env_logger",

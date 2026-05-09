@@ -2,7 +2,6 @@ mod commands;
 mod photos;
 mod remote_control;
 mod tagging_worker;
-mod thumbnail_cache;
 
 use tauri::{Emitter, Manager};
 
@@ -24,7 +23,7 @@ pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
 pub struct S3LibraryScanService(pub std::sync::Arc<commands::S3LibraryScanState>);
 pub struct CameraDiscoveryService(pub std::sync::Arc<shade_io::CameraDiscoveryService>);
 pub struct CameraThumbnailService(pub std::sync::Arc<shade_io::CameraThumbnailService>);
-pub struct ThumbnailCacheDb(pub std::sync::Arc<thumbnail_cache::ThumbnailCacheDb>);
+pub struct ThumbnailCacheDb(pub std::sync::Arc<shade_io::ThumbnailCacheDb>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

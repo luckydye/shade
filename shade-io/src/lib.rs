@@ -33,6 +33,8 @@ pub mod library_scan_service;
 #[cfg(feature = "native")]
 pub mod library_source;
 #[cfg(feature = "native")]
+pub mod thumbnail_cache;
+#[cfg(feature = "native")]
 pub mod thumbnail_loader;
 #[cfg(feature = "native")]
 pub mod thumbnail_queue;
@@ -56,7 +58,7 @@ pub use collections::{
     rename_collection, reorder_collection, Collection, CollectionItem,
 };
 #[cfg(feature = "native")]
-pub use image_loader::{hash_file, load_picture_bytes, open_image, OpenedImage};
+pub use image_loader::{hash_bytes, hash_file, load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
     delete_persisted_library_index, delete_persisted_library_index_item, has_persisted_library_index,
@@ -85,6 +87,8 @@ pub use library_source::{
     LocalLibraryConfig, PeerLibraryConfig, S3LibraryConfig, S3ObjectEntry,
     S3ObjectListPage,
 };
+#[cfg(feature = "native")]
+pub use thumbnail_cache::{thumbnail_cache_key, ThumbnailCacheDb, ThumbnailCacheEntry};
 #[cfg(feature = "native")]
 pub use thumbnail_loader::{
     generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
