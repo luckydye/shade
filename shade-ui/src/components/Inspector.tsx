@@ -19,6 +19,7 @@ import {
   createBrushMask,
   cropAspectRatioPreset,
   deleteLayer,
+  deletePreset,
   findCropLayerIdx,
   isAdjustmentSliderActive,
   isDrawerOpen,
@@ -281,7 +282,7 @@ export const Inspector: Component = () => {
     "sliders",
   );
   const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
-  const [presets, setPresets] = createSignal<{ name: string }[]>([]);
+  const [presets, setPresets] = createSignal<{ name: string; created_at: number }[]>([]);
   const [snapshots, setSnapshots] = createSignal<
     { id: string; display_index: number; created_at: number; is_current: boolean }[]
   >([]);
@@ -1238,6 +1239,13 @@ export const Inspector: Component = () => {
     });
   };
 
+  const handleDeletePreset = async (name: string) => {
+    await withPresetBusy(async () => {
+      await deletePreset(name);
+      await refreshPresetList();
+    });
+  };
+
   const handleLoadPreset = async (name: string) => {
     await withPresetBusy(async () => {
       await loadPreset(name);
@@ -1533,7 +1541,7 @@ export const Inspector: Component = () => {
         >
           <div class="flex flex-col gap-1">
             {presets().map((preset) => (
-              <div class="grid min-h-8 grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-md bg-[var(--surface-subtle)] px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
+              <div class="grid min-h-8 grid-cols-[minmax(0,1fr)_72px_28px] items-center gap-2 rounded-md bg-[var(--surface-subtle)] px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-subtle)]">
                 <div class="min-w-0">
                   <Show
                     when={editingPresetName() === preset.name}
@@ -1573,6 +1581,15 @@ export const Inspector: Component = () => {
                   class={SECONDARY_BUTTON_CLASS}
                 >
                   Load
+                </Button>
+                <Button
+                  type="button"
+                  disabled={isPresetBusy()}
+                  onClick={() => void handleDeletePreset(preset.name)}
+                  class="inline-flex h-8 w-7 items-center justify-center rounded-md border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-dim)] transition-colors hover:border-[var(--danger-border,var(--border-active))] hover:text-[var(--danger-text,var(--text))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
+                  title="Delete preset"
+                >
+                  <span class="flex h-4 w-4 items-center justify-center [&>svg]:h-4 [&>svg]:w-4" innerHTML={trashSvg} />
                 </Button>
               </div>
             ))}
@@ -2082,8 +2099,8 @@ export const Inspector: Component = () => {
       <div
         class={`m-2 flex h-[calc(100%-1rem)] flex-col touch-compact:hidden ${PANEL_SHELL_CLASS}`}
       >
+        <InspectorTabs class="mb-3 pr-5" />
         <div class="media-scroll flex-1 pr-5 overflow-y-auto">
-          <InspectorTabs class="mb-5" />
           <Show when={inspectorTab() === "edit"} fallback={<PresetsPanel />}>
             <div class="flex flex-col gap-5">
               <DesktopLayerList />

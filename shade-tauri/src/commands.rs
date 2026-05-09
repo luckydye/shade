@@ -1409,6 +1409,7 @@ struct PersistedEditVersion {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PresetInfo {
     pub name: String,
+    pub created_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -5555,11 +5556,19 @@ pub async fn list_presets() -> Result<Vec<PresetInfo>, String> {
         let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
+        let created_at = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.created().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         presets.push(PresetInfo {
             name: stem.to_string(),
+            created_at,
         });
     }
-    presets.sort_by(|a, b| a.name.cmp(&b.name));
+    presets.sort_by(|a, b| a.created_at.cmp(&b.created_at));
     Ok(presets)
 }
 
@@ -5582,8 +5591,15 @@ pub async fn save_preset(
     };
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    let created_at = std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| m.created().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
     Ok(PresetInfo {
         name: name.trim().to_string(),
+        created_at,
     })
 }
 
@@ -5594,9 +5610,16 @@ pub async fn rename_preset(
 ) -> Result<PresetInfo, String> {
     let old_path = preset_file_path(&old_name)?;
     let new_path = preset_file_path(&new_name)?;
+    let created_at = std::fs::metadata(&old_path)
+        .ok()
+        .and_then(|m| m.created().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
     if old_path == new_path {
         return Ok(PresetInfo {
             name: new_name.trim().to_string(),
+            created_at,
         });
     }
     if !old_path.exists() {
@@ -5608,7 +5631,17 @@ pub async fn rename_preset(
     std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
     Ok(PresetInfo {
         name: new_name.trim().to_string(),
+        created_at,
     })
+}
+
+#[tauri::command]
+pub async fn delete_preset(name: String) -> Result<(), String> {
+    let path = preset_file_path(&name)?;
+    if !path.exists() {
+        return Err(format!("preset not found: {}", name.trim()));
+    }
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

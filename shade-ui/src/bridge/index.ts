@@ -957,6 +957,7 @@ export interface BrowserPresetsPlatform {
   listPresets(): Promise<PresetInfo[]>;
   savePreset(name: string, file: BrowserPresetFile): Promise<PresetInfo>;
   renamePreset(oldName: string, newName: string): Promise<PresetInfo>;
+  deletePreset(name: string): Promise<void>;
   loadPreset(name: string): Promise<BrowserPresetFile>;
 }
 
@@ -1058,6 +1059,7 @@ export interface S3MediaLibraryInput {
 
 export interface PresetInfo {
   name: string;
+  created_at: number;
 }
 
 export interface EditSnapshotInfo {
@@ -1533,6 +1535,15 @@ export async function renamePreset(oldName: string, newName: string): Promise<Pr
     return inv("rename_preset", { oldName, newName }) as Promise<PresetInfo>;
   }
   return getBrowserPlatform().presets.renamePreset(oldName, newName);
+}
+
+export async function deletePreset(name: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("delete_preset", { name });
+    return;
+  }
+  await getBrowserPlatform().presets.deletePreset(name);
 }
 
 export async function loadPreset(name: string): Promise<void> {

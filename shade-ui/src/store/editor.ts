@@ -42,6 +42,7 @@ export {
   refreshLayerStack,
   resetCrop,
   renamePreset,
+  deletePreset,
   savePreset,
   selectLayer,
   selectMaskLayer,

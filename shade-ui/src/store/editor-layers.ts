@@ -512,6 +512,10 @@ export async function renamePreset(oldName: string, newName: string) {
   return bridge.renamePreset(oldName, newName);
 }
 
+export async function deletePreset(name: string) {
+  return bridge.deletePreset(name);
+}
+
 export async function loadPreset(name: string) {
   await bridge.loadPreset(name);
   await refreshLayerStack();

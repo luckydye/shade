@@ -140,6 +140,7 @@ pub fn run() {
             commands::list_presets,
             commands::save_preset,
             commands::rename_preset,
+            commands::delete_preset,
             commands::load_preset,
             commands::apply_preset_snapshot,
             commands::batch_apply_preset_snapshot,
