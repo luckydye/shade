@@ -1529,6 +1529,46 @@ export async function savePreset(name: string): Promise<PresetInfo> {
   } satisfies BrowserPresetFile);
 }
 
+export async function getSnapshotPresetJson(
+  fileHash: string | null,
+  imagePath: string,
+): Promise<string | null> {
+  if (await isTauriRuntime()) {
+    if (!fileHash) return null;
+    const inv = await getTauriInvoke();
+    return inv("get_snapshot_preset_json", { fileHash }) as Promise<string | null>;
+  }
+  const snapshot = await getBrowserPlatform().snapshots.getCurrentSnapshot(imagePath);
+  if (!snapshot) return null;
+  return JSON.stringify({ version: 1, layers: snapshot.layers } satisfies BrowserPresetFile);
+}
+
+export async function serializeCurrentPreset(): Promise<string> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    const tempName = "__clipboard_serialize__";
+    await inv("save_preset", { name: tempName });
+    const json = (await inv("get_preset_json", { name: tempName })) as string;
+    await inv("delete_preset", { name: tempName });
+    return json;
+  }
+  const stack = await getLayerStack();
+  return JSON.stringify({
+    version: 1,
+    layers: serializeBrowserPresetLayers(stack.layers),
+  } satisfies BrowserPresetFile);
+}
+
+export async function savePresetFromJson(name: string, json: string): Promise<void> {
+  if (await isTauriRuntime()) {
+    const inv = await getTauriInvoke();
+    await inv("save_preset_from_json", { name, json });
+    return;
+  }
+  const data: BrowserPresetFile = JSON.parse(json);
+  await getBrowserPlatform().presets.savePreset(name, data);
+}
+
 export async function renamePreset(oldName: string, newName: string): Promise<PresetInfo> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();

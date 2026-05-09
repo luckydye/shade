@@ -7,8 +7,15 @@ import { checkWebGPU } from "./bridge/webgpu-check";
 import { showEditorView, showMediaView } from "./store/editor";
 import { setState, state } from "./store/editor-store";
 import { undo, redo } from "./store/history";
+import { loadPreset } from "./store/editor-layers";
+import { serializeCurrentPreset, savePresetFromJson, deletePreset, getSnapshotPresetJson } from "./bridge/index";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
 import { actions, buildActionContext } from "./store/actions";
+import { CLIPBOARD_PRESET_NAME } from "./store/edit-clipboard";
+import { getMediaBrowserController } from "./store/media-browser-control";
+import { mediaViewFocusedItem } from "./store/media-view-context";
+import { showToast } from "./store/toast";
+import { Toast } from "./components/Toast";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };
@@ -62,8 +69,65 @@ const App: Component = () => {
       run: () => redo(),
     });
 
+    actions.register({
+      id: "editor.copy-edits",
+      title: "Copy Edits",
+      group: "Editor",
+      when: (ctx) =>
+        (ctx.hasImage && ctx.currentView === "editor") ||
+        (ctx.currentView === "media" && ctx.mediaViewFocusedItemId !== null),
+      run: async (ctx) => {
+        let json: string | null;
+        if (ctx.currentView === "media") {
+          const item = mediaViewFocusedItem();
+          if (!item) return;
+          json = await getSnapshotPresetJson(item.fileHash, item.path);
+          if (!json) { showToast("No edits to copy"); return; }
+        } else {
+          json = await serializeCurrentPreset();
+        }
+        await navigator.clipboard.writeText(json);
+        showToast("Edits copied");
+      },
+    });
+
+    actions.register({
+      id: "editor.paste-edits",
+      title: "Paste Edits",
+      group: "Editor",
+      when: (ctx) => {
+        if (ctx.currentView === "editor") return ctx.hasImage;
+        if (ctx.currentView === "media") return ctx.mediaViewSelectedItemIds.length > 0;
+        return false;
+      },
+      run: async (ctx) => {
+        let json: string;
+        try {
+          json = await navigator.clipboard.readText();
+          JSON.parse(json);
+        } catch {
+          showToast("Nothing to paste");
+          return;
+        }
+        try {
+          await savePresetFromJson(CLIPBOARD_PRESET_NAME, json);
+          if (ctx.currentView === "editor") {
+            await loadPreset(CLIPBOARD_PRESET_NAME);
+            showToast("Edits pasted");
+          } else {
+            await getMediaBrowserController().pasteEdits(CLIPBOARD_PRESET_NAME);
+            showToast(`Edits pasted to ${ctx.mediaViewSelectedItemIds.length} image${ctx.mediaViewSelectedItemIds.length > 1 ? "s" : ""}`);
+          }
+        } finally {
+          await deletePreset(CLIPBOARD_PRESET_NAME).catch(() => undefined);
+        }
+      },
+    });
+
     actions.mapShortcut("mod+z", "editor.undo");
     actions.mapShortcut("mod+shift+z", "editor.redo");
+    actions.mapShortcut("mod+c", "editor.copy-edits");
+    actions.mapShortcut("mod+v", "editor.paste-edits");
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (targetAcceptsTextInput(e.target)) return;
@@ -76,6 +140,8 @@ const App: Component = () => {
       document.removeEventListener("keydown", handleKeyDown);
       actions.unregister("editor.undo");
       actions.unregister("editor.redo");
+      actions.unregister("editor.copy-edits");
+      actions.unregister("editor.paste-edits");
     });
   });
 
@@ -137,6 +203,7 @@ const App: Component = () => {
           <Inspector />
         </div>
       </div>
+      <Toast />
     </div>
   );
 };

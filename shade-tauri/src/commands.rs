@@ -5604,6 +5604,46 @@ pub async fn save_preset(
 }
 
 #[tauri::command]
+pub async fn save_preset_from_json(name: String, json: String) -> Result<(), String> {
+    let path = preset_file_path(&name)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid preset path: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let _file: PresetFile = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_preset_json(name: String) -> Result<String, String> {
+    let path = preset_file_path(&name)?;
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_snapshot_preset_json(file_hash: String) -> Result<Option<String>, String> {
+    let conn = library_db_conn().await;
+    let mut rows = conn
+        .query(
+            "SELECT layers_json FROM edit_versions WHERE file_hash = ?1 ORDER BY created_at DESC LIMIT 1",
+            libsql::params![file_hash],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(row) = rows.next().await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let layers_json: String = row.get::<String>(0).map_err(|e| e.to_string())?;
+    let data: PersistedLayerData = serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+    let preset = PresetFile {
+        version: 1,
+        layers: data.layers,
+        mask_params: data.mask_params,
+    };
+    Ok(Some(serde_json::to_string(&preset).map_err(|e| e.to_string())?))
+}
+
+#[tauri::command]
 pub async fn rename_preset(
     old_name: String,
     new_name: String,

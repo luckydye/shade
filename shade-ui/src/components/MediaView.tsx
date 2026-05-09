@@ -70,6 +70,8 @@ import {
   setMediaViewFocusedItemId,
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
+  setMediaViewSelectedBatchItems,
+  setMediaViewFocusedItem,
 } from "../store/media-view-context";
 import { actions, buildActionContext } from "../store/actions";
 import { Button } from "./Button";
@@ -254,6 +256,15 @@ export const MediaView: Component = () => {
   } | null>(null);
   createEffect(() => {
     setMediaViewFocusedItemId(focusedItemId());
+    const id = focusedItemId();
+    const item = id ? itemsById().get(id) : undefined;
+    setMediaViewFocusedItem(
+      item
+        ? item.kind === "peer"
+          ? { path: item.name, fileHash: item.fileHash, kind: "peer", peerId: item.peerId, id: item.id }
+          : { path: item.path, fileHash: item.fileHash, kind: "local" }
+        : null,
+    );
   });
 
   createEffect(() => {
@@ -262,6 +273,19 @@ export const MediaView: Component = () => {
 
   createEffect(() => {
     setMediaViewSelectedLibraryId(selectedLibraryId());
+  });
+
+  createEffect(() => {
+    const byId = itemsById();
+    const batchItems = selectedMediaItemIds()
+      .map((id) => byId.get(id))
+      .filter((item): item is MediaItem => !!item)
+      .map((item) =>
+        item.kind === "peer"
+          ? { path: item.name, fileHash: item.fileHash, kind: "peer" as const, peerId: item.peerId, id: item.id }
+          : { path: item.path, fileHash: item.fileHash, kind: "local" as const },
+      );
+    setMediaViewSelectedBatchItems(batchItems);
   });
 
   const thumbnailMemoryBuffer = new Map<string, string>();
@@ -903,6 +927,9 @@ export const MediaView: Component = () => {
       },
       getSelectedLibraryId() {
         return selectedLibraryId();
+      },
+      async pasteEdits(presetName: string) {
+        await handleApplyPresetToSelected(presetName);
       },
     });
     startP2pPolling();

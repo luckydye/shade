@@ -1,6 +1,7 @@
 export interface MediaBrowserController {
   selectLibrary(libraryId: string): void;
   getSelectedLibraryId(): string | null;
+  pasteEdits(presetName: string): Promise<void>;
 }
 
 let controller: MediaBrowserController | null = null;
