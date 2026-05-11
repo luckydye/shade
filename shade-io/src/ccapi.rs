@@ -131,6 +131,7 @@ impl CCAPI {
         let request_url = format!("http://{}{}", self.host, endpoint);
         let client = reqwest::Client::builder()
             .user_agent(APP_USER_AGENT)
+            .pool_max_idle_per_host(0)
             .build()?;
 
         let response = client

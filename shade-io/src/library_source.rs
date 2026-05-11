@@ -584,9 +584,16 @@ fn http_client() -> Result<reqwest::Client, String> {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     Ok(CLIENT
         .get_or_init(|| {
+            // pool_max_idle_per_host(0) disables hyper's idle connection pool.
+            // Without it, hyper spawns a reaper task on whichever runtime fires
+            // the first request; if that runtime dies (short-lived worker
+            // runtime, OS suspend/resume, …) every later request fails with
+            // "dispatch task is gone". Pooling is not worth the bug class for
+            // our access pattern.
             reqwest::Client::builder()
                 .user_agent(APP_USER_AGENT)
                 .http1_only()
+                .pool_max_idle_per_host(0)
                 .build()
                 .expect("failed to build S3 HTTP client")
         })
@@ -893,6 +900,7 @@ fn general_http_client() -> Result<reqwest::Client, String> {
             reqwest::Client::builder()
                 .user_agent(APP_USER_AGENT)
                 .timeout(std::time::Duration::from_secs(10))
+                .pool_max_idle_per_host(0)
                 .build()
                 .expect("failed to build HTTP client")
         })
