@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use shade_lib::{
-    build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
-    CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
-    LayerStack, MaskData, MaskParams, PreviewCrop as GpuPreviewCrop, Renderer,
+    build_curve_lut_from_points, linear_lut, to_acescct_f32, AdjustmentOp, ColorParams,
+    CropRect, CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams,
+    HslParams, LayerStack, MaskData, MaskParams, PreviewCrop as GpuPreviewCrop, Renderer,
     SharpenParams, VignetteParams,
 };
 use shade_io::{
@@ -10,8 +10,7 @@ use shade_io::{
     has_persisted_library_index_by_root, is_supported_library_image,
     library_index_db_path as shared_library_index_db_path, load_image_bytes,
     load_image_bytes_f32_with_info, picture_display_name,
-    replace_persisted_library_index_by_root, scan_directory_images, to_acescct_f32,
-    SourceImageInfo,
+    replace_persisted_library_index_by_root, scan_directory_images, SourceImageInfo,
 };
 use std::collections::HashMap;
 use std::io::Write;

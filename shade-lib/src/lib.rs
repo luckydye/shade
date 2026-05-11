@@ -3,6 +3,7 @@ extern crate self as shade_lib;
 pub mod color_transform;
 pub mod composite;
 mod context;
+pub mod color;
 pub mod denoise;
 mod pipeline;
 pub mod pipelines;
@@ -28,6 +29,10 @@ pub use composite::{
     CompositePipeline, CompositeUniform,
 };
 pub use context::GpuContext;
+pub use color::{
+    from_acescct_f32, from_linear_srgb_f32, quantize_rgba_f32, to_acescct_f32,
+    to_linear_srgb_f32,
+};
 pub use denoise::DenoisePipeline;
 pub use pipeline::TonePipeline;
 pub use pipelines::{

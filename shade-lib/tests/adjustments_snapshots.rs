@@ -288,7 +288,7 @@ fn load_fixture_rgba(path: &Path) -> (Vec<u8>, u32, u32) {
 
 fn expected_srgb_from_working(image: &FloatImage) -> (Vec<u8>, u32, u32) {
     let mut pixels = image.pixels.to_vec();
-    shade_io::from_acescct_f32(&mut pixels, &ColorSpace::Srgb);
+    shade_lib::from_acescct_f32(&mut pixels, &ColorSpace::Srgb);
     let bytes = pixels
         .chunks_exact(4)
         .flat_map(|chunk| {

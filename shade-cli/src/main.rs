@@ -2,14 +2,14 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use shade_lib::{
-    AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect, FloatImage, GrainParams,
-    LayerStack, MaskData, MaskParams, PreviewCrop, Renderer, SharpenParams, ToneParams,
-    VignetteParams,
+    from_acescct_f32, from_linear_srgb_f32, quantize_rgba_f32, to_acescct_f32,
+    to_linear_srgb_f32, AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect,
+    FloatImage, GrainParams, LayerStack, MaskData, MaskParams, PreviewCrop, Renderer,
+    SharpenParams, ToneParams, VignetteParams,
 };
 use shade_io::{
-    from_acescct_f32, from_linear_srgb_f32, generate_desktop_thumbnail, load_image,
-    load_image_f32_with_info, quantize_rgba_f32, save_image, scan_directory_images,
-    to_acescct_f32, to_linear_srgb_f32,
+    generate_desktop_thumbnail, load_image, load_image_f32_with_info, save_image,
+    scan_directory_images,
 };
 #[cfg(feature = "video")]
 use shade_io::{VideoCodec, VideoDecoder, VideoEncoder};
