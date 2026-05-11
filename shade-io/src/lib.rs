@@ -21,9 +21,9 @@ pub mod file_fingerprint;
 #[cfg(feature = "native")]
 pub mod app_config;
 #[cfg(feature = "native")]
-pub mod file_fingerprint_cache;
+pub(crate) mod file_fingerprint_cache;
 #[cfg(feature = "native")]
-pub mod file_fingerprint_io;
+pub(crate) mod file_fingerprint_io;
 #[cfg(feature = "native")]
 pub mod camera_services;
 #[cfg(feature = "native")]
@@ -49,28 +49,12 @@ pub mod video_decoder;
 #[cfg(feature = "ffmpeg")]
 pub mod video_encoder;
 
-pub use file_fingerprint::{
-    fingerprint_from_bytes, fingerprint_from_s3_etag, fingerprint_from_samples,
-    fingerprint_local, fingerprint_with_source, sample_offsets, sample_plan, Fingerprint,
-    FingerprintError, LocalFile, LocalFingerprint, SampleSource, ALGO_V1_SAMPLES,
-    ALGO_V_S3_ETAG, SAMPLE_SIZE, WHOLE_FILE_THRESHOLD,
-};
-
-#[cfg(feature = "native")]
-pub use file_fingerprint_cache::{
-    file_fingerprints_db_path, get_or_compute, FileFingerprintDb, FingerprintRow, LocatorKind,
-};
-#[cfg(feature = "native")]
-pub use file_fingerprint_io::{
-    coalesce, etag_is_content_hash, fingerprint_http, fingerprint_local_async,
-    fingerprint_s3, FingerprintHints, FingerprintResult,
-};
+pub use file_fingerprint::{fingerprint_from_bytes, fingerprint_local};
 
 #[cfg(feature = "native")]
 pub use app_config::{
-    app_config_path, append_library_order_id, is_peer_paired, load_app_config,
-    normalize_library_order, pair_peer, remove_library_order_id, save_app_config,
-    upsert_library_config, AppConfig,
+    append_library_order_id, is_peer_paired, load_app_config, normalize_library_order,
+    pair_peer, remove_library_order_id, save_app_config, upsert_library_config, AppConfig,
 };
 #[cfg(feature = "native")]
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
@@ -84,41 +68,36 @@ pub use collections::{
 pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 #[cfg(feature = "native")]
 pub use library_index::{
-    delete_persisted_library_index, delete_persisted_library_index_item, has_persisted_library_index,
-    has_persisted_library_index_by_root, indexed_library_image_for_path,
-    is_supported_library_image, library_index_db_path, library_index_root_key,
-    load_persisted_library_index, load_persisted_library_index_by_root, picture_display_name,
-    rating_for_image_path, replace_persisted_library_index,
-    replace_persisted_library_index_by_root, scan_directory_images, sort_indexed_library_items,
-    upsert_library_index_items, IndexedLibraryImage, LibraryIndexDb, PersistedLibraryIndex,
+    delete_persisted_library_index, delete_persisted_library_index_item,
+    has_persisted_library_index, has_persisted_library_index_by_root,
+    is_supported_library_image, library_index_db_path, load_persisted_library_index_by_root,
+    picture_display_name, rating_for_image_path, replace_persisted_library_index_by_root,
+    scan_directory_images, sort_indexed_library_items, IndexedLibraryImage, LibraryIndexDb,
 };
 #[cfg(feature = "native")]
 pub use library_scan_service::{
-    flush_library_scan_batch, scan_library_into_snapshot, start_library_scan,
-    LibraryScanService, LibraryScanSnapshot,
+    flush_library_scan_batch, LibraryScanService, LibraryScanSnapshot,
 };
 #[cfg(feature = "native")]
 pub use library_source::{
-    camera_library_id, delete_s3_object, display_s3_library_name,
+    camera_library_id, delete_s3_object, display_s3_library_name, fetch_url_bytes,
     format_s3_library_detail, get_s3_object_bytes, head_s3_object_modified_at,
-    library_config_id, list_s3_objects,
-    list_s3_objects_page, local_library_id, media_path_for_s3_object,
-    normalize_s3_library_input, parse_s3_media_path, peer_library_id,
-    put_s3_object_bytes, put_s3_object_bytes_with_atime, put_s3_object_bytes_with_modified,
-    fetch_url_bytes, get_s3_object_range, head_s3_object_metadata,
+    library_config_id, list_s3_objects, list_s3_objects_page, local_library_id,
+    media_path_for_s3_object, normalize_s3_library_input, parse_s3_media_path,
+    peer_library_id, put_s3_object_bytes, put_s3_object_bytes_with_atime,
     resolve_s3_source_id_from_library_id, s3_library_id, AddS3LibraryParams,
     CameraLibraryConfig, LibraryConfig, LibraryMode, LocalLibraryConfig, PeerLibraryConfig,
-    S3LibraryConfig, S3ObjectEntry, S3ObjectListPage, S3ObjectMetadata,
+    S3LibraryConfig,
 };
 #[cfg(feature = "native")]
 pub use thumbnail_cache::{thumbnail_cache_key, ThumbnailCacheDb, ThumbnailCacheEntry};
 #[cfg(feature = "native")]
 pub use thumbnail_loader::{
     generate_desktop_thumbnail, load_thumbnail_bytes, spawn_thumbnail_workers,
-    LoadedThumbnail, ThumbnailResponseSender,
+    ThumbnailResponseSender,
 };
 #[cfg(feature = "native")]
-pub use thumbnail_queue::{PendingThumbnailJob, ThumbnailJob, ThumbnailQueue};
+pub use thumbnail_queue::ThumbnailQueue;
 #[cfg(feature = "ffmpeg")]
 pub use video_decoder::{FrameInfo, VideoDecoder};
 #[cfg(feature = "ffmpeg")]
@@ -169,16 +148,6 @@ pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
     Ok((rgba.into_raw(), width, height))
-}
-
-pub fn load_image_f32(path: &Path) -> Result<FloatImage> {
-    let (image, _) = load_image_f32_with_info(path)?;
-    Ok(image)
-}
-
-pub fn load_image_bytes_f32(bytes: &[u8], name_hint: Option<&str>) -> Result<FloatImage> {
-    let (image, _) = load_image_bytes_f32_with_info(bytes, name_hint)?;
-    Ok(image)
 }
 
 /// Load an image and also detect its embedded colour space.
@@ -301,108 +270,6 @@ fn raw_orientation_to_exif(orientation: RawOrientation) -> Option<u32> {
         RawOrientation::Rotate90 => Some(6),
         RawOrientation::Transverse => Some(7),
         RawOrientation::Rotate270 => Some(8),
-    }
-}
-
-/// Convert RGBA8 pixels from `src_space` to **linear sRGB** in-place.
-///
-/// This is the normalisation step applied to every source image on load.
-/// The engine always works in linear sRGB internally.
-pub fn to_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
-    match color_space {
-        ColorSpace::LinearSrgb => { /* already linear, nothing to do */ }
-        ColorSpace::Srgb | ColorSpace::Unknown => {
-            // Remove sRGB gamma → linear
-            for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (srgb_to_linear(chunk[0] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[1] = (srgb_to_linear(chunk[1] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[2] = (srgb_to_linear(chunk[2] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                // alpha unchanged
-            }
-        }
-        ColorSpace::AdobeRgb => {
-            apply_matrix_and_linearise(
-                pixels,
-                2.2,
-                &ColorMatrix3x3::ADOBE_RGB_TO_LINEAR_SRGB,
-            );
-        }
-        ColorSpace::DisplayP3 => {
-            apply_matrix_and_linearise(
-                pixels,
-                2.2,
-                &ColorMatrix3x3::DISPLAY_P3_TO_LINEAR_SRGB,
-            );
-        }
-        ColorSpace::ProPhotoRgb => {
-            apply_matrix_and_linearise(
-                pixels,
-                1.8,
-                &ColorMatrix3x3::PROPHOTO_TO_LINEAR_SRGB,
-            );
-        }
-        ColorSpace::AcesCct => { /* already in working space */ }
-        ColorSpace::Custom(_) => {
-            // Fallback: assume sRGB for unknown embedded profiles
-            for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (srgb_to_linear(chunk[0] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[1] = (srgb_to_linear(chunk[1] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[2] = (srgb_to_linear(chunk[2] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-            }
-        }
-    }
-}
-
-/// Convert RGBA8 pixels from **linear sRGB** to `dst_space` for display/export.
-pub fn from_linear_srgb(pixels: &mut Vec<u8>, color_space: &ColorSpace) {
-    match color_space {
-        ColorSpace::LinearSrgb => { /* nothing to do */ }
-        ColorSpace::Srgb | ColorSpace::Unknown => {
-            for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (linear_to_srgb(chunk[0] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[1] = (linear_to_srgb(chunk[1] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[2] = (linear_to_srgb(chunk[2] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-            }
-        }
-        ColorSpace::DisplayP3 => {
-            apply_linear_matrix_and_gamma(
-                pixels,
-                &ColorMatrix3x3::LINEAR_SRGB_TO_DISPLAY_P3,
-                2.2,
-            );
-        }
-        _ => {
-            // Default: apply sRGB encoding
-            for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = (linear_to_srgb(chunk[0] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[1] = (linear_to_srgb(chunk[1] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                chunk[2] = (linear_to_srgb(chunk[2] as f32 / 255.0) * 255.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-            }
-        }
     }
 }
 
@@ -651,7 +518,7 @@ pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<(
 // ── Transfer functions ────────────────────────────────────────────────────────
 
 /// sRGB electro-optical transfer function: encoded → linear.
-pub fn srgb_to_linear(v: f32) -> f32 {
+pub(crate) fn srgb_to_linear(v: f32) -> f32 {
     if v <= 0.04045 {
         v / 12.92
     } else {
@@ -660,7 +527,7 @@ pub fn srgb_to_linear(v: f32) -> f32 {
 }
 
 /// sRGB opto-electrical transfer function: linear → encoded.
-pub fn linear_to_srgb(v: f32) -> f32 {
+pub(crate) fn linear_to_srgb(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
     if v <= 0.0031308 {
         v * 12.92
@@ -1032,37 +899,6 @@ fn float_to_u8(value: f32) -> u8 {
 
 pub fn quantize_rgba_f32(pixels: &[f32]) -> Vec<u8> {
     pixels.iter().map(|channel| float_to_u8(*channel)).collect()
-}
-
-/// Decode gamma, apply matrix, result is linear sRGB.
-fn apply_matrix_and_linearise(pixels: &mut Vec<u8>, gamma: f32, matrix: &ColorMatrix3x3) {
-    for chunk in pixels.chunks_exact_mut(4) {
-        let r = (chunk[0] as f32 / 255.0).powf(gamma);
-        let g = (chunk[1] as f32 / 255.0).powf(gamma);
-        let b = (chunk[2] as f32 / 255.0).powf(gamma);
-        let (or, og, ob) = matrix.apply(r, g, b);
-        chunk[0] = (or.clamp(0.0, 1.0) * 255.0).round() as u8;
-        chunk[1] = (og.clamp(0.0, 1.0) * 255.0).round() as u8;
-        chunk[2] = (ob.clamp(0.0, 1.0) * 255.0).round() as u8;
-    }
-}
-
-/// Apply matrix then encode gamma. Linear sRGB → destination space.
-fn apply_linear_matrix_and_gamma(
-    pixels: &mut Vec<u8>,
-    matrix: &ColorMatrix3x3,
-    gamma: f32,
-) {
-    let inv_gamma = 1.0 / gamma;
-    for chunk in pixels.chunks_exact_mut(4) {
-        let r = chunk[0] as f32 / 255.0;
-        let g = chunk[1] as f32 / 255.0;
-        let b = chunk[2] as f32 / 255.0;
-        let (or, og, ob) = matrix.apply(r, g, b);
-        chunk[0] = (or.clamp(0.0, 1.0).powf(inv_gamma) * 255.0).round() as u8;
-        chunk[1] = (og.clamp(0.0, 1.0).powf(inv_gamma) * 255.0).round() as u8;
-        chunk[2] = (ob.clamp(0.0, 1.0).powf(inv_gamma) * 255.0).round() as u8;
-    }
 }
 
 fn apply_matrix_and_linearise_f32(

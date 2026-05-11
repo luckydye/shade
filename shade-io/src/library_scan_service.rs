@@ -1,4 +1,4 @@
-use crate::{
+use crate::library_index::{
     is_supported_library_image, library_index_root_key, load_persisted_library_index,
     picture_display_name, replace_persisted_library_index, sort_indexed_library_items,
     upsert_library_index_items, IndexedLibraryImage, LibraryIndexDb,

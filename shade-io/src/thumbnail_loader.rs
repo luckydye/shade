@@ -1,5 +1,5 @@
 use crate::file_fingerprint::fingerprint_from_bytes;
-use crate::{ThumbnailJob, ThumbnailQueue};
+use crate::thumbnail_queue::{ThumbnailJob, ThumbnailQueue};
 use std::path::Path;
 use std::sync::Arc;
 
