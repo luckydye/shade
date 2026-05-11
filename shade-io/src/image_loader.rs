@@ -1,4 +1,5 @@
 use crate::file_fingerprint::{fingerprint_from_bytes, fingerprint_local};
+use crate::library_source::{parse_ccapi_media_path, parse_s3_media_path};
 use crate::{
     load_image_bytes_f32_with_info, load_image_f32_with_info, picture_display_name,
     SourceImageInfo,
@@ -12,35 +13,6 @@ pub struct OpenedImage {
     pub source_name: Option<String>,
     pub image: FloatImage,
     pub info: SourceImageInfo,
-}
-
-fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
-    let path = path
-        .strip_prefix("ccapi://")
-        .ok_or_else(|| format!("invalid ccapi media path: {path}"))?;
-    let slash_idx = path
-        .find('/')
-        .ok_or_else(|| format!("invalid ccapi media path: ccapi://{path}"))?;
-    let (host, file_path) = path.split_at(slash_idx);
-    if host.is_empty() || file_path.is_empty() {
-        return Err(format!("invalid ccapi media path: ccapi://{path}"));
-    }
-    Ok((host, file_path))
-}
-
-fn parse_s3_media_path(path: &str) -> Result<(&str, &str), String> {
-    let path = path
-        .strip_prefix("s3://")
-        .ok_or_else(|| format!("invalid S3 media path: {path}"))?;
-    let slash_idx = path
-        .find('/')
-        .ok_or_else(|| format!("invalid S3 media path: s3://{path}"))?;
-    let (source_id, key_with_slash) = path.split_at(slash_idx);
-    let key = &key_with_slash[1..];
-    if source_id.is_empty() || key.is_empty() {
-        return Err(format!("invalid S3 media path: s3://{path}"));
-    }
-    Ok((source_id, key))
 }
 
 pub async fn load_picture_bytes<

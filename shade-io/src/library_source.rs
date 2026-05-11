@@ -154,6 +154,20 @@ pub fn parse_s3_media_path(path: &str) -> Result<(&str, &str), String> {
     Ok((source_id, key))
 }
 
+pub fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
+    let path = path
+        .strip_prefix("ccapi://")
+        .ok_or_else(|| format!("invalid ccapi media path: {path}"))?;
+    let slash_index = path
+        .find('/')
+        .ok_or_else(|| format!("invalid ccapi media path: ccapi://{path}"))?;
+    let (host, file_path) = path.split_at(slash_index);
+    if host.is_empty() || file_path.is_empty() {
+        return Err(format!("invalid ccapi media path: ccapi://{path}"));
+    }
+    Ok((host, file_path))
+}
+
 pub fn library_config_id(config: &LibraryConfig) -> String {
     match config {
         LibraryConfig::Local(config) => local_library_id(Path::new(&config.path)),

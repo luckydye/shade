@@ -1,4 +1,5 @@
 use crate::file_fingerprint::fingerprint_from_bytes;
+use crate::library_source::{parse_ccapi_media_path, parse_s3_media_path};
 use crate::thumbnail_queue::{ThumbnailJob, ThumbnailQueue};
 use std::path::Path;
 use std::sync::Arc;
@@ -11,35 +12,6 @@ pub struct LoadedThumbnail {
 
 pub type ThumbnailResponseSender =
     tokio::sync::oneshot::Sender<Result<LoadedThumbnail, String>>;
-
-fn parse_ccapi_media_path(path: &str) -> Result<(&str, &str), String> {
-    let path = path
-        .strip_prefix("ccapi://")
-        .ok_or_else(|| format!("invalid ccapi media path: {path}"))?;
-    let slash_idx = path
-        .find('/')
-        .ok_or_else(|| format!("invalid ccapi media path: ccapi://{path}"))?;
-    let (host, file_path) = path.split_at(slash_idx);
-    if host.is_empty() || file_path.is_empty() {
-        return Err(format!("invalid ccapi media path: ccapi://{path}"));
-    }
-    Ok((host, file_path))
-}
-
-fn parse_s3_media_path(path: &str) -> Result<(&str, &str), String> {
-    let path = path
-        .strip_prefix("s3://")
-        .ok_or_else(|| format!("invalid S3 media path: {path}"))?;
-    let slash_idx = path
-        .find('/')
-        .ok_or_else(|| format!("invalid S3 media path: s3://{path}"))?;
-    let (source_id, key_with_slash) = path.split_at(slash_idx);
-    let key = &key_with_slash[1..];
-    if source_id.is_empty() || key.is_empty() {
-        return Err(format!("invalid S3 media path: s3://{path}"));
-    }
-    Ok((source_id, key))
-}
 
 pub fn generate_desktop_thumbnail(path: &str) -> Result<LoadedThumbnail, String> {
     let source = Path::new(path);
