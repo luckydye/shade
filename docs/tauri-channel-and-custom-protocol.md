@@ -191,10 +191,12 @@ pub enum ChannelMessage {
         done: bool,
     },
 
-    // Thumbnail
+    // Thumbnail (Rust → JS)
+    // Sent when Rust has proactively re-rendered a thumbnail (e.g. after save
+    // or library scan). Frontend updates its <img> src to the new fingerprint.
     ThumbnailReady {
         path: String,
-        cache_key: String,
+        edit_fingerprint: String,
     },
 
     // Batch
@@ -228,7 +230,7 @@ pub enum ChannelMessage {
 Important:
 
 * JS → Rust messages: viewport state updates
-* Rust → JS messages: library progress, thumbnails, batch progress, peer events
+* Rust → JS messages: library progress, batch progress, peer events, thumbnail ready
 * no image payloads in either direction on this channel
 * preview frames go through the dedicated preview channel (`Channel<PreviewFrame>`)
 
@@ -464,48 +466,37 @@ image/png
 
 # Thumbnail Flow
 
-## Before
-
-```text
-invoke("get_thumbnail")
-  → Vec<u8>
-```
-
-This serializes through IPC.
-
-Bad.
-
----
-
-## After
-
-```text
-invoke("request_thumbnail")
-```
-
-Backend:
-
-```text
-generate thumbnail
-  ↓
-store in thumbnail cache
-  ↓
-send ThumbnailReady(cache_key)
-```
-
-Frontend:
-
 ```html
-<img src="shade://thumb/<cache_key>">
+<img src="shade://thumb/<path>?edit=<fingerprint>">
 ```
 
-The browser handles:
+The edit fingerprint is a hash or generation counter that changes whenever
+the edit stack for that image changes. It is part of the browser cache key,
+so a new fingerprint forces a fresh fetch without any explicit cache
+invalidation.
 
-* decode
-* cache
-* scheduling
+The protocol handler uses `(path, fingerprint)` as its cache key:
 
-natively.
+* cache hit → return cached bytes immediately
+* cache miss → render thumbnail with current edits → cache → return
+
+## Keeping the fingerprint current
+
+**Frontend-driven** (normal case): the frontend already knows when edits
+change because it is the one applying them. It updates the `<img>` src with
+the new fingerprint immediately.
+
+**Rust-driven** (background re-render): after a save or library scan Rust
+may proactively re-render thumbnails. It sends `ThumbnailReady` over the
+coordination channel so the frontend can update its src:
+
+```ts
+onThumbnailReady(({ path, edit_fingerprint }) => {
+  setThumbnailSrc(path, `shade://thumb/${path}?edit=${edit_fingerprint}`);
+});
+```
+
+The browser handles decode, HTTP cache, and scheduling natively.
 
 ---
 
@@ -687,10 +678,10 @@ Recommended:
 
 ## Phase 2 — Thumbnails
 
-* thumbnail cache
-* `shade://thumb/`
-* thumbnail invalidation
-* browser-native image loading
+* thumbnail cache (Rust-side, keyed by `(path, edit_fingerprint)`)
+* `shade://thumb/<path>?edit=<fingerprint>` protocol handler — on-demand render + cache serve
+* `ThumbnailReady` — Rust notifies frontend after background re-renders
+* browser-native image loading; fingerprint in URL drives cache invalidation
 
 ---
 
