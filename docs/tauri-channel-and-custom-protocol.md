@@ -6,18 +6,22 @@
 invoke()
   = commands / mutations
 
-channels
-  = invalidation / progress / coordination
+coordination channel  (JS → Rust + Rust → JS)
+  = viewport state updates / invalidation / progress / metadata
 
-custom protocol
-  = all binary transport
+preview channel  (Rust → JS)
+  = pixel frame stream (push, per-artboard)
+
+custom protocol (shade://)
+  = thumbnails / static binary assets
 ```
 
 The architecture intentionally separates:
 
 * control plane
-* notification plane
-* binary/image transport
+* coordination/notification plane
+* preview pixel stream (push)
+* static binary transport
 
 This avoids pushing image data through the WebView IPC bridge while still keeping the system fully inside Tauri.
 
@@ -52,7 +56,6 @@ Examples:
 
 ```text
 apply_edit
-start_preview_session
 save_preset
 start_library_scan
 ```
@@ -61,16 +64,26 @@ Commands return immediately whenever possible.
 
 ---
 
-## Channels
+## Coordination Channel
 
-Used ONLY for:
+Bidirectional (JS → Rust and Rust → JS).
+
+JS → Rust:
+
+* viewport state updates (`update_preview_viewports`)
+
+Rust → JS:
 
 * invalidation
 * progress
 * lightweight metadata
 * state coordination
 
-Never:
+Viewport updates go through the channel — not invoke() — because they fire
+rapidly during pan, zoom, and drag. Fire-and-forget semantics mean the
+frontend never blocks waiting for a response.
+
+Never carries:
 
 * image bytes
 * thumbnails
@@ -81,14 +94,43 @@ Typical messages are tiny JSON objects.
 
 ---
 
+## Preview Channel
+
+A dedicated Tauri `Channel<PreviewFrame>` separate from the coordination
+channel. Unlike the coordination channel, this IS a binary streaming
+transport — Rust pushes pixel frames to it as renders complete.
+
+Each frame carries:
+
+```rust
+struct PreviewFrame {
+    artboard_id: String,
+    generation: u64,      // matches generation from viewport update — stale frames discarded
+    quality: "interactive" | "final",
+    width: u32,
+    height: u32,
+    crop_x: f64,
+    crop_y: f64,
+    crop_width: f64,
+    crop_height: f64,
+    kind: "rgba" | "rgba-float16",
+    color_space: "srgb" | "display-p3",
+    pixels: Vec<u8>,
+}
+```
+
+The preview channel is the only channel that carries binary payloads. The
+coordination channel remains metadata-only.
+
+---
+
 ## Custom Protocol (`shade://`)
 
-Used for ALL binary/image transport.
+Used for binary/image transport.
 
 Examples:
 
 ```text
-shade://preview/<session>/current
 shade://thumb/<cache_key>
 ```
 
@@ -109,9 +151,10 @@ This avoids JS-side blob churn and unnecessary allocations.
 
 ```text
 shade-tauri/src/
-  channel_protocol.rs
+  channel_protocol.rs   — coordination channel messages
   channel_server.rs
-  preview_protocol.rs
+  preview_channel.rs    — preview frame push channel  (renamed from preview_protocol.rs)
+  preview_scheduler.rs  — multi-artboard render queue  (new)
   commands.rs
   lib.rs
 ```
@@ -121,16 +164,17 @@ shade-tauri/src/
 # Channel Protocol
 
 ```rust
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChannelMessage {
-    // Preview
-    PreviewInvalidated {
-        session_id: String,
+    // Preview viewport state (JS → Rust)
+    UpdatePreviewViewports {
         generation: u64,
+        quality: PreviewQuality,
+        viewports: Vec<ArtboardViewport>,
     },
 
-    // Library
+    // Library (Rust → JS)
     LibraryScanProgress {
         library_id: String,
         scanned: u64,
@@ -183,105 +227,192 @@ pub enum ChannelMessage {
 
 Important:
 
-* messages are metadata only
-* no image payloads
-* no sequence-based frame streaming
+* JS → Rust messages: viewport state updates
+* Rust → JS messages: library progress, thumbnails, batch progress, peer events
+* no image payloads in either direction on this channel
+* preview frames go through the dedicated preview channel (`Channel<PreviewFrame>`)
 
 ---
 
 # Preview Protocol
 
-## URI Structure
+## Transport
+
+Live preview pixel data is pushed from Rust to the frontend via the dedicated
+**preview channel** — a `Channel<PreviewFrame>` separate from the coordination
+channel.
+
+The custom protocol handles thumbnails only:
 
 ```text
-shade://preview/<session>/current
 shade://thumb/<cache_key>
 ```
 
-No frame sequence numbers.
+## Viewport State Sync
 
-The preview system is state-driven, not frame-driven.
+The frontend sends viewport state as a channel message whenever the viewport
+changes (pan / zoom / crop / artboard set):
+
+```rust
+// JS → Rust, sent over the coordination channel
+UpdatePreviewViewports {
+    generation: u64,     // monotonically increasing, frontend-assigned
+    quality: "interactive" | "final",
+    viewports: Vec<ArtboardViewport>,
+}
+
+struct ArtboardViewport {
+    artboard_id: String,
+    crop: PreviewCrop,       // visible region in artboard-local coords
+    target_width: u32,       // pixel dimensions to render
+    target_height: u32,
+    priority: u32,           // 0 = selected, 1+ = background
+}
+```
+
+This is a channel message rather than an invoke() call because viewport
+updates fire rapidly during pan, zoom, and drag — invoke() would queue up
+round-trips and add latency.
+
+The `quality` hint comes from the frontend because only the frontend knows
+whether a UI interaction (slider drag) is in progress.
+
+## Rust Render Worker Behaviour
+
+1. On `update_preview_viewports`: cancel in-flight renders for changed
+   artboards, re-queue by priority.
+2. Render each artboard in priority order (selected first, background
+   opportunistically).
+3. Push a `PreviewFrame` to the preview channel as each artboard completes.
+
+## Why a channel (not invoke()) for previews
+
+The viewport renders tiles directly onto a `<canvas>` using `putImageData` +
+`drawImage`. It also samples raw pixel values for the tone picker and the
+brush mask overlay. These operations require a live `ImageData` handle —
+not a browser-decoded `<img>` element.
+
+The push model lets Rust schedule and prioritise renders across multiple
+artboards independently of the frontend. Background artboards render
+opportunistically without the frontend polling.
 
 ---
 
 # Preview Rendering Model
 
-## Before
-
 ```text
-apply_edit
+apply_edit  /  pan  /  zoom  /  artboard change
   ↓
-render_preview
+channel.send(UpdatePreviewViewports { generation, quality, viewports })
   ↓
-return image bytes
-```
-
----
-
-## After
-
-```text
-apply_edit
+Rust cancels stale renders, re-queues by priority
   ↓
-render worker updates current preview
+[per artboard, in priority order]
+  render → raw pixel buffer: float16 Display P3 | RGBA u8
   ↓
-channel.send(PreviewInvalidated)
+  preview_channel.send(PreviewFrame { artboard_id, generation, ... })
   ↓
-frontend reloads current preview URL
+frontend: stale-check → ImageData → RenderedTile signal
+  ↓
+compositor: putImageData → drawImage onto <canvas>
 ```
 
 ---
 
 # Frontend Preview Flow
 
-## Frontend
+## Viewport state updates
 
 ```ts
-channel.onPreviewInvalidated((msg) => {
-  img.src =
-    `shade://preview/${msg.session_id}/current?g=${msg.generation}`;
+// called on every pan / zoom / crop / artboard-set change
+// fire-and-forget via coordination channel — not invoke()
+coordinationChannel.send({
+  type: "update_preview_viewports",
+  generation: ++currentGeneration,
+  quality: isInteracting ? "interactive" : "final",
+  viewports: buildViewports(),
 });
 ```
 
-The query parameter only exists to force refresh semantics.
+## Preview channel handler
 
-The actual preview state is always:
-
-```text
-/current
+```ts
+previewChannel.onFrame((frame) => {
+  if (frame.generation < currentGeneration) return; // stale
+  const tile = toRenderedTile(frame);
+  setArtboardTile(frame.artboard_id, frame.quality, tile);
+});
 ```
 
-This removes:
+`toRenderedTile()` converts the raw pixel buffer to `ImageData`:
 
-* frame bookkeeping
-* stale frame accumulation
-* sequence synchronization
-* preview queue complexity
+```ts
+type PreviewFrame = {
+  artboard_id: string;
+  generation: number;
+  quality: "interactive" | "final";
+  kind: "rgba" | "rgba-float16";
+  color_space: "srgb" | "display-p3";
+  pixels: Uint8Array;         // raw bytes (float16 if kind === "rgba-float16")
+  width: number;
+  height: number;
+  crop_x: number;
+  crop_y: number;
+  crop_width: number;
+  crop_height: number;
+};
+```
+
+The resulting `RenderedTile` is stored in a per-artboard tile map. The canvas
+re-renders reactively whenever the signal changes.
+
+The compositor renders by showing the `final` tile if available, falling back
+to `interactive`, falling back to the last cached backdrop.
 
 ---
 
 # Preview Cache
 
-The preview cache stores:
+Preview tiles are **raw pixel data held in JS memory** — not encoded images.
 
-* compressed previews
-* JPEG/WebP
-* never raw RGBA unless explicitly required
+Each tile is an `ImageData` (8-bit RGBA or float16 Display P3) wrapped in a
+`RenderedTile`:
 
-Recommended:
-
-```text
-JPEG for interactive previews
-WebP for higher quality previews
+```ts
+interface RenderedTile {
+  image: ImageData;   // raw pixels — never encoded
+  x: number;         // artboard-local position
+  y: number;
+  width: number;     // world-space extent
+  height: number;
+}
 ```
+
+Tiles are stored in a per-artboard map with two quality slots:
+
+```ts
+// keyed by artboard_id
+Map<string, { interactive: RenderedTile | null, final: RenderedTile | null }>
+```
+
+The push model eliminates snapshot-equality logic: Rust drives invalidation and
+the generation counter discards stale frames, so the frontend never needs to
+compare viewport snapshots. There is no Rust-side encoded image cache.
 
 Avoid:
 
 ```text
-Vec<u8> RGBA framebuffer caches
+JPEG / WebP / PNG encoded buffers in the preview path
+  — lossy formats lose photo fidelity
+  — lossless PNG can't represent float16 Display P3
+  — encoding/decoding adds latency with no benefit
+
+Vec<u8> RGBA framebuffer caches on the Rust side
+  — unbounded memory, wrong layer for this cache
 ```
 
-for memory reasons.
+The `OffscreenCanvas` surface cache in the compositor avoids redundant
+`putImageData` calls between frames.
 
 ---
 
@@ -315,17 +446,17 @@ tauri::Builder::default()
 
 Responsibilities:
 
-* preview responses
 * thumbnail responses
 * cache lookup
 * content type headers
 * browser cache control
 
+Preview pixel data does **not** go through this handler — it is pushed via
+the preview channel (`Channel<PreviewFrame>`).
+
 The protocol handler should return proper MIME types:
 
 ```text
-image/jpeg
-image/webp
 image/png
 ```
 
@@ -455,9 +586,9 @@ Responsibilities:
 Example:
 
 ```ts
-onPreviewInvalidated(cb)
 onLibraryScanProgress(cb)
 onBatchProgress(cb)
+onThumbnailReady(cb)
 ```
 
 ---
@@ -466,26 +597,53 @@ onBatchProgress(cb)
 
 Responsibilities:
 
-* preview refresh logic
-* cache-busting generation handling
-* image element coordination
-* bitmap upload helpers later
+* register and own the preview channel (`Channel<PreviewFrame>`)
+* maintain `currentGeneration` counter; increment on each viewport update
+* send `UpdatePreviewViewports` over the coordination channel on viewport changes
+* receive pushed `PreviewFrame` objects; discard stale frames by generation
+* convert frames to `RenderedTile` and update per-artboard tile map signals
+* expose per-artboard tile signals to the compositor
 
 ---
 
 # Memory Strategy
 
-## Preview Cache
+## Preview Cache — Multi-Artboard Tile Map
 
-Bounded LRU.
-
-Recommended:
+Per-artboard tile map, two quality slots each:
 
 ```text
-2–4 active previews max
+Map<artboard_id, { interactive: RenderedTile | null, final: RenderedTile | null }>
 ```
 
-Store compressed previews only.
+Both quality levels are `RenderedTile` signals (raw `ImageData`). Tiles are set
+directly when a `PreviewFrame` arrives from Rust; no snapshot-equality comparison
+is needed.
+
+Compositor render order per artboard:
+
+```text
+1. final tile if available
+2. fall back to interactive tile
+3. fall back to last cached backdrop
+```
+
+Each tile also has a corresponding `OffscreenCanvas` surface cached in the
+compositor to avoid redundant `putImageData` calls.
+
+Quality levels:
+
+```text
+interactive — lower resolution, issued during slider drag / pan / zoom
+final       — full resolution, issued when interaction settles
+```
+
+Priority:
+
+```text
+0 — selected artboard (rendered first)
+1+ — background artboards (rendered opportunistically)
+```
 
 ---
 
@@ -505,21 +663,25 @@ Recommended:
 
 ## Phase 0 — Infrastructure
 
-* channel protocol
-* channel registration
-* frontend dispatcher
+* coordination channel protocol
+* coordination channel registration and frontend dispatcher
 * managed channel state
-* protocol registration
+* preview channel registration (`Channel<PreviewFrame>`)
+* `preview_channel.rs` — frame type and push helpers
+* `preview_scheduler.rs` — multi-artboard render queue skeleton
+* protocol registration (`shade://`)
 
 ---
 
-## Phase 1 — Preview Pipeline
+## Phase 1 — Preview Pipeline (push model)
 
-* preview protocol
-* compressed preview cache
-* `PreviewInvalidated`
-* frontend preview refresh
-* remove blocking preview round-trip
+* `UpdatePreviewViewports` channel message — viewport state sync (fire-and-forget)
+* `preview_scheduler.rs` — priority queue, cancellation, per-artboard workers
+* Rust pushes `PreviewFrame` to preview channel as renders complete
+* frontend: generation counter, stale-frame discard
+* per-artboard tile map (`Map<artboard_id, { interactive, final }>`)
+* compositor: final → interactive → backdrop fallback chain
+* interactive + final quality levels driven from frontend interaction state
 
 ---
 
@@ -557,66 +719,55 @@ Recommended:
 
 # Important Design Constraints
 
-## Channels are NOT a streaming transport
+## The coordination channel is NOT a streaming transport
 
-They are:
+The coordination channel carries metadata only (tiny JSON):
 
 ```text
-coordination transport
+coordination transport — invalidation, progress, state events
 ```
 
 not:
 
 ```text
-media transport
+media transport — pixel buffers, binary payloads
 ```
 
----
-
-## Previews are stateful
-
-Not sequential frame streams.
-
-This is closer to how:
-
-* Lightroom
-* Capture One
-* Figma
-
-style rendering systems behave.
+The **preview channel** is a separate `Channel<PreviewFrame>` that IS a
+binary streaming transport. Keeping them separate means the coordination
+channel latency is never affected by preview frame size or volume.
 
 ---
 
-## Browser image pipeline is leveraged intentionally
+## Multi-artboard scheduling
 
-The browser/WebView is already highly optimized for:
+Rust owns render scheduling and prioritisation:
+
+* selected artboard → priority 0, rendered first
+* background artboards → priority 1+, rendered opportunistically
+* viewport updates cancel and re-queue in-flight renders
+* generation counter lets the frontend discard frames that arrived after a
+  newer viewport update superseded them
+
+The frontend does not poll. It sends viewport state and receives pushed frames.
+
+---
+
+## Browser image pipeline is leveraged for thumbnails only
+
+For thumbnails (`shade://thumb/<cache_key>`) the browser handles:
 
 * image decode
-* caching
+* HTTP cache
 * texture upload
 
-The architecture should use that rather than fighting it with manual JS blob management.
+This is appropriate for thumbnails because they are static, cacheable by
+key, and do not require direct pixel access.
 
----
+Live previews cannot use this path. The viewport needs raw `ImageData`
+for:
 
-# Escape Hatch
-
-If later measurements show:
-
-* protocol latency too high
-* preview invalidation too slow
-* decode bottlenecks
-
-then the system can still migrate preview transport to:
-
-* WebSocket
-* shared textures
-* GPU-native rendering
-
-without changing:
-
-* command APIs
-* channel protocol
-* frontend coordination logic
-
-Only the binary transport layer changes.
+* direct pixel sampling (tone picker reads `tile.image.data` per pointer event)
+* brush mask overlay (`stampBrushOverlay` writes into a pixel buffer)
+* float16 Display P3 wide-gamut support (not representable in PNG or any
+  format that browsers decode to sRGB `ImageData` by default)
