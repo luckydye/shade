@@ -224,6 +224,13 @@ pub enum ChannelMessage {
     },
 
     PresetListChanged,
+
+    // Camera discovery (Rust → JS)
+    // Sent when the background scan updates the list of reachable camera hosts.
+    // Replaces the current polling model (list_media_libraries re-read on timer).
+    CameraHostsChanged {
+        hosts: Vec<String>,
+    },
 }
 ```
 
@@ -667,7 +674,7 @@ Recommended:
 * Rust pushes `PreviewFrame` as renders complete
 * frontend: generation counter, stale-frame discard, per-artboard tile map
 * compositor: final → interactive → backdrop fallback chain
-* remove legacy blocking preview round-trip
+* remove `render_preview` and `render_preview_float16` invoke handlers
 
 ---
 
@@ -680,6 +687,9 @@ Phases 2 and 3 are independent and can proceed in parallel after Phase 0.
 * thumbnail cache (Rust-side, keyed by `(path, edit_fingerprint)`)
 * `shade://thumb/<path>?edit=<fingerprint>` protocol handler — on-demand render + cache serve
 * `ThumbnailReady` for Rust-proactive background re-renders
+* remove `get_thumbnail` and `get_peer_thumbnail` invoke handlers
+* peer thumbnails: `shade://thumb/peer/<peer_id>/<path>?edit=<fingerprint>`
+* `get_mask_thumbnail` stays as invoke() — session-scoped, in-memory, not a file thumbnail
 
 ---
 
@@ -687,10 +697,15 @@ Phases 2 and 3 are independent and can proceed in parallel after Phase 0.
 
 Replace all `app.emit()` usage with coordination channel messages:
 
-* chunked library list streaming (`LibraryListChunk`)
-* scan progress (`LibraryScanProgress` / `LibraryScanComplete`)
-* batch export progress (`BatchExportProgress`)
-* peer events, collection / preset changes
+* scan progress — `LibraryScanProgress` / `LibraryScanComplete` (currently `handle.emit("library-scan-progress" / "library-scan-complete")` in `LibraryScanService`)
+* chunked library list streaming — `LibraryListChunk` (replaces `list_library_images` returning full payload)
+* batch export progress — `BatchExportProgress`
+* peer events — `PeerPaired` / `PeerAwarenessUpdate`
+* collection / preset changes — `CollectionChanged` / `PresetListChanged`
+* camera discovery — `CameraHostsChanged` (replaces polling via `list_media_libraries`; fired by `spawn_camera_discovery` whenever the host list changes)
+* camera thumbnails — `shade://thumb/camera/<host>/<path>` (no edit fingerprint; protocol handler acquires the per-host `CameraThumbnailService` semaphore before fetching via CCAPI)
+
+Out of scope: `remote_control` — separate subsystem, not migrated here.
 
 ---
 
