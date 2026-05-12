@@ -652,27 +652,26 @@ Recommended:
 
 # Implementation Phases
 
-## Phase 0 — Infrastructure
+## Phase 0 — Transport Infrastructure
 
-* coordination channel protocol
-* coordination channel registration and frontend dispatcher
-* managed channel state
-* preview channel registration (`Channel<PreviewFrame>`)
-* `preview_channel.rs` — frame type and push helpers
-* `preview_scheduler.rs` — multi-artboard render queue skeleton
-* protocol registration (`shade://`)
+* coordination channel: protocol, registration, frontend dispatcher
+* preview channel: registration (`Channel<PreviewFrame>`), `preview_channel.rs` frame type and push helpers
+* `shade://` protocol registration
 
 ---
 
-## Phase 1 — Preview Pipeline (push model)
+## Phase 1 — Preview Pipeline
 
-* `UpdatePreviewViewports` channel message — viewport state sync (fire-and-forget)
 * `preview_scheduler.rs` — priority queue, cancellation, per-artboard workers
-* Rust pushes `PreviewFrame` to preview channel as renders complete
-* frontend: generation counter, stale-frame discard
-* per-artboard tile map (`Map<artboard_id, { interactive, final }>`)
+* `UpdatePreviewViewports` channel message — viewport state sync
+* Rust pushes `PreviewFrame` as renders complete
+* frontend: generation counter, stale-frame discard, per-artboard tile map
 * compositor: final → interactive → backdrop fallback chain
-* interactive + final quality levels driven from frontend interaction state
+* remove legacy blocking preview round-trip
+
+---
+
+Phases 2 and 3 are independent and can proceed in parallel after Phase 0.
 
 ---
 
@@ -680,31 +679,25 @@ Recommended:
 
 * thumbnail cache (Rust-side, keyed by `(path, edit_fingerprint)`)
 * `shade://thumb/<path>?edit=<fingerprint>` protocol handler — on-demand render + cache serve
-* `ThumbnailReady` — Rust notifies frontend after background re-renders
-* browser-native image loading; fingerprint in URL drives cache invalidation
+* `ThumbnailReady` for Rust-proactive background re-renders
 
 ---
 
-## Phase 3 — Streaming Library APIs
+## Phase 3 — Remaining Channel Messages
 
-* chunked library list streaming
-* scan progress
-* progressive UI population
+Replace all `app.emit()` usage with coordination channel messages:
 
----
-
-## Phase 4 — Batch / Peer / Collections
-
-* replace `app.emit()`
-* unify coordination plane under channels
+* chunked library list streaming (`LibraryListChunk`)
+* scan progress (`LibraryScanProgress` / `LibraryScanComplete`)
+* batch export progress (`BatchExportProgress`)
+* peer events, collection / preset changes
 
 ---
 
-## Phase 5 — Cleanup
+## Cleanup (part of each phase's done criteria)
 
-* remove legacy events
-* remove binary IPC returns
-* document protocol
+* remove replaced legacy events and binary IPC returns as each phase lands
+* document protocol changes in each PR
 
 ---
 
