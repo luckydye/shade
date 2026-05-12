@@ -1,7 +1,26 @@
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use wgpu::{Adapter, Buffer, BufferDescriptor, BufferUsages, Device, Instance, Queue};
+
+const WORK_TEXTURE_POOL_BUDGET_BYTES: u64 = 384 * 1024 * 1024;
+const INTERNAL_TEXTURE_BYTES_PER_PIXEL: u64 = 8;
+
+pub struct WorkTexturePool {
+    pub textures: HashMap<(u32, u32), Vec<wgpu::Texture>>,
+    pub lru: VecDeque<(u32, u32)>,
+    pub bytes: u64,
+}
+
+impl WorkTexturePool {
+    pub fn new() -> Self {
+        Self {
+            textures: HashMap::new(),
+            lru: VecDeque::new(),
+            bytes: 0,
+        }
+    }
+}
 
 /// Owns the core wgpu objects needed for headless GPU compute.
 pub struct GpuContext {
@@ -9,7 +28,7 @@ pub struct GpuContext {
     pub adapter: Adapter,
     pub device: Device,
     pub queue: Queue,
-    work_texture_pool: Mutex<HashMap<(u32, u32), Vec<wgpu::Texture>>>,
+    pub work_texture_pool: Mutex<WorkTexturePool>,
 }
 
 pub fn create_upload_buffer(
@@ -36,14 +55,20 @@ impl GpuContext {
         height: u32,
         label: &'static str,
     ) -> wgpu::Texture {
-        if let Some(texture) = self
-            .work_texture_pool
-            .lock()
-            .expect("work texture pool poisoned")
-            .get_mut(&(width, height))
-            .and_then(Vec::pop)
+        let key = (width, height);
+        let bytes = work_texture_bytes(width, height);
         {
-            return texture;
+            let mut pool = self
+                .work_texture_pool
+                .lock()
+                .expect("work texture pool poisoned");
+            if let Some(texture) = pool.textures.get_mut(&key).and_then(Vec::pop) {
+                if pool.textures.get(&key).is_some_and(Vec::is_empty) {
+                    pool.textures.remove(&key);
+                }
+                pool.bytes -= bytes;
+                return texture;
+            }
         }
         self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -63,12 +88,29 @@ impl GpuContext {
 
     pub fn release_work_texture(&self, texture: wgpu::Texture) {
         let size = texture.size();
-        self.work_texture_pool
+        let key = (size.width, size.height);
+        let bytes = work_texture_bytes(size.width, size.height);
+        if bytes > WORK_TEXTURE_POOL_BUDGET_BYTES {
+            return;
+        }
+        let mut pool = self
+            .work_texture_pool
             .lock()
-            .expect("work texture pool poisoned")
-            .entry((size.width, size.height))
-            .or_default()
-            .push(texture);
+            .expect("work texture pool poisoned");
+        pool.textures.entry(key).or_default().push(texture);
+        pool.lru.push_back(key);
+        pool.bytes += bytes;
+        trim_work_texture_pool(&mut pool);
+    }
+
+    pub fn clear_work_texture_pool(&self) {
+        let mut pool = self
+            .work_texture_pool
+            .lock()
+            .expect("work texture pool poisoned");
+        pool.textures.clear();
+        pool.lru.clear();
+        pool.bytes = 0;
     }
 
     /// Create a headless wgpu context (no surface / window required).
@@ -120,7 +162,30 @@ impl GpuContext {
             adapter,
             device,
             queue,
-            work_texture_pool: Mutex::new(HashMap::new()),
+            work_texture_pool: Mutex::new(WorkTexturePool::new()),
         })
+    }
+}
+
+pub fn work_texture_bytes(width: u32, height: u32) -> u64 {
+    u64::from(width) * u64::from(height) * INTERNAL_TEXTURE_BYTES_PER_PIXEL
+}
+
+pub fn trim_work_texture_pool(pool: &mut WorkTexturePool) {
+    while pool.bytes > WORK_TEXTURE_POOL_BUDGET_BYTES {
+        let key = pool
+            .lru
+            .pop_front()
+            .expect("work texture pool lru must contain evictable texture");
+        let Some(textures) = pool.textures.get_mut(&key) else {
+            continue;
+        };
+        if textures.pop().is_none() {
+            continue;
+        }
+        pool.bytes -= work_texture_bytes(key.0, key.1);
+        if textures.is_empty() {
+            pool.textures.remove(&key);
+        }
     }
 }

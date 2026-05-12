@@ -18,3 +18,7 @@ futures-channel = "0.3"
 shade-io = { path = "../shade-io" }
 image = { workspace = true }
 tokio = { workspace = true }
+
+[[bench]]
+name = "organic_gpu"
+harness = false

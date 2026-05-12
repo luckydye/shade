@@ -5,7 +5,7 @@ use shade_lib::{
     AdjustmentOp, ColorMatrix3x3, ColorSpace, FloatImage, HslParams,
     Layer, LayerStack, TextureId, ToneParams,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use wgpu::{
     BufferDescriptor, BufferUsages, Extent3d, ImageCopyBuffer, ImageCopyTexture,
@@ -26,11 +26,38 @@ use crate::{
         VignettePipeline,
     },
     sharpen2::SharpenTwoPassPipeline,
-    texture_cache::TextureCache,
+    texture_cache::{TextureCache, TextureCacheKey},
     GpuContext, TonePipeline, INTERNAL_TEXTURE_FORMAT,
 };
 
 const PREVIEW_SRGB_LUT_SIZE: usize = 8192;
+const READBACK_BUFFER_POOL_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
+
+pub struct ReadbackBufferPool {
+    pub buffers: HashMap<u64, Vec<wgpu::Buffer>>,
+    pub lru: VecDeque<u64>,
+    pub bytes: u64,
+}
+
+impl ReadbackBufferPool {
+    pub fn new() -> Self {
+        Self {
+            buffers: HashMap::new(),
+            lru: VecDeque::new(),
+            bytes: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RendererMemoryStats {
+    pub work_texture_pool_bytes: u64,
+    pub work_texture_pool_textures: usize,
+    pub texture_cache_bytes: u64,
+    pub texture_cache_textures: usize,
+    pub readback_buffer_pool_bytes: u64,
+    pub readback_buffer_pool_buffers: usize,
+}
 
 #[derive(Clone, Debug)]
 pub struct PreviewCrop {
@@ -59,7 +86,7 @@ pub struct Renderer {
     pub denoise_pipeline: DenoisePipeline,
     pub texture_cache: TextureCache,
     pub color_transform_pipeline: ColorTransformPipeline,
-    readback_buffer_pool: Mutex<HashMap<u64, Vec<wgpu::Buffer>>>,
+    readback_buffer_pool: Mutex<ReadbackBufferPool>,
 }
 
 impl Renderer {
@@ -108,12 +135,39 @@ impl Renderer {
             denoise_pipeline,
             texture_cache,
             color_transform_pipeline,
-            readback_buffer_pool: Mutex::new(HashMap::new()),
+            readback_buffer_pool: Mutex::new(ReadbackBufferPool::new()),
         })
     }
 
     pub fn clear_image_cache(&self) {
         self.texture_cache.clear();
+    }
+
+    pub fn trim_memory(&self) {
+        self.texture_cache.clear();
+        self.ctx.clear_work_texture_pool();
+        self.clear_readback_buffer_pool();
+    }
+
+    pub fn memory_stats(&self) -> RendererMemoryStats {
+        let work_pool = self
+            .ctx
+            .work_texture_pool
+            .lock()
+            .expect("work texture pool poisoned");
+        let texture_cache = self.texture_cache.state.borrow();
+        let readback_pool = self
+            .readback_buffer_pool
+            .lock()
+            .expect("readback buffer pool poisoned");
+        RendererMemoryStats {
+            work_texture_pool_bytes: work_pool.bytes,
+            work_texture_pool_textures: work_pool.textures.values().map(Vec::len).sum(),
+            texture_cache_bytes: texture_cache.bytes,
+            texture_cache_textures: texture_cache.map.len(),
+            readback_buffer_pool_bytes: readback_pool.bytes,
+            readback_buffer_pool_buffers: readback_pool.buffers.values().map(Vec::len).sum(),
+        }
     }
 
     /// Apply tone adjustments to raw RGBA8 pixels and return the processed RGBA8 result.
@@ -479,15 +533,17 @@ impl Renderer {
             let layer_result: wgpu::Texture = match &entry.layer {
                 Layer::Image { texture_id, .. } => {
                     if let Some(image) = image_sources.get(texture_id) {
-                        let source_texture =
-                            self.texture_cache.get_or_insert_with(*texture_id, || {
+                        let source_texture = self.texture_cache.get_or_insert_with(
+                            TextureCacheKey::from_image(*texture_id, image),
+                            || {
                                 self.upload_float_texture(
                                     &image.pixels,
                                     image.width,
                                     image.height,
                                     "cached image layer texture",
                                 )
-                            });
+                            },
+                        );
 
                         // Pre-apply the longest ordered prefix of ops that is safe to run on
                         // the full-resolution source before crop/downscale. This preserves the
@@ -981,14 +1037,18 @@ impl Renderer {
     }
 
     fn acquire_readback_buffer(&self, size: u64, label: &'static str) -> wgpu::Buffer {
-        if let Some(buffer) = self
-            .readback_buffer_pool
-            .lock()
-            .expect("readback buffer pool poisoned")
-            .get_mut(&size)
-            .and_then(Vec::pop)
         {
-            return buffer;
+            let mut pool = self
+                .readback_buffer_pool
+                .lock()
+                .expect("readback buffer pool poisoned");
+            if let Some(buffer) = pool.buffers.get_mut(&size).and_then(Vec::pop) {
+                if pool.buffers.get(&size).is_some_and(Vec::is_empty) {
+                    pool.buffers.remove(&size);
+                }
+                pool.bytes -= size;
+                return buffer;
+            }
         }
         self.ctx.device.create_buffer(&BufferDescriptor {
             label: Some(label),
@@ -999,12 +1059,27 @@ impl Renderer {
     }
 
     fn release_readback_buffer(&self, size: u64, buffer: wgpu::Buffer) {
-        self.readback_buffer_pool
+        if size > READBACK_BUFFER_POOL_BUDGET_BYTES {
+            return;
+        }
+        let mut pool = self
+            .readback_buffer_pool
             .lock()
-            .expect("readback buffer pool poisoned")
-            .entry(size)
-            .or_default()
-            .push(buffer);
+            .expect("readback buffer pool poisoned");
+        pool.buffers.entry(size).or_default().push(buffer);
+        pool.lru.push_back(size);
+        pool.bytes += size;
+        trim_readback_buffer_pool(&mut pool);
+    }
+
+    fn clear_readback_buffer_pool(&self) {
+        let mut pool = self
+            .readback_buffer_pool
+            .lock()
+            .expect("readback buffer pool poisoned");
+        pool.buffers.clear();
+        pool.lru.clear();
+        pool.bytes = 0;
     }
 
     async fn readback_texture<T, F>(
@@ -1192,6 +1267,25 @@ impl Renderer {
             },
         )
         .await
+    }
+}
+
+fn trim_readback_buffer_pool(pool: &mut ReadbackBufferPool) {
+    while pool.bytes > READBACK_BUFFER_POOL_BUDGET_BYTES {
+        let size = pool
+            .lru
+            .pop_front()
+            .expect("readback buffer pool lru must contain evictable buffer");
+        let Some(buffers) = pool.buffers.get_mut(&size) else {
+            continue;
+        };
+        if buffers.pop().is_none() {
+            continue;
+        }
+        pool.bytes -= size;
+        if buffers.is_empty() {
+            pool.buffers.remove(&size);
+        }
     }
 }
 

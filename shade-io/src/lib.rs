@@ -138,6 +138,33 @@ pub fn load_image(path: &Path) -> Result<(Vec<u8>, u32, u32)> {
         .with_context(|| format!("Failed to decode image: {}", path.display()))
 }
 
+pub fn load_image_preview(path: &Path, max_dim: u32) -> Result<(Vec<u8>, u32, u32)> {
+    assert!(max_dim > 0, "max_dim must be > 0");
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("Cannot read file: {}", path.display()))?;
+    load_image_bytes_preview(&bytes, path.file_name().and_then(|name| name.to_str()), max_dim)
+        .with_context(|| format!("Failed to decode image preview: {}", path.display()))
+}
+
+pub fn load_image_bytes_preview(
+    bytes: &[u8],
+    name_hint: Option<&str>,
+    max_dim: u32,
+) -> Result<(Vec<u8>, u32, u32)> {
+    assert!(max_dim > 0, "max_dim must be > 0");
+    if is_exr(name_hint, bytes) || is_camera_raw(name_hint, bytes) {
+        let (pixels, width, height) = load_image_bytes(bytes, name_hint)?;
+        return Ok(resize_rgba_within(pixels, width, height, max_dim));
+    }
+    let img = apply_orientation(
+        image::load_from_memory(bytes).context("Failed to decode image bytes")?,
+        read_orientation(&mut Cursor::new(bytes))?,
+    );
+    let rgba = img.thumbnail(max_dim, max_dim).to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok((rgba.into_raw(), width, height))
+}
+
 pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
     if is_exr(name_hint, bytes) || is_camera_raw(name_hint, bytes) {
         let (image, _info) = load_image_bytes_f32_with_info(bytes, name_hint)?;
@@ -322,6 +349,25 @@ pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<(
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+fn resize_rgba_within(rgba: Vec<u8>, width: u32, height: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
+    let current_max = width.max(height);
+    if current_max <= max_dim {
+        return (rgba, width, height);
+    }
+    let scale = max_dim as f32 / current_max as f32;
+    let target_width = ((width as f32 * scale).round() as u32).max(1);
+    let target_height = ((height as f32 * scale).round() as u32).max(1);
+    let image = image::RgbaImage::from_raw(width, height, rgba)
+        .expect("decoded rgba buffer size must match dimensions");
+    let resized = image::imageops::resize(
+        &image,
+        target_width,
+        target_height,
+        image::imageops::FilterType::Triangle,
+    );
+    (resized.into_raw(), target_width, target_height)
+}
 
 fn is_exr(name_hint: Option<&str>, bytes: &[u8]) -> bool {
     name_hint

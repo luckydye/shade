@@ -40,9 +40,9 @@ pub use pipelines::{
     GrainPipeline, HslPipeline, SharpenPipeline, VignettePipeline,
 };
 pub use profiler::{GpuProfiler, PassTiming};
-pub use renderer::{PreviewCrop, Renderer};
+pub use renderer::{PreviewCrop, Renderer, RendererMemoryStats};
 pub use sharpen2::SharpenTwoPassPipeline;
-pub use texture_cache::TextureCache;
+pub use texture_cache::{TextureCache, TextureCacheKey};
 
 /// Tone adjustment parameters — must match the WGSL uniform struct layout.
 #[repr(C)]

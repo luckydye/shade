@@ -23,11 +23,17 @@ struct RenderJob {
     w: u32,
     h: u32,
     ops: Vec<AdjustmentOp>,
+    trim_before: bool,
     reply: futures_channel::oneshot::Sender<anyhow::Result<Vec<u8>>>,
 }
 
+enum RenderRequest {
+    Render(RenderJob),
+    Trim,
+}
+
 struct JobSlot {
-    job: Mutex<Option<RenderJob>>,
+    job: Mutex<Option<RenderRequest>>,
     wake: Condvar,
 }
 
@@ -45,7 +51,7 @@ impl RenderWorker {
             let renderer = pollster::block_on(Renderer::new())
                 .expect("failed to create shade-lib Renderer on render thread");
             loop {
-                let job: RenderJob = {
+                let request: RenderRequest = {
                     let mut guard = slot2.job.lock().unwrap();
                     loop {
                         match guard.take() {
@@ -54,13 +60,21 @@ impl RenderWorker {
                         }
                     }
                 };
-                let result = pollster::block_on(renderer.render_with_ops(
-                    &job.pixels,
-                    job.w,
-                    job.h,
-                    &job.ops,
-                ));
-                let _ = job.reply.send(result);
+                match request {
+                    RenderRequest::Render(job) => {
+                        if job.trim_before {
+                            renderer.trim_memory();
+                        }
+                        let result = pollster::block_on(renderer.render_with_ops(
+                            &job.pixels,
+                            job.w,
+                            job.h,
+                            &job.ops,
+                        ));
+                        let _ = job.reply.send(result);
+                    }
+                    RenderRequest::Trim => renderer.trim_memory(),
+                }
             }
         });
         Self(slot)
@@ -68,7 +82,12 @@ impl RenderWorker {
 
     /// Submit a job. If a previous job is still waiting, it is discarded.
     fn submit(&self, job: RenderJob) {
-        *self.0.job.lock().unwrap() = Some(job);
+        *self.0.job.lock().unwrap() = Some(RenderRequest::Render(job));
+        self.0.wake.notify_one();
+    }
+
+    fn trim_memory(&self) {
+        *self.0.job.lock().unwrap() = Some(RenderRequest::Trim);
         self.0.wake.notify_one();
     }
 }
@@ -147,6 +166,7 @@ struct Shade {
     view: View,
     edits: Edits,
     rendered: Option<Arc<RenderImage>>,
+    render_source: Option<usize>,
     // Images evicted from `rendered` that still need to be removed from the
     // sprite atlas. Drained in render() where &mut Window is available.
     pending_drops: Vec<Arc<RenderImage>>,
@@ -165,6 +185,7 @@ impl Shade {
             view: View::Library,
             edits: Edits::zero(),
             rendered: None,
+            render_source: None,
             pending_drops: Vec::new(),
             status: None,
             drag: None,
@@ -195,6 +216,17 @@ impl Shade {
         if self.selected.is_none() {
             self.selected = self.photos.len().checked_sub(1);
         }
+        cx.notify();
+    }
+
+    fn clear_photos(&mut self, cx: &mut Context<Self>) {
+        self.pending_drops.extend(self.photos.drain(..).map(|photo| photo.thumb));
+        self.set_rendered(None);
+        self.selected = None;
+        self.render_source = None;
+        self.view = View::Library;
+        self._render_task = None;
+        self.worker.trim_memory();
         cx.notify();
     }
 
@@ -234,7 +266,9 @@ impl Shade {
     fn rerender(&mut self, cx: &mut Context<Self>) {
         let Some(idx) = self.selected else {
             self.set_rendered(None);
+            self.render_source = None;
             self._render_task = None;
+            self.worker.trim_memory();
             cx.notify();
             return;
         };
@@ -246,14 +280,20 @@ impl Shade {
 
         let (tx, rx) = futures_channel::oneshot::channel();
 
+        let trim_before = self.render_source != Some(idx);
+        self.render_source = Some(idx);
+
         if ops.is_empty() {
             // No edits: pass through without touching the render thread.
             let bytes = pixels.as_ref().clone();
             self.set_rendered(render_image_from_rgba(bytes, w, h));
             self._render_task = None;
+            if trim_before {
+                self.worker.trim_memory();
+            }
             cx.notify();
         } else {
-            self.worker.submit(RenderJob { pixels, w, h, ops, reply: tx });
+            self.worker.submit(RenderJob { pixels, w, h, ops, trim_before, reply: tx });
             // Await the reply on the foreground executor (non-blocking).
             // Must use async closure (not a closure calling async fn) to satisfy
             // the AsyncFnOnce HRTB bound on cx.spawn.
@@ -309,8 +349,7 @@ impl Shade {
 // ── Loading helpers ──────────────────────────────────────────────────────────
 
 fn load_photo(path: &std::path::Path) -> anyhow::Result<Photo> {
-    let (pixels, w, h) = shade_io::load_image(path)?;
-    let (preview_pixels, pw, ph) = fit_within(&pixels, w, h, PREVIEW_MAX_DIM);
+    let (preview_pixels, pw, ph) = shade_io::load_image_preview(path, PREVIEW_MAX_DIM)?;
     let (thumb_pixels, tw, th) = fit_within(&preview_pixels, pw, ph, THUMB_MAX_DIM);
     let thumb = render_image_from_rgba(thumb_pixels, tw, th)
         .ok_or_else(|| anyhow::anyhow!("thumbnail build failed"))?;
@@ -326,12 +365,16 @@ fn load_photo(path: &std::path::Path) -> anyhow::Result<Photo> {
 }
 
 fn fit_within(rgba: &[u8], w: u32, h: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
+    fit_within_owned(rgba.to_vec(), w, h, max_dim)
+}
+
+fn fit_within_owned(rgba: Vec<u8>, w: u32, h: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
     let m = w.max(h);
-    if m <= max_dim { return (rgba.to_vec(), w, h); }
+    if m <= max_dim { return (rgba, w, h); }
     let scale = max_dim as f32 / m as f32;
     let nw = ((w as f32 * scale).round() as u32).max(1);
     let nh = ((h as f32 * scale).round() as u32).max(1);
-    let img: RgbaImage = ImageBuffer::from_raw(w, h, rgba.to_vec()).unwrap();
+    let img: RgbaImage = ImageBuffer::from_raw(w, h, rgba).unwrap();
     let resized = image::imageops::resize(&img, nw, nh, FilterType::Triangle);
     (resized.into_raw(), nw, nh)
 }
@@ -444,7 +487,12 @@ fn slider(
 
 // ── Header / buttons ─────────────────────────────────────────────────────────
 
-fn header(view: View, has_image: bool, cx: &mut Context<Shade>) -> impl IntoElement {
+fn header(
+    view: View,
+    has_image: bool,
+    has_photos: bool,
+    cx: &mut Context<Shade>,
+) -> impl IntoElement {
     div()
         .flex().flex_row().items_center().justify_between()
         .px_4().py_3()
@@ -461,6 +509,11 @@ fn header(view: View, has_image: bool, cx: &mut Context<Shade>) -> impl IntoElem
             div().flex().gap_2()
                 .child(primary_button("Open…",
                     cx.listener(|this, _: &ClickEvent, _, cx| this.open_picker(cx))))
+                .child(if has_photos {
+                    secondary_button("Clear",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.clear_photos(cx))
+                    ).into_any_element()
+                } else { div().into_any_element() })
                 .child(if has_image {
                     primary_button("Save Edited…",
                         cx.listener(|this, _: &ClickEvent, _, cx| this.save_as(cx))
@@ -579,7 +632,7 @@ impl gpui::Render for Shade {
         let mut root = div()
             .size_full().flex().flex_col()
             .bg(rgb(BG)).text_color(rgb(TEXT))
-            .child(header(self.view, self.selected.is_some(), cx))
+            .child(header(self.view, self.selected.is_some(), !self.photos.is_empty(), cx))
             .child(div().flex_1().overflow_hidden().child(body));
 
         if let Some(status) = self.status.clone() {
