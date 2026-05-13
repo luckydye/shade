@@ -1755,10 +1755,8 @@ export const Inspector: Component = () => {
                 >
                   <button
                     type="button"
-                    class={`inline-flex h-4 w-4 items-center justify-center rounded-[2px] border transition-colors ${
-                      layer.visible
-                        ? "border-[var(--text)] bg-[var(--text)] text-surface-input"
-                        : "border-surface-inactive bg-transparent"
+                    class={`inline-flex h-4 w-4 items-center justify-center text-xs leading-none transition-colors ${
+                      layer.visible ? "text-[var(--text)]" : "text-[var(--text-subtle)]"
                     }`}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
@@ -1766,11 +1764,7 @@ export const Inspector: Component = () => {
                       void setLayerVisible(realIdx, !layer.visible);
                     }}
                   >
-                    {layer.visible && (
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M2 5l2 2 4-4" />
-                      </svg>
-                    )}
+                    {layer.visible ? "●" : "○"}
                   </button>
                 </Show>
                 <LayerTypeIcon layer={layer} />
