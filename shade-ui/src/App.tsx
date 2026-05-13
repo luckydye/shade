@@ -192,7 +192,7 @@ const App: Component = () => {
   });
 
   return (
-    <div class="app-gradient relative flex h-screen w-screen select-none flex-col overflow-hidden text-[var(--text)]">
+    <div class="bg-black relative flex h-screen w-screen select-none flex-col overflow-hidden text-[var(--text)]">
       <Toolbar />
       <div class="flex min-h-0 flex-1">
         <MediaView />

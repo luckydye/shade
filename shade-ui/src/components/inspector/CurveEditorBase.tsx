@@ -274,10 +274,10 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
         class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4"
         innerHTML={curveSvg}
       />
-      <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
+      <span class="self-center text-[12px] font-medium text-[var(--text-strong)]">
         {props.label}
       </span>
-      <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
+      <span class="self-center text-right text-[11px] font-medium tabular-nums text-[var(--text-value)]">
         {props.valueLabel}
       </span>
       <div class="col-start-2 col-end-4 overflow-hidden">

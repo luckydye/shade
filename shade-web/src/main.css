@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "../../shade-ui/src/theme.css";
 
 @custom-variant touch-mobile (@media (max-width: 767px) and (hover: none) and (pointer: coarse));
 @custom-variant touch-compact (@media (max-width: 1023px) and (hover: none) and (pointer: coarse));
@@ -147,13 +148,6 @@
 }
 
 /* ─── App shell ──────────────────────────────────────────────────────────── */
-
-.app-gradient {
-  background-image:
-    radial-gradient(circle at top, var(--app-bg-highlight), transparent 24%),
-    var(--app-bg);
-}
-
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────── */
 

@@ -91,16 +91,16 @@ export const Slider: Component<{
       data-mobile-slider-current={
         activeAdjustmentSliderId() === sliderId ? "true" : undefined
       }
-      class={`${props.containerClass ?? PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150`}
+      class={`${props.containerClass ?? PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150 pr-2`}
     >
       <Show when={props.icon !== undefined}>
         <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={props.icon} />
       </Show>
-      <span class="self-center text-[13px] font-medium text-[var(--text-strong)]">
+      <span class="self-center text-[12px] font-medium text-[var(--text-strong)]">
         {props.label}
       </span>
       <Show when={!props.tooltip}>
-        <span class="self-center text-right text-xs font-medium tabular-nums text-[var(--text-value)]">
+        <span class="self-center text-right text-[11px] font-medium tabular-nums text-[var(--text-value)]">
           {props.valueLabel ?? props.value.toFixed(2)}
         </span>
       </Show>

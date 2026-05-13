@@ -1678,7 +1678,7 @@ export const Viewport: Component = () => {
     <section class="relative flex min-h-0 flex-1 overflow-hidden touch-compact:min-h-[42vh]">
       <div
         ref={stageRef}
-        class="relative flex-1 overflow-hidden bg-[var(--canvas-bg)]"
+        class="relative flex-1 overflow-hidden"
         style={{ "touch-action": "none", cursor: brushCursorStyle() }}
         onContextMenu={(e) => e.preventDefault()}
         onDragOver={onDragOver}
@@ -1699,8 +1699,6 @@ export const Viewport: Component = () => {
           onPointerUp(e);
         }}
       >
-        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--canvas-highlight),_transparent_45%)]" />
-
         <div
           ref={setContainerRef}
           class="relative flex h-full w-full items-center justify-center lg:h-full"
