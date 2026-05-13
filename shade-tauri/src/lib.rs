@@ -1,9 +1,17 @@
+mod channel_protocol;
+mod channel_server;
 mod commands;
 mod photos;
+mod preview_channel;
+mod preview_scheduler;
 mod remote_control;
 mod tagging_worker;
 
-use tauri::{Emitter, Manager};
+pub use channel_protocol::ChannelMessage;
+pub use channel_server::{CoordinationChannel, CoordinationChannelService};
+pub use preview_channel::{PreviewChannel, PreviewChannelService};
+
+use tauri::Manager;
 
 pub struct P2pState(
     pub tokio::sync::RwLock<Option<std::sync::Arc<shade_p2p::LocalPeerDiscovery>>>,
@@ -30,6 +38,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(photos::init())
         .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol(
+            "shade",
+            |ctx, request, responder| {
+                let app = ctx.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let response = commands::serve_shade_uri(&app, request).await;
+                    responder.respond(response);
+                });
+            },
+        )
+        .manage(CoordinationChannelService(CoordinationChannel::new()))
+        .manage(PreviewChannelService(PreviewChannel::new()))
         .manage(P2pState(tokio::sync::RwLock::new(None)))
         .manage(remote_control::RemoteControlState::default())
         .manage(std::sync::Mutex::new(commands::EditorState::default()))
@@ -60,11 +80,21 @@ pub fn run() {
             let handle_complete = app.handle().clone();
             app.manage(LibraryScanService(shade_io::LibraryScanService::new(
                 library_index_db.clone(),
-                move |library_id| {
-                    let _ = handle_progress.emit("library-scan-progress", library_id);
+                move |library_id: &str| {
+                    channel_server::channel_from_app(&handle_progress).send_blocking(
+                        ChannelMessage::LibraryScanProgress {
+                            library_id: library_id.to_owned(),
+                            scanned: 0,
+                            total: 0,
+                        },
+                    );
                 },
-                move |library_id| {
-                    let _ = handle_complete.emit("library-scan-complete", library_id);
+                move |library_id: &str| {
+                    channel_server::channel_from_app(&handle_complete).send_blocking(
+                        ChannelMessage::LibraryScanComplete {
+                            library_id: library_id.to_owned(),
+                        },
+                    );
                 },
             )));
             app.manage(S3LibraryScanService(commands::S3LibraryScanState::new(
@@ -109,8 +139,6 @@ pub fn run() {
             commands::open_image_encoded_bytes,
             commands::open_image_bytes,
             commands::export_image,
-            commands::render_preview,
-            commands::render_preview_float16,
             commands::apply_edit,
             commands::add_layer,
             commands::delete_layer,
@@ -155,11 +183,9 @@ pub fn run() {
             commands::load_snapshot,
             commands::set_media_rating,
             commands::set_media_tags,
-            commands::get_thumbnail,
             commands::get_local_peer_discovery_snapshot,
             commands::pair_peer_device,
             commands::list_peer_pictures,
-            commands::get_peer_thumbnail,
             commands::get_peer_image_bytes,
             commands::open_peer_image,
             commands::set_local_awareness,
@@ -181,6 +207,9 @@ pub fn run() {
             commands::remove_from_collection,
             remote_control::submit_remote_control_response,
             remote_control::get_remote_control_server_info,
+            channel_server::register_coordination_channel,
+            preview_channel::register_preview_channel,
+            preview_scheduler::update_preview_viewports,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

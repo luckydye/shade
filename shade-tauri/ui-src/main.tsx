@@ -2,6 +2,9 @@ import { createSignal, ErrorBoundary } from "solid-js";
 import { render } from "solid-js/web";
 import App from "shade-ui/src/App";
 import { setPlatform } from "shade-ui/src/bridge/index";
+import { installCoordinationChannel, type ChannelMessage } from "shade-ui/src/bridge/channel";
+import { installPreviewChannel } from "shade-ui/src/bridge/preview";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { platform } from "./platform";
 import { startRemoteControlBridge } from "./remote-control";
 
@@ -60,6 +63,16 @@ window.addEventListener("unhandledrejection", (event) => {
 
 try {
   setPlatform(platform);
+  void installCoordinationChannel(async (handler) => {
+    const channel = new Channel<ChannelMessage>(handler);
+    await invoke("register_coordination_channel", { channel });
+  }).catch(reportFatalError);
+  void installPreviewChannel(async (handler) => {
+    const channel = new Channel<ArrayBuffer>((buffer) => {
+      if (buffer instanceof ArrayBuffer) handler(buffer);
+    });
+    await invoke("register_preview_channel", { channel });
+  }).catch(reportFatalError);
   void startRemoteControlBridge().catch(reportFatalError);
   render(
     () => (

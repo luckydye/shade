@@ -1,5 +1,14 @@
 import { createSignal } from "solid-js";
 import * as bridge from "../bridge/index";
+import type { ArtboardViewport, PreviewQuality } from "../bridge/channel";
+import {
+  getArtboardTiles,
+  getCurrentGeneration,
+  nextGeneration,
+  sendUpdatePreviewViewports,
+  subscribeTiles,
+  type RenderedTile as PushedRenderedTile,
+} from "../bridge/preview";
 import {
   fullCanvasCrop,
   getCommittedCropRect,
@@ -17,57 +26,96 @@ import { releaseTileSurface } from "./compositor";
 export const [previewTile, setPreviewTile] = createSignal<RenderedTile | null>(null);
 export const [backdropTile, setBackdropTile] = createSignal<RenderedTile | null>(null);
 
+const PREVIEW_ARTBOARD_ID = "primary:preview";
+const BACKDROP_ARTBOARD_ID = "primary:backdrop";
 const INTERACTIVE_SCALE = 0.33;
-const THROTTLE_MS = 16;
 const MIN_ZOOM = 0.1;
 const MAX_IMAGE_SCALE = 8;
-const FINAL_PREVIEW_SKIP_THRESHOLD_MS = 120;
-const FINAL_PREVIEW_LATENCY_TRAINING_WEIGHT = 0.35;
 
-let refreshVersion = 0;
-let refreshQueued: { version: number; quality: "interactive" | "final" } | null = null;
-let refreshPromise: Promise<void> | null = null;
-let refreshLastStartAt = 0;
-let refreshWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
 let previewSuspended = false;
-let finalPreviewLatencyEstimateMs: number | null = null;
-let refreshMode: "auto" | "final-only" = "auto";
 let finalPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let lastRenderedPreview:
-  | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
-  | null = null;
-let lastRenderedBackdrop:
-  | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
-  | null = null;
+let tileSubscriberInstalled = false;
+let isTauriPlatform: boolean | null = null;
 
-type RefreshSnapshot = {
-  previewContentVersion: number;
-  viewportZoom: number;
-  viewportCenterX: number;
-  viewportCenterY: number;
-  viewportScreenWidth: number;
-  viewportScreenHeight: number;
-  canvasWidth: number;
-  canvasHeight: number;
-  selectedLayerIdx: number;
-  cropMode: boolean;
-  committedCropX: number;
-  committedCropY: number;
-  committedCropWidth: number;
-  committedCropHeight: number;
-  committedCropRotation: number;
-};
+interface ViewportSpec {
+  target_width: number;
+  target_height: number;
+  crop: { x: number; y: number; width: number; height: number };
+  ignore_crop_layers: boolean;
+}
+
+async function ensurePlatformDetected(): Promise<boolean> {
+  if (isTauriPlatform === null) {
+    isTauriPlatform = await bridge.isTauriRuntime();
+  }
+  return isTauriPlatform;
+}
+
+function installTileSubscriber() {
+  if (tileSubscriberInstalled) return;
+  tileSubscriberInstalled = true;
+  subscribeTiles((artboardId) => {
+    if (previewSuspended) return;
+    const tiles = getArtboardTiles(artboardId);
+    if (!tiles) return;
+    const pick = tiles.final ?? tiles.interactive;
+    if (!pick) return;
+    if (artboardId === PREVIEW_ARTBOARD_ID) {
+      applyPreviewTile(pick);
+    } else if (artboardId === BACKDROP_ARTBOARD_ID) {
+      applyBackdropTile(pick);
+    }
+  });
+}
+
+function applyPreviewTile(pushed: PushedRenderedTile) {
+  const tile: RenderedTile = {
+    image: pushed.image,
+    x: pushed.x,
+    y: pushed.y,
+    width: pushed.width,
+    height: pushed.height,
+  };
+  releaseTileSurface(previewTile()?.image ?? null);
+  setPreviewTile(tile);
+  setSelectedArtboardPreviewTile(tile);
+  setState({
+    previewDisplayColorSpace:
+      pushed.image.colorSpace === "display-p3" ? "Display P3" : "sRGB",
+    previewRenderWidth: pushed.image.width,
+    previewRenderHeight: pushed.image.height,
+  });
+  // If the preview already covers the full artboard, reuse it as the backdrop.
+  if (
+    pushed.x <= 0 &&
+    pushed.y <= 0 &&
+    pushed.width >= state.canvasWidth &&
+    pushed.height >= state.canvasHeight
+  ) {
+    applyBackdropTile(pushed);
+  }
+}
+
+function applyBackdropTile(pushed: PushedRenderedTile) {
+  const tile: RenderedTile = {
+    image: pushed.image,
+    x: pushed.x,
+    y: pushed.y,
+    width: pushed.width,
+    height: pushed.height,
+  };
+  releaseTileSurface(backdropTile()?.image ?? null);
+  setBackdropTile(tile);
+  setSelectedArtboardBackdropTile(tile);
+}
 
 export function clearPreviewTiles() {
-  refreshVersion += 1;
-  refreshQueued = null;
-  refreshMode = "auto";
   releaseTileSurface(previewTile()?.image ?? null);
   releaseTileSurface(backdropTile()?.image ?? null);
   setPreviewTile(null);
   setBackdropTile(null);
-  lastRenderedPreview = null;
-  lastRenderedBackdrop = null;
+  // Bump generation so any in-flight pushed frames are discarded.
+  nextGeneration();
 }
 
 export function suspendPreview() {
@@ -77,11 +125,10 @@ export function suspendPreview() {
 
 export function resumePreview() {
   previewSuspended = false;
-  refreshMode = "auto";
 }
 
 export function resetPreviewLatencyEstimate() {
-  finalPreviewLatencyEstimateMs = null;
+  // Retained for API compatibility — Rust now owns scheduling latency.
 }
 
 export function getViewportFitRef(): FitReference {
@@ -150,9 +197,6 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
 
   const committedCrop = !selectedLayerIsCrop() ? getCommittedCropRect() : null;
   if (committedCrop && Math.abs(committedCrop.rotation) > 0.001) {
-    // For rotated crops, the compositor counter-rotates the canvas so tiles must
-    // provide the original (unrotated) image content. Compute the bounding box of
-    // the currently visible output sub-region rotated back into image space.
     const rot = committedCrop.rotation;
     const cos = Math.cos(rot);
     const sin = Math.sin(rot);
@@ -160,12 +204,10 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
     const absSin = Math.abs(sin);
     const cropCX = fit.x + fit.width * 0.5;
     const cropCY = fit.y + fit.height * 0.5;
-    // Rotate the visible sub-region center from output space to image space
     const localX = cx - cropCX;
     const localY = cy - cropCY;
     const imgCX = cropCX + localX * cos - localY * sin;
     const imgCY = cropCY + localX * sin + localY * cos;
-    // Bounding box of the visible rectangle rotated by `rot`
     const bbHalfW = (visW * absCos + visH * absSin) * 0.5;
     const bbHalfH = (visW * absSin + visH * absCos) * 0.5;
     const x = Math.max(0, imgCX - bbHalfW);
@@ -180,7 +222,6 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
     };
   }
 
-  // Axis-aligned case
   const imageX = sw * 0.5 - (cx - fit.x) * imageScale;
   const imageY = sh * 0.5 - (cy - fit.y) * imageScale;
   const screenLeft = Math.max(0, imageX);
@@ -200,65 +241,7 @@ function getVisibleRegion(zoom: number, centerX: number, centerY: number) {
   };
 }
 
-function createRenderedTile(image: ImageData, crop: bridge.PreviewCrop): RenderedTile {
-  return {
-    image,
-    x: crop.x,
-    y: crop.y,
-    width: crop.width,
-    height: crop.height,
-  };
-}
-
-function toImageData(frame: bridge.PreviewFrame): ImageData {
-  if (frame.kind === "rgba-float16") {
-    return new ImageData(frame.pixels as any, frame.width, frame.height, {
-      pixelFormat: "rgba-float16",
-      colorSpace: frame.colorSpace,
-    } as any);
-  }
-  const pixels = new Uint8ClampedArray(
-    frame.pixels.buffer,
-    frame.pixels.byteOffset,
-    frame.pixels.byteLength,
-  ) as any;
-  return new ImageData(pixels, frame.width, frame.height);
-}
-
-async function throttledRender(request: bridge.PreviewRequest) {
-  const elapsed = performance.now() - refreshLastStartAt;
-  if (elapsed < THROTTLE_MS) {
-    await new Promise<void>((r) => setTimeout(r, THROTTLE_MS - elapsed));
-  }
-  refreshLastStartAt = performance.now();
-  const renderStartedAt = performance.now();
-  const frame = await bridge.renderPreview(request);
-  return { frame, elapsedMs: performance.now() - renderStartedAt };
-}
-
-function recordFinalPreviewLatency(elapsedMs: number) {
-  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
-    throw new Error("final preview latency must be a finite non-negative number");
-  }
-  finalPreviewLatencyEstimateMs =
-    finalPreviewLatencyEstimateMs === null
-      ? elapsedMs
-      : finalPreviewLatencyEstimateMs * (1 - FINAL_PREVIEW_LATENCY_TRAINING_WEIGHT) +
-        elapsedMs * FINAL_PREVIEW_LATENCY_TRAINING_WEIGHT;
-}
-
-function shouldRenderInteractivePreview() {
-  return (
-    finalPreviewLatencyEstimateMs === null ||
-    finalPreviewLatencyEstimateMs > FINAL_PREVIEW_SKIP_THRESHOLD_MS
-  );
-}
-
-function shouldRenderOnlyInteractivePreview() {
-  return isAdjustmentSliderActive() && shouldRenderInteractivePreview();
-}
-
-function buildPreviewRequest(quality: "interactive" | "final"): bridge.PreviewRequest | null {
+function buildPreviewSpec(quality: PreviewQuality): ViewportSpec | null {
   const visible = getVisibleRegion(
     state.viewportZoom,
     state.viewportCenterX,
@@ -266,12 +249,11 @@ function buildPreviewRequest(quality: "interactive" | "final"): bridge.PreviewRe
   );
   if (!visible) return null;
   const inCropEdit = selectedLayerIsCrop();
-  // For rotated crops the compositor counter-rotates the canvas, so we need unrotated
-  // image content from the engine (ignore_crop_layers: true). For axis-aligned crops
-  // the engine applies the crop layer normally.
   const hasRotation =
     !inCropEdit && Math.abs(getCommittedCropRect().rotation) > 0.001;
-  const dpr = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_SCALE : 1);
+  const dpr =
+    (window.devicePixelRatio || 1) *
+    (quality === "interactive" ? INTERACTIVE_SCALE : 1);
   return {
     target_width: Math.max(1, Math.round(visible.screenWidth * dpr)),
     target_height: Math.max(1, Math.round(visible.screenHeight * dpr)),
@@ -280,20 +262,30 @@ function buildPreviewRequest(quality: "interactive" | "final"): bridge.PreviewRe
   };
 }
 
-function buildBackdropRequest(quality: "interactive" | "final"): bridge.PreviewRequest | null {
+function buildBackdropSpec(quality: PreviewQuality): ViewportSpec | null {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) return null;
   const inCropEdit = selectedLayerIsCrop();
   const committedCrop = inCropEdit ? null : getCommittedCropRect();
   const hasRotation = committedCrop ? Math.abs(committedCrop.rotation) > 0.001 : false;
-  // For rotated crops the compositor counter-rotates the canvas, so the backdrop
-  // must cover the full artboard (the rotated crop bounding box could extend anywhere).
-  // For axis-aligned crops we only need the committed crop region.
-  const crop = inCropEdit || hasRotation ? undefined : committedCrop ?? undefined;
-  const baseW = crop?.width ?? state.canvasWidth;
-  const baseH = crop?.height ?? state.canvasHeight;
+  const crop =
+    inCropEdit || hasRotation
+      ? {
+          x: 0,
+          y: 0,
+          width: state.canvasWidth,
+          height: state.canvasHeight,
+        }
+      : committedCrop ?? {
+          x: 0,
+          y: 0,
+          width: state.canvasWidth,
+          height: state.canvasHeight,
+        };
   const { viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
-  const dpr = (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_SCALE : 1);
-  const fitted = fitPreviewSize(sw * dpr, sh * dpr, baseW, baseH);
+  const dpr =
+    (window.devicePixelRatio || 1) *
+    (quality === "interactive" ? INTERACTIVE_SCALE : 1);
+  const fitted = fitPreviewSize(sw * dpr, sh * dpr, crop.width, crop.height);
   if (fitted.width <= 0 || fitted.height <= 0) return null;
   return {
     target_width: fitted.width,
@@ -303,200 +295,148 @@ function buildBackdropRequest(quality: "interactive" | "final"): bridge.PreviewR
   };
 }
 
-function captureRefreshSnapshot(): RefreshSnapshot {
-  const committedCrop = getCommittedCropRect();
+function specToViewport(
+  artboardId: string,
+  spec: ViewportSpec,
+  priority: number,
+): ArtboardViewport {
   return {
-    previewContentVersion: state.previewContentVersion,
-    viewportZoom: state.viewportZoom,
-    viewportCenterX: state.viewportCenterX,
-    viewportCenterY: state.viewportCenterY,
-    viewportScreenWidth: state.viewportScreenWidth,
-    viewportScreenHeight: state.viewportScreenHeight,
-    canvasWidth: state.canvasWidth,
-    canvasHeight: state.canvasHeight,
-    selectedLayerIdx: state.selectedLayerIdx,
-    cropMode: selectedLayerIsCrop(),
-    committedCropX: committedCrop.x,
-    committedCropY: committedCrop.y,
-    committedCropWidth: committedCrop.width,
-    committedCropHeight: committedCrop.height,
-    committedCropRotation: committedCrop.rotation,
+    artboard_id: artboardId,
+    crop: spec.crop,
+    target_width: spec.target_width,
+    target_height: spec.target_height,
+    priority,
+    ignore_crop_layers: spec.ignore_crop_layers,
   };
 }
 
-function refreshSnapshotMatches(snapshot: RefreshSnapshot) {
-  const current = captureRefreshSnapshot();
-  return (
-    current.previewContentVersion === snapshot.previewContentVersion &&
-    current.viewportZoom === snapshot.viewportZoom &&
-    current.viewportCenterX === snapshot.viewportCenterX &&
-    current.viewportCenterY === snapshot.viewportCenterY &&
-    current.viewportScreenWidth === snapshot.viewportScreenWidth &&
-    current.viewportScreenHeight === snapshot.viewportScreenHeight &&
-    current.canvasWidth === snapshot.canvasWidth &&
-    current.canvasHeight === snapshot.canvasHeight &&
-    current.selectedLayerIdx === snapshot.selectedLayerIdx &&
-    current.cropMode === snapshot.cropMode &&
-    current.committedCropX === snapshot.committedCropX &&
-    current.committedCropY === snapshot.committedCropY &&
-    current.committedCropWidth === snapshot.committedCropWidth &&
-    current.committedCropHeight === snapshot.committedCropHeight &&
-    current.committedCropRotation === snapshot.committedCropRotation
+function previewFrameToImageData(frame: bridge.PreviewFrame): ImageData {
+  if (frame.kind === "rgba-float16") {
+    return new ImageData(frame.pixels as never, frame.width, frame.height, {
+      pixelFormat: "rgba-float16",
+      colorSpace: frame.colorSpace,
+    } as ImageDataSettings);
+  }
+  const pixels = new Uint8ClampedArray(
+    frame.pixels.buffer as ArrayBuffer,
+    frame.pixels.byteOffset,
+    frame.pixels.byteLength,
   );
+  return new ImageData(pixels, frame.width, frame.height);
 }
 
-function previewRequestMatches(
-  a: bridge.PreviewRequest,
-  b: bridge.PreviewRequest,
-) {
-  const cropA = a.crop;
-  const cropB = b.crop;
-  const cropMatches =
-    cropA === undefined && cropB === undefined
-      ? true
-      : cropA !== undefined &&
-          cropB !== undefined &&
-          cropA.x === cropB.x &&
-          cropA.y === cropB.y &&
-          cropA.width === cropB.width &&
-          cropA.height === cropB.height;
-  return (
-    a.target_width === b.target_width &&
-    a.target_height === b.target_height &&
-    a.ignore_crop_layers === b.ignore_crop_layers &&
-    cropMatches
-  );
-}
-
-function canReuseRenderedPreview(
-  cached:
-    | { quality: "interactive" | "final"; snapshot: RefreshSnapshot; request: bridge.PreviewRequest }
-    | null,
-  quality: "interactive" | "final",
-  snapshot: RefreshSnapshot,
-  request: bridge.PreviewRequest,
-  hasTile: boolean,
-) {
-  return (
-    hasTile &&
-    cached?.quality === quality &&
-    refreshSnapshotMatches(cached.snapshot) &&
-    refreshSnapshotMatches(snapshot) &&
-    previewRequestMatches(cached.request, request)
-  );
-}
-
-async function performRefresh() {
-  const queued = refreshQueued;
-  if (!queued) return;
+async function browserRefresh(quality: PreviewQuality) {
+  const previewSpec = buildPreviewSpec(quality);
+  const backdropSpec = buildBackdropSpec(quality);
+  if (!previewSpec) return;
+  const previewFrame = await bridge.renderPreview({
+    target_width: previewSpec.target_width,
+    target_height: previewSpec.target_height,
+    crop: previewSpec.crop,
+    ignore_crop_layers: previewSpec.ignore_crop_layers,
+  });
   if (previewSuspended) return;
-  refreshQueued = null;
-  const snapshot = captureRefreshSnapshot();
-  const previewReq = buildPreviewRequest(queued.quality);
-  const backdropReq = buildBackdropRequest(queued.quality);
-  if (!previewReq || !backdropReq) return;
+  if (previewFrame.width === 0 || previewFrame.height === 0) return;
+  const previewImage = previewFrameToImageData(previewFrame);
+  applyPreviewTile({
+    image: previewImage,
+    x: previewSpec.crop.x,
+    y: previewSpec.crop.y,
+    width: previewSpec.crop.width,
+    height: previewSpec.crop.height,
+  });
+  if (!backdropSpec) return;
+  // If preview covers the whole canvas, applyPreviewTile already mirrored to backdrop.
   if (
-    canReuseRenderedPreview(
-      lastRenderedPreview,
-      queued.quality,
-      snapshot,
-      previewReq,
-      previewTile() !== null,
-    )
+    previewSpec.crop.x <= 0 &&
+    previewSpec.crop.y <= 0 &&
+    previewSpec.crop.width >= state.canvasWidth &&
+    previewSpec.crop.height >= state.canvasHeight
   ) {
     return;
   }
-  const { frame, elapsedMs } = await throttledRender(previewReq);
+  const backdropFrame = await bridge.renderPreview({
+    target_width: backdropSpec.target_width,
+    target_height: backdropSpec.target_height,
+    crop: backdropSpec.crop,
+    ignore_crop_layers: backdropSpec.ignore_crop_layers,
+  });
+  if (previewSuspended) return;
+  if (backdropFrame.width === 0 || backdropFrame.height === 0) return;
+  applyBackdropTile({
+    image: previewFrameToImageData(backdropFrame),
+    x: backdropSpec.crop.x,
+    y: backdropSpec.crop.y,
+    width: backdropSpec.crop.width,
+    height: backdropSpec.crop.height,
+  });
+}
 
-  if (frame.width === 0 || frame.height === 0) return;
-  if (queued.quality === "final") {
-    recordFinalPreviewLatency(elapsedMs);
+async function tauriRefresh(quality: PreviewQuality) {
+  installTileSubscriber();
+  const previewSpec = buildPreviewSpec(quality);
+  const backdropSpec = buildBackdropSpec(quality);
+  const viewports: ArtboardViewport[] = [];
+  if (previewSpec) {
+    viewports.push(specToViewport(PREVIEW_ARTBOARD_ID, previewSpec, 0));
   }
-  const crop = previewReq.crop;
-  if (!crop) throw new Error("preview request must have a crop");
+  if (backdropSpec) {
+    viewports.push(specToViewport(BACKDROP_ARTBOARD_ID, backdropSpec, 1));
+  }
+  if (viewports.length === 0) return;
+  const platform = bridge.getPlatform();
+  if (platform.kind !== "tauri") return;
+  const generation = nextGeneration();
+  sendUpdatePreviewViewports(
+    (cmd, args) => platform.invoke(cmd, args ?? {}),
+    {
+      generation,
+      quality,
+      viewports,
+      use_float16: supportsFloat16Preview(),
+    },
+  );
+}
 
-  if (!refreshSnapshotMatches(snapshot)) {
-    return;
+let float16PreviewSupport: boolean | null = null;
+function supportsFloat16Preview() {
+  if (float16PreviewSupport !== null) return float16PreviewSupport;
+  if (typeof navigator !== "undefined" && /\bAndroid\b/i.test(navigator.userAgent)) {
+    float16PreviewSupport = false;
+    return false;
   }
+  const Float16 = (globalThis as { Float16Array?: unknown }).Float16Array;
+  if (typeof ImageData === "undefined" || !Float16) {
+    float16PreviewSupport = false;
+    return false;
+  }
+  try {
+    const probe = new (Float16 as new (b: ArrayBufferLike) => unknown)(
+      new Uint16Array(4).buffer,
+    );
+    new ImageData(probe as never, 1, 1, {
+      pixelFormat: "rgba-float16",
+      colorSpace: "display-p3",
+    } as ImageDataSettings);
+    float16PreviewSupport = true;
+  } catch {
+    float16PreviewSupport = false;
+  }
+  return float16PreviewSupport;
+}
 
-  if (queued.version !== refreshVersion) {
-    return;
+async function dispatchRefresh(quality: PreviewQuality) {
+  if (previewSuspended) return;
+  if (await ensurePlatformDetected()) {
+    await tauriRefresh(quality);
+  } else {
+    await browserRefresh(quality);
   }
-  if (queued.quality === "final") {
-    setState({
-      previewDisplayColorSpace:
-        frame.kind === "rgba-float16"
-          ? frame.colorSpace === "display-p3"
-            ? "Display P3"
-            : frame.colorSpace
-          : "sRGB",
-      previewRenderWidth: frame.width,
-      previewRenderHeight: frame.height,
-    });
-  }
-  const previewTileImage = toImageData(frame);
-  const renderedPreviewTile = createRenderedTile(previewTileImage, crop);
-  releaseTileSurface(previewTile()?.image ?? null);
-  setPreviewTile(renderedPreviewTile);
-  setSelectedArtboardPreviewTile(renderedPreviewTile);
-  lastRenderedPreview = {
-    quality: queued.quality,
-    snapshot,
-    request: previewReq,
-  };
-  // If the preview already covers the full artboard, reuse it as the backdrop
-  if (
-    crop.x <= 0 &&
-    crop.y <= 0 &&
-    crop.width >= state.canvasWidth &&
-    crop.height >= state.canvasHeight
-  ) {
-    const renderedBackdropTile = createRenderedTile(previewTileImage, crop);
-    releaseTileSurface(backdropTile()?.image ?? null);
-    setBackdropTile(renderedBackdropTile);
-    setSelectedArtboardBackdropTile(renderedBackdropTile);
-    return;
-  }
-  // Skip backdrop on interactive quality if we already have one
-  if (queued.quality === "interactive" && backdropTile()) return;
-  if (
-    canReuseRenderedPreview(
-      lastRenderedBackdrop,
-      queued.quality,
-      snapshot,
-      backdropReq,
-      backdropTile() !== null,
-    )
-  ) {
-    return;
-  }
-  const { frame: bdFrame } = await throttledRender(backdropReq);
-  if (queued.version !== refreshVersion) return;
-  if (bdFrame.width === 0 || bdFrame.height === 0) return;
-  if (!refreshSnapshotMatches(snapshot)) {
-    return;
-  }
-  const bdCrop = backdropReq.crop ?? fullCanvasCrop();
-  const renderedBackdropCrop = {
-    x: bdCrop.x,
-    y: bdCrop.y,
-    width: bdCrop.width,
-    height: bdCrop.height,
-  };
-  const backdropImage = toImageData(bdFrame);
-  const renderedBackdropTile = createRenderedTile(backdropImage, renderedBackdropCrop);
-  releaseTileSurface(backdropTile()?.image ?? null);
-  setBackdropTile(renderedBackdropTile);
-  setSelectedArtboardBackdropTile(renderedBackdropTile);
-  lastRenderedBackdrop = {
-    quality: queued.quality,
-    snapshot,
-    request: backdropReq,
-  };
 }
 
 export function refreshPreview() {
-  return requestPreviewRefresh("auto");
+  const quality: PreviewQuality = isAdjustmentSliderActive() ? "interactive" : "final";
+  return dispatchRefresh(quality);
 }
 
 export function refreshFinalPreview() {
@@ -504,116 +444,18 @@ export function refreshFinalPreview() {
     clearTimeout(finalPreviewDebounceTimer);
     finalPreviewDebounceTimer = null;
   }
-  return requestPreviewRefresh("final-only");
+  return dispatchRefresh("final");
 }
 
 function debounceFinalPreviewRefresh(delayMs = 120) {
-  if (previewSuspended) {
-    return;
-  }
+  if (previewSuspended) return;
   if (finalPreviewDebounceTimer !== null) {
     clearTimeout(finalPreviewDebounceTimer);
   }
   finalPreviewDebounceTimer = setTimeout(() => {
     finalPreviewDebounceTimer = null;
-    void requestPreviewRefresh("final-only");
+    void dispatchRefresh("final");
   }, delayMs);
-}
-
-function canSkipRefresh(mode: "auto" | "final-only") {
-  const snapshot = captureRefreshSnapshot();
-  const finalPreviewReq = buildPreviewRequest("final");
-  const finalBackdropReq = buildBackdropRequest("final");
-  if (!finalPreviewReq || !finalBackdropReq) {
-    return true;
-  }
-  const hasFinalPreview = canReuseRenderedPreview(
-    lastRenderedPreview,
-    "final",
-    snapshot,
-    finalPreviewReq,
-    previewTile() !== null,
-  );
-  const hasFinalBackdrop = canReuseRenderedPreview(
-    lastRenderedBackdrop,
-    "final",
-    snapshot,
-    finalBackdropReq,
-    backdropTile() !== null,
-  );
-  if (!hasFinalPreview || !hasFinalBackdrop) {
-    return false;
-  }
-  if (mode === "final-only" || !shouldRenderInteractivePreview()) {
-    return true;
-  }
-  const interactivePreviewReq = buildPreviewRequest("interactive");
-  const interactiveBackdropReq = buildBackdropRequest("interactive");
-  if (!interactivePreviewReq || !interactiveBackdropReq) {
-    return true;
-  }
-  return (
-    canReuseRenderedPreview(
-      lastRenderedPreview,
-      "interactive",
-      snapshot,
-      interactivePreviewReq,
-      previewTile() !== null,
-    ) &&
-    canReuseRenderedPreview(
-      lastRenderedBackdrop,
-      "interactive",
-      snapshot,
-      interactiveBackdropReq,
-      backdropTile() !== null,
-    )
-  );
-}
-
-function requestPreviewRefresh(mode: "auto" | "final-only") {
-  if (previewSuspended || canSkipRefresh(mode)) {
-    return Promise.resolve();
-  }
-  refreshVersion += 1;
-  refreshMode = mode;
-  const completion = new Promise<void>((resolve, reject) => {
-    refreshWaiters.push({ resolve, reject });
-  });
-  if (refreshPromise) return completion;
-  refreshPromise = (async () => {
-    try {
-      while (true) {
-        const version = refreshVersion;
-        const mode = refreshMode;
-        const interactiveOnly = mode === "auto" && shouldRenderOnlyInteractivePreview();
-        if (mode === "auto" && shouldRenderInteractivePreview()) {
-          refreshQueued = { version, quality: "interactive" };
-          await performRefresh();
-          if (version !== refreshVersion) continue;
-          if (interactiveOnly) {
-            const waiters = refreshWaiters;
-            refreshWaiters = [];
-            for (const w of waiters) w.resolve();
-            return;
-          }
-        }
-        refreshQueued = { version, quality: "final" };
-        await performRefresh();
-        if (version !== refreshVersion) continue;
-        const waiters = refreshWaiters;
-        refreshWaiters = [];
-        for (const w of waiters) w.resolve();
-        return;
-      }
-    } catch (error) {
-      const waiters = refreshWaiters;
-      refreshWaiters = [];
-      for (const w of waiters) w.reject(error);
-    } finally {
-      refreshPromise = null;
-    }
-  })();
-  return completion;
 }
 
 export function setViewportScreenSize(width: number, height: number) {
@@ -621,7 +463,7 @@ export function setViewportScreenSize(width: number, height: number) {
   const h = Math.max(0, Math.floor(height));
   if (w === state.viewportScreenWidth && h === state.viewportScreenHeight) return;
   setState({ viewportScreenWidth: w, viewportScreenHeight: h });
-  refreshPreview();
+  void refreshPreview();
 }
 
 export function resetViewport() {
@@ -631,7 +473,7 @@ export function resetViewport() {
     viewportCenterX: fit.x + fit.width * 0.5,
     viewportCenterY: fit.y + fit.height * 0.5,
   });
-  refreshFinalPreview();
+  void refreshFinalPreview();
 }
 
 export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anchorY: number) {
@@ -659,6 +501,8 @@ export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anc
     viewportCenterX: anchoredX - (anchorX - vcx) / newScale,
     viewportCenterY: anchoredY - (anchorY - vcy) / newScale,
   });
+  // Send interactive immediately for snappy zoom feel; final follows after pause.
+  void dispatchRefresh("interactive");
   debounceFinalPreviewRefresh();
 }
 
@@ -673,6 +517,7 @@ export function panViewport(deltaX: number, deltaY: number, shouldRefresh = true
     viewportCenterY: state.viewportCenterY - deltaY / imageScale,
   });
   if (shouldRefresh) {
+    void dispatchRefresh("interactive");
     debounceFinalPreviewRefresh();
   }
 }
@@ -682,7 +527,7 @@ export function offsetViewportCenter(deltaX: number, deltaY: number) {
     viewportCenterX: state.viewportCenterX + deltaX,
     viewportCenterY: state.viewportCenterY + deltaY,
   });
-  refreshPreview();
+  void refreshPreview();
 }
 
 export function setViewportState(params: {
@@ -707,5 +552,7 @@ export function setViewportState(params: {
     viewportCenterY: nextCenterY,
     viewportZoom: Math.max(MIN_ZOOM, Math.min(getMaxViewportZoom(), nextZoom)),
   });
-  refreshPreview();
+  void refreshPreview();
 }
+
+export { getCurrentGeneration as getCurrentPreviewGeneration };

@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { onChannelMessage } from "shade-ui/src/bridge/channel";
 import type { NativeDragDropPayload, TauriPlatform } from "shade-ui/src/bridge/index";
 
 type TauriPlatformApi = Pick<
@@ -52,10 +53,10 @@ export const tauriPlatform: TauriPlatformApi = {
     });
   },
   async listenPeerPaired(listener) {
-    const unlisten = await listen("peer-paired", listener);
-    return () => {
-      void unlisten();
-    };
+    const unsubscribe = onChannelMessage("peer_paired", () => {
+      listener();
+    });
+    return unsubscribe;
   },
   async listenLibrarySyncProgress(listener) {
     const unlisten = await listen<{ library_id: string; total: number; completed: number; current_name: string | null }>("library-sync-progress", (event) => {
@@ -66,20 +67,14 @@ export const tauriPlatform: TauriPlatformApi = {
     };
   },
   async listenLibraryScanComplete(listener) {
-    const unlisten = await listen<string>("library-scan-complete", (event) => {
-      listener(event.payload);
+    return onChannelMessage("library_scan_complete", (msg) => {
+      listener(msg.library_id);
     });
-    return () => {
-      void unlisten();
-    };
   },
   async listenLibraryScanProgress(listener) {
-    const unlisten = await listen<string>("library-scan-progress", (event) => {
-      listener(event.payload);
+    return onChannelMessage("library_scan_progress", (msg) => {
+      listener(msg.library_id);
     });
-    return () => {
-      void unlisten();
-    };
   },
   async listenImageOpenPhase(listener) {
     const unlisten = await listen<string>("image-open-phase", (event) => {
@@ -90,12 +85,13 @@ export const tauriPlatform: TauriPlatformApi = {
     };
   },
   async listenBatchExportProgress(listener) {
-    const unlisten = await listen<{ total: number; completed: number; current_name: string | null }>("batch-export-progress", (event) => {
-      listener(event.payload);
+    return onChannelMessage("batch_export_progress", (msg) => {
+      listener({
+        total: msg.total,
+        completed: msg.current,
+        current_name: msg.name || null,
+      });
     });
-    return () => {
-      void unlisten();
-    };
   },
   async listenNativeDragDrop(listener) {
     return getCurrentWebview().onDragDropEvent((event) => {

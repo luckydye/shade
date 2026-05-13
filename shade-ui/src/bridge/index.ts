@@ -37,7 +37,6 @@ export interface NativeDragDropPayload {
 
 export interface TauriPlatform {
   kind: "tauri";
-  thumbnailBackend: ThumbnailBackend;
   libraryCache: LibraryCachePlatform;
   collections: CollectionsPlatform;
   isTauri(): boolean;
@@ -386,66 +385,6 @@ export interface PreviewRequest {
   ignore_crop_layers?: boolean;
 }
 
-type Float16ArrayCtor = new (
-  buffer: ArrayBufferLike,
-  byteOffset?: number,
-  length?: number,
-) => unknown;
-
-let float16PreviewSupport: boolean | null = null;
-
-function supportsFloat16Preview() {
-  if (float16PreviewSupport !== null) return float16PreviewSupport;
-  if (typeof navigator !== "undefined" && /\bAndroid\b/i.test(navigator.userAgent)) {
-    float16PreviewSupport = false;
-    return false;
-  }
-  const Float16 = (globalThis as any).Float16Array as Float16ArrayCtor | undefined;
-  if (typeof ImageData === "undefined" || !Float16) {
-    float16PreviewSupport = false;
-    return false;
-  }
-  try {
-    const probe = new Float16(new Uint16Array(4).buffer);
-    new ImageData(probe as any, 1, 1, {
-      pixelFormat: "rgba-float16",
-      colorSpace: "display-p3",
-    } as any);
-    float16PreviewSupport = true;
-  } catch {
-    float16PreviewSupport = false;
-  }
-  return float16PreviewSupport;
-}
-
-interface ByteView {
-  buffer: ArrayBufferLike;
-  byteOffset: number;
-  byteLength: number;
-}
-
-function readPreviewHeader(view: ByteView) {
-  const header = new DataView(view.buffer, view.byteOffset, 8);
-  return {
-    width: header.getUint32(0, true),
-    height: header.getUint32(4, true),
-  };
-}
-
-function toByteView(value: ArrayBuffer | Uint8Array): ByteView {
-  return value instanceof Uint8Array
-    ? {
-        buffer: value.buffer,
-        byteOffset: value.byteOffset,
-        byteLength: value.byteLength,
-      }
-    : {
-        buffer: value,
-        byteOffset: 0,
-        byteLength: value.byteLength,
-      };
-}
-
 export async function renderSnapshotThumbnail(
   bytes: ArrayBuffer,
   fileName: string | null,
@@ -461,42 +400,16 @@ export async function renderSnapshotThumbnail(
   );
 }
 
+/**
+ * Browser-only synchronous preview render. The Tauri runtime uses the
+ * push-based preview channel (`bridge/preview.ts` + `update_preview_viewports`)
+ * and does not go through this path.
+ */
 export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {
   if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    if (supportsFloat16Preview()) {
-      const Float16 = (globalThis as any).Float16Array as Float16ArrayCtor;
-      const result = toByteView(
-        (await inv("render_preview_float16", { request })) as ArrayBuffer | Uint8Array,
-      );
-      const { width, height } = readPreviewHeader(result);
-      return {
-        kind: "rgba-float16",
-        pixels: new Float16(
-          result.buffer,
-          result.byteOffset + 8,
-          (result.byteLength - 8) / 2,
-        ),
-        width,
-        height,
-        colorSpace: "display-p3",
-      };
-    }
-    const result = toByteView(
-      (await inv("render_preview", { request })) as ArrayBuffer | Uint8Array,
+    throw new Error(
+      "renderPreview is browser-only in this build; tauri uses the push preview channel",
     );
-    const { width, height } = readPreviewHeader(result);
-    const pixels = new Uint8Array(
-      result.buffer,
-      result.byteOffset + 8,
-      result.byteLength - 8,
-    );
-    return {
-      kind: "rgba",
-      pixels,
-      width,
-      height,
-    };
   }
   await ensureWorkerReady();
   const result = await workerCall<{
@@ -654,25 +567,6 @@ export async function listPeerPictures(
   return inv("list_peer_pictures", {
     peerEndpointId: peer_endpoint_id,
   }) as Promise<SharedPicture[]>;
-}
-
-export async function getPeerThumbnailBytes(
-  peer_endpoint_id: string,
-  picture_id: string,
-): Promise<Uint8Array> {
-  return getPlatform().thumbnailBackend.getPeerThumbnailBytes(
-    peer_endpoint_id,
-    picture_id,
-  );
-}
-
-export async function getPeerThumbnail(
-  peer_endpoint_id: string,
-  picture_id: string,
-): Promise<string> {
-  const bytes = await getPeerThumbnailBytes(peer_endpoint_id, picture_id);
-  const blobBytes = Uint8Array.from(bytes);
-  return URL.createObjectURL(new Blob([blobBytes.buffer], { type: "image/jpeg" }));
 }
 
 export async function openPeerImage(
@@ -872,18 +766,6 @@ export async function moveLayer(fromIdx: number, toIdx: number): Promise<number>
     "layer_moved",
   );
   return result.layerIdx;
-}
-
-/** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
-export async function getThumbnailBytes(path: string): Promise<Uint8Array> {
-  return getPlatform().thumbnailBackend.getThumbnailBytes(path);
-}
-
-/** Returns a JPEG blob URL for any image format including EXR and RAW. Caller owns the URL (call URL.revokeObjectURL when done). */
-export async function getThumbnail(path: string): Promise<string> {
-  const bytes = await getThumbnailBytes(path);
-  const blobBytes = Uint8Array.from(bytes);
-  return URL.createObjectURL(new Blob([blobBytes.buffer], { type: "image/jpeg" }));
 }
 
 export async function listPictures(): Promise<string[]> {
@@ -1087,12 +969,45 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   return getBrowserPlatform().media.listMediaLibraries();
 }
 
+let nextLibraryListRequestId = 1;
+
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
   if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return inv("list_library_images", {
-      libraryId,
-    }) as Promise<LibraryImageListing>;
+    const { onChannelMessage } = await import("./channel");
+    const requestId = nextLibraryListRequestId++;
+    const items: LibraryImage[] = [];
+    const done = new Promise<void>((resolve, reject) => {
+      const unsubscribe = onChannelMessage("library_list_chunk", (msg) => {
+        if (msg.request_id !== requestId) return;
+        for (const item of msg.items) {
+          const meta = item.metadata ?? {};
+          items.push({
+            path: item.path,
+            name: item.name,
+            modified_at: item.modified_at ?? null,
+            fingerprint: item.fingerprint ?? null,
+            metadata: {
+              has_snapshots: meta.has_snapshots ?? false,
+              latest_snapshot_id: meta.latest_snapshot_id ?? null,
+              latest_snapshot_created_at: meta.latest_snapshot_created_at ?? null,
+              rating: meta.rating ?? null,
+              tags: meta.tags ?? [],
+            },
+          });
+        }
+        if (msg.done) {
+          unsubscribe();
+          resolve();
+        }
+      });
+      const inv = getTauriPlatform().invoke;
+      inv("list_library_images", { libraryId, requestId }).catch((err) => {
+        unsubscribe();
+        reject(err);
+      });
+    });
+    await done;
+    return { items, is_complete: true };
   }
   return getBrowserPlatform().media.listLibraryImages(libraryId);
 }

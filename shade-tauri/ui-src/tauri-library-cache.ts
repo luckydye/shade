@@ -8,7 +8,10 @@ import {
   listLibraryImages,
   listPeerPictures,
 } from "shade-ui/src/bridge/index";
-import { getThumbnailBackend } from "shade-ui/src/bridge/thumbnail-backend";
+import {
+  shadePeerThumbnailUrl,
+  shadeThumbnailUrl,
+} from "shade-ui/src/bridge/channel";
 import {
   normalizeModifiedAt,
   normalizeRating,
@@ -18,13 +21,6 @@ import {
 const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
 const tauriCameraLibraryItems = new Map<string, LibraryImage[]>();
 const tauriPeerLibraryItems = new Map<string, SharedPicture[]>();
-
-function abortError() {
-  if (typeof DOMException !== "undefined") {
-    return new DOMException("thumbnail load aborted", "AbortError");
-  }
-  return new Error("thumbnail load aborted");
-}
 
 function normalizeSnapshotVersion(version: unknown) {
   return typeof version === "string" && version.length > 0 ? version : null;
@@ -76,23 +72,6 @@ function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
   };
 }
 
-async function thumbnailObjectUrl(
-  loadBytes: Promise<Uint8Array>,
-  signal: AbortSignal,
-): Promise<string> {
-  if (signal.aborted) {
-    throw abortError();
-  }
-  const bytes = await loadBytes;
-  if (signal.aborted) {
-    throw abortError();
-  }
-  const blobBytes = Uint8Array.from(bytes);
-  return URL.createObjectURL(
-    new Blob([blobBytes.buffer], { type: "image/jpeg" }),
-  );
-}
-
 export const tauriLibraryCache: LibraryCachePlatform = {
   async getCachedLocalLibraryItems(libraryId) {
     return tauriLocalLibraryListings.get(libraryId)?.items ?? [];
@@ -123,25 +102,20 @@ export const tauriLibraryCache: LibraryCachePlatform = {
   async removePeerLibrary(peerId) {
     tauriPeerLibraryItems.delete(peerId);
   },
-  resolveLocalThumbnailSrc(path, latestSnapshotId, signal) {
-    const thumbnailPath = latestSnapshotId ? `${path}#snapshot:${latestSnapshotId}` : path;
-    return thumbnailObjectUrl(
-      getThumbnailBackend().getThumbnailBytes(thumbnailPath),
-      signal,
-    );
+  async resolveLocalThumbnailSrc(path, latestSnapshotId) {
+    const thumbPath = latestSnapshotId
+      ? `${path}#snapshot:${latestSnapshotId}`
+      : path;
+    return shadeThumbnailUrl(thumbPath, latestSnapshotId);
   },
-  resolveCameraThumbnailSrc(path, latestSnapshotId, signal) {
-    const thumbnailPath = latestSnapshotId ? `${path}#snapshot:${latestSnapshotId}` : path;
-    return thumbnailObjectUrl(
-      getThumbnailBackend().getThumbnailBytes(thumbnailPath),
-      signal,
-    );
+  async resolveCameraThumbnailSrc(path, latestSnapshotId) {
+    const thumbPath = latestSnapshotId
+      ? `${path}#snapshot:${latestSnapshotId}`
+      : path;
+    return shadeThumbnailUrl(thumbPath, latestSnapshotId);
   },
-  resolvePeerThumbnailSrc(peerId, pictureId, signal) {
-    return thumbnailObjectUrl(
-      getThumbnailBackend().getPeerThumbnailBytes(peerId, pictureId),
-      signal,
-    );
+  async resolvePeerThumbnailSrc(peerId, pictureId) {
+    return shadePeerThumbnailUrl(peerId, pictureId);
   },
   resetLocalThumbnailFailure() {},
   resetCameraThumbnailFailure() {},

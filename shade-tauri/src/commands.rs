@@ -103,11 +103,6 @@ pub struct LibraryImageListing {
     pub is_complete: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct PeerPairedEvent {
-    peer_endpoint_id: String,
-}
-
 #[derive(Serialize, Clone)]
 struct LibrarySyncProgress {
     library_id: String,
@@ -1539,13 +1534,13 @@ fn emit_peer_paired<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     peer_endpoint_id: &str,
 ) -> Result<(), String> {
-    app.emit(
-        "peer-paired",
-        PeerPairedEvent {
-            peer_endpoint_id: peer_endpoint_id.to_owned(),
+    crate::channel_server::channel_from_app(app).send_blocking(
+        crate::ChannelMessage::PeerPaired {
+            peer_id: peer_endpoint_id.to_owned(),
+            name: String::new(),
         },
-    )
-    .map_err(|error| error.to_string())
+    );
+    Ok(())
 }
 
 fn set_library_order(library_order: Vec<String>) -> Result<(), String> {
@@ -1827,14 +1822,23 @@ pub fn spawn_camera_discovery<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     tauri::async_runtime::spawn(async move {
+        let mut last_hosts: Vec<String> = Vec::new();
         loop {
             let hosts = scan_ccapi_hosts_on_local_subnets()
                 .await
                 .expect("camera discovery scan failed");
+            let mut sorted = hosts.clone();
+            sorted.sort();
             app.state::<crate::CameraDiscoveryService>()
                 .0
                 .replace_hosts(hosts)
                 .await;
+            if sorted != last_hosts {
+                last_hosts = sorted.clone();
+                crate::channel_server::channel_from_app(&app)
+                    .send(crate::ChannelMessage::CameraHostsChanged { hosts: sorted })
+                    .await;
+            }
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
     });
@@ -2286,7 +2290,9 @@ fn start_s3_library_scan<R: tauri::Runtime>(
             guard.is_scanning = false;
             guard.is_complete = true;
             drop(guard);
-            let _ = app.emit("library-scan-complete", &library_id);
+            crate::channel_server::channel_from_app(&app).send_blocking(
+                crate::ChannelMessage::LibraryScanComplete { library_id },
+            );
         })
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -2358,7 +2364,13 @@ async fn scan_s3_library_into_snapshot<R: tauri::Runtime>(
 
         if batch.len() >= BATCH_SIZE {
             shade_io::flush_library_scan_batch(snapshot, &mut batch)?;
-            let _ = app.emit("library-scan-progress", library_id);
+            crate::channel_server::channel_from_app(app).send_blocking(
+                crate::ChannelMessage::LibraryScanProgress {
+                    library_id: library_id.to_owned(),
+                    scanned: 0,
+                    total: 0,
+                },
+            );
         }
     }
 
@@ -2770,22 +2782,20 @@ async fn load_photo_image_from_tauri<R: tauri::Runtime>(
 }
 
 pub enum RenderJob {
-    Preview {
+    /// Push-based preview render. Result is pushed to the preview channel
+    /// instead of returned via oneshot. Carries `artboard_id` + `generation`
+    /// so the frontend can discard stale frames.
+    ViewportPreview {
+        artboard_id: String,
+        generation: u64,
+        quality: crate::channel_protocol::PreviewQuality,
         stack: LayerStack,
         sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
         canvas_width: u32,
         canvas_height: u32,
         request: PreviewRenderRequest,
-        response: tokio::sync::oneshot::Sender<Result<PreviewFrameResponse, String>>,
-    },
-    PreviewFloat16 {
-        stack: LayerStack,
-        sources: Arc<std::collections::HashMap<shade_lib::TextureId, FloatImage>>,
-        canvas_width: u32,
-        canvas_height: u32,
-        request: PreviewRenderRequest,
-        response:
-            tokio::sync::oneshot::Sender<Result<PreviewFrameFloat16Response, String>>,
+        use_float16: bool,
+        preview_channel: std::sync::Arc<crate::PreviewChannel>,
     },
     Export {
         stack: LayerStack,
@@ -2848,15 +2858,11 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                         Err(_) => break,
                     },
                 };
-                if matches!(
-                    job,
-                    RenderJob::Preview { .. } | RenderJob::PreviewFloat16 { .. }
-                ) {
+                if matches!(job, RenderJob::ViewportPreview { .. }) {
                     loop {
                         match receiver.try_recv() {
                             Ok(next_job) => match next_job {
-                                RenderJob::Preview { .. }
-                                | RenderJob::PreviewFloat16 { .. } => {
+                                RenderJob::ViewportPreview { .. } => {
                                     job = next_job;
                                 }
                                 _ => {
@@ -2870,77 +2876,114 @@ pub fn spawn_render_worker() -> crossbeam_channel::Sender<RenderJob> {
                     }
                 }
                 match job {
-                    RenderJob::Preview {
+                    RenderJob::ViewportPreview {
+                        artboard_id,
+                        generation,
+                        quality,
                         stack,
                         sources,
                         canvas_width,
                         canvas_height,
                         request,
-                        response,
+                        use_float16,
+                        preview_channel,
                     } => {
-                        let result = std::panic::catch_unwind(
-                            std::panic::AssertUnwindSafe(|| {
-                                runtime
-                                    .block_on(renderer.render_stack_preview(
-                                        &stack,
-                                        sources.as_ref(),
-                                        canvas_width,
-                                        canvas_height,
-                                        request.target_width,
-                                        request.target_height,
-                                        request.crop.map(|crop| GpuPreviewCrop {
-                                            x: crop.x,
-                                            y: crop.y,
-                                            width: crop.width,
-                                            height: crop.height,
-                                        }),
-                                    ))
-                                    .map(|pixels| PreviewFrameResponse {
-                                        pixels,
-                                        width: request.target_width,
-                                        height: request.target_height,
-                                    })
-                                    .map_err(|e| e.to_string())
-                            }),
-                        )
-                        .unwrap_or_else(|e| Err(panic_to_string(e)));
-                        let _ = response.send(result);
-                    }
-                    RenderJob::PreviewFloat16 {
-                        stack,
-                        sources,
-                        canvas_width,
-                        canvas_height,
-                        request,
-                        response,
-                    } => {
-                        let result = std::panic::catch_unwind(
-                            std::panic::AssertUnwindSafe(|| {
+                        let crop = request.crop.clone().map(|c| GpuPreviewCrop {
+                            x: c.x,
+                            y: c.y,
+                            width: c.width,
+                            height: c.height,
+                        });
+                        let crop_rect = request.crop.clone();
+                        let target_w = request.target_width;
+                        let target_h = request.target_height;
+                        let frame_result = if use_float16 {
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 runtime
                                     .block_on(renderer.render_stack_preview_f16(
                                         &stack,
                                         sources.as_ref(),
                                         canvas_width,
                                         canvas_height,
-                                        request.target_width,
-                                        request.target_height,
-                                        request.crop.map(|crop| GpuPreviewCrop {
-                                            x: crop.x,
-                                            y: crop.y,
-                                            width: crop.width,
-                                            height: crop.height,
-                                        }),
+                                        target_w,
+                                        target_h,
+                                        crop,
                                     ))
-                                    .map(|pixels| PreviewFrameFloat16Response {
-                                        pixels,
-                                        width: request.target_width,
-                                        height: request.target_height,
+                                    .map(|pixels: Vec<u16>| {
+                                        let mut bytes =
+                                            Vec::with_capacity(pixels.len() * 2);
+                                        for word in pixels {
+                                            bytes.extend_from_slice(&word.to_le_bytes());
+                                        }
+                                        bytes
                                     })
                                     .map_err(|e| e.to_string())
-                            }),
-                        )
-                        .unwrap_or_else(|e| Err(panic_to_string(e)));
-                        let _ = response.send(result);
+                            }))
+                            .unwrap_or_else(|e| Err(panic_to_string(e)))
+                        } else {
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                runtime
+                                    .block_on(renderer.render_stack_preview(
+                                        &stack,
+                                        sources.as_ref(),
+                                        canvas_width,
+                                        canvas_height,
+                                        target_w,
+                                        target_h,
+                                        crop,
+                                    ))
+                                    .map_err(|e| e.to_string())
+                            }))
+                            .unwrap_or_else(|e| Err(panic_to_string(e)))
+                        };
+                        match frame_result {
+                            Ok(pixels) => {
+                                let (crop_x, crop_y, crop_w, crop_h) = crop_rect
+                                    .as_ref()
+                                    .map(|c| {
+                                        (
+                                            c.x as f64,
+                                            c.y as f64,
+                                            c.width as f64,
+                                            c.height as f64,
+                                        )
+                                    })
+                                    .unwrap_or((
+                                        0.0,
+                                        0.0,
+                                        canvas_width as f64,
+                                        canvas_height as f64,
+                                    ));
+                                let frame = crate::preview_channel::PreviewFrame {
+                                    artboard_id,
+                                    generation,
+                                    quality,
+                                    width: target_w,
+                                    height: target_h,
+                                    crop_x,
+                                    crop_y,
+                                    crop_width: crop_w,
+                                    crop_height: crop_h,
+                                    kind: if use_float16 {
+                                        crate::preview_channel::PreviewFrameKind::RgbaFloat16
+                                    } else {
+                                        crate::preview_channel::PreviewFrameKind::Rgba
+                                    },
+                                    color_space: if use_float16 {
+                                        crate::preview_channel::PreviewColorSpace::DisplayP3
+                                    } else {
+                                        crate::preview_channel::PreviewColorSpace::Srgb
+                                    },
+                                    pixels,
+                                };
+                                runtime.block_on(preview_channel.send(frame));
+                            }
+                            Err(error) => {
+                                eprintln!(
+                                    "viewport preview render failed: {error}"
+                                );
+                            }
+                        }
                     }
                     RenderJob::Export {
                         stack,
@@ -3235,19 +3278,6 @@ pub async fn list_peer_pictures(
             }
         })
         .collect())
-}
-
-#[tauri::command]
-pub async fn get_peer_thumbnail(
-    peer_endpoint_id: String,
-    picture_id: String,
-    p2p: tauri::State<'_, crate::P2pState>,
-) -> Result<Vec<u8>, String> {
-    require_p2p(&p2p)
-        .await?
-        .get_peer_thumbnail(&peer_endpoint_id, &picture_id)
-        .await
-        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -3683,40 +3713,6 @@ pub async fn open_image_bytes(
     Ok(response)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PreviewFrameResponse {
-    pub pixels: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PreviewFrameFloat16Response {
-    pub pixels: Vec<u16>,
-    pub width: u32,
-    pub height: u32,
-}
-
-fn pack_preview_rgba_response(frame: PreviewFrameResponse) -> tauri::ipc::Response {
-    let mut bytes = Vec::with_capacity(8 + frame.pixels.len());
-    bytes.extend_from_slice(&frame.width.to_le_bytes());
-    bytes.extend_from_slice(&frame.height.to_le_bytes());
-    bytes.extend_from_slice(&frame.pixels);
-    tauri::ipc::Response::new(bytes)
-}
-
-fn pack_preview_float16_response(
-    frame: PreviewFrameFloat16Response,
-) -> tauri::ipc::Response {
-    let mut bytes = Vec::with_capacity(8 + frame.pixels.len() * 2);
-    bytes.extend_from_slice(&frame.width.to_le_bytes());
-    bytes.extend_from_slice(&frame.height.to_le_bytes());
-    for word in frame.pixels {
-        bytes.extend_from_slice(&word.to_le_bytes());
-    }
-    tauri::ipc::Response::new(bytes)
-}
-
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PreviewCrop {
     pub x: f32,
@@ -3733,7 +3729,7 @@ pub struct PreviewRenderRequest {
     pub ignore_crop_layers: Option<bool>,
 }
 
-fn snapshot_render_state(
+pub(crate) fn snapshot_render_state(
     state: &tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<
     (
@@ -3754,28 +3750,6 @@ fn snapshot_render_state(
         st.canvas_width,
         st.canvas_height,
     ))
-}
-
-fn apply_preview_request(
-    mut stack: LayerStack,
-    canvas_width: u32,
-    canvas_height: u32,
-    request: Option<PreviewRenderRequest>,
-) -> (LayerStack, PreviewRenderRequest) {
-    let request = request.unwrap_or(PreviewRenderRequest {
-        target_width: canvas_width,
-        target_height: canvas_height,
-        crop: None,
-        ignore_crop_layers: None,
-    });
-    if request.ignore_crop_layers.unwrap_or(false) {
-        for entry in &mut stack.layers {
-            if matches!(entry.layer, shade_lib::Layer::Crop { .. }) {
-                entry.visible = false;
-            }
-        }
-    }
-    (stack, request)
 }
 
 fn export_dimension(value: f32, axis: &str) -> Result<u32, String> {
@@ -3951,72 +3925,6 @@ async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?;
     let bytes = response_rx.await.map_err(|error| error.to_string())??;
     Ok(Some((bytes, opened.fingerprint)))
-}
-
-/// Run the full GPU render pipeline and return raw RGBA8 pixels.
-#[tauri::command]
-pub async fn render_preview(
-    request: Option<PreviewRenderRequest>,
-    render_service: tauri::State<'_, crate::RenderService>,
-    state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<tauri::ipc::Response, String> {
-    let (stack, sources, canvas_width, canvas_height) = snapshot_render_state(&state)?;
-    let (stack, request) =
-        apply_preview_request(stack, canvas_width, canvas_height, request);
-    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    render_service
-        .0
-        .send(RenderJob::Preview {
-            stack,
-            sources,
-            canvas_width,
-            canvas_height,
-            request,
-            response: response_tx,
-        })
-        .map_err(|e| e.to_string())?;
-    response_rx
-        .await
-        .map_err(|e| e.to_string())?
-        .map(pack_preview_rgba_response)
-}
-
-#[tauri::command]
-pub async fn render_preview_float16(
-    request: Option<PreviewRenderRequest>,
-    render_service: tauri::State<'_, crate::RenderService>,
-    state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<tauri::ipc::Response, String> {
-    let (stack, sources, canvas_width, canvas_height) = {
-        let st = lock_editor_state(&state)?;
-        if st.canvas_width == 0 {
-            return Err("no image loaded".to_string());
-        }
-        (
-            st.stack.clone(),
-            st.image_sources.clone(),
-            st.canvas_width,
-            st.canvas_height,
-        )
-    };
-    let (stack, request) =
-        apply_preview_request(stack, canvas_width, canvas_height, request);
-    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    render_service
-        .0
-        .send(RenderJob::PreviewFloat16 {
-            stack,
-            sources,
-            canvas_width,
-            canvas_height,
-            request,
-            response: response_tx,
-        })
-        .map_err(|e| e.to_string())?;
-    response_rx
-        .await
-        .map_err(|e| e.to_string())?
-        .map(pack_preview_float16_response)
 }
 
 #[tauri::command]
@@ -4676,15 +4584,6 @@ pub struct HslValues {
     pub blue_lum: f32,
 }
 
-#[tauri::command]
-pub async fn get_thumbnail<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    _thumbnail_service: tauri::State<'_, crate::ThumbnailService>,
-    path: String,
-) -> Result<Vec<u8>, String> {
-    load_thumbnail_bytes(app, &path).await
-}
-
 pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     picture_id: &str,
@@ -5017,14 +4916,67 @@ async fn enrich_listing_metadata(
     Ok(())
 }
 
+/// Streaming variant of the old `list_library_images` bulk return. Builds the
+/// listing in the backend, then chunks the rich `LibraryImage` items over the
+/// coordination channel as `LibraryListChunk` messages keyed by `request_id`.
+/// The command itself returns immediately with `Ok(())`; the frontend
+/// collects chunks until it receives one with `done: true`.
 #[tauri::command]
 pub async fn list_library_images<R: tauri::Runtime>(
     _app: tauri::AppHandle<R>,
     library_id: String,
-) -> Result<LibraryImageListing, String> {
+    request_id: u32,
+) -> Result<(), String> {
     let mut listing = build_library_listing(&_app, library_id).await?;
     enrich_listing_metadata(&mut listing).await?;
-    Ok(listing)
+
+    const CHUNK_SIZE: usize = 256;
+    let coord = crate::channel_server::channel_from_app(&_app);
+    let mut iter = listing.items.into_iter().peekable();
+    let mut sent_any = false;
+    while iter.peek().is_some() {
+        let mut buf: Vec<crate::channel_protocol::LibraryImageListing> =
+            Vec::with_capacity(CHUNK_SIZE);
+        for _ in 0..CHUNK_SIZE {
+            match iter.next() {
+                Some(item) => buf.push(crate::channel_protocol::LibraryImageListing {
+                    path: item.path,
+                    name: item.name,
+                    modified_at: item.modified_at,
+                    fingerprint: item.fingerprint,
+                    metadata: crate::channel_protocol::LibraryImageMetadata {
+                        has_snapshots: item.metadata.has_snapshots,
+                        latest_snapshot_id: item.metadata.latest_snapshot_id,
+                        latest_snapshot_created_at: item
+                            .metadata
+                            .latest_snapshot_created_at,
+                        rating: item.metadata.rating,
+                        tags: item.metadata.tags,
+                    },
+                }),
+                None => break,
+            }
+        }
+        let done = iter.peek().is_none();
+        coord
+            .send(crate::ChannelMessage::LibraryListChunk {
+                request_id,
+                items: buf,
+                done,
+            })
+            .await;
+        sent_any = true;
+    }
+    if !sent_any {
+        coord
+            .send(crate::ChannelMessage::LibraryListChunk {
+                request_id,
+                items: Vec::new(),
+                done: true,
+            })
+            .await;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -5491,7 +5443,9 @@ pub async fn delete_media_library_item<R: tauri::Runtime>(
             .0
             .remove_item(&library_id, &path)
             .await?;
-        let _ = _app.emit("library-scan-complete", &library_id);
+        crate::channel_server::channel_from_app(&_app).send(
+            crate::ChannelMessage::LibraryScanComplete { library_id },
+        ).await;
         return Ok(());
     }
     #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -5858,13 +5812,6 @@ pub struct BatchExportItem {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct BatchExportProgress {
-    pub total: usize,
-    pub completed: usize,
-    pub current_name: Option<String>,
-}
-
 async fn open_image_for_batch<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     path: &str,
@@ -5946,14 +5893,14 @@ pub async fn batch_export_images<R: tauri::Runtime>(
     let total = items.len();
     let mut count = 0u32;
     for (i, item) in items.into_iter().enumerate() {
-        let _ = app.emit(
-            "batch-export-progress",
-            BatchExportProgress {
-                total,
-                completed: i,
-                current_name: Some(item.name.clone()),
-            },
-        );
+        crate::channel_server::channel_from_app(&app)
+            .send(crate::ChannelMessage::BatchExportProgress {
+                current: i as u32,
+                total: total as u32,
+                name: item.name.clone(),
+                error: None,
+            })
+            .await;
 
         let opened = open_image_for_batch(&app, &item.path).await?;
         let fingerprint = item.fingerprint.unwrap_or_else(|| opened.fingerprint.clone());
@@ -6016,14 +5963,14 @@ pub async fn batch_export_images<R: tauri::Runtime>(
         count += 1;
     }
 
-    let _ = app.emit(
-        "batch-export-progress",
-        BatchExportProgress {
-            total,
-            completed: total,
-            current_name: None,
-        },
-    );
+    crate::channel_server::channel_from_app(&app)
+        .send(crate::ChannelMessage::BatchExportProgress {
+            current: total as u32,
+            total: total as u32,
+            name: String::new(),
+            error: None,
+        })
+        .await;
 
     Ok(count)
 }
@@ -6821,4 +6768,135 @@ mod tests {
             vec!["client".to_string(), "portrait".to_string()]
         );
     }
+}
+
+// ─── shade:// custom protocol handler ────────────────────────────────────────
+
+fn shade_uri_not_found() -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(404)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Vec::new())
+        .unwrap()
+}
+
+fn shade_uri_error(message: impl AsRef<str>) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(500)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(message.as_ref().as_bytes().to_vec())
+        .unwrap()
+}
+
+fn detect_thumb_mime(bytes: &[u8]) -> &'static str {
+    if bytes.len() >= 3 && &bytes[0..3] == b"\xff\xd8\xff" {
+        "image/jpeg"
+    } else if bytes.len() >= 8 && &bytes[0..8] == b"\x89PNG\r\n\x1a\n" {
+        "image/png"
+    } else if bytes.len() >= 4 && &bytes[0..4] == b"RIFF" {
+        "image/webp"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+fn shade_uri_ok(bytes: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
+    let mime = detect_thumb_mime(&bytes);
+    tauri::http::Response::builder()
+        .status(200)
+        .header("Content-Type", mime)
+        .header("Access-Control-Allow-Origin", "*")
+        // Edit fingerprint is in the URL — safe to cache aggressively.
+        .header("Cache-Control", "public, max-age=31536000, immutable")
+        .body(bytes)
+        .unwrap()
+}
+
+/// Dispatch a `shade://` request. Supported URIs:
+///
+/// * `shade://thumb/<path>?edit=<fingerprint>` — local image / library thumb
+/// * `shade://thumb/peer/<peer_id>/<path>?edit=<fingerprint>` — peer thumb
+/// * `shade://thumb/camera/<host>/<path>` — camera thumb (no fingerprint)
+pub async fn serve_shade_uri<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    request: tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+    let uri = request.uri();
+    // Tauri rewrites the URI; the original path is available via `.path()`.
+    // Strip leading `/` and the host portion if present.
+    let raw_path = uri.path().trim_start_matches('/');
+    // Detect prefix to decide route.
+    if let Some(rest) = raw_path
+        .strip_prefix("thumb/peer/")
+        .or_else(|| raw_path.strip_prefix("peer/"))
+    {
+        let (peer_id, encoded_path) = match rest.split_once('/') {
+            Some(pair) => pair,
+            None => return shade_uri_not_found(),
+        };
+        let decoded = match urlencoding_decode(encoded_path) {
+            Ok(p) => p,
+            Err(_) => return shade_uri_not_found(),
+        };
+        let p2p = app.state::<crate::P2pState>();
+        let peer = match p2p.0.read().await.as_ref() {
+            Some(p) => p.clone(),
+            None => return shade_uri_error("p2p not initialized"),
+        };
+        return match peer.get_peer_thumbnail(peer_id, &decoded).await {
+            Ok(bytes) => shade_uri_ok(bytes),
+            Err(error) => shade_uri_error(error.to_string()),
+        };
+    }
+    if let Some(rest) = raw_path
+        .strip_prefix("thumb/camera/")
+        .or_else(|| raw_path.strip_prefix("camera/"))
+    {
+        let (host, encoded_path) = match rest.split_once('/') {
+            Some(pair) => pair,
+            None => return shade_uri_not_found(),
+        };
+        let decoded = match urlencoding_decode(encoded_path) {
+            Ok(p) => p,
+            Err(_) => return shade_uri_not_found(),
+        };
+        return match load_camera_thumbnail_from_tauri(app, host, &decoded).await {
+            Ok(bytes) => shade_uri_ok(bytes),
+            Err(error) => shade_uri_error(error),
+        };
+    }
+    if let Some(rest) = raw_path
+        .strip_prefix("thumb/")
+        .or_else(|| Some(raw_path).filter(|p| !p.is_empty()))
+    {
+        let decoded = match urlencoding_decode(rest) {
+            Ok(p) => p,
+            Err(_) => return shade_uri_not_found(),
+        };
+        return match load_thumbnail_bytes(app.clone(), &decoded).await {
+            Ok(bytes) => shade_uri_ok(bytes),
+            Err(error) => shade_uri_error(error),
+        };
+    }
+    shade_uri_not_found()
+}
+
+fn urlencoding_decode(input: &str) -> Result<String, std::string::FromUtf8Error> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out)
 }
