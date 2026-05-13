@@ -1,4 +1,5 @@
 import * as bridge from "../bridge/index";
+import { onChannelMessage } from "../bridge/channel";
 import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 import {
   fullCanvasCrop,
@@ -12,6 +13,40 @@ import {
   state,
 } from "./editor-store";
 import { onRestore, recordSnapshot } from "./history";
+
+interface LayerStackInfoLike {
+  layers: LayerInfo[];
+  canvas_width: number;
+  canvas_height: number;
+  generation: number;
+}
+
+function applyLayerStackInfo(info: LayerStackInfoLike) {
+  const layers = info.layers;
+  const selectedLayerIdx =
+    layers.length === 0 ? -1 : resolveSelectedLayerIdx(layers, state.selectedLayerIdx);
+  setState({
+    layers,
+    canvasWidth: info.canvas_width,
+    canvasHeight: info.canvas_height,
+    previewContentVersion: info.generation,
+    selectedLayerIdx,
+    selectedLayerPart: resolveSelectedLayerPart(
+      layers,
+      state.selectedLayerIdx,
+      selectedLayerIdx,
+      state.selectedLayerPart,
+    ),
+  });
+}
+
+// Subscribe to authoritative layer-stack pushes from Rust. The subscriber is
+// installed once at module load; every Rust-side mutation site broadcasts a
+// `LayerStackSnapshot` after persisting, so the store reflects the
+// post-mutation state without callers needing to invoke `get_layer_stack`.
+onChannelMessage("layer_stack_snapshot", (msg) => {
+  applyLayerStackInfo(msg.stack as LayerStackInfoLike);
+});
 
 onRestore(async (data) => {
   await bridge.replaceStack(data);
@@ -130,24 +165,21 @@ async function runLayerMutation(work: () => Promise<unknown>) {
   await refreshPreview();
 }
 
+/**
+ * In the Tauri runtime the layer stack is pushed reactively via
+ * `LayerStackSnapshot` — callers no longer need to refetch after mutations.
+ * This function remains as a fallback for the browser worker path (which has
+ * no channel) and as a manual sync trigger when starting up before any
+ * mutation has fired.
+ */
 export async function refreshLayerStack() {
+  if (await bridge.isTauriRuntime()) {
+    // Rust broadcasts on every mutation and on initial channel registration —
+    // store is already kept in sync by the subscriber.
+    return;
+  }
   const info = await bridge.getLayerStack();
-  const layers = info.layers as LayerInfo[];
-  const selectedLayerIdx =
-    layers.length === 0 ? -1 : resolveSelectedLayerIdx(layers, state.selectedLayerIdx);
-  setState({
-    layers,
-    canvasWidth: info.canvas_width,
-    canvasHeight: info.canvas_height,
-    previewContentVersion: info.generation,
-    selectedLayerIdx,
-    selectedLayerPart: resolveSelectedLayerPart(
-      layers,
-      state.selectedLayerIdx,
-      selectedLayerIdx,
-      state.selectedLayerPart,
-    ),
-  });
+  applyLayerStackInfo(info as unknown as LayerStackInfoLike);
 }
 
 export async function setLayerVisible(idx: number, visible: boolean) {

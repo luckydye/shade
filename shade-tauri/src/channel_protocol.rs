@@ -129,4 +129,12 @@ pub enum ChannelMessage {
     CameraHostsChanged {
         hosts: Vec<String>,
     },
+
+    // Authoritative layer-stack state (Rust → JS). Pushed after every mutation
+    // and on demand; replaces the `get_layer_stack` refetch pattern. The
+    // payload carries the same shape as the legacy `get_layer_stack` invoke
+    // return so the frontend store can adopt it directly.
+    LayerStackSnapshot {
+        stack: serde_json::Value,
+    },
 }

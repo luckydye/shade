@@ -84,7 +84,8 @@ export type ChannelMessage =
     }
   | { type: "collection_changed"; collection_id: string }
   | { type: "preset_list_changed" }
-  | { type: "camera_hosts_changed"; hosts: string[] };
+  | { type: "camera_hosts_changed"; hosts: string[] }
+  | { type: "layer_stack_snapshot"; stack: unknown };
 
 type MessageType = ChannelMessage["type"];
 

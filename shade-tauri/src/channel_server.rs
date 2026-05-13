@@ -49,11 +49,16 @@ impl CoordinationChannel {
 pub struct CoordinationChannelService(pub Arc<CoordinationChannel>);
 
 #[tauri::command]
-pub async fn register_coordination_channel(
+pub async fn register_coordination_channel<R: tauri::Runtime>(
     channel: Channel<ChannelMessage>,
     service: tauri::State<'_, CoordinationChannelService>,
+    app: tauri::AppHandle<R>,
+    editor: tauri::State<'_, std::sync::Mutex<crate::commands::EditorState>>,
 ) -> Result<(), String> {
     service.0.register(channel).await;
+    // Immediately push the current layer stack so the frontend can populate
+    // its store without a separate `get_layer_stack` invoke.
+    crate::commands::broadcast_layer_stack(&app, &editor).await;
     Ok(())
 }
 

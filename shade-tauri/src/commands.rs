@@ -3460,12 +3460,13 @@ pub struct ApplyPeerMetadataResult {
 }
 
 #[tauri::command]
-pub async fn open_peer_image(
+pub async fn open_peer_image<R: tauri::Runtime>(
     peer_endpoint_id: String,
     picture_id: String,
     file_name: Option<String>,
     p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<LayerInfoResponse, String> {
     let open_request_id = {
         let mut st = lock_editor_state(&state)?;
@@ -3514,6 +3515,7 @@ pub async fn open_peer_image(
         response.fingerprint = Some(fingerprint);
         response
     };
+    broadcast_layer_stack(&app, &state).await;
     Ok(response)
 }
 
@@ -3615,15 +3617,17 @@ pub async fn open_image<R: tauri::Runtime>(
         response.fingerprint = Some(fingerprint);
         response
     };
+    broadcast_layer_stack(&app, &state).await;
     Ok(response)
 }
 
 #[tauri::command]
-pub async fn open_image_encoded_bytes(
+pub async fn open_image_encoded_bytes<R: tauri::Runtime>(
     bytes: Vec<u8>,
     file_name: Option<String>,
     p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<LayerInfoResponse, String> {
     let open_request_id = {
         let mut st = lock_editor_state(&state)?;
@@ -3659,6 +3663,7 @@ pub async fn open_image_encoded_bytes(
         response.fingerprint = Some(fingerprint);
         response
     };
+    broadcast_layer_stack(&app, &state).await;
     Ok(response)
 }
 
@@ -3668,12 +3673,13 @@ pub async fn open_image_encoded_bytes(
 /// NOTE: pixels here are already decoded by the browser, which applies color management
 /// and outputs sRGB-encoded values.
 #[tauri::command]
-pub async fn open_image_bytes(
+pub async fn open_image_bytes<R: tauri::Runtime>(
     pixels: Vec<u8>,
     width: u32,
     height: u32,
     p2p: tauri::State<'_, crate::P2pState>,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<LayerInfoResponse, String> {
     let open_request_id = {
         let mut st = lock_editor_state(&state)?;
@@ -3710,6 +3716,7 @@ pub async fn open_image_bytes(
         response.fingerprint = Some(fingerprint);
         response
     };
+    broadcast_layer_stack(&app, &state).await;
     Ok(response)
 }
 
@@ -4015,9 +4022,10 @@ pub struct EditParams {
 }
 
 #[tauri::command]
-pub async fn apply_edit(
+pub async fn apply_edit<R: tauri::Runtime>(
     params: EditParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -4230,14 +4238,15 @@ pub async fn apply_edit(
             _ => return Err("target layer is not editable by apply_edit".into()),
         }
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn add_layer(
+pub async fn add_layer<R: tauri::Runtime>(
     kind: String,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<usize, String> {
     let idx = {
         let mut st = lock_editor_state(&state)?;
@@ -4275,7 +4284,7 @@ pub async fn add_layer(
             _ => return Err(format!("unknown layer kind: {kind}")),
         }
     };
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(idx)
 }
 
@@ -4286,9 +4295,10 @@ pub struct LayerVisibility {
 }
 
 #[tauri::command]
-pub async fn set_layer_visible(
+pub async fn set_layer_visible<R: tauri::Runtime>(
     params: LayerVisibility,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -4298,7 +4308,7 @@ pub async fn set_layer_visible(
         st.stack.layers[params.layer_idx].visible = params.visible;
         st.stack.generation += 1;
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
@@ -4315,9 +4325,10 @@ pub struct RenameLayerParams {
 }
 
 #[tauri::command]
-pub async fn set_layer_opacity(
+pub async fn set_layer_opacity<R: tauri::Runtime>(
     params: LayerOpacityParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -4327,14 +4338,15 @@ pub async fn set_layer_opacity(
         st.stack.layers[params.layer_idx].opacity = params.opacity.clamp(0.0, 1.0);
         st.stack.generation += 1;
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn rename_layer(
+pub async fn rename_layer<R: tauri::Runtime>(
     params: RenameLayerParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -4348,7 +4360,7 @@ pub async fn rename_layer(
             .filter(|name| !name.is_empty());
         st.stack.generation += 1;
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
@@ -4358,9 +4370,10 @@ pub struct DeleteLayerParams {
 }
 
 #[tauri::command]
-pub async fn delete_layer(
+pub async fn delete_layer<R: tauri::Runtime>(
     params: DeleteLayerParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -4373,7 +4386,7 @@ pub async fn delete_layer(
         st.stack.layers.remove(params.layer_idx);
         st.stack.generation += 1;
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
@@ -4384,9 +4397,10 @@ pub struct MoveLayerParams {
 }
 
 #[tauri::command]
-pub async fn move_layer(
+pub async fn move_layer<R: tauri::Runtime>(
     params: MoveLayerParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<usize, String> {
     let new_idx = {
         let mut st = lock_editor_state(&state)?;
@@ -4410,7 +4424,7 @@ pub async fn move_layer(
         st.stack.generation += 1;
         insert_idx
     };
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(new_idx)
 }
 
@@ -5658,9 +5672,10 @@ pub async fn delete_preset(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn load_preset(
+pub async fn load_preset<R: tauri::Runtime>(
     name: String,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let path = preset_file_path(&name)?;
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
@@ -5690,14 +5705,15 @@ pub async fn load_preset(
         restore_masks_from_params(&mut st.stack, base_idx, &file.mask_params, w, h);
         st.stack.generation += 1;
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn apply_preset_snapshot(
+pub async fn apply_preset_snapshot<R: tauri::Runtime>(
     name: String,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<EditSnapshotInfo, String> {
     let path = preset_file_path(&name)?;
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
@@ -5728,6 +5744,7 @@ pub async fn apply_preset_snapshot(
         st.stack.generation += 1;
     }
     let id = save_new_snapshot(&state).await?;
+    broadcast_layer_stack(&app, &state).await;
     Ok(EditSnapshotInfo { id })
 }
 
@@ -6009,32 +6026,36 @@ pub fn get_stack_snapshot(
 }
 
 #[tauri::command]
-pub fn replace_stack(
+pub async fn replace_stack<R: tauri::Runtime>(
     layers_json: String,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let snap: StackSnapshot =
         serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
-    let mut st = lock_editor_state(&state)?;
-    let image_layers: Vec<_> = st
-        .stack
-        .layers
-        .iter()
-        .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
-        .cloned()
-        .collect();
-    if image_layers.is_empty() {
-        return Err("no image layers to preserve".into());
+    {
+        let mut st = lock_editor_state(&state)?;
+        let image_layers: Vec<_> = st
+            .stack
+            .layers
+            .iter()
+            .filter(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
+            .cloned()
+            .collect();
+        if image_layers.is_empty() {
+            return Err("no image layers to preserve".into());
+        }
+        st.stack.layers = image_layers;
+        st.stack.masks.clear();
+        st.stack.mask_params.clear();
+        let base_idx = st.stack.layers.len();
+        st.stack.layers.extend(snap.layers);
+        let w = st.canvas_width;
+        let h = st.canvas_height;
+        restore_masks_from_params(&mut st.stack, base_idx, &snap.mask_params, w, h);
+        st.stack.generation += 1;
     }
-    st.stack.layers = image_layers;
-    st.stack.masks.clear();
-    st.stack.mask_params.clear();
-    let base_idx = st.stack.layers.len();
-    st.stack.layers.extend(snap.layers);
-    let w = st.canvas_width;
-    let h = st.canvas_height;
-    restore_masks_from_params(&mut st.stack, base_idx, &snap.mask_params, w, h);
-    st.stack.generation += 1;
+    broadcast_layer_stack(&app, &state).await;
     Ok(())
 }
 
@@ -6064,9 +6085,10 @@ pub async fn list_snapshots(
 }
 
 #[tauri::command]
-pub async fn load_snapshot(
+pub async fn load_snapshot<R: tauri::Runtime>(
     params: LoadSnapshotParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let fingerprint = {
         let st = lock_editor_state(&state)?;
@@ -6104,6 +6126,7 @@ pub async fn load_snapshot(
         st.stack.generation += 1;
         st.current_snapshot_id = Some(snapshot.id);
     }
+    broadcast_layer_stack(&app, &state).await;
     Ok(())
 }
 
@@ -6308,6 +6331,10 @@ pub async fn get_layer_stack(
     state: tauri::State<'_, Mutex<EditorState>>,
 ) -> Result<LayerStackInfo, String> {
     let st = lock_editor_state(&state)?;
+    Ok(build_layer_stack_info(&st))
+}
+
+pub(crate) fn build_layer_stack_info(st: &EditorState) -> LayerStackInfo {
     let layers = st
         .stack
         .layers
@@ -6444,12 +6471,45 @@ pub async fn get_layer_stack(
             },
         })
         .collect();
-    Ok(LayerStackInfo {
+    LayerStackInfo {
         layers,
         canvas_width: st.canvas_width,
         canvas_height: st.canvas_height,
         generation: st.stack.generation,
-    })
+    }
+}
+
+/// Build the current layer stack snapshot and push it over the coordination
+/// channel. Called from every mutation site (centralised through
+/// `finalize_layer_stack_mutation`).
+pub(crate) async fn broadcast_layer_stack<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    state: &tauri::State<'_, Mutex<EditorState>>,
+) {
+    let info = match lock_editor_state(state) {
+        Ok(st) => build_layer_stack_info(&st),
+        Err(_) => return,
+    };
+    let value = match serde_json::to_value(&info) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    crate::channel_server::channel_from_app(app)
+        .send(crate::ChannelMessage::LayerStackSnapshot { stack: value })
+        .await;
+}
+
+/// Persist the in-progress edit version AND broadcast the resulting stack
+/// snapshot. Mutation commands should call this in place of
+/// `persist_current_edit_version` so the frontend reactively learns about
+/// the new state without needing to re-invoke `get_layer_stack`.
+pub(crate) async fn finalize_layer_stack_mutation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    state: &tauri::State<'_, Mutex<EditorState>>,
+) -> Result<String, String> {
+    let id = persist_current_edit_version(state).await?;
+    broadcast_layer_stack(app, state).await;
+    Ok(id)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -6468,9 +6528,10 @@ pub struct GradientMaskParams {
 }
 
 #[tauri::command]
-pub async fn apply_gradient_mask(
+pub async fn apply_gradient_mask<R: tauri::Runtime>(
     params: GradientMaskParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -6500,7 +6561,7 @@ pub async fn apply_gradient_mask(
         };
         st.stack.set_mask_with_params(params.layer_idx, mask, mp);
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
@@ -6510,9 +6571,10 @@ pub struct RemoveMaskParams {
 }
 
 #[tauri::command]
-pub async fn remove_mask(
+pub async fn remove_mask<R: tauri::Runtime>(
     params: RemoveMaskParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -6521,7 +6583,7 @@ pub async fn remove_mask(
         }
         st.stack.remove_mask(params.layer_idx);
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
@@ -6531,9 +6593,10 @@ pub struct CreateBrushMaskParams {
 }
 
 #[tauri::command]
-pub async fn create_brush_mask(
+pub async fn create_brush_mask<R: tauri::Runtime>(
     params: CreateBrushMaskParams,
     state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     {
         let mut st = lock_editor_state(&state)?;
@@ -6550,7 +6613,7 @@ pub async fn create_brush_mask(
         };
         st.stack.set_mask_with_params(params.layer_idx, mask, mp);
     }
-    persist_current_edit_version(&state).await?;
+    finalize_layer_stack_mutation(&app, &state).await?;
     Ok(())
 }
 
