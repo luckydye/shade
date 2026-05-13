@@ -2128,7 +2128,7 @@ export const Inspector: Component = () => {
   );
 
   return (
-    <aside class="flex w-[320px] flex-none touch-compact:w-auto mt-4 mr-2">
+    <aside class="flex w-[350px] flex-none touch-compact:w-auto mt-4 mr-2">
       <DesktopTabBar />
       <div
         class="flex w-full h-[calc(100%-1rem)] flex-col touch-compact:hidden gap-2 rounded-sm bg-[var(--panel-bg)]"

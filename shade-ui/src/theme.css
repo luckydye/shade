@@ -1,7 +1,8 @@
 @theme {
   /* text */
-  --text-label: #ffffff;
-  --text-unit: #cccccc;
+  --text-label: #1c1c1c; /* NaNpx */
+  --text-unit: #000000; /* NaNpx */
+  --text-: var(--unknown-reference); /* NaNpx */
 
   /* spacing */
   --spacing-5xs: 0.25rem; /* 4px */
@@ -15,12 +16,12 @@
   --spacing-xl: 3rem; /* 48px */
 
   /* radius */
-  --radius-xs: 0.1875rem;  /* 3px */
-  --radius-sm: 0.375rem;   /* 6px */
-  --radius-md: 0.5rem;     /* 8px */
-  --radius-lg: 0.75rem;    /* 12px */
-  --radius-xl: 1rem;       /* 16px */
-  --radius-2xl: 1.375rem;  /* 22px */
+  --radius-xs: 0.1875rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.375rem;
   --radius-full: 6.25rem;
 
   /* numbers */
@@ -28,29 +29,34 @@
   --number-site-width: 100rem;
 
   /* colors */
-  --color-fill: #ffffff;
-  --color-surface-backdrop: #252527;
-  --color-surface-header: #1b1b1b;
-  --color-surface-active: #2f2f32;
-  --color-surface-inactive: #808080;
-  --color-surface-input: #1b1b1b;
-  --color-surface-handle: #ffffff;
-  --color-surface-item: #262626;
+  --color-surface-backdrop: #ffffff;
+  --color-surface-background: #e6e6e6;
+  --color-surface-header: #e6e6e6;
+  --color-surface-active: #ffffff;
+  --color-surface-inactive: #505050;
+  --color-surface-input: #e6e6e6;
+  --color-surface-handle: #333333;
+  --color-surface-item: #fbfbfb;
+  --color-fill: var(--unknown-reference);
+  --color-: var(--unknown-reference);
   --color-subtle: var(--unknown-reference);
 
   /* other */
   --line-height-interactive: 2rem;
 }
 
-/* Dark mode overrides */
-.mode-dark {
-  --text-label: #ffffff;
-  --text-unit: #cccccc;
-  --color-surface-backdrop: #252527;
-  --color-surface-header: #1b1b1b;
-  --color-surface-active: #2f2f32;
-  --color-surface-inactive: #808080;
-  --color-surface-input: #1b1b1b;
-  --color-surface-handle: #ffffff;
-  --color-surface-item: #262626;
+@media (prefers-color-scheme: dark) {
+    /* Dark mode overrides */
+    :root {
+        --text-label: #ffffff;
+        --text-unit: #cccccc;
+        --color-surface-backdrop: #252527;
+        --color-surface-background: #000000;
+        --color-surface-header: #1b1b1b;
+        --color-surface-active: #2f2f32;
+        --color-surface-inactive: #808080;
+        --color-surface-input: #1b1b1b;
+        --color-surface-handle: #ffffff;
+        --color-surface-item: #262626;
+    }
 }
