@@ -6,13 +6,13 @@ import type {
   LibraryImageListing,
   MediaLibrary,
 } from "shade-ui/src/bridge/index";
-import { getBrowserPlatform } from "shade-ui/src/bridge/index";
 import {
   fileNameFromPath,
   loadBrowserEncodedBytes,
   loadBrowserThumbnailBytes,
 } from "./image-preview";
 import { requestToPromise, withStores } from "shade-wasm/indexed-db";
+import { browserSnapshotsPlatform } from "shade-wasm/worker/snapshots";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;
@@ -419,7 +419,7 @@ async function listBrowserLibraryImages(
   await assertReadable(library.rootHandle);
   const [items, snapshotMap] = await Promise.all([
     scanDirectory(library.rootHandle, library.id),
-    getBrowserPlatform().snapshots.getSnapshotPathMap(),
+    browserSnapshotsPlatform.getSnapshotPathMap(),
   ]);
   await replaceLibraryItems(library, items);
   return {
