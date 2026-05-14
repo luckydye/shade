@@ -264,14 +264,12 @@ export type MutationRequest =
 
 /**
  * Send an editor-state mutation. Fire-and-forget: the returned Promise
- * resolves once Rust has acknowledged the dispatch, but state updates land
- * via the `LayerStackSnapshot` channel message.
+ * resolves once the transport has acknowledged the dispatch, but state
+ * updates land via the `LayerStackSnapshot` channel message.
  */
-export async function sendMutation(
-  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
-  request: MutationRequest,
-): Promise<void> {
-  await invoke("dispatch_mutation", { request });
+export async function sendMutation(request: MutationRequest): Promise<void> {
+  const { getTransport } = await import("./transport");
+  await getTransport().sendMutation(request);
 }
 
 // ── Read protocol ────────────────────────────────────────────────────────────
@@ -311,10 +309,11 @@ let nextReadId = 1;
  * kind the Promise rejects.
  */
 export async function sendRead<T>(
-  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
   request: ReadRequest,
   expectedKind: string,
 ): Promise<T> {
+  const { getTransport } = await import("./transport");
+  const transport = getTransport();
   const readId = nextReadId++;
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -341,7 +340,7 @@ export async function sendRead<T>(
       unsubFailed();
       reject(new Error(msg.message));
     });
-    invoke("dispatch_read", { readId, request }).catch((err) => {
+    transport.sendRead(readId, request).catch((err) => {
       if (settled) return;
       settled = true;
       unsubResponse();
@@ -360,11 +359,12 @@ export async function sendRead<T>(
  * `onChunk` (optional) fires per chunk for progressive UI updates.
  */
 export async function sendChunkedRead<TItem>(
-  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
   request: ReadRequest,
   expectedKind: string,
   onChunk?: (chunk: TItem[]) => void,
 ): Promise<TItem[]> {
+  const { getTransport } = await import("./transport");
+  const transport = getTransport();
   const readId = nextReadId++;
   const items: TItem[] = [];
   return new Promise<TItem[]>((resolve, reject) => {
@@ -399,7 +399,7 @@ export async function sendChunkedRead<TItem>(
       unsubFailed();
       reject(new Error(msg.message));
     });
-    invoke("dispatch_read", { readId, request }).catch((err) => {
+    transport.sendRead(readId, request).catch((err) => {
       if (settled) return;
       settled = true;
       unsubResponse();
@@ -407,4 +407,15 @@ export async function sendChunkedRead<TItem>(
       reject(err);
     });
   });
+}
+
+/**
+ * Install the transport's coordination-channel handler. Idempotent — only
+ * the first call registers; subsequent calls are no-ops.
+ */
+export async function installCoordinationChannelFromTransport(): Promise<void> {
+  if (dispatcherInstalled) return;
+  dispatcherInstalled = true;
+  const { getTransport } = await import("./transport");
+  getTransport().onMessage(dispatch);
 }

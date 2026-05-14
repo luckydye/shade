@@ -14,14 +14,9 @@ function inv<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return getTauriPlatform().invoke<T>(cmd, args);
 }
 
-function rawInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
-  return getTauriPlatform().invoke(cmd, args);
-}
-
 export const tauriCollectionsPlatform: CollectionsPlatform = {
   listCollections(libraryId) {
     return sendRead<Collection[]>(
-      rawInvoke,
       { type: "list_collections", library_id: libraryId },
       "collections",
     );
@@ -47,7 +42,7 @@ export const tauriCollectionsPlatform: CollectionsPlatform = {
         unsub();
         resolve(collection);
       });
-      sendMutation(rawInvoke, {
+      sendMutation({
         type: "create_collection",
         library_id: libraryId,
         name,
@@ -60,20 +55,20 @@ export const tauriCollectionsPlatform: CollectionsPlatform = {
     });
   },
   async renameCollection(collectionId, name) {
-    await sendMutation(rawInvoke, {
+    await sendMutation({
       type: "rename_collection",
       collection_id: collectionId,
       name,
     });
   },
   async deleteCollection(collectionId) {
-    await sendMutation(rawInvoke, {
+    await sendMutation({
       type: "delete_collection",
       collection_id: collectionId,
     });
   },
   async reorderCollection(collectionId, newPosition) {
-    await sendMutation(rawInvoke, {
+    await sendMutation({
       type: "reorder_collection",
       collection_id: collectionId,
       new_position: newPosition,
@@ -81,20 +76,19 @@ export const tauriCollectionsPlatform: CollectionsPlatform = {
   },
   listCollectionItems(collectionId) {
     return sendRead<CollectionItem[]>(
-      rawInvoke,
       { type: "list_collection_items", collection_id: collectionId },
       "collection_items",
     );
   },
   async addToCollection(collectionId, fingerprints) {
-    await sendMutation(rawInvoke, {
+    await sendMutation({
       type: "add_to_collection",
       collection_id: collectionId,
       fingerprints,
     });
   },
   async removeFromCollection(collectionId, fingerprints) {
-    await sendMutation(rawInvoke, {
+    await sendMutation({
       type: "remove_from_collection",
       collection_id: collectionId,
       fingerprints,
