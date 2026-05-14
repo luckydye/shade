@@ -3,7 +3,6 @@
  * falls back to a browser worker when running on the web.
  */
 
-import type { ThumbnailBackend } from "./thumbnail-backend";
 import {
   onChannelMessage,
   sendChunkedRead,
@@ -50,7 +49,6 @@ export interface TauriPlatform {
 
 export interface BrowserPlatform {
   kind: "browser";
-  thumbnailBackend: ThumbnailBackend;
   libraryCache: LibraryCachePlatform;
   createWorker(): Worker;
   media: BrowserMediaPlatform;
