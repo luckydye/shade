@@ -156,6 +156,10 @@ pub enum ChannelMessage {
         fingerprint: Option<String>,
         id: String,
     },
+
+    // The configured media-library list changed (add/remove/reorder/mode).
+    // Frontend re-queries `list_media_libraries`.
+    MediaLibrariesChanged,
 }
 
 /// Editor-state mutation requests (JS → Rust). Sent through the single
@@ -268,4 +272,47 @@ pub enum MutationRequest {
 
     // Snapshots
     SaveSnapshot,
+
+    // Library config (add_media_library, add_s3_media_library,
+    // update_s3_media_library return rich Library records and stay as
+    // regular invokes — same exception as create_collection).
+    SetMediaLibraryOrder {
+        library_order: Vec<String>,
+    },
+    SetLibraryMode {
+        library_id: String,
+        mode: String,
+        #[serde(default)]
+        sync_target: Option<String>,
+    },
+    SyncLibrary {
+        library_id: String,
+    },
+    RefreshLibraryIndex {
+        library_id: String,
+    },
+    DeleteMediaLibraryItem {
+        path: String,
+    },
+    RemoveMediaLibrary {
+        id: String,
+    },
+    UploadMediaLibraryUrl {
+        library_id: String,
+        url: String,
+        file_name: String,
+    },
+    UploadMediaLibraryFile {
+        library_id: String,
+        file_name: String,
+        bytes: Vec<u8>,
+        #[serde(default)]
+        modified_at: Option<u64>,
+        #[serde(default)]
+        append_timestamp_on_conflict: bool,
+    },
+    UploadMediaLibraryPath {
+        library_id: String,
+        path: String,
+    },
 }

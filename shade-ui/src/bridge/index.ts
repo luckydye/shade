@@ -1076,8 +1076,14 @@ export async function uploadMediaLibraryUrl(
   if (!(await isTauriRuntime())) {
     throw new Error("URL image uploads are only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("upload_media_library_url", { libraryId, url, fileName });
+  await sendMutation(inv, {
+    type: "upload_media_library_url",
+    library_id: libraryId,
+    url,
+    file_name: fileName,
+  });
 }
 
 export async function uploadMediaLibraryFile(
@@ -1088,14 +1094,16 @@ export async function uploadMediaLibraryFile(
   if (!(await isTauriRuntime())) {
     throw new Error("library uploads are only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
   const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-  await inv("upload_media_library_file", {
-    libraryId,
-    fileName: file.name,
+  await sendMutation(inv, {
+    type: "upload_media_library_file",
+    library_id: libraryId,
+    file_name: file.name,
     bytes,
-    modifiedAt: file.lastModified,
-    appendTimestampOnConflict,
+    modified_at: file.lastModified,
+    append_timestamp_on_conflict: appendTimestampOnConflict,
   });
 }
 
@@ -1106,9 +1114,11 @@ export async function uploadMediaLibraryPath(
   if (!(await isTauriRuntime())) {
     throw new Error("library uploads from paths are only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("upload_media_library_path", {
-    libraryId,
+  await sendMutation(inv, {
+    type: "upload_media_library_path",
+    library_id: libraryId,
     path,
   });
 }
@@ -1117,16 +1127,16 @@ export async function deleteMediaLibraryItem(path: string): Promise<void> {
   if (!(await isTauriRuntime())) {
     throw new Error("media item deletion is only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("delete_media_library_item", {
-    path,
-  });
+  await sendMutation(inv, { type: "delete_media_library_item", path });
 }
 
 export async function removeMediaLibrary(id: string): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("remove_media_library", { id });
+    await sendMutation(inv, { type: "remove_media_library", id });
     return;
   }
   await getBrowserPlatform().media.removeMediaLibrary(id);
@@ -1214,23 +1224,32 @@ export async function setLibraryMode(libraryId: string, mode: LibraryMode, syncT
   if (!(await isTauriRuntime())) {
     throw new Error("setLibraryMode is only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("set_library_mode", { libraryId, mode, syncTarget: syncTarget ?? null });
+  await sendMutation(inv, {
+    type: "set_library_mode",
+    library_id: libraryId,
+    mode,
+    sync_target: syncTarget ?? null,
+  });
 }
 
 export async function syncLibrary(libraryId: string): Promise<void> {
   if (!(await isTauriRuntime())) {
     throw new Error("syncLibrary is only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("sync_library", { libraryId });
+  await sendMutation(inv, { type: "sync_library", library_id: libraryId });
 }
 
 export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("set_media_library_order", {
-      libraryOrder,
+    await sendMutation(inv, {
+      type: "set_media_library_order",
+      library_order: libraryOrder,
     });
     return;
   }
@@ -1241,8 +1260,12 @@ export async function refreshLibraryIndex(libraryId: string): Promise<void> {
   if (!(await isTauriRuntime())) {
     return;
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("refresh_library_index", { libraryId });
+  await sendMutation(inv, {
+    type: "refresh_library_index",
+    library_id: libraryId,
+  });
 }
 
 function serializeBrowserPresetLayers(layers: LayerInfo[]): BrowserPresetLayer[] {

@@ -88,7 +88,8 @@ export type ChannelMessage =
   | { type: "layer_stack_snapshot"; stack: unknown }
   | { type: "media_metadata_changed"; fingerprints: string[] }
   | { type: "collection_list_changed" }
-  | { type: "snapshot_saved"; fingerprint: string | null; id: string };
+  | { type: "snapshot_saved"; fingerprint: string | null; id: string }
+  | { type: "media_libraries_changed" };
 
 type MessageType = ChannelMessage["type"];
 
@@ -222,7 +223,33 @@ export type MutationRequest =
       collection_id: string;
       fingerprints: string[];
     }
-  | { type: "save_snapshot" };
+  | { type: "save_snapshot" }
+  | { type: "set_media_library_order"; library_order: string[] }
+  | {
+      type: "set_library_mode";
+      library_id: string;
+      mode: string;
+      sync_target: string | null;
+    }
+  | { type: "sync_library"; library_id: string }
+  | { type: "refresh_library_index"; library_id: string }
+  | { type: "delete_media_library_item"; path: string }
+  | { type: "remove_media_library"; id: string }
+  | {
+      type: "upload_media_library_url";
+      library_id: string;
+      url: string;
+      file_name: string;
+    }
+  | {
+      type: "upload_media_library_file";
+      library_id: string;
+      file_name: string;
+      bytes: number[];
+      modified_at: number | null;
+      append_timestamp_on_conflict: boolean;
+    }
+  | { type: "upload_media_library_path"; library_id: string; path: string };
 
 /**
  * Send an editor-state mutation. Fire-and-forget: the returned Promise

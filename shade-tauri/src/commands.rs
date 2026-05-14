@@ -6701,6 +6701,82 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                 })
                 .await;
         }
+        M::SetMediaLibraryOrder { library_order } => {
+            set_media_library_order(library_order).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::SetLibraryMode {
+            library_id,
+            mode,
+            sync_target,
+        } => {
+            set_library_mode(library_id, mode, sync_target).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::SyncLibrary { library_id } => {
+            sync_library(app.clone(), library_id, p2p).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::RefreshLibraryIndex { library_id } => {
+            refresh_library_index(app.clone(), library_id).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::DeleteMediaLibraryItem { path } => {
+            delete_media_library_item(app.clone(), path).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::RemoveMediaLibrary { id } => {
+            remove_media_library(app.clone(), id).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::UploadMediaLibraryUrl {
+            library_id,
+            url,
+            file_name,
+        } => {
+            upload_media_library_url(app.clone(), library_id, url, file_name).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::UploadMediaLibraryFile {
+            library_id,
+            file_name,
+            bytes,
+            modified_at,
+            append_timestamp_on_conflict,
+        } => {
+            upload_media_library_file(
+                app.clone(),
+                library_id,
+                file_name,
+                bytes,
+                modified_at,
+                append_timestamp_on_conflict,
+            )
+            .await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::UploadMediaLibraryPath { library_id, path } => {
+            upload_media_library_path(app.clone(), library_id, path).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
     }
     Ok(())
 }
