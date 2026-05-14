@@ -145,6 +145,14 @@ pub enum ChannelMessage {
     // Frontend re-queries `list_media_libraries`.
     MediaLibrariesChanged,
 
+    // A media library was added or updated. Carries the freshly-minted /
+    // updated MediaLibrary record so bridge wrappers for AddMediaLibrary,
+    // AddS3MediaLibrary, UpdateS3MediaLibrary can resolve with the full data
+    // without mutation-id correlation.
+    MediaLibraryUpserted {
+        library: serde_json::Value,
+    },
+
     // Response to a `ReadRequest` dispatched through `dispatch_read`. The
     // `read_id` correlates with the originating request; `kind` discriminates
     // the payload shape and `value` carries the typed result as JSON.
@@ -291,6 +299,23 @@ pub enum MutationRequest {
     },
     BatchClearEdits {
         paths: Vec<String>,
+    },
+    BatchExportImages {
+        items: serde_json::Value,
+        target_dir: String,
+    },
+
+    // Library additions / S3 updates land via the MediaLibraryUpserted
+    // notification; bridge wrappers one-shot subscribe for the next message.
+    AddMediaLibrary {
+        path: String,
+    },
+    AddS3MediaLibrary {
+        params: serde_json::Value,
+    },
+    UpdateS3MediaLibrary {
+        library_id: String,
+        params: serde_json::Value,
     },
 
     // Library config (add_media_library, add_s3_media_library,

@@ -1036,6 +1036,16 @@ export async function listLibraryImages(libraryId: string): Promise<LibraryImage
   return getBrowserPlatform().media.listLibraryImages(libraryId);
 }
 
+async function awaitMediaLibraryUpserted(): Promise<MediaLibrary> {
+  const { onChannelMessage } = await import("./channel");
+  return new Promise<MediaLibrary>((resolve) => {
+    const unsub = onChannelMessage("media_library_upserted", (msg) => {
+      unsub();
+      resolve(msg.library as MediaLibrary);
+    });
+  });
+}
+
 export async function addMediaLibrary(
   path: string | BrowserDirectoryHandle,
 ): Promise<MediaLibrary> {
@@ -1043,8 +1053,11 @@ export async function addMediaLibrary(
     if (typeof path !== "string") {
       throw new Error("expected a filesystem path in the Tauri runtime");
     }
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("add_media_library", { path }) as Promise<MediaLibrary>;
+    const upserted = awaitMediaLibraryUpserted();
+    await sendMutation(inv, { type: "add_media_library", path });
+    return upserted;
   }
   if (typeof path === "string") {
     throw new Error("expected a directory handle in the browser runtime");
@@ -1058,8 +1071,11 @@ export async function addS3MediaLibrary(
   if (!(await isTauriRuntime())) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  return inv("add_s3_media_library", { params }) as Promise<MediaLibrary>;
+  const upserted = awaitMediaLibraryUpserted();
+  await sendMutation(inv, { type: "add_s3_media_library", params });
+  return upserted;
 }
 
 export async function getS3MediaLibrary(
@@ -1084,11 +1100,15 @@ export async function updateS3MediaLibrary(
   if (!(await isTauriRuntime())) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  return inv("update_s3_media_library", {
-    libraryId,
+  const upserted = awaitMediaLibraryUpserted();
+  await sendMutation(inv, {
+    type: "update_s3_media_library",
+    library_id: libraryId,
     params,
-  }) as Promise<MediaLibrary>;
+  });
+  return upserted;
 }
 
 export async function uploadMediaLibraryUrl(
@@ -1666,8 +1686,15 @@ export async function batchExportImages(
   targetDir: string,
 ): Promise<number> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("batch_export_images", { items, targetDir }) as Promise<number>;
+    const completed = awaitBatchCompleted("export_images");
+    await sendMutation(inv, {
+      type: "batch_export_images",
+      items,
+      target_dir: targetDir,
+    });
+    return completed;
   }
   throw new Error("batch export is only implemented for Tauri");
 }

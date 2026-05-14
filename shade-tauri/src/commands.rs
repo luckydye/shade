@@ -6590,6 +6590,7 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
     p2p: tauri::State<'_, crate::P2pState>,
     pairing_lock: tauri::State<'_, crate::PeerPairingState>,
     awareness: tauri::State<'_, crate::AwarenessStateHandle>,
+    render_service: tauri::State<'_, crate::RenderService>,
 ) -> Result<(), String> {
     use crate::channel_protocol::MutationRequest as M;
     match request {
@@ -6806,6 +6807,55 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                     kind: "clear_edits".to_string(),
                     count,
                 })
+                .await;
+        }
+        M::BatchExportImages { items, target_dir } => {
+            let items: Vec<BatchExportItem> = serde_json::from_value(items)
+                .map_err(|e| format!("batch_export_images: invalid items: {e}"))?;
+            let count =
+                batch_export_images(items, target_dir, app.clone(), render_service).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::BatchCompleted {
+                    kind: "export_images".to_string(),
+                    count,
+                })
+                .await;
+        }
+        M::AddMediaLibrary { path } => {
+            let library = add_media_library(app.clone(), path).await?;
+            let value = serde_json::to_value(&library).map_err(|e| e.to_string())?;
+            let coord = crate::channel_server::channel_from_app(&app);
+            coord
+                .send(crate::ChannelMessage::MediaLibraryUpserted { library: value })
+                .await;
+            coord
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::AddS3MediaLibrary { params } => {
+            let params: shade_io::AddS3LibraryParams = serde_json::from_value(params)
+                .map_err(|e| format!("add_s3_media_library: invalid params: {e}"))?;
+            let library = add_s3_media_library(app.clone(), params).await?;
+            let value = serde_json::to_value(&library).map_err(|e| e.to_string())?;
+            let coord = crate::channel_server::channel_from_app(&app);
+            coord
+                .send(crate::ChannelMessage::MediaLibraryUpserted { library: value })
+                .await;
+            coord
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
+                .await;
+        }
+        M::UpdateS3MediaLibrary { library_id, params } => {
+            let params: shade_io::AddS3LibraryParams = serde_json::from_value(params)
+                .map_err(|e| format!("update_s3_media_library: invalid params: {e}"))?;
+            let library = update_s3_media_library(app.clone(), library_id, params).await?;
+            let value = serde_json::to_value(&library).map_err(|e| e.to_string())?;
+            let coord = crate::channel_server::channel_from_app(&app);
+            coord
+                .send(crate::ChannelMessage::MediaLibraryUpserted { library: value })
+                .await;
+            coord
+                .send(crate::ChannelMessage::MediaLibrariesChanged)
                 .await;
         }
         M::SaveSnapshot => {

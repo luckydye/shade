@@ -70,6 +70,7 @@ export type ChannelMessage =
   | { type: "collection_created"; collection: unknown }
   | { type: "snapshot_saved"; fingerprint: string | null; id: string }
   | { type: "media_libraries_changed" }
+  | { type: "media_library_upserted"; library: unknown }
   | {
       type: "read_response";
       read_id: number;
@@ -219,6 +220,14 @@ export type MutationRequest =
       name: string;
     }
   | { type: "batch_clear_edits"; paths: string[] }
+  | {
+      type: "batch_export_images";
+      items: { path: string; fingerprint: string | null; name: string }[];
+      target_dir: string;
+    }
+  | { type: "add_media_library"; path: string }
+  | { type: "add_s3_media_library"; params: unknown }
+  | { type: "update_s3_media_library"; library_id: string; params: unknown }
   | { type: "set_media_library_order"; library_order: string[] }
   | {
       type: "set_library_mode";
