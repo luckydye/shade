@@ -1625,8 +1625,13 @@ export async function listMediaRatings(
 
 export async function setMediaRating(params: MediaRatingParams): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("set_media_rating", { params });
+    await sendMutation(inv, {
+      type: "set_media_rating",
+      fingerprint: params.fingerprint,
+      rating: params.rating,
+    });
     return;
   }
   await getBrowserPlatform().ratings.setRating(params.fingerprint, params.rating);
@@ -1815,13 +1820,16 @@ export async function syncPeerSnapshots(
 export async function applyPeerMetadata(
   peerEndpointId: string,
   fingerprints: string[],
-): Promise<ApplyPeerMetadataResult> {
+): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("apply_peer_metadata", {
-      peerEndpointId,
+    await sendMutation(inv, {
+      type: "apply_peer_metadata",
+      peer_endpoint_id: peerEndpointId,
       fingerprints,
-    }) as Promise<ApplyPeerMetadataResult>;
+    });
+    return;
   }
   throw new Error("applyPeerMetadata is only implemented for Tauri");
 }

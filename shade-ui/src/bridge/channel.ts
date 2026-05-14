@@ -85,7 +85,8 @@ export type ChannelMessage =
   | { type: "collection_changed"; collection_id: string }
   | { type: "preset_list_changed" }
   | { type: "camera_hosts_changed"; hosts: string[] }
-  | { type: "layer_stack_snapshot"; stack: unknown };
+  | { type: "layer_stack_snapshot"; stack: unknown }
+  | { type: "media_metadata_changed"; fingerprints: string[] };
 
 type MessageType = ChannelMessage["type"];
 
@@ -198,7 +199,14 @@ export type MutationRequest =
   | ({ type: "stamp_brush_mask" } & StampBrushMaskPayload)
   | { type: "load_snapshot"; id: string }
   | { type: "load_preset"; name: string }
-  | { type: "apply_preset_snapshot"; name: string };
+  | { type: "apply_preset_snapshot"; name: string }
+  | { type: "set_media_rating"; fingerprint: string; rating: number | null }
+  | { type: "set_media_tags"; fingerprint: string; tags: string[] }
+  | {
+      type: "apply_peer_metadata";
+      peer_endpoint_id: string;
+      fingerprints: string[];
+    };
 
 /**
  * Send an editor-state mutation. Fire-and-forget: the returned Promise

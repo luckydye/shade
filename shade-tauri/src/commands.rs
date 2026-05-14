@@ -1441,18 +1441,6 @@ pub struct SnapshotInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MediaRatingParams {
-    pub fingerprint: String,
-    pub rating: Option<u8>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MediaTagsParams {
-    pub fingerprint: String,
-    pub tags: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct LoadSnapshotParams {
     pub id: String,
 }
@@ -5000,22 +4988,6 @@ pub async fn list_media_ratings(
     load_media_ratings_map(&fingerprints).await
 }
 
-#[tauri::command]
-pub async fn set_media_rating(params: MediaRatingParams) -> Result<(), String> {
-    if params.fingerprint.trim().is_empty() {
-        return Err("file hash cannot be empty".to_string());
-    }
-    persist_media_rating(&params.fingerprint, params.rating).await
-}
-
-#[tauri::command]
-pub async fn set_media_tags(params: MediaTagsParams) -> Result<(), String> {
-    if params.fingerprint.trim().is_empty() {
-        return Err("file hash cannot be empty".to_string());
-    }
-    persist_media_tags(&params.fingerprint, &params.tags).await
-}
-
 async fn build_library_listing<R: tauri::Runtime>(
     _app: &tauri::AppHandle<R>,
     library_id: String,
@@ -6528,6 +6500,7 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
     request: crate::channel_protocol::MutationRequest,
     state: tauri::State<'_, Mutex<EditorState>>,
     app: tauri::AppHandle<R>,
+    p2p: tauri::State<'_, crate::P2pState>,
 ) -> Result<(), String> {
     use crate::channel_protocol::MutationRequest as M;
     match request {
@@ -6616,6 +6589,41 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
         }
         M::ApplyPresetSnapshot { name } => {
             let _info = apply_preset_snapshot(name, state, app).await?;
+        }
+        M::SetMediaRating { fingerprint, rating } => {
+            if fingerprint.trim().is_empty() {
+                return Err("file hash cannot be empty".to_string());
+            }
+            persist_media_rating(&fingerprint, rating).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaMetadataChanged {
+                    fingerprints: vec![fingerprint],
+                })
+                .await;
+        }
+        M::SetMediaTags { fingerprint, tags } => {
+            if fingerprint.trim().is_empty() {
+                return Err("file hash cannot be empty".to_string());
+            }
+            persist_media_tags(&fingerprint, &tags).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaMetadataChanged {
+                    fingerprints: vec![fingerprint],
+                })
+                .await;
+        }
+        M::ApplyPeerMetadata {
+            peer_endpoint_id,
+            fingerprints,
+        } => {
+            let touched = fingerprints.clone();
+            let _result =
+                apply_peer_metadata(peer_endpoint_id, fingerprints, p2p).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::MediaMetadataChanged {
+                    fingerprints: touched,
+                })
+                .await;
         }
     }
     Ok(())

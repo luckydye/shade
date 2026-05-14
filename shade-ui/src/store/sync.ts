@@ -8,7 +8,6 @@ import {
   applyPeerMetadata as bridgeApplyPeerMetadata,
   type AwarenessState,
   type SyncPeerSnapshotsResult,
-  type ApplyPeerMetadataResult,
 } from "../bridge";
 
 export interface PeerAwareness {
@@ -115,14 +114,12 @@ export async function syncSnapshotsFromAllPeers(
 
 // ── Metadata sync ─────────────────────────────────────────────────────────────
 
-export type { ApplyPeerMetadataResult };
-
 export async function applyPeerMetadata(
   peerId: string,
   fingerprints: string[],
-): Promise<ApplyPeerMetadataResult> {
-  if (!(await isTauriRuntime())) return { ratings_updated: 0, tags_added: 0 };
-  return bridgeApplyPeerMetadata(peerId, fingerprints);
+): Promise<void> {
+  if (!(await isTauriRuntime())) return;
+  await bridgeApplyPeerMetadata(peerId, fingerprints);
 }
 
 /** Apply metadata from all connected peers for the given file hashes. */

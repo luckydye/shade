@@ -137,6 +137,14 @@ pub enum ChannelMessage {
     LayerStackSnapshot {
         stack: serde_json::Value,
     },
+
+    // Media metadata changed for one or more fingerprints. Fired after
+    // `SetMediaRating` / `SetMediaTags` / `ApplyPeerMetadata`. `rating`/`tags`
+    // carry the new values; `None`/empty in a field means "unchanged in this
+    // event."
+    MediaMetadataChanged {
+        fingerprints: Vec<String>,
+    },
 }
 
 /// Editor-state mutation requests (JS → Rust). Sent through the single
@@ -192,5 +200,19 @@ pub enum MutationRequest {
     },
     ApplyPresetSnapshot {
         name: String,
+    },
+
+    // Media metadata
+    SetMediaRating {
+        fingerprint: String,
+        rating: Option<u8>,
+    },
+    SetMediaTags {
+        fingerprint: String,
+        tags: Vec<String>,
+    },
+    ApplyPeerMetadata {
+        peer_endpoint_id: String,
+        fingerprints: Vec<String>,
     },
 }
