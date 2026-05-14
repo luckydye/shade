@@ -145,6 +145,17 @@ pub enum ChannelMessage {
     MediaMetadataChanged {
         fingerprints: Vec<String>,
     },
+
+    // The collection list within a library changed (create/delete/reorder).
+    // `library_id` is omitted when unknown — frontend can refetch globally.
+    CollectionListChanged,
+
+    // A persisted snapshot was created. Frontend can refresh `list_snapshots`
+    // for the affected fingerprint, or just record the id.
+    SnapshotSaved {
+        fingerprint: Option<String>,
+        id: String,
+    },
 }
 
 /// Editor-state mutation requests (JS → Rust). Sent through the single
@@ -215,4 +226,46 @@ pub enum MutationRequest {
         peer_endpoint_id: String,
         fingerprints: Vec<String>,
     },
+
+    // Presets
+    SavePreset {
+        name: String,
+    },
+    SavePresetFromJson {
+        name: String,
+        json: String,
+    },
+    RenamePreset {
+        old_name: String,
+        new_name: String,
+    },
+    DeletePreset {
+        name: String,
+    },
+
+    // Collections (create_collection stays as a regular invoke because it
+    // returns the new Collection record by id/position/created_at — folding
+    // that into a fire-and-forget message is more plumbing than it saves).
+    RenameCollection {
+        collection_id: String,
+        name: String,
+    },
+    DeleteCollection {
+        collection_id: String,
+    },
+    ReorderCollection {
+        collection_id: String,
+        new_position: i64,
+    },
+    AddToCollection {
+        collection_id: String,
+        fingerprints: Vec<String>,
+    },
+    RemoveFromCollection {
+        collection_id: String,
+        fingerprints: Vec<String>,
+    },
+
+    // Snapshots
+    SaveSnapshot,
 }

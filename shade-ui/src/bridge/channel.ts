@@ -86,7 +86,9 @@ export type ChannelMessage =
   | { type: "preset_list_changed" }
   | { type: "camera_hosts_changed"; hosts: string[] }
   | { type: "layer_stack_snapshot"; stack: unknown }
-  | { type: "media_metadata_changed"; fingerprints: string[] };
+  | { type: "media_metadata_changed"; fingerprints: string[] }
+  | { type: "collection_list_changed" }
+  | { type: "snapshot_saved"; fingerprint: string | null; id: string };
 
 type MessageType = ChannelMessage["type"];
 
@@ -206,7 +208,21 @@ export type MutationRequest =
       type: "apply_peer_metadata";
       peer_endpoint_id: string;
       fingerprints: string[];
-    };
+    }
+  | { type: "save_preset"; name: string }
+  | { type: "save_preset_from_json"; name: string; json: string }
+  | { type: "rename_preset"; old_name: string; new_name: string }
+  | { type: "delete_preset"; name: string }
+  | { type: "rename_collection"; collection_id: string; name: string }
+  | { type: "delete_collection"; collection_id: string }
+  | { type: "reorder_collection"; collection_id: string; new_position: number }
+  | { type: "add_to_collection"; collection_id: string; fingerprints: string[] }
+  | {
+      type: "remove_from_collection";
+      collection_id: string;
+      fingerprints: string[];
+    }
+  | { type: "save_snapshot" };
 
 /**
  * Send an editor-state mutation. Fire-and-forget: the returned Promise

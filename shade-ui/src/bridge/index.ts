@@ -1438,10 +1438,14 @@ export async function listPresets(): Promise<PresetInfo[]> {
   return getBrowserPlatform().presets.listPresets();
 }
 
-export async function savePreset(name: string): Promise<PresetInfo> {
+export async function savePreset(name: string): Promise<PresetInfo | void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("save_preset", { name }) as Promise<PresetInfo>;
+    await sendMutation(inv, { type: "save_preset", name });
+    // The new preset's metadata is delivered via the PresetListChanged
+    // channel notification; callers no longer receive a PresetInfo here.
+    return;
   }
   const stack = await getLayerStack();
   return getBrowserPlatform().presets.savePreset(name, {
@@ -1466,11 +1470,12 @@ export async function getSnapshotPresetJson(
 
 export async function serializeCurrentPreset(): Promise<string> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
     const tempName = "__clipboard_serialize__";
-    await inv("save_preset", { name: tempName });
+    await sendMutation(inv, { type: "save_preset", name: tempName });
     const json = (await inv("get_preset_json", { name: tempName })) as string;
-    await inv("delete_preset", { name: tempName });
+    await sendMutation(inv, { type: "delete_preset", name: tempName });
     return json;
   }
   const stack = await getLayerStack();
@@ -1482,26 +1487,30 @@ export async function serializeCurrentPreset(): Promise<string> {
 
 export async function savePresetFromJson(name: string, json: string): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("save_preset_from_json", { name, json });
+    await sendMutation(inv, { type: "save_preset_from_json", name, json });
     return;
   }
   const data: BrowserPresetFile = JSON.parse(json);
   await getBrowserPlatform().presets.savePreset(name, data);
 }
 
-export async function renamePreset(oldName: string, newName: string): Promise<PresetInfo> {
+export async function renamePreset(oldName: string, newName: string): Promise<PresetInfo | void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("rename_preset", { oldName, newName }) as Promise<PresetInfo>;
+    await sendMutation(inv, { type: "rename_preset", old_name: oldName, new_name: newName });
+    return;
   }
   return getBrowserPlatform().presets.renamePreset(oldName, newName);
 }
 
 export async function deletePreset(name: string): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("delete_preset", { name });
+    await sendMutation(inv, { type: "delete_preset", name });
     return;
   }
   await getBrowserPlatform().presets.deletePreset(name);
@@ -1585,10 +1594,13 @@ export async function batchExportImages(
   throw new Error("batch export is only implemented for Tauri");
 }
 
-export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo> {
+export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo | void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("save_snapshot") as Promise<EditSnapshotInfo>;
+    await sendMutation(inv, { type: "save_snapshot" });
+    // Snapshot id surfaces through the SnapshotSaved channel notification.
+    return;
   }
   const stack = await getLayerStack();
   if (!stack.layers.some((layer) => layer.kind === "image")) {

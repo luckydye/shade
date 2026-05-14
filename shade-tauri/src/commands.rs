@@ -6625,6 +6625,82 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                 })
                 .await;
         }
+        M::SavePreset { name } => {
+            let _info = save_preset(name, state).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::PresetListChanged)
+                .await;
+        }
+        M::SavePresetFromJson { name, json } => {
+            save_preset_from_json(name, json).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::PresetListChanged)
+                .await;
+        }
+        M::RenamePreset { old_name, new_name } => {
+            let _info = rename_preset(old_name, new_name).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::PresetListChanged)
+                .await;
+        }
+        M::DeletePreset { name } => {
+            delete_preset(name).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::PresetListChanged)
+                .await;
+        }
+        M::RenameCollection { collection_id, name } => {
+            rename_collection(collection_id.clone(), name).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::CollectionChanged { collection_id })
+                .await;
+        }
+        M::DeleteCollection { collection_id } => {
+            delete_collection(collection_id).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::CollectionListChanged)
+                .await;
+        }
+        M::ReorderCollection {
+            collection_id,
+            new_position,
+        } => {
+            reorder_collection(collection_id, new_position).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::CollectionListChanged)
+                .await;
+        }
+        M::AddToCollection {
+            collection_id,
+            fingerprints,
+        } => {
+            add_to_collection(collection_id.clone(), fingerprints).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::CollectionChanged { collection_id })
+                .await;
+        }
+        M::RemoveFromCollection {
+            collection_id,
+            fingerprints,
+        } => {
+            remove_from_collection(collection_id.clone(), fingerprints).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::CollectionChanged { collection_id })
+                .await;
+        }
+        M::SaveSnapshot => {
+            let info = save_snapshot(state.clone()).await?;
+            let fingerprint = {
+                let st = lock_editor_state(&state)?;
+                st.current_image_hash.clone()
+            };
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::SnapshotSaved {
+                    fingerprint,
+                    id: info.id,
+                })
+                .await;
+        }
     }
     Ok(())
 }
