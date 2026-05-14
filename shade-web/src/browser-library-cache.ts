@@ -1,9 +1,25 @@
+import type { HostHooks } from "shade-ui/src/bridge/host";
 import type {
-  LibraryCachePlatform,
   LibraryImage,
   LibraryImageListing,
   SharedPicture,
 } from "shade-ui/src/bridge/index";
+
+type LibraryCacheHooks = Pick<
+  HostHooks,
+  | "getCachedLocalLibraryItems"
+  | "loadLocalLibraryItemsCachedOrRemote"
+  | "getCachedCameraLibraryItems"
+  | "loadCameraLibraryItemsCachedOrRemote"
+  | "getCachedPeerLibraryItems"
+  | "loadPeerLibraryItemsCachedOrRemote"
+  | "removePeerLibrary"
+  | "resolveLocalThumbnailSrc"
+  | "resolveCameraThumbnailSrc"
+  | "resolvePeerThumbnailSrc"
+  | "resetLocalThumbnailFailure"
+  | "resetCameraThumbnailFailure"
+>;
 import {
   normalizeModifiedAt,
   normalizeRating,
@@ -253,7 +269,7 @@ async function warmLocalLibraryThumbnails(items: LibraryImage[]) {
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
-export const browserLibraryCache: LibraryCachePlatform = {
+export const browserLibraryCache: LibraryCacheHooks = {
   async getCachedLocalLibraryItems(libraryId) {
     return (await loadLocalLibraryListing(libraryId)).items;
   },

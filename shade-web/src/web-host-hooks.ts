@@ -2,6 +2,7 @@ import type {
   HostHooks,
   NativeDragDropPayload,
 } from "shade-ui/src/bridge/host";
+import { browserLibraryCache } from "./browser-library-cache";
 
 /**
  * Web host-hook implementation. Uses File System Access APIs for the
@@ -12,6 +13,7 @@ import type {
  * corresponding controls.
  */
 export const webHostHooks: HostHooks = {
+  ...browserLibraryCache,
   async pickDirectory() {
     const win = window as unknown as {
       showDirectoryPicker?: () => Promise<{ name: string }>;

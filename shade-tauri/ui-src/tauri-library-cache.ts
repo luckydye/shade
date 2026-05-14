@@ -1,9 +1,25 @@
+import type { HostHooks } from "shade-ui/src/bridge/host";
 import type {
-  LibraryCachePlatform,
   LibraryImage,
   LibraryImageListing,
   SharedPicture,
 } from "shade-ui/src/bridge/index";
+
+type LibraryCacheHooks = Pick<
+  HostHooks,
+  | "getCachedLocalLibraryItems"
+  | "loadLocalLibraryItemsCachedOrRemote"
+  | "getCachedCameraLibraryItems"
+  | "loadCameraLibraryItemsCachedOrRemote"
+  | "getCachedPeerLibraryItems"
+  | "loadPeerLibraryItemsCachedOrRemote"
+  | "removePeerLibrary"
+  | "resolveLocalThumbnailSrc"
+  | "resolveCameraThumbnailSrc"
+  | "resolvePeerThumbnailSrc"
+  | "resetLocalThumbnailFailure"
+  | "resetCameraThumbnailFailure"
+>;
 import {
   listLibraryImages,
   listPeerPictures,
@@ -72,7 +88,7 @@ function normalizeSharedPicture(picture: SharedPicture): SharedPicture {
   };
 }
 
-export const tauriLibraryCache: LibraryCachePlatform = {
+export const tauriLibraryCache: LibraryCacheHooks = {
   async getCachedLocalLibraryItems(libraryId) {
     return tauriLocalLibraryListings.get(libraryId)?.items ?? [];
   },

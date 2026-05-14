@@ -4,6 +4,7 @@ import type {
   HostHooks,
   NativeDragDropPayload,
 } from "shade-ui/src/bridge/host";
+import { tauriLibraryCache } from "./tauri-library-cache";
 
 function normalizeDialogPath(path: string | string[] | null): string | null {
   if (path === null) {
@@ -16,6 +17,7 @@ function normalizeDialogPath(path: string | string[] | null): string | null {
 }
 
 export const tauriHostHooks: HostHooks = {
+  ...tauriLibraryCache,
   async pickDirectory() {
     return normalizeDialogPath(
       await open({
