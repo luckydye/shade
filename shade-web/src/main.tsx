@@ -6,7 +6,7 @@ import { installCoordinationChannelFromTransport } from "shade-ui/src/bridge/cha
 import { setTransport } from "shade-ui/src/bridge/transport";
 import { setHostHooks } from "shade-ui/src/bridge/host";
 import { browserPlatform } from "./platform";
-import { createWebTransport } from "./web-transport";
+import { createWorkerTransport } from "./worker-transport";
 import { webHostHooks } from "./web-host-hooks";
 
 const root = document.getElementById("root");
@@ -16,7 +16,7 @@ if (!(root instanceof HTMLElement)) {
 }
 
 setPlatform(browserPlatform);
-setTransport(createWebTransport());
+setTransport(createWorkerTransport());
 setHostHooks(webHostHooks);
 void installCoordinationChannelFromTransport();
 
