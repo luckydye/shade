@@ -138,3 +138,59 @@ pub enum ChannelMessage {
         stack: serde_json::Value,
     },
 }
+
+/// Editor-state mutation requests (JS → Rust). Sent through the single
+/// `dispatch_mutation` invoke endpoint. Each variant carries the same payload
+/// the original granular invoke command used; results land via channel
+/// notifications (`LayerStackSnapshot` for stack-shape changes; future
+/// `SnapshotSaved` / `PeerMetadataApplied` for the ones that returned ids).
+///
+/// The shape is transport-agnostic so a future web-worker backend can accept
+/// the same tagged messages over `postMessage`.
+#[derive(serde::Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MutationRequest {
+    AddLayer {
+        kind: String,
+    },
+    DeleteLayer {
+        idx: usize,
+    },
+    MoveLayer {
+        from: usize,
+        to: usize,
+    },
+    SetLayerVisible {
+        idx: usize,
+        visible: bool,
+    },
+    SetLayerOpacity {
+        idx: usize,
+        opacity: f32,
+    },
+    RenameLayer {
+        idx: usize,
+        name: Option<String>,
+    },
+    ReplaceStack {
+        layers_json: String,
+    },
+    ApplyEdit(serde_json::Value),
+    ApplyGradientMask(serde_json::Value),
+    RemoveMask {
+        idx: usize,
+    },
+    CreateBrushMask {
+        idx: usize,
+    },
+    StampBrushMask(serde_json::Value),
+    LoadSnapshot {
+        id: String,
+    },
+    LoadPreset {
+        name: String,
+    },
+    ApplyPresetSnapshot {
+        name: String,
+    },
+}

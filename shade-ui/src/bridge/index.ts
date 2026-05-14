@@ -629,8 +629,9 @@ export async function getLayerStack(): Promise<StackInfo> {
 
 export async function applyEdit(params: Record<string, unknown>): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("apply_edit", { params });
+    await sendMutation(inv, { type: "apply_edit", ...params });
     return;
   }
   await ensureWorkerReady();
@@ -709,8 +710,9 @@ export async function applyEdit(params: Record<string, unknown>): Promise<void> 
 
 export async function setLayerVisible(idx: number, visible: boolean): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("set_layer_visible", { params: { layer_idx: idx, visible } });
+    await sendMutation(inv, { type: "set_layer_visible", idx, visible });
     return;
   }
   await ensureWorkerReady();
@@ -722,8 +724,9 @@ export async function setLayerVisible(idx: number, visible: boolean): Promise<vo
 
 export async function setLayerOpacity(idx: number, opacity: number): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("set_layer_opacity", { params: { layer_idx: idx, opacity } });
+    await sendMutation(inv, { type: "set_layer_opacity", idx, opacity });
     return;
   }
   await ensureWorkerReady();
@@ -735,8 +738,9 @@ export async function setLayerOpacity(idx: number, opacity: number): Promise<voi
 
 export async function renameLayer(idx: number, name: string | null): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("rename_layer", { params: { layer_idx: idx, name } });
+    await sendMutation(inv, { type: "rename_layer", idx, name });
     return;
   }
   await ensureWorkerReady();
@@ -745,8 +749,9 @@ export async function renameLayer(idx: number, name: string | null): Promise<voi
 
 export async function deleteLayer(idx: number): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("delete_layer", { params: { layer_idx: idx } });
+    await sendMutation(inv, { type: "delete_layer", idx });
     return;
   }
   await ensureWorkerReady();
@@ -755,10 +760,11 @@ export async function deleteLayer(idx: number): Promise<void> {
 
 export async function moveLayer(fromIdx: number, toIdx: number): Promise<number> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("move_layer", {
-      params: { from_idx: fromIdx, to_idx: toIdx },
-    }) as Promise<number>;
+    await sendMutation(inv, { type: "move_layer", from: fromIdx, to: toIdx });
+    // New idx is derivable from from/to; callers use getMovedLayerIndex().
+    return toIdx > fromIdx ? toIdx - 1 : toIdx;
   }
   await ensureWorkerReady();
   const result = await workerCall<{ layerIdx: number }>(
@@ -1503,8 +1509,9 @@ export async function deletePreset(name: string): Promise<void> {
 
 export async function loadPreset(name: string): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("load_preset", { name });
+    await sendMutation(inv, { type: "load_preset", name });
     return;
   }
   const preset = await getBrowserPlatform().presets.loadPreset(name);
@@ -1525,10 +1532,14 @@ export async function loadPreset(name: string): Promise<void> {
 export async function applyPresetSnapshot(
   name: string,
   imagePath?: string | null,
-): Promise<EditSnapshotInfo> {
+): Promise<EditSnapshotInfo | void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("apply_preset_snapshot", { name }) as Promise<EditSnapshotInfo>;
+    await sendMutation(inv, { type: "apply_preset_snapshot", name });
+    // Snapshot id is no longer returned through invoke; a future
+    // `SnapshotSaved` ChannelMessage will surface it for callers that need it.
+    return;
   }
   await loadPreset(name);
   return saveSnapshot(imagePath);
@@ -1642,8 +1653,9 @@ export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<
 
 export async function loadSnapshot(id: string): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("load_snapshot", { params: { id } });
+    await sendMutation(inv, { type: "load_snapshot", id });
     return;
   }
   const record = await getBrowserPlatform().snapshots.getSnapshot(id);
@@ -1677,8 +1689,9 @@ export async function getStackSnapshot(): Promise<string> {
 
 export async function replaceStack(layersJson: string): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("replace_stack", { layersJson });
+    await sendMutation(inv, { type: "replace_stack", layers_json: layersJson });
     return;
   }
   await ensureWorkerReady();
@@ -1687,8 +1700,13 @@ export async function replaceStack(layersJson: string): Promise<void> {
 
 export async function addLayer(kind: string): Promise<number> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("add_layer", { kind }) as Promise<number>;
+    await sendMutation(inv, { type: "add_layer", kind });
+    // New layer is always appended; the LayerStackSnapshot will surface the
+    // exact index. Callers should use `state.layers.length - 1` after the
+    // snapshot has been applied.
+    return -1;
   }
   await ensureWorkerReady();
   const result = await workerCall<{ layerIdx: number }>(
@@ -1719,8 +1737,9 @@ export type GradientMaskParams = LinearGradientMask | RadialGradientMask;
 
 export async function applyGradientMask(params: GradientMaskParams): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("apply_gradient_mask", { params });
+    await sendMutation(inv, { type: "apply_gradient_mask", ...params });
     return;
   }
   await ensureWorkerReady();
@@ -1809,8 +1828,9 @@ export async function applyPeerMetadata(
 
 export async function removeMask(idx: number): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("remove_mask", { params: { layer_idx: idx } });
+    await sendMutation(inv, { type: "remove_mask", idx });
     return;
   }
   await ensureWorkerReady();
@@ -1819,8 +1839,9 @@ export async function removeMask(idx: number): Promise<void> {
 
 export async function createBrushMask(layerIdx: number): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("create_brush_mask", { params: { layer_idx: layerIdx } });
+    await sendMutation(inv, { type: "create_brush_mask", idx: layerIdx });
     return;
   }
   await ensureWorkerReady();
@@ -1836,9 +1857,16 @@ export async function stampBrushMask(
   erase: boolean,
 ): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("stamp_brush_mask", {
-      params: { layer_idx: layerIdx, cx, cy, radius, softness, erase },
+    await sendMutation(inv, {
+      type: "stamp_brush_mask",
+      layer_idx: layerIdx,
+      cx,
+      cy,
+      radius,
+      softness,
+      erase,
     });
     return;
   }

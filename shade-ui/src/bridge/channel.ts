@@ -171,3 +171,43 @@ export function shadePeerThumbnailUrl(
 export function shadeCameraThumbnailUrl(host: string, path: string): string {
   return `shade://thumb/camera/${encodeURIComponent(host)}/${encodeURIComponent(path)}`;
 }
+
+// ── Mutation protocol ────────────────────────────────────────────────────────
+// Editor-state mutations sent from JS to Rust. The Tauri transport is a single
+// invoke endpoint (`dispatch_mutation`); a future worker backend can carry the
+// same tagged payload over `postMessage`. Results land via channel
+// notifications (`LayerStackSnapshot`, and later `SnapshotSaved` etc.) — no
+// return value, fire-and-forget on the caller's side.
+
+export type ApplyEditPayload = Record<string, unknown>;
+export type ApplyGradientMaskPayload = Record<string, unknown>;
+export type StampBrushMaskPayload = Record<string, unknown>;
+
+export type MutationRequest =
+  | { type: "add_layer"; kind: string }
+  | { type: "delete_layer"; idx: number }
+  | { type: "move_layer"; from: number; to: number }
+  | { type: "set_layer_visible"; idx: number; visible: boolean }
+  | { type: "set_layer_opacity"; idx: number; opacity: number }
+  | { type: "rename_layer"; idx: number; name: string | null }
+  | { type: "replace_stack"; layers_json: string }
+  | ({ type: "apply_edit" } & ApplyEditPayload)
+  | ({ type: "apply_gradient_mask" } & ApplyGradientMaskPayload)
+  | { type: "remove_mask"; idx: number }
+  | { type: "create_brush_mask"; idx: number }
+  | ({ type: "stamp_brush_mask" } & StampBrushMaskPayload)
+  | { type: "load_snapshot"; id: string }
+  | { type: "load_preset"; name: string }
+  | { type: "apply_preset_snapshot"; name: string };
+
+/**
+ * Send an editor-state mutation. Fire-and-forget: the returned Promise
+ * resolves once Rust has acknowledged the dispatch, but state updates land
+ * via the `LayerStackSnapshot` channel message.
+ */
+export async function sendMutation(
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
+  request: MutationRequest,
+): Promise<void> {
+  await invoke("dispatch_mutation", { request });
+}

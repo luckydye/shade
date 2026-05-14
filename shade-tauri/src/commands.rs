@@ -6512,6 +6512,115 @@ pub(crate) async fn finalize_layer_stack_mutation<R: tauri::Runtime>(
     Ok(id)
 }
 
+/// Single JS → Rust mutation dispatcher. Each variant of
+/// [`MutationRequest`](crate::channel_protocol::MutationRequest) is routed to
+/// the corresponding command body; persistence and the resulting
+/// `LayerStackSnapshot` broadcast happen inside each command via
+/// `finalize_layer_stack_mutation`.
+///
+/// Return values that the granular invokes used to produce
+/// (`add_layer`/`move_layer` → idx, `apply_preset_snapshot` → snapshot id)
+/// are discarded here; callers derive layer positions from the snapshot, and
+/// snapshot-id consumers (none today) would subscribe to a future
+/// `SnapshotSaved` channel message.
+#[tauri::command]
+pub async fn dispatch_mutation<R: tauri::Runtime>(
+    request: crate::channel_protocol::MutationRequest,
+    state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    use crate::channel_protocol::MutationRequest as M;
+    match request {
+        M::AddLayer { kind } => {
+            let _idx = add_layer(kind, state, app).await?;
+        }
+        M::DeleteLayer { idx } => {
+            delete_layer(DeleteLayerParams { layer_idx: idx }, state, app).await?;
+        }
+        M::MoveLayer { from, to } => {
+            let _idx = move_layer(
+                MoveLayerParams {
+                    from_idx: from,
+                    to_idx: to,
+                },
+                state,
+                app,
+            )
+            .await?;
+        }
+        M::SetLayerVisible { idx, visible } => {
+            set_layer_visible(
+                LayerVisibility {
+                    layer_idx: idx,
+                    visible,
+                },
+                state,
+                app,
+            )
+            .await?;
+        }
+        M::SetLayerOpacity { idx, opacity } => {
+            set_layer_opacity(
+                LayerOpacityParams {
+                    layer_idx: idx,
+                    opacity,
+                },
+                state,
+                app,
+            )
+            .await?;
+        }
+        M::RenameLayer { idx, name } => {
+            rename_layer(
+                RenameLayerParams {
+                    layer_idx: idx,
+                    name,
+                },
+                state,
+                app,
+            )
+            .await?;
+        }
+        M::ReplaceStack { layers_json } => {
+            replace_stack(layers_json, state, app).await?;
+        }
+        M::ApplyEdit(value) => {
+            let params: EditParams = serde_json::from_value(value)
+                .map_err(|e| format!("apply_edit: invalid params: {e}"))?;
+            apply_edit(params, state, app).await?;
+        }
+        M::ApplyGradientMask(value) => {
+            let params: GradientMaskParams = serde_json::from_value(value)
+                .map_err(|e| format!("apply_gradient_mask: invalid params: {e}"))?;
+            apply_gradient_mask(params, state, app).await?;
+        }
+        M::RemoveMask { idx } => {
+            remove_mask(RemoveMaskParams { layer_idx: idx }, state, app).await?;
+        }
+        M::CreateBrushMask { idx } => {
+            create_brush_mask(CreateBrushMaskParams { layer_idx: idx }, state, app).await?;
+        }
+        M::StampBrushMask(value) => {
+            let params: StampBrushMaskParams = serde_json::from_value(value)
+                .map_err(|e| format!("stamp_brush_mask: invalid params: {e}"))?;
+            // Brush strokes mutate mask pixel data only; mask params (the
+            // shape visible in LayerStackSnapshot) don't change, so no
+            // snapshot broadcast is needed per stroke.
+            stamp_brush_mask(params, state).await?;
+        }
+        M::LoadSnapshot { id } => {
+            load_snapshot(LoadSnapshotParams { id }, state, app).await?;
+        }
+        M::LoadPreset { name } => {
+            load_preset(name, state, app).await?;
+        }
+        M::ApplyPresetSnapshot { name } => {
+            let _info = apply_preset_snapshot(name, state, app).await?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GradientMaskParams {
     pub layer_idx: usize,

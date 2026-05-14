@@ -479,12 +479,16 @@ export async function stampBrushMask(
 }
 
 export async function addLayer(kind: string, position: number) {
-  let idx = await bridge.addLayer(kind);
+  await bridge.addLayer(kind);
+  // The Rust side always appends the new layer, then broadcasts the new
+  // stack via LayerStackSnapshot. The bridge mutation awaits the snapshot
+  // before resolving, so state.layers is up-to-date here.
   await refreshLayerStack();
   if (position < 0 || position > state.layers.length) {
     throw new Error("layer insertion position is out of bounds");
   }
-  if (idx < 0 || idx >= state.layers.length) {
+  let idx = state.layers.length - 1;
+  if (idx < 0) {
     throw new Error("new layer could not be resolved after insertion");
   }
   if (idx !== position) {
