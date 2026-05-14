@@ -4,7 +4,22 @@ import type {
   ReadRequest,
 } from "shade-ui/src/bridge/channel";
 import type { Transport } from "shade-ui/src/bridge/transport";
-import { getSharedWorker } from "./shared-worker";
+
+// Singleton Worker instance. Both the unified Transport (this file) and the
+// legacy `workerCall` path in shade-ui/bridge/index.ts (via
+// `platform.ts.createWorker`) funnel through the same Worker so editor
+// state (the wasm stack) stays consistent across both protocols.
+let _worker: Worker | null = null;
+
+export function getSharedWorker(): Worker {
+  if (!_worker) {
+    _worker = new Worker(new URL("./worker/index.ts", import.meta.url), {
+      type: "module",
+      name: "shade-web-worker",
+    });
+  }
+  return _worker;
+}
 
 // Heuristic: the unified protocol's outbound payloads always carry a `type`
 // string that matches one of the known ChannelMessage variants. Legacy
