@@ -33,32 +33,6 @@ pub struct ArtboardViewport {
     pub ignore_crop_layers: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct LibraryImageMetadata {
-    #[serde(default)]
-    pub has_snapshots: bool,
-    #[serde(default)]
-    pub latest_snapshot_id: Option<String>,
-    #[serde(default)]
-    pub latest_snapshot_created_at: Option<i64>,
-    #[serde(default)]
-    pub rating: Option<u8>,
-    #[serde(default)]
-    pub tags: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct LibraryImageListing {
-    pub path: String,
-    pub name: String,
-    #[serde(default)]
-    pub modified_at: Option<u64>,
-    #[serde(default)]
-    pub fingerprint: Option<String>,
-    #[serde(default)]
-    pub metadata: LibraryImageMetadata,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AwarenessStateMessage {
     #[serde(default)]
@@ -88,12 +62,6 @@ pub enum ChannelMessage {
     LibraryScanComplete {
         library_id: String,
     },
-    LibraryListChunk {
-        request_id: u32,
-        items: Vec<LibraryImageListing>,
-        done: bool,
-    },
-
     // Thumbnail (Rust → JS)
     ThumbnailReady {
         path: String,
@@ -164,10 +132,17 @@ pub enum ChannelMessage {
     // Response to a `ReadRequest` dispatched through `dispatch_read`. The
     // `read_id` correlates with the originating request; `kind` discriminates
     // the payload shape and `value` carries the typed result as JSON.
+    //
+    // Single-shot reads emit one message with `done: true`. Streaming reads
+    // emit multiple messages with the same `read_id`; the final message
+    // carries `done: true`. Frontends discriminate via the `sendRead` vs
+    // `sendChunkedRead` helpers.
     ReadResponse {
         read_id: u32,
         kind: String,
         value: serde_json::Value,
+        #[serde(default)]
+        done: bool,
     },
     // Error variant for failed reads — same correlation key.
     ReadFailed {
@@ -354,6 +329,7 @@ pub enum MutationRequest {
 pub enum ReadRequest {
     ListPictures,
     ListMediaLibraries,
+    ListLibraryImages { library_id: String },
     ListMediaRatings { fingerprints: Vec<String> },
     ListPresets,
     ListSnapshots,

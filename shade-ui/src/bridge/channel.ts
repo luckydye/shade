@@ -27,22 +27,6 @@ export interface ArtboardViewport {
 
 export type PreviewQuality = "interactive" | "final";
 
-export interface LibraryImageListingMetadata {
-  has_snapshots?: boolean;
-  latest_snapshot_id?: string | null;
-  latest_snapshot_created_at?: number | null;
-  rating?: number | null;
-  tags?: string[];
-}
-
-export interface LibraryImageListing {
-  path: string;
-  name: string;
-  modified_at?: number | null;
-  fingerprint?: string | null;
-  metadata?: LibraryImageListingMetadata;
-}
-
 export interface AwarenessStateMessage {
   cursor?: [number, number] | null;
   selection?: string | null;
@@ -62,12 +46,6 @@ export type ChannelMessage =
       total: number;
     }
   | { type: "library_scan_complete"; library_id: string }
-  | {
-      type: "library_list_chunk";
-      request_id: number;
-      items: LibraryImageListing[];
-      done: boolean;
-    }
   | { type: "thumbnail_ready"; path: string; edit_fingerprint: string }
   | {
       type: "batch_export_progress";
@@ -90,7 +68,13 @@ export type ChannelMessage =
   | { type: "collection_list_changed" }
   | { type: "snapshot_saved"; fingerprint: string | null; id: string }
   | { type: "media_libraries_changed" }
-  | { type: "read_response"; read_id: number; kind: string; value: unknown }
+  | {
+      type: "read_response";
+      read_id: number;
+      kind: string;
+      value: unknown;
+      done: boolean;
+    }
   | { type: "read_failed"; read_id: number; message: string };
 
 type MessageType = ChannelMessage["type"];
@@ -282,6 +266,7 @@ export async function sendMutation(
 export type ReadRequest =
   | { type: "list_pictures" }
   | { type: "list_media_libraries" }
+  | { type: "list_library_images"; library_id: string }
   | { type: "list_media_ratings"; fingerprints: string[] }
   | { type: "list_presets" }
   | { type: "list_snapshots" }
@@ -317,6 +302,7 @@ export async function sendRead<T>(
     let settled = false;
     const unsubResponse = onChannelMessage("read_response", (msg) => {
       if (msg.read_id !== readId || settled) return;
+      if (!msg.done) return; // ignore intermediate chunks
       settled = true;
       unsubResponse();
       unsubFailed();
@@ -329,6 +315,64 @@ export async function sendRead<T>(
         return;
       }
       resolve(msg.value as T);
+    });
+    const unsubFailed = onChannelMessage("read_failed", (msg) => {
+      if (msg.read_id !== readId || settled) return;
+      settled = true;
+      unsubResponse();
+      unsubFailed();
+      reject(new Error(msg.message));
+    });
+    invoke("dispatch_read", { readId, request }).catch((err) => {
+      if (settled) return;
+      settled = true;
+      unsubResponse();
+      unsubFailed();
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Send a streaming read request. The producer emits one or more
+ * `read_response` messages with the same `read_id`; each carries a chunk of
+ * `TItem[]` in `value`. The final message carries `done: true`. The promise
+ * resolves with the accumulated items.
+ *
+ * `onChunk` (optional) fires per chunk for progressive UI updates.
+ */
+export async function sendChunkedRead<TItem>(
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
+  request: ReadRequest,
+  expectedKind: string,
+  onChunk?: (chunk: TItem[]) => void,
+): Promise<TItem[]> {
+  const readId = nextReadId++;
+  const items: TItem[] = [];
+  return new Promise<TItem[]>((resolve, reject) => {
+    let settled = false;
+    const unsubResponse = onChannelMessage("read_response", (msg) => {
+      if (msg.read_id !== readId || settled) return;
+      if (msg.kind !== expectedKind) {
+        settled = true;
+        unsubResponse();
+        unsubFailed();
+        reject(
+          new Error(
+            `read_response kind mismatch: expected ${expectedKind}, got ${msg.kind}`,
+          ),
+        );
+        return;
+      }
+      const chunk = (msg.value as TItem[]) ?? [];
+      items.push(...chunk);
+      onChunk?.(chunk);
+      if (msg.done) {
+        settled = true;
+        unsubResponse();
+        unsubFailed();
+        resolve(items);
+      }
     });
     const unsubFailed = onChannelMessage("read_failed", (msg) => {
       if (msg.read_id !== readId || settled) return;

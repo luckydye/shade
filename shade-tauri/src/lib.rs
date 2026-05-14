@@ -142,7 +142,6 @@ pub fn run() {
             commands::dispatch_mutation,
             commands::dispatch_read,
             commands::get_layer_stack,
-            commands::list_library_images,
             commands::add_media_library,
             commands::add_s3_media_library,
             commands::update_s3_media_library,

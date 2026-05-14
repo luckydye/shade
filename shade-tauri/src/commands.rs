@@ -4918,69 +4918,6 @@ async fn enrich_listing_metadata(
     Ok(())
 }
 
-/// Streaming variant of the old `list_library_images` bulk return. Builds the
-/// listing in the backend, then chunks the rich `LibraryImage` items over the
-/// coordination channel as `LibraryListChunk` messages keyed by `request_id`.
-/// The command itself returns immediately with `Ok(())`; the frontend
-/// collects chunks until it receives one with `done: true`.
-#[tauri::command]
-pub async fn list_library_images<R: tauri::Runtime>(
-    _app: tauri::AppHandle<R>,
-    library_id: String,
-    request_id: u32,
-) -> Result<(), String> {
-    let mut listing = build_library_listing(&_app, library_id).await?;
-    enrich_listing_metadata(&mut listing).await?;
-
-    const CHUNK_SIZE: usize = 256;
-    let coord = crate::channel_server::channel_from_app(&_app);
-    let mut iter = listing.items.into_iter().peekable();
-    let mut sent_any = false;
-    while iter.peek().is_some() {
-        let mut buf: Vec<crate::channel_protocol::LibraryImageListing> =
-            Vec::with_capacity(CHUNK_SIZE);
-        for _ in 0..CHUNK_SIZE {
-            match iter.next() {
-                Some(item) => buf.push(crate::channel_protocol::LibraryImageListing {
-                    path: item.path,
-                    name: item.name,
-                    modified_at: item.modified_at,
-                    fingerprint: item.fingerprint,
-                    metadata: crate::channel_protocol::LibraryImageMetadata {
-                        has_snapshots: item.metadata.has_snapshots,
-                        latest_snapshot_id: item.metadata.latest_snapshot_id,
-                        latest_snapshot_created_at: item
-                            .metadata
-                            .latest_snapshot_created_at,
-                        rating: item.metadata.rating,
-                        tags: item.metadata.tags,
-                    },
-                }),
-                None => break,
-            }
-        }
-        let done = iter.peek().is_none();
-        coord
-            .send(crate::ChannelMessage::LibraryListChunk {
-                request_id,
-                items: buf,
-                done,
-            })
-            .await;
-        sent_any = true;
-    }
-    if !sent_any {
-        coord
-            .send(crate::ChannelMessage::LibraryListChunk {
-                request_id,
-                items: Vec::new(),
-                done: true,
-            })
-            .await;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn list_media_ratings(
     fingerprints: Vec<String>,
@@ -6499,7 +6436,54 @@ pub async fn dispatch_read<R: tauri::Runtime>(
 ) -> Result<(), String> {
     use crate::channel_protocol::ReadRequest as R;
     let coord = crate::channel_server::channel_from_app(&app);
+
+    // Streaming reads short-circuit: they emit their own ReadResponse chunks
+    // and return early. Single-shot reads fall through to the common send.
+    if let R::ListLibraryImages { library_id } = &request {
+        let library_id = library_id.clone();
+        let outcome = async {
+            let mut listing = build_library_listing(&app, library_id).await?;
+            enrich_listing_metadata(&mut listing).await?;
+            const CHUNK_SIZE: usize = 256;
+            let mut iter = listing.items.into_iter().peekable();
+            let mut sent_any = false;
+            while iter.peek().is_some() {
+                let chunk: Vec<_> = iter.by_ref().take(CHUNK_SIZE).collect();
+                let value = serde_json::to_value(&chunk).map_err(|e| e.to_string())?;
+                let done = iter.peek().is_none();
+                coord
+                    .send(crate::ChannelMessage::ReadResponse {
+                        read_id,
+                        kind: "library_images_chunk".to_string(),
+                        value,
+                        done,
+                    })
+                    .await;
+                sent_any = true;
+            }
+            if !sent_any {
+                coord
+                    .send(crate::ChannelMessage::ReadResponse {
+                        read_id,
+                        kind: "library_images_chunk".to_string(),
+                        value: serde_json::Value::Array(Vec::new()),
+                        done: true,
+                    })
+                    .await;
+            }
+            Ok::<(), String>(())
+        }
+        .await;
+        if let Err(message) = outcome {
+            coord
+                .send(crate::ChannelMessage::ReadFailed { read_id, message })
+                .await;
+        }
+        return Ok(());
+    }
+
     let outcome: Result<(&'static str, serde_json::Value), String> = match request {
+        R::ListLibraryImages { .. } => unreachable!("handled above"),
         R::ListPictures => list_pictures(app.clone())
             .await
             .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
@@ -6574,6 +6558,7 @@ pub async fn dispatch_read<R: tauri::Runtime>(
                     read_id,
                     kind: kind.to_string(),
                     value,
+                    done: true,
                 })
                 .await;
         }

@@ -991,45 +991,47 @@ export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   return getBrowserPlatform().media.listMediaLibraries();
 }
 
-let nextLibraryListRequestId = 1;
+interface RawLibraryImage {
+  path: string;
+  name: string;
+  modified_at?: number | null;
+  fingerprint?: string | null;
+  metadata?: {
+    has_snapshots?: boolean;
+    latest_snapshot_id?: string | null;
+    latest_snapshot_created_at?: number | null;
+    rating?: number | null;
+    tags?: string[];
+  };
+}
+
+function normalizeLibraryImage(raw: RawLibraryImage): LibraryImage {
+  const meta = raw.metadata ?? {};
+  return {
+    path: raw.path,
+    name: raw.name,
+    modified_at: raw.modified_at ?? null,
+    fingerprint: raw.fingerprint ?? null,
+    metadata: {
+      has_snapshots: meta.has_snapshots ?? false,
+      latest_snapshot_id: meta.latest_snapshot_id ?? null,
+      latest_snapshot_created_at: meta.latest_snapshot_created_at ?? null,
+      rating: meta.rating ?? null,
+      tags: meta.tags ?? [],
+    },
+  };
+}
 
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
   if (await isTauriRuntime()) {
-    const { onChannelMessage } = await import("./channel");
-    const requestId = nextLibraryListRequestId++;
-    const items: LibraryImage[] = [];
-    const done = new Promise<void>((resolve, reject) => {
-      const unsubscribe = onChannelMessage("library_list_chunk", (msg) => {
-        if (msg.request_id !== requestId) return;
-        for (const item of msg.items) {
-          const meta = item.metadata ?? {};
-          items.push({
-            path: item.path,
-            name: item.name,
-            modified_at: item.modified_at ?? null,
-            fingerprint: item.fingerprint ?? null,
-            metadata: {
-              has_snapshots: meta.has_snapshots ?? false,
-              latest_snapshot_id: meta.latest_snapshot_id ?? null,
-              latest_snapshot_created_at: meta.latest_snapshot_created_at ?? null,
-              rating: meta.rating ?? null,
-              tags: meta.tags ?? [],
-            },
-          });
-        }
-        if (msg.done) {
-          unsubscribe();
-          resolve();
-        }
-      });
-      const inv = getTauriPlatform().invoke;
-      inv("list_library_images", { libraryId, requestId }).catch((err) => {
-        unsubscribe();
-        reject(err);
-      });
-    });
-    await done;
-    return { items, is_complete: true };
+    const { sendChunkedRead } = await import("./channel");
+    const inv = await getTauriInvoke();
+    const raws = await sendChunkedRead<RawLibraryImage>(
+      inv,
+      { type: "list_library_images", library_id: libraryId },
+      "library_images_chunk",
+    );
+    return { items: raws.map(normalizeLibraryImage), is_complete: true };
   }
   return getBrowserPlatform().media.listLibraryImages(libraryId);
 }
