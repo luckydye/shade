@@ -1,80 +1,29 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { onChannelMessage } from "shade-ui/src/bridge/channel";
-import type { NativeDragDropPayload, TauriPlatform } from "shade-ui/src/bridge/index";
+import type { TauriPlatform } from "shade-ui/src/bridge/index";
 
 type TauriPlatformApi = Pick<
   TauriPlatform,
-  | "isTauri"
-  | "invoke"
-  | "pickDirectory"
-  | "pickExportTarget"
-  | "listenPeerPaired"
-  | "listenNativeDragDrop"
-  | "listenLibrarySyncProgress"
-  | "listenLibraryScanComplete"
-  | "listenLibraryScanProgress"
-  | "listenImageOpenPhase"
-  | "listenBatchExportProgress"
+  "isTauri" | "invoke" | "listenLibrarySyncProgress" | "listenImageOpenPhase"
 >;
-
-function normalizeDialogPath(path: string | string[] | null): string | null {
-  if (path === null) {
-    return null;
-  }
-  if (Array.isArray(path)) {
-    throw new Error("expected a single filesystem path");
-  }
-  return path;
-}
 
 export const tauriPlatform: TauriPlatformApi = {
   isTauri,
   invoke(cmd, args) {
     return invoke(cmd, args);
   },
-  async pickDirectory() {
-    return normalizeDialogPath(
-      await open({
-        directory: true,
-        multiple: false,
-      }),
-    );
-  },
-  pickExportTarget() {
-    return save({
-      title: "Export Render",
-      filters: [
-        { name: "PNG Image", extensions: ["png"] },
-        { name: "JPEG Image", extensions: ["jpg", "jpeg"] },
-      ],
-    });
-  },
-  async listenPeerPaired(listener) {
-    const unsubscribe = onChannelMessage("peer_paired", () => {
-      listener();
-    });
-    return unsubscribe;
-  },
   async listenLibrarySyncProgress(listener) {
-    const unlisten = await listen<{ library_id: string; total: number; completed: number; current_name: string | null }>("library-sync-progress", (event) => {
+    const unlisten = await listen<{
+      library_id: string;
+      total: number;
+      completed: number;
+      current_name: string | null;
+    }>("library-sync-progress", (event) => {
       listener(event.payload);
     });
     return () => {
       void unlisten();
     };
-  },
-  async listenLibraryScanComplete(listener) {
-    return onChannelMessage("library_scan_complete", (msg) => {
-      listener(msg.library_id);
-    });
-  },
-  async listenLibraryScanProgress(listener) {
-    return onChannelMessage("library_scan_progress", (msg) => {
-      listener(msg.library_id);
-    });
   },
   async listenImageOpenPhase(listener) {
     const unlisten = await listen<string>("image-open-phase", (event) => {
@@ -83,26 +32,5 @@ export const tauriPlatform: TauriPlatformApi = {
     return () => {
       void unlisten();
     };
-  },
-  async listenBatchExportProgress(listener) {
-    return onChannelMessage("batch_export_progress", (msg) => {
-      listener({
-        total: msg.total,
-        completed: msg.current,
-        current_name: msg.name || null,
-      });
-    });
-  },
-  async listenNativeDragDrop(listener) {
-    return getCurrentWebview().onDragDropEvent((event) => {
-      const { payload } = event;
-      if (!("paths" in payload) || !Array.isArray(payload.paths)) {
-        throw new Error("native drag-drop event is missing paths");
-      }
-      listener({
-        type: payload.type as NativeDragDropPayload["type"],
-        paths: payload.paths,
-      });
-    });
   },
 };

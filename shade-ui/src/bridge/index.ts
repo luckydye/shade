@@ -46,26 +46,15 @@ export interface TauriPlatform {
   libraryCache: LibraryCachePlatform;
   isTauri(): boolean;
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
-  pickDirectory(): Promise<string | null>;
-  pickExportTarget(): Promise<string | null>;
-  listenPeerPaired(listener: () => void): Promise<() => void>;
-  listenNativeDragDrop(
-    listener: (payload: NativeDragDropPayload) => void,
-  ): Promise<() => void>;
+  // Two legacy Tauri-event listeners survive on the platform interface —
+  // their Rust-side emit calls still go through `app.emit("library-sync-
+  // progress" | "image-open-phase")` rather than the coordination channel.
+  // Migrate those in a follow-up and remove these.
   listenLibrarySyncProgress(
     listener: (payload: LibrarySyncProgress) => void,
   ): Promise<() => void>;
-  listenLibraryScanComplete(
-    listener: (libraryId: string) => void,
-  ): Promise<() => void>;
-  listenLibraryScanProgress(
-    listener: (libraryId: string) => void,
-  ): Promise<() => void>;
   listenImageOpenPhase(
     listener: (phase: string) => void,
-  ): Promise<() => void>;
-  listenBatchExportProgress(
-    listener: (payload: BatchExportProgress) => void,
   ): Promise<() => void>;
 }
 
@@ -475,66 +464,71 @@ export async function exportImage(path: string): Promise<void> {
   downloadBlob(blob, path || "shade-export.png");
 }
 
-export async function pickDirectory(): Promise<string | BrowserDirectoryHandle | null> {
-  if (!(await isTauriRuntime())) {
-    return getBrowserPlatform().media.pickDirectory();
-  }
-  return getTauriPlatform().pickDirectory();
+export async function pickDirectory(): Promise<string | null> {
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().pickDirectory();
 }
 
 export async function pickExportTarget(): Promise<string | null> {
-  if (!(await isTauriRuntime())) {
-    return "shade-export.png";
-  }
-  return getTauriPlatform().pickExportTarget();
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().pickExportTarget();
 }
 
-async function tauriListen<L>(
-  listener: L,
-  fn: (platform: TauriPlatform, listener: L) => Promise<() => void>,
-): Promise<() => void> {
-  if (!(await isTauriRuntime())) return () => {};
-  return fn(getTauriPlatform(), listener);
-}
-
-export function listenPeerPaired(listener: () => void): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenPeerPaired(l));
-}
-
-export function listenNativeDragDrop(
+export async function listenNativeDragDrop(
   listener: (payload: NativeDragDropPayload) => void,
 ): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenNativeDragDrop(l));
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().listenNativeDragDrop(listener);
 }
 
-export function listenLibrarySyncProgress(
-  listener: (payload: LibrarySyncProgress) => void,
-): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenLibrarySyncProgress(l));
+export function listenPeerPaired(listener: () => void): () => void {
+  return onChannelMessage("peer_paired", () => listener());
 }
 
 export function listenLibraryScanComplete(
   listener: (libraryId: string) => void,
-): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenLibraryScanComplete(l));
+): () => void {
+  return onChannelMessage("library_scan_complete", (msg) => {
+    listener(msg.library_id);
+  });
 }
 
 export function listenLibraryScanProgress(
   listener: (libraryId: string) => void,
-): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenLibraryScanProgress(l));
-}
-
-export function listenImageOpenPhase(
-  listener: (phase: string) => void,
-): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenImageOpenPhase(l));
+): () => void {
+  return onChannelMessage("library_scan_progress", (msg) => {
+    listener(msg.library_id);
+  });
 }
 
 export function listenBatchExportProgress(
   listener: (payload: BatchExportProgress) => void,
+): () => void {
+  return onChannelMessage("batch_export_progress", (msg) => {
+    listener({
+      total: msg.total,
+      completed: msg.current,
+      current_name: msg.name || null,
+    });
+  });
+}
+
+// listenLibrarySyncProgress / listenImageOpenPhase are not yet
+// ChannelMessage-backed (Rust still emits them via legacy
+// `app.emit("library-sync-progress" / "image-open-phase")`). Keep them as
+// TauriPlatform listeners until the Rust side migrates to channel messages.
+export async function listenLibrarySyncProgress(
+  listener: (payload: LibrarySyncProgress) => void,
 ): Promise<() => void> {
-  return tauriListen(listener, (p, l) => p.listenBatchExportProgress(l));
+  if (!(await isTauriRuntime())) return () => {};
+  return getTauriPlatform().listenLibrarySyncProgress(listener);
+}
+
+export async function listenImageOpenPhase(
+  listener: (phase: string) => void,
+): Promise<() => void> {
+  if (!(await isTauriRuntime())) return () => {};
+  return getTauriPlatform().listenImageOpenPhase(listener);
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
