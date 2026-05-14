@@ -1,9 +1,19 @@
-import type {
-  Collection,
-  CollectionItem,
-  CollectionsPlatform,
-} from "shade-ui/src/bridge/index";
+import type { Collection, CollectionItem } from "shade-ui/src/bridge/index";
 import { requestToPromise, withStores } from "./indexed-db";
+
+interface CollectionsHandlers {
+  listCollections(libraryId: string): Promise<Collection[]>;
+  createCollection(libraryId: string, name: string): Promise<Collection>;
+  renameCollection(collectionId: string, name: string): Promise<void>;
+  deleteCollection(collectionId: string): Promise<void>;
+  reorderCollection(collectionId: string, newPosition: number): Promise<void>;
+  listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
+  addToCollection(collectionId: string, fingerprints: string[]): Promise<void>;
+  removeFromCollection(
+    collectionId: string,
+    fingerprints: string[],
+  ): Promise<void>;
+}
 
 const DB_NAME = "shade-browser-collections";
 const DB_VERSION = 2;
@@ -66,7 +76,7 @@ async function countItems(
   ).length;
 }
 
-export const browserCollectionsPlatform: CollectionsPlatform = {
+export const browserCollectionsPlatform: CollectionsHandlers = {
   async listCollections(libraryId) {
     return withStores(
       openDb,

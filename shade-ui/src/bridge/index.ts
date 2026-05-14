@@ -44,7 +44,6 @@ export interface NativeDragDropPayload {
 export interface TauriPlatform {
   kind: "tauri";
   libraryCache: LibraryCachePlatform;
-  collections: CollectionsPlatform;
   isTauri(): boolean;
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   pickDirectory(): Promise<string | null>;
@@ -70,21 +69,18 @@ export interface TauriPlatform {
   ): Promise<() => void>;
 }
 
-export interface BrowserRatingsPlatform {
-  listRatings(ids: string[]): Promise<Record<string, number>>;
-  setRating(id: string, rating: number | null): Promise<void>;
-}
-
 export interface BrowserPlatform {
   kind: "browser";
   thumbnailBackend: ThumbnailBackend;
   libraryCache: LibraryCachePlatform;
-  collections: CollectionsPlatform;
   createWorker(): Worker;
   media: BrowserMediaPlatform;
-  presets: BrowserPresetsPlatform;
+  // `snapshots` survives on the platform interface because
+  // `restoreCurrentBrowserSnapshot` reads it on the main thread to
+  // coordinate snapshot-on-open. Editor-state snapshot writes go through
+  // the unified `MutationRequest` protocol; this field is read-only in
+  // practice.
   snapshots: BrowserSnapshotsPlatform;
-  ratings: BrowserRatingsPlatform;
 }
 
 export type Platform = BrowserPlatform | TauriPlatform;
@@ -1679,45 +1675,98 @@ export interface CollectionItem {
   added_at: number;
 }
 
-export interface CollectionsPlatform {
-  listCollections(libraryId: string): Promise<Collection[]>;
-  createCollection(libraryId: string, name: string): Promise<Collection>;
-  renameCollection(collectionId: string, name: string): Promise<void>;
-  deleteCollection(collectionId: string): Promise<void>;
-  reorderCollection(collectionId: string, newPosition: number): Promise<void>;
-  listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
-  addToCollection(collectionId: string, fingerprints: string[]): Promise<void>;
-  removeFromCollection(collectionId: string, fingerprints: string[]): Promise<void>;
-}
-
 export function listCollections(libraryId: string): Promise<Collection[]> {
-  return getPlatform().collections.listCollections(libraryId);
+  return sendRead<Collection[]>(
+    { type: "list_collections", library_id: libraryId },
+    "collections",
+  );
 }
 
-export function createCollection(libraryId: string, name: string): Promise<Collection> {
-  return getPlatform().collections.createCollection(libraryId, name);
+export async function createCollection(
+  libraryId: string,
+  name: string,
+): Promise<Collection> {
+  // The freshly-minted record lands via the `collection_created` channel
+  // notification; correlate by library_id + name (the UI never fires
+  // concurrent creates with the same name in the same library).
+  return new Promise<Collection>((resolve, reject) => {
+    let settled = false;
+    const unsub = onChannelMessage("collection_created", (msg) => {
+      if (settled) return;
+      const collection = msg.collection as Collection | undefined;
+      if (
+        !collection ||
+        collection.library_id !== libraryId ||
+        collection.name !== name
+      ) {
+        return;
+      }
+      settled = true;
+      unsub();
+      resolve(collection);
+    });
+    sendMutation({ type: "create_collection", library_id: libraryId, name }).catch(
+      (err) => {
+        if (settled) return;
+        settled = true;
+        unsub();
+        reject(err);
+      },
+    );
+  });
 }
 
-export function renameCollection(collectionId: string, name: string): Promise<void> {
-  return getPlatform().collections.renameCollection(collectionId, name);
+export async function renameCollection(
+  collectionId: string,
+  name: string,
+): Promise<void> {
+  await sendMutation({
+    type: "rename_collection",
+    collection_id: collectionId,
+    name,
+  });
 }
 
-export function deleteCollection(collectionId: string): Promise<void> {
-  return getPlatform().collections.deleteCollection(collectionId);
+export async function deleteCollection(collectionId: string): Promise<void> {
+  await sendMutation({ type: "delete_collection", collection_id: collectionId });
 }
 
-export function reorderCollection(collectionId: string, newPosition: number): Promise<void> {
-  return getPlatform().collections.reorderCollection(collectionId, newPosition);
+export async function reorderCollection(
+  collectionId: string,
+  newPosition: number,
+): Promise<void> {
+  await sendMutation({
+    type: "reorder_collection",
+    collection_id: collectionId,
+    new_position: newPosition,
+  });
 }
 
 export function listCollectionItems(collectionId: string): Promise<CollectionItem[]> {
-  return getPlatform().collections.listCollectionItems(collectionId);
+  return sendRead<CollectionItem[]>(
+    { type: "list_collection_items", collection_id: collectionId },
+    "collection_items",
+  );
 }
 
-export function addToCollection(collectionId: string, fingerprints: string[]): Promise<void> {
-  return getPlatform().collections.addToCollection(collectionId, fingerprints);
+export async function addToCollection(
+  collectionId: string,
+  fingerprints: string[],
+): Promise<void> {
+  await sendMutation({
+    type: "add_to_collection",
+    collection_id: collectionId,
+    fingerprints,
+  });
 }
 
-export function removeFromCollection(collectionId: string, fingerprints: string[]): Promise<void> {
-  return getPlatform().collections.removeFromCollection(collectionId, fingerprints);
+export async function removeFromCollection(
+  collectionId: string,
+  fingerprints: string[],
+): Promise<void> {
+  await sendMutation({
+    type: "remove_from_collection",
+    collection_id: collectionId,
+    fingerprints,
+  });
 }
