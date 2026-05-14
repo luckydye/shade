@@ -1,5 +1,5 @@
 import type { Collection, CollectionItem } from "shade-ui/src/bridge/index";
-import { requestToPromise, withStores } from "./indexed-db";
+import { requestToPromise, withStores } from "../indexed-db";
 
 interface CollectionsHandlers {
   listCollections(libraryId: string): Promise<Collection[]>;

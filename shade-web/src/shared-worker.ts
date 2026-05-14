@@ -16,7 +16,7 @@ let _worker: Worker | null = null;
 
 export function getSharedWorker(): Worker {
   if (!_worker) {
-    _worker = new Worker(new URL("./worker.ts", import.meta.url), {
+    _worker = new Worker(new URL("./worker/index.ts", import.meta.url), {
       type: "module",
       name: "shade-web-worker",
     });

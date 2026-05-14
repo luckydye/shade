@@ -1,4 +1,4 @@
-import { requestToPromise, withStores } from "./indexed-db";
+import { requestToPromise, withStores } from "../indexed-db";
 
 const DB_NAME = "shade-browser-ratings";
 const DB_VERSION = 1;
