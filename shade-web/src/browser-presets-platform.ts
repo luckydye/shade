@@ -153,9 +153,17 @@ async function loadBrowserPreset(name: string): Promise<BrowserPresetFile> {
   return assertPresetFile(record.file, normalizedName);
 }
 
+async function deleteBrowserPreset(name: string): Promise<void> {
+  const normalizedName = normalizePresetName(name);
+  await withStore("readwrite", async (store) => {
+    await requestToPromise(store.delete(normalizedName));
+  });
+}
+
 export const browserPresetsPlatform: BrowserPresetsPlatform = {
   listPresets: listBrowserPresets,
   savePreset: saveBrowserPreset,
   renamePreset: renameBrowserPreset,
   loadPreset: loadBrowserPreset,
+  deletePreset: deleteBrowserPreset,
 };

@@ -8,6 +8,8 @@
     "build:dev": "../scripts/build-wasm-dev.sh"
   },
   "exports": {
-    ".": "./web/index.ts"
+    ".": "./web/index.ts",
+    "./pkg/shade_wasm.js": "./pkg/shade_wasm.js",
+    "./pkg/*": "./pkg/*"
   }
 }
