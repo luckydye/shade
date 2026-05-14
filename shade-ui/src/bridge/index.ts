@@ -646,152 +646,38 @@ export async function getLayerStack(): Promise<StackInfo> {
 }
 
 export async function applyEdit(params: Record<string, unknown>): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "apply_edit", ...params });
-    return;
-  }
-  await ensureWorkerReady();
-  const { op, layer_idx, ...rest } = params;
-  switch (op) {
-    case "crop":
-      await workerCall(
-        { type: "apply_crop", layerIdx: layer_idx, ...rest },
-        "crop_applied",
-      );
-      break;
-    case "tone":
-      await workerCall(
-        { type: "apply_tone", layerIdx: layer_idx, ...rest },
-        "tone_applied",
-      );
-      break;
-    case "color":
-      await workerCall(
-        { type: "apply_color", layerIdx: layer_idx, ...rest },
-        "color_applied",
-      );
-      break;
-    case "hsl":
-      await workerCall(
-        { type: "apply_hsl", layerIdx: layer_idx, ...rest },
-        "hsl_applied",
-      );
-      break;
-    case "curves":
-      await workerCall(
-        { type: "apply_curves", layerIdx: layer_idx, ...rest },
-        "curves_applied",
-      );
-      break;
-    case "ls_curve":
-      await workerCall(
-        { type: "apply_ls_curve", layerIdx: layer_idx, ...rest },
-        "ls_curve_applied",
-      );
-      break;
-    case "vignette":
-      await workerCall(
-        { type: "apply_vignette", layerIdx: layer_idx, ...rest },
-        "vignette_applied",
-      );
-      break;
-    case "sharpen":
-      await workerCall(
-        { type: "apply_sharpen", layerIdx: layer_idx, ...rest },
-        "sharpen_applied",
-      );
-      break;
-    case "grain":
-      await workerCall(
-        { type: "apply_grain", layerIdx: layer_idx, ...rest },
-        "grain_applied",
-      );
-      break;
-    case "glow":
-      await workerCall(
-        { type: "apply_glow", layerIdx: layer_idx, ...rest },
-        "glow_applied",
-      );
-      break;
-    case "denoise":
-      await workerCall(
-        { type: "apply_denoise", layerIdx: layer_idx, ...rest },
-        "denoise_applied",
-      );
-      break;
-    default:
-      throw new Error(`unsupported web edit op: ${String(op)}`);
-  }
+  await sendMutation({ type: "apply_edit", ...params });
+  return;
 }
 
 export async function setLayerVisible(idx: number, visible: boolean): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "set_layer_visible", idx, visible });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall(
-    { type: "set_layer_visible", layerIdx: idx, visible },
-    "layer_updated",
-  );
+  await sendMutation({ type: "set_layer_visible", idx, visible });
+  return;
 }
 
 export async function setLayerOpacity(idx: number, opacity: number): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "set_layer_opacity", idx, opacity });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall(
-    { type: "set_layer_opacity", layerIdx: idx, opacity },
-    "layer_updated",
-  );
+  await sendMutation({ type: "set_layer_opacity", idx, opacity });
+  return;
 }
 
 export async function renameLayer(idx: number, name: string | null): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "rename_layer", idx, name });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall({ type: "rename_layer", layerIdx: idx, name }, "layer_renamed");
+  await sendMutation({ type: "rename_layer", idx, name });
+  return;
 }
 
 export async function deleteLayer(idx: number): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "delete_layer", idx });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall({ type: "delete_layer", layerIdx: idx }, "layer_deleted");
+  await sendMutation({ type: "delete_layer", idx });
+  return;
 }
 
 export async function moveLayer(fromIdx: number, toIdx: number): Promise<number> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "move_layer", from: fromIdx, to: toIdx });
-    // New idx is derivable from from/to; callers use getMovedLayerIndex().
-    return toIdx > fromIdx ? toIdx - 1 : toIdx;
-  }
-  await ensureWorkerReady();
-  const result = await workerCall<{ layerIdx: number }>(
-    { type: "move_layer", fromIdx, toIdx },
-    "layer_moved",
-  );
-  return result.layerIdx;
+  await sendMutation({ type: "move_layer", from: fromIdx, to: toIdx });
+  // New idx is derivable from from/to; callers use getMovedLayerIndex().
+  return toIdx > fromIdx ? toIdx - 1 : toIdx;
 }
 
 export async function listPictures(): Promise<string[]> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<string[]>({ type: "list_pictures" }, "pictures");
-  }
-  return [];
+  return sendRead<string[]>({ type: "list_pictures" }, "pictures");
 }
 
 export type LibraryMode = "browse" | "sync";
@@ -980,14 +866,10 @@ export interface MediaRatingParams {
 }
 
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<MediaLibrary[]>(
-      { type: "list_media_libraries" },
-      "media_libraries",
-    );
-  }
-  return getBrowserPlatform().media.listMediaLibraries();
+  return sendRead<MediaLibrary[]>(
+    { type: "list_media_libraries" },
+    "media_libraries",
+  );
 }
 
 interface RawLibraryImage {
@@ -1022,15 +904,11 @@ function normalizeLibraryImage(raw: RawLibraryImage): LibraryImage {
 }
 
 export async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const raws = await sendChunkedRead<RawLibraryImage>(
-      { type: "list_library_images", library_id: libraryId },
-      "library_images_chunk",
-    );
-    return { items: raws.map(normalizeLibraryImage), is_complete: true };
-  }
-  return getBrowserPlatform().media.listLibraryImages(libraryId);
+  const raws = await sendChunkedRead<RawLibraryImage>(
+    { type: "list_library_images", library_id: libraryId },
+    "library_images_chunk",
+  );
+  return { items: raws.map(normalizeLibraryImage), is_complete: true };
 }
 
 async function awaitMediaLibraryUpserted(): Promise<MediaLibrary> {
@@ -1045,19 +923,12 @@ async function awaitMediaLibraryUpserted(): Promise<MediaLibrary> {
 export async function addMediaLibrary(
   path: string | BrowserDirectoryHandle,
 ): Promise<MediaLibrary> {
-  if (await isTauriRuntime()) {
-    if (typeof path !== "string") {
-      throw new Error("expected a filesystem path in the Tauri runtime");
-    }
-    const inv = await getTauriInvoke();
-    const upserted = awaitMediaLibraryUpserted();
-    await sendMutation({ type: "add_media_library", path });
-    return upserted;
+  if (typeof path !== "string") {
+    throw new Error("expected a filesystem path in the Tauri runtime");
   }
-  if (typeof path === "string") {
-    throw new Error("expected a directory handle in the browser runtime");
-  }
-  return getBrowserPlatform().media.addMediaLibrary(path);
+  const upserted = awaitMediaLibraryUpserted();
+  await sendMutation({ type: "add_media_library", path });
+  return upserted;
 }
 
 export async function addS3MediaLibrary(
@@ -1163,12 +1034,8 @@ export async function deleteMediaLibraryItem(path: string): Promise<void> {
 }
 
 export async function removeMediaLibrary(id: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "remove_media_library", id });
-    return;
-  }
-  await getBrowserPlatform().media.removeMediaLibrary(id);
+  await sendMutation({ type: "remove_media_library", id });
+  return;
 }
 
 export function getCachedLocalLibraryItems(libraryId: string): Promise<LibraryImage[]> {
@@ -1271,15 +1138,11 @@ export async function syncLibrary(libraryId: string): Promise<void> {
 }
 
 export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({
-      type: "set_media_library_order",
-      library_order: libraryOrder,
-    });
-    return;
-  }
-  throw new Error("setMediaLibraryOrder is only implemented for Tauri");
+  await sendMutation({
+    type: "set_media_library_order",
+    library_order: libraryOrder,
+  });
+  return;
 }
 
 export async function refreshLibraryIndex(libraryId: string): Promise<void> {
@@ -1479,126 +1342,66 @@ async function applyBrowserPresetLayer(layer: BrowserPresetLayer) {
 }
 
 export async function listPresets(): Promise<PresetInfo[]> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<PresetInfo[]>({ type: "list_presets" }, "presets");
-  }
-  return getBrowserPlatform().presets.listPresets();
+  return sendRead<PresetInfo[]>({ type: "list_presets" }, "presets");
 }
 
 export async function savePreset(name: string): Promise<PresetInfo | void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "save_preset", name });
-    // The new preset's metadata is delivered via the PresetListChanged
-    // channel notification; callers no longer receive a PresetInfo here.
-    return;
-  }
-  const stack = await getLayerStack();
-  return getBrowserPlatform().presets.savePreset(name, {
-    version: 1,
-    layers: serializeBrowserPresetLayers(stack.layers),
-  } satisfies BrowserPresetFile);
+  await sendMutation({ type: "save_preset", name });
+  // The new preset's metadata is delivered via the PresetListChanged
+  // channel notification; callers no longer receive a PresetInfo here.
+  return;
 }
 
 export async function getSnapshotPresetJson(
   fingerprint: string | null,
   imagePath: string,
 ): Promise<string | null> {
-  if (await isTauriRuntime()) {
-    if (!fingerprint) return null;
-    const inv = await getTauriInvoke();
-    return sendRead<string | null>(
-      { type: "get_snapshot_preset_json", fingerprint },
-      "snapshot_preset_json",
-    );
-  }
-  const snapshot = await getBrowserPlatform().snapshots.getCurrentSnapshot(imagePath);
-  if (!snapshot) return null;
-  return JSON.stringify({ version: 1, layers: snapshot.layers } satisfies BrowserPresetFile);
+  if (!fingerprint) return null;
+  return sendRead<string | null>(
+    { type: "get_snapshot_preset_json", fingerprint },
+    "snapshot_preset_json",
+  );
 }
 
 export async function serializeCurrentPreset(): Promise<string> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const tempName = "__clipboard_serialize__";
-    await sendMutation({ type: "save_preset", name: tempName });
-    const json = await sendRead<string>(
-      { type: "get_preset_json", name: tempName },
-      "preset_json",
-    );
-    await sendMutation({ type: "delete_preset", name: tempName });
-    return json;
-  }
-  const stack = await getLayerStack();
-  return JSON.stringify({
-    version: 1,
-    layers: serializeBrowserPresetLayers(stack.layers),
-  } satisfies BrowserPresetFile);
+  const tempName = "__clipboard_serialize__";
+  await sendMutation({ type: "save_preset", name: tempName });
+  const json = await sendRead<string>(
+    { type: "get_preset_json", name: tempName },
+    "preset_json",
+  );
+  await sendMutation({ type: "delete_preset", name: tempName });
+  return json;
 }
 
 export async function savePresetFromJson(name: string, json: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "save_preset_from_json", name, json });
-    return;
-  }
-  const data: BrowserPresetFile = JSON.parse(json);
-  await getBrowserPlatform().presets.savePreset(name, data);
+  await sendMutation({ type: "save_preset_from_json", name, json });
+  return;
 }
 
 export async function renamePreset(oldName: string, newName: string): Promise<PresetInfo | void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "rename_preset", old_name: oldName, new_name: newName });
-    return;
-  }
-  return getBrowserPlatform().presets.renamePreset(oldName, newName);
+  await sendMutation({ type: "rename_preset", old_name: oldName, new_name: newName });
+  return;
 }
 
 export async function deletePreset(name: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "delete_preset", name });
-    return;
-  }
-  await getBrowserPlatform().presets.deletePreset(name);
+  await sendMutation({ type: "delete_preset", name });
+  return;
 }
 
 export async function loadPreset(name: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "load_preset", name });
-    return;
-  }
-  const preset = await getBrowserPlatform().presets.loadPreset(name);
-  const stack = await getLayerStack();
-  if (!stack.layers.some((layer) => layer.kind === "image")) {
-    throw new Error("cannot load a preset without a loaded image");
-  }
-  for (let idx = stack.layers.length - 1; idx >= 0; idx -= 1) {
-    if (stack.layers[idx]?.kind !== "image") {
-      await deleteLayer(idx);
-    }
-  }
-  for (const layer of preset.layers) {
-    await applyBrowserPresetLayer(layer);
-  }
+  await sendMutation({ type: "load_preset", name });
+  return;
 }
 
 export async function applyPresetSnapshot(
   name: string,
   imagePath?: string | null,
 ): Promise<EditSnapshotInfo | void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "apply_preset_snapshot", name });
-    // Snapshot id is no longer returned through invoke; a future
-    // `SnapshotSaved` ChannelMessage will surface it for callers that need it.
-    return;
-  }
-  await loadPreset(name);
-  return saveSnapshot(imagePath);
+  await sendMutation({ type: "apply_preset_snapshot", name });
+  // Snapshot id is no longer returned through invoke; a future
+  // `SnapshotSaved` ChannelMessage will surface it for callers that need it.
+  return;
 }
 
 async function awaitBatchCompleted(kind: string): Promise<number> {
@@ -1615,31 +1418,19 @@ export async function batchApplyPresetSnapshot(
   items: { path: string; fingerprint: string | null }[],
   name: string,
 ): Promise<number> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const completed = awaitBatchCompleted("apply_preset_snapshot");
-    await sendMutation({
-      type: "batch_apply_preset_snapshot",
-      items,
-      name,
-    });
-    return completed;
-  }
-  for (const item of items) {
-    await loadPreset(name);
-    await saveSnapshot(item.path);
-  }
-  return items.length;
+  const completed = awaitBatchCompleted("apply_preset_snapshot");
+  await sendMutation({
+    type: "batch_apply_preset_snapshot",
+    items,
+    name,
+  });
+  return completed;
 }
 
 export async function batchClearEdits(paths: string[]): Promise<number> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const completed = awaitBatchCompleted("clear_edits");
-    await sendMutation({ type: "batch_clear_edits", paths });
-    return completed;
-  }
-  return paths.length;
+  const completed = awaitBatchCompleted("clear_edits");
+  await sendMutation({ type: "batch_clear_edits", paths });
+  return completed;
 }
 
 export interface BatchExportItem {
@@ -1652,42 +1443,23 @@ export async function batchExportImages(
   items: BatchExportItem[],
   targetDir: string,
 ): Promise<number> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const completed = awaitBatchCompleted("export_images");
-    await sendMutation({
-      type: "batch_export_images",
-      items,
-      target_dir: targetDir,
-    });
-    return completed;
-  }
-  throw new Error("batch export is only implemented for Tauri");
+  const completed = awaitBatchCompleted("export_images");
+  await sendMutation({
+    type: "batch_export_images",
+    items,
+    target_dir: targetDir,
+  });
+  return completed;
 }
 
 export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo | void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "save_snapshot" });
-    // Snapshot id surfaces through the SnapshotSaved channel notification.
-    return;
-  }
-  const stack = await getLayerStack();
-  if (!stack.layers.some((layer) => layer.kind === "image")) {
-    throw new Error("cannot save a snapshot without a loaded image");
-  }
-  return getBrowserPlatform().snapshots.saveSnapshot(
-    serializeBrowserPresetLayers(stack.layers),
-    imagePath ?? null,
-  );
+  await sendMutation({ type: "save_snapshot" });
+  // Snapshot id surfaces through the SnapshotSaved channel notification.
+  return;
 }
 
 export async function listSnapshots(imagePath?: string | null): Promise<SnapshotInfo[]> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<SnapshotInfo[]>({ type: "list_snapshots" }, "snapshots");
-  }
-  return getBrowserPlatform().snapshots.listSnapshots(imagePath ?? null);
+  return sendRead<SnapshotInfo[]>({ type: "list_snapshots" }, "snapshots");
 }
 
 export async function listMediaRatings(
@@ -1696,27 +1468,19 @@ export async function listMediaRatings(
   if (ids.length === 0) {
     return {};
   }
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<Record<string, number>>(
-      { type: "list_media_ratings", fingerprints: ids },
-      "media_ratings",
-    );
-  }
-  return getBrowserPlatform().ratings.listRatings(ids);
+  return sendRead<Record<string, number>>(
+    { type: "list_media_ratings", fingerprints: ids },
+    "media_ratings",
+  );
 }
 
 export async function setMediaRating(params: MediaRatingParams): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({
-      type: "set_media_rating",
-      fingerprint: params.fingerprint,
-      rating: params.rating,
-    });
-    return;
-  }
-  await getBrowserPlatform().ratings.setRating(params.fingerprint, params.rating);
+  await sendMutation({
+    type: "set_media_rating",
+    fingerprint: params.fingerprint,
+    rating: params.rating,
+  });
+  return;
 }
 
 /**
@@ -1739,65 +1503,25 @@ export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<
 }
 
 export async function loadSnapshot(id: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "load_snapshot", id });
-    return;
-  }
-  const record = await getBrowserPlatform().snapshots.getSnapshot(id);
-  const stack = await getLayerStack();
-  if (!stack.layers.some((layer) => layer.kind === "image")) {
-    throw new Error("cannot load a snapshot without a loaded image");
-  }
-  for (let idx = stack.layers.length - 1; idx >= 0; idx -= 1) {
-    if (stack.layers[idx]?.kind !== "image") {
-      await deleteLayer(idx);
-    }
-  }
-  for (const layer of record.layers) {
-    await applyBrowserPresetLayer(layer);
-  }
-  await getBrowserPlatform().snapshots.markSnapshotCurrent(id);
+  await sendMutation({ type: "load_snapshot", id });
+  return;
 }
 
 export async function getStackSnapshot(): Promise<string> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<string>({ type: "get_stack_snapshot" }, "stack_snapshot");
-  }
-  await ensureWorkerReady();
-  const result = await workerCall<{ data: string }>(
-    { type: "get_stack_snapshot" },
-    "stack_snapshot",
-  );
-  return result.data;
+  return sendRead<string>({ type: "get_stack_snapshot" }, "stack_snapshot");
 }
 
 export async function replaceStack(layersJson: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "replace_stack", layers_json: layersJson });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall({ type: "replace_stack", data: layersJson }, "stack_replaced");
+  await sendMutation({ type: "replace_stack", layers_json: layersJson });
+  return;
 }
 
 export async function addLayer(kind: string): Promise<number> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "add_layer", kind });
-    // New layer is always appended; the LayerStackSnapshot will surface the
-    // exact index. Callers should use `state.layers.length - 1` after the
-    // snapshot has been applied.
-    return -1;
-  }
-  await ensureWorkerReady();
-  const result = await workerCall<{ layerIdx: number }>(
-    { type: "add_layer", kind },
-    "layer_added",
-  );
-  return result.layerIdx;
+  await sendMutation({ type: "add_layer", kind });
+  // New layer is always appended; the LayerStackSnapshot will surface the
+  // exact index. Callers should use `state.layers.length - 1` after the
+  // snapshot has been applied.
+  return -1;
 }
 
 export interface LinearGradientMask {
@@ -1820,23 +1544,8 @@ export interface RadialGradientMask {
 export type GradientMaskParams = LinearGradientMask | RadialGradientMask;
 
 export async function applyGradientMask(params: GradientMaskParams): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "apply_gradient_mask", ...params });
-    return;
-  }
-  await ensureWorkerReady();
-  if (params.kind === "linear") {
-    await workerCall(
-      { type: "apply_linear_mask", layerIdx: params.layer_idx, ...params },
-      "mask_applied",
-    );
-    return;
-  }
-  await workerCall(
-    { type: "apply_radial_mask", layerIdx: params.layer_idx, ...params },
-    "mask_applied",
-  );
+  await sendMutation({ type: "apply_gradient_mask", ...params });
+  return;
 }
 
 // ── P2P Awareness & Sync ──────────────────────────────────────────────────────
@@ -1861,82 +1570,56 @@ export async function setLocalAwareness(
   fingerprint: string | null,
   snapshotId: string | null,
 ): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({
-      type: "set_local_awareness",
-      display_name: displayName,
-      fingerprint,
-      snapshot_id: snapshotId,
-    });
-    return;
-  }
-  throw new Error("setLocalAwareness is only implemented for Tauri");
+  await sendMutation({
+    type: "set_local_awareness",
+    display_name: displayName,
+    fingerprint,
+    snapshot_id: snapshotId,
+  });
+  return;
 }
 
 export async function getPeerAwareness(peerEndpointId: string): Promise<AwarenessState> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<AwarenessState>(
-      { type: "get_peer_awareness", peer_endpoint_id: peerEndpointId },
-      "peer_awareness",
-    );
-  }
-  throw new Error("getPeerAwareness is only implemented for Tauri");
+  return sendRead<AwarenessState>(
+    { type: "get_peer_awareness", peer_endpoint_id: peerEndpointId },
+    "peer_awareness",
+  );
 }
 
 export async function syncPeerSnapshots(
   peerEndpointId: string,
   fingerprint: string,
 ): Promise<SyncPeerSnapshotsResult> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return sendRead<SyncPeerSnapshotsResult>(
-      {
-        type: "sync_peer_snapshots",
-        peer_endpoint_id: peerEndpointId,
-        fingerprint,
-      },
-      "sync_peer_snapshots_result",
-    );
-  }
-  throw new Error("syncPeerSnapshots is only implemented for Tauri");
+  return sendRead<SyncPeerSnapshotsResult>(
+    {
+      type: "sync_peer_snapshots",
+      peer_endpoint_id: peerEndpointId,
+      fingerprint,
+    },
+    "sync_peer_snapshots_result",
+  );
 }
 
 export async function applyPeerMetadata(
   peerEndpointId: string,
   fingerprints: string[],
 ): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({
-      type: "apply_peer_metadata",
-      peer_endpoint_id: peerEndpointId,
-      fingerprints,
-    });
-    return;
-  }
-  throw new Error("applyPeerMetadata is only implemented for Tauri");
+  await sendMutation({
+    type: "apply_peer_metadata",
+    peer_endpoint_id: peerEndpointId,
+    fingerprints,
+  });
+  return;
 }
 
 export async function removeMask(idx: number): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "remove_mask", idx });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall({ type: "remove_mask", layerIdx: idx }, "mask_removed");
+  await sendMutation({ type: "remove_mask", idx });
+  return;
 }
 
 export async function createBrushMask(layerIdx: number): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({ type: "create_brush_mask", idx: layerIdx });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall({ type: "create_brush_mask", layerIdx }, "mask_applied");
+  await sendMutation({ type: "create_brush_mask", idx: layerIdx });
+  return;
 }
 
 export async function stampBrushMask(
@@ -1947,24 +1630,16 @@ export async function stampBrushMask(
   softness: number,
   erase: boolean,
 ): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await sendMutation({
-      type: "stamp_brush_mask",
-      layer_idx: layerIdx,
-      cx,
-      cy,
-      radius,
-      softness,
-      erase,
-    });
-    return;
-  }
-  await ensureWorkerReady();
-  await workerCall(
-    { type: "stamp_brush_mask", layerIdx, cx, cy, radius, softness, erase },
-    "mask_applied",
-  );
+  await sendMutation({
+    type: "stamp_brush_mask",
+    layer_idx: layerIdx,
+    cx,
+    cy,
+    radius,
+    softness,
+    erase,
+  });
+  return;
 }
 
 export interface MaskThumbnail {
