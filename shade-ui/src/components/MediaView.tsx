@@ -943,26 +943,20 @@ export const MediaView: Component = () => {
         await refetchLibraries();
       });
     });
-    let unlistenSyncProgress: (() => void) | null = null;
-    void listenLibrarySyncProgress((progress) => {
+    const unlistenSyncProgress = listenLibrarySyncProgress((progress) => {
       if (progress.completed >= progress.total) {
         setSyncProgress(null);
         void refetchItems();
       } else {
         setSyncProgress(progress);
       }
-    }).then((unlisten) => {
-      unlistenSyncProgress = unlisten;
     });
-    let unlistenExportProgress: (() => void) | null = null;
-    void listenBatchExportProgress((progress) => {
+    const unlistenExportProgress = listenBatchExportProgress((progress) => {
       if (progress.completed >= progress.total) {
         setExportProgress(null);
       } else {
         setExportProgress(progress);
       }
-    }).then((unlisten) => {
-      unlistenExportProgress = unlisten;
     });
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
@@ -974,8 +968,8 @@ export const MediaView: Component = () => {
       window.clearInterval(libraryRefreshTimer);
       stopP2pPolling();
       void unlistenPeerPaired?.();
-      unlistenSyncProgress?.();
-      unlistenExportProgress?.();
+      unlistenSyncProgress();
+      unlistenExportProgress();
       for (const src of thumbnailMemoryBuffer.values()) {
         if (src !== state.loadingMediaSrc) {
           URL.revokeObjectURL(src);
@@ -1307,27 +1301,21 @@ export const MediaView: Component = () => {
   });
 
   onMount(() => {
-    let unlistenScanComplete: (() => void) | null = null;
-    void listenLibraryScanComplete((libraryId) => {
+    const unlistenScanComplete = listenLibraryScanComplete((libraryId) => {
       const library = selectedLibrary();
       if (library?.id === libraryId) {
         void refetchItems();
       }
-    }).then((unlisten) => {
-      unlistenScanComplete = unlisten;
     });
-    let unlistenScanProgress: (() => void) | null = null;
-    void listenLibraryScanProgress((libraryId) => {
+    const unlistenScanProgress = listenLibraryScanProgress((libraryId) => {
       const library = selectedLibrary();
       if (library?.id === libraryId) {
         void refetchItems();
       }
-    }).then((unlisten) => {
-      unlistenScanProgress = unlisten;
     });
     onCleanup(() => {
-      unlistenScanComplete?.();
-      unlistenScanProgress?.();
+      unlistenScanComplete();
+      unlistenScanProgress();
     });
   });
 

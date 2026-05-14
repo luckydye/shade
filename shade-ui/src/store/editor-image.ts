@@ -553,7 +553,7 @@ export async function openImage(
   }
   let unlistenPhase: (() => void) | null = null;
   if (isS3) {
-    unlistenPhase = await bridge.listenImageOpenPhase((phase) => {
+    unlistenPhase = bridge.listenImageOpenPhase((phase) => {
       if (phase === "processing") {
         setState("isDownloading", false);
       }

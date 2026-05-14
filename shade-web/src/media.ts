@@ -12,7 +12,7 @@ import {
   loadBrowserEncodedBytes,
   loadBrowserThumbnailBytes,
 } from "./image-preview";
-import { requestToPromise, withStores } from "./indexed-db";
+import { requestToPromise, withStores } from "shade-wasm/indexed-db";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;

@@ -26,7 +26,7 @@ import {
   normalizeTags,
 } from "shade-ui/src/cache-utils";
 import { browserMediaPlatform } from "./media";
-import { requestToPromise, withStores } from "./indexed-db";
+import { requestToPromise, withStores } from "shade-wasm/indexed-db";
 
 const DB_NAME = "shade-local-library-cache";
 const DB_VERSION = 2;
