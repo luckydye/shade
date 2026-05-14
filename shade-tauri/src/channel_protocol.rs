@@ -160,6 +160,20 @@ pub enum ChannelMessage {
     // The configured media-library list changed (add/remove/reorder/mode).
     // Frontend re-queries `list_media_libraries`.
     MediaLibrariesChanged,
+
+    // Response to a `ReadRequest` dispatched through `dispatch_read`. The
+    // `read_id` correlates with the originating request; `kind` discriminates
+    // the payload shape and `value` carries the typed result as JSON.
+    ReadResponse {
+        read_id: u32,
+        kind: String,
+        value: serde_json::Value,
+    },
+    // Error variant for failed reads — same correlation key.
+    ReadFailed {
+        read_id: u32,
+        message: String,
+    },
 }
 
 /// Editor-state mutation requests (JS → Rust). Sent through the single
@@ -328,4 +342,29 @@ pub enum MutationRequest {
         #[serde(default)]
         snapshot_id: Option<String>,
     },
+}
+
+/// Read requests (JS → Rust). Sent through `dispatch_read`; results come back
+/// over the coordination channel as `ChannelMessage::ReadResponse` keyed by
+/// `read_id`. Binary reads (`get_mask_thumbnail`, `get_peer_image_bytes`) and
+/// `get_layer_stack` (already pushed reactively via `LayerStackSnapshot`) are
+/// intentionally excluded.
+#[derive(serde::Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReadRequest {
+    ListPictures,
+    ListMediaLibraries,
+    ListMediaRatings { fingerprints: Vec<String> },
+    ListPresets,
+    ListSnapshots,
+    ListCollections { library_id: String },
+    ListCollectionItems { collection_id: String },
+    ListPeerPictures { peer_endpoint_id: String },
+    GetLocalPeerDiscoverySnapshot,
+    GetS3MediaLibrary { library_id: String },
+    GetPresetJson { name: String },
+    GetSnapshotPresetJson { fingerprint: String },
+    GetPeerAwareness { peer_endpoint_id: String },
+    GetStackSnapshot,
+    SyncPeerSnapshots { peer_endpoint_id: String, fingerprint: String },
 }

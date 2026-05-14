@@ -4,7 +4,7 @@ import type {
   CollectionsPlatform,
 } from "shade-ui/src/bridge/index";
 import { getTauriPlatform } from "shade-ui/src/bridge/index";
-import { sendMutation } from "shade-ui/src/bridge/channel";
+import { sendMutation, sendRead } from "shade-ui/src/bridge/channel";
 
 function inv<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return getTauriPlatform().invoke<T>(cmd, args);
@@ -16,7 +16,11 @@ function rawInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown
 
 export const tauriCollectionsPlatform: CollectionsPlatform = {
   listCollections(libraryId) {
-    return inv<Collection[]>("list_collections", { libraryId });
+    return sendRead<Collection[]>(
+      rawInvoke,
+      { type: "list_collections", library_id: libraryId },
+      "collections",
+    );
   },
   // `create_collection` stays as a regular invoke — the caller needs the
   // freshly-minted Collection (id/position/created_at) right away.
@@ -44,7 +48,11 @@ export const tauriCollectionsPlatform: CollectionsPlatform = {
     });
   },
   listCollectionItems(collectionId) {
-    return inv<CollectionItem[]>("list_collection_items", { collectionId });
+    return sendRead<CollectionItem[]>(
+      rawInvoke,
+      { type: "list_collection_items", collection_id: collectionId },
+      "collection_items",
+    );
   },
   async addToCollection(collectionId, fingerprints) {
     await sendMutation(rawInvoke, {

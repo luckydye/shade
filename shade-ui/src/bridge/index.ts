@@ -544,7 +544,12 @@ export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscover
     };
   }
   const inv = await getTauriInvoke();
-  return inv("get_local_peer_discovery_snapshot") as Promise<LocalPeerDiscoverySnapshot>;
+  const { sendRead } = await import("./channel");
+  return sendRead<LocalPeerDiscoverySnapshot>(
+    inv,
+    { type: "get_local_peer_discovery_snapshot" },
+    "local_peer_discovery_snapshot",
+  );
 }
 
 export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
@@ -566,9 +571,12 @@ export async function listPeerPictures(
     return [];
   }
   const inv = await getTauriInvoke();
-  return inv("list_peer_pictures", {
-    peerEndpointId: peer_endpoint_id,
-  }) as Promise<SharedPicture[]>;
+  const { sendRead } = await import("./channel");
+  return sendRead<SharedPicture[]>(
+    inv,
+    { type: "list_peer_pictures", peer_endpoint_id },
+    "peer_pictures",
+  );
 }
 
 export async function openPeerImage(
@@ -778,8 +786,9 @@ export async function moveLayer(fromIdx: number, toIdx: number): Promise<number>
 
 export async function listPictures(): Promise<string[]> {
   if (await isTauriRuntime()) {
+    const { sendRead } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("list_pictures") as Promise<string[]>;
+    return sendRead<string[]>(inv, { type: "list_pictures" }, "pictures");
   }
   return [];
 }
@@ -971,8 +980,13 @@ export interface MediaRatingParams {
 
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
   if (await isTauriRuntime()) {
+    const { sendRead } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("list_media_libraries") as Promise<MediaLibrary[]>;
+    return sendRead<MediaLibrary[]>(
+      inv,
+      { type: "list_media_libraries" },
+      "media_libraries",
+    );
   }
   return getBrowserPlatform().media.listMediaLibraries();
 }
@@ -1053,7 +1067,12 @@ export async function getS3MediaLibrary(
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
   const inv = await getTauriInvoke();
-  return inv("get_s3_media_library", { libraryId }) as Promise<S3MediaLibraryInput>;
+  const { sendRead } = await import("./channel");
+  return sendRead<S3MediaLibraryInput>(
+    inv,
+    { type: "get_s3_media_library", library_id: libraryId },
+    "s3_media_library",
+  );
 }
 
 export async function updateS3MediaLibrary(
@@ -1457,8 +1476,9 @@ async function applyBrowserPresetLayer(layer: BrowserPresetLayer) {
 
 export async function listPresets(): Promise<PresetInfo[]> {
   if (await isTauriRuntime()) {
+    const { sendRead } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("list_presets") as Promise<PresetInfo[]>;
+    return sendRead<PresetInfo[]>(inv, { type: "list_presets" }, "presets");
   }
   return getBrowserPlatform().presets.listPresets();
 }
@@ -1486,7 +1506,12 @@ export async function getSnapshotPresetJson(
   if (await isTauriRuntime()) {
     if (!fingerprint) return null;
     const inv = await getTauriInvoke();
-    return inv("get_snapshot_preset_json", { fingerprint }) as Promise<string | null>;
+    const { sendRead } = await import("./channel");
+    return sendRead<string | null>(
+      inv,
+      { type: "get_snapshot_preset_json", fingerprint },
+      "snapshot_preset_json",
+    );
   }
   const snapshot = await getBrowserPlatform().snapshots.getCurrentSnapshot(imagePath);
   if (!snapshot) return null;
@@ -1499,7 +1524,12 @@ export async function serializeCurrentPreset(): Promise<string> {
     const inv = await getTauriInvoke();
     const tempName = "__clipboard_serialize__";
     await sendMutation(inv, { type: "save_preset", name: tempName });
-    const json = (await inv("get_preset_json", { name: tempName })) as string;
+    const { sendRead } = await import("./channel");
+    const json = await sendRead<string>(
+      inv,
+      { type: "get_preset_json", name: tempName },
+      "preset_json",
+    );
     await sendMutation(inv, { type: "delete_preset", name: tempName });
     return json;
   }
@@ -1639,8 +1669,9 @@ export async function saveSnapshot(imagePath?: string | null): Promise<EditSnaps
 
 export async function listSnapshots(imagePath?: string | null): Promise<SnapshotInfo[]> {
   if (await isTauriRuntime()) {
+    const { sendRead } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("list_snapshots") as Promise<SnapshotInfo[]>;
+    return sendRead<SnapshotInfo[]>(inv, { type: "list_snapshots" }, "snapshots");
   }
   return getBrowserPlatform().snapshots.listSnapshots(imagePath ?? null);
 }
@@ -1653,9 +1684,12 @@ export async function listMediaRatings(
   }
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("list_media_ratings", {
-      fingerprints: ids,
-    }) as Promise<Record<string, number>>;
+    const { sendRead } = await import("./channel");
+    return sendRead<Record<string, number>>(
+      inv,
+      { type: "list_media_ratings", fingerprints: ids },
+      "media_ratings",
+    );
   }
   return getBrowserPlatform().ratings.listRatings(ids);
 }
@@ -1718,8 +1752,9 @@ export async function loadSnapshot(id: string): Promise<void> {
 
 export async function getStackSnapshot(): Promise<string> {
   if (await isTauriRuntime()) {
+    const { sendRead } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("get_stack_snapshot") as Promise<string>;
+    return sendRead<string>(inv, { type: "get_stack_snapshot" }, "stack_snapshot");
   }
   await ensureWorkerReady();
   const result = await workerCall<{ data: string }>(
@@ -1837,7 +1872,12 @@ export async function setLocalAwareness(
 export async function getPeerAwareness(peerEndpointId: string): Promise<AwarenessState> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("get_peer_awareness", { peerEndpointId }) as Promise<AwarenessState>;
+    const { sendRead } = await import("./channel");
+    return sendRead<AwarenessState>(
+      inv,
+      { type: "get_peer_awareness", peer_endpoint_id: peerEndpointId },
+      "peer_awareness",
+    );
   }
   throw new Error("getPeerAwareness is only implemented for Tauri");
 }
@@ -1848,10 +1888,16 @@ export async function syncPeerSnapshots(
 ): Promise<SyncPeerSnapshotsResult> {
   if (await isTauriRuntime()) {
     const inv = await getTauriInvoke();
-    return inv("sync_peer_snapshots", {
-      peerEndpointId,
-      fingerprint,
-    }) as Promise<SyncPeerSnapshotsResult>;
+    const { sendRead } = await import("./channel");
+    return sendRead<SyncPeerSnapshotsResult>(
+      inv,
+      {
+        type: "sync_peer_snapshots",
+        peer_endpoint_id: peerEndpointId,
+        fingerprint,
+      },
+      "sync_peer_snapshots_result",
+    );
   }
   throw new Error("syncPeerSnapshots is only implemented for Tauri");
 }

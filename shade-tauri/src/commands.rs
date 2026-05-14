@@ -6484,6 +6484,108 @@ pub(crate) async fn finalize_layer_stack_mutation<R: tauri::Runtime>(
     Ok(id)
 }
 
+/// Single JS → Rust read dispatcher. Each variant of
+/// [`ReadRequest`](crate::channel_protocol::ReadRequest) is routed to the
+/// corresponding read fn; the result is serialised and pushed back over the
+/// coordination channel as `ChannelMessage::ReadResponse` keyed by `read_id`.
+/// Failures land as `ChannelMessage::ReadFailed`.
+#[tauri::command]
+pub async fn dispatch_read<R: tauri::Runtime>(
+    read_id: u32,
+    request: crate::channel_protocol::ReadRequest,
+    state: tauri::State<'_, Mutex<EditorState>>,
+    app: tauri::AppHandle<R>,
+    p2p: tauri::State<'_, crate::P2pState>,
+) -> Result<(), String> {
+    use crate::channel_protocol::ReadRequest as R;
+    let coord = crate::channel_server::channel_from_app(&app);
+    let outcome: Result<(&'static str, serde_json::Value), String> = match request {
+        R::ListPictures => list_pictures(app.clone())
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("pictures", v)),
+        R::ListMediaLibraries => list_media_libraries(app.clone())
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("media_libraries", v)),
+        R::ListMediaRatings { fingerprints } => list_media_ratings(fingerprints)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("media_ratings", v)),
+        R::ListPresets => list_presets()
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("presets", v)),
+        R::ListSnapshots => list_snapshots(state)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("snapshots", v)),
+        R::ListCollections { library_id } => list_collections(library_id)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("collections", v)),
+        R::ListCollectionItems { collection_id } => list_collection_items(collection_id)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("collection_items", v)),
+        R::ListPeerPictures { peer_endpoint_id } => {
+            list_peer_pictures(peer_endpoint_id, p2p)
+                .await
+                .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+                .map(|v| ("peer_pictures", v))
+        }
+        R::GetLocalPeerDiscoverySnapshot => get_local_peer_discovery_snapshot(p2p)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("local_peer_discovery_snapshot", v)),
+        R::GetS3MediaLibrary { library_id } => get_s3_media_library(library_id)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("s3_media_library", v)),
+        R::GetPresetJson { name } => get_preset_json(name)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("preset_json", v)),
+        R::GetSnapshotPresetJson { fingerprint } => get_snapshot_preset_json(fingerprint)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("snapshot_preset_json", v)),
+        R::GetPeerAwareness { peer_endpoint_id } => {
+            get_peer_awareness(peer_endpoint_id, p2p)
+                .await
+                .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+                .map(|v| ("peer_awareness", v))
+        }
+        R::GetStackSnapshot => get_stack_snapshot(state)
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("stack_snapshot", v)),
+        R::SyncPeerSnapshots {
+            peer_endpoint_id,
+            fingerprint,
+        } => sync_peer_snapshots(peer_endpoint_id, fingerprint, p2p)
+            .await
+            .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            .map(|v| ("sync_peer_snapshots_result", v)),
+    };
+    match outcome {
+        Ok((kind, value)) => {
+            coord
+                .send(crate::ChannelMessage::ReadResponse {
+                    read_id,
+                    kind: kind.to_string(),
+                    value,
+                })
+                .await;
+        }
+        Err(message) => {
+            coord
+                .send(crate::ChannelMessage::ReadFailed { read_id, message })
+                .await;
+        }
+    }
+    Ok(())
+}
+
 /// Single JS → Rust mutation dispatcher. Each variant of
 /// [`MutationRequest`](crate::channel_protocol::MutationRequest) is routed to
 /// the corresponding command body; persistence and the resulting

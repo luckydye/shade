@@ -89,7 +89,9 @@ export type ChannelMessage =
   | { type: "media_metadata_changed"; fingerprints: string[] }
   | { type: "collection_list_changed" }
   | { type: "snapshot_saved"; fingerprint: string | null; id: string }
-  | { type: "media_libraries_changed" };
+  | { type: "media_libraries_changed" }
+  | { type: "read_response"; read_id: number; kind: string; value: unknown }
+  | { type: "read_failed"; read_id: number; message: string };
 
 type MessageType = ChannelMessage["type"];
 
@@ -268,4 +270,79 @@ export async function sendMutation(
   request: MutationRequest,
 ): Promise<void> {
   await invoke("dispatch_mutation", { request });
+}
+
+// ── Read protocol ────────────────────────────────────────────────────────────
+// Reads (list_*/get_*) ride the same bidirectional channel concept as
+// mutations: the consumer sends a request through `dispatch_read` and the
+// producer pushes the typed result back as a `read_response` channel message
+// keyed by `read_id`. Worker-portable: a future backend can ferry the same
+// request/result envelopes over `postMessage`.
+
+export type ReadRequest =
+  | { type: "list_pictures" }
+  | { type: "list_media_libraries" }
+  | { type: "list_media_ratings"; fingerprints: string[] }
+  | { type: "list_presets" }
+  | { type: "list_snapshots" }
+  | { type: "list_collections"; library_id: string }
+  | { type: "list_collection_items"; collection_id: string }
+  | { type: "list_peer_pictures"; peer_endpoint_id: string }
+  | { type: "get_local_peer_discovery_snapshot" }
+  | { type: "get_s3_media_library"; library_id: string }
+  | { type: "get_preset_json"; name: string }
+  | { type: "get_snapshot_preset_json"; fingerprint: string }
+  | { type: "get_peer_awareness"; peer_endpoint_id: string }
+  | { type: "get_stack_snapshot" }
+  | {
+      type: "sync_peer_snapshots";
+      peer_endpoint_id: string;
+      fingerprint: string;
+    };
+
+let nextReadId = 1;
+
+/**
+ * Send a read request and resolve with the typed payload value. Caller
+ * supplies the expected `kind` discriminant — if Rust returns a different
+ * kind the Promise rejects.
+ */
+export async function sendRead<T>(
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
+  request: ReadRequest,
+  expectedKind: string,
+): Promise<T> {
+  const readId = nextReadId++;
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const unsubResponse = onChannelMessage("read_response", (msg) => {
+      if (msg.read_id !== readId || settled) return;
+      settled = true;
+      unsubResponse();
+      unsubFailed();
+      if (msg.kind !== expectedKind) {
+        reject(
+          new Error(
+            `read_response kind mismatch: expected ${expectedKind}, got ${msg.kind}`,
+          ),
+        );
+        return;
+      }
+      resolve(msg.value as T);
+    });
+    const unsubFailed = onChannelMessage("read_failed", (msg) => {
+      if (msg.read_id !== readId || settled) return;
+      settled = true;
+      unsubResponse();
+      unsubFailed();
+      reject(new Error(msg.message));
+    });
+    invoke("dispatch_read", { readId, request }).catch((err) => {
+      if (settled) return;
+      settled = true;
+      unsubResponse();
+      unsubFailed();
+      reject(err);
+    });
+  });
 }
