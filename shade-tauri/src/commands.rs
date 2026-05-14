@@ -6235,14 +6235,6 @@ impl<R: tauri::Runtime> shade_p2p::PeerProvider for AppPeerProvider<R> {
     }
 }
 
-#[tauri::command]
-pub async fn get_layer_stack(
-    state: tauri::State<'_, Mutex<EditorState>>,
-) -> Result<LayerStackInfo, String> {
-    let st = lock_editor_state(&state)?;
-    Ok(build_layer_stack_info(&st))
-}
-
 pub(crate) fn build_layer_stack_info(st: &EditorState) -> LayerStackInfo {
     let layers = st
         .stack

@@ -627,10 +627,17 @@ async function _loadEncodedBytes(
   };
 }
 
+/**
+ * Browser-only: synchronously fetch the layer stack via the worker. In the
+ * Tauri runtime the authoritative stack is pushed reactively over the
+ * coordination channel as `LayerStackSnapshot` and read from
+ * `editor-store`; calling this on Tauri is a programming error.
+ */
 export async function getLayerStack(): Promise<StackInfo> {
   if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return inv("get_layer_stack") as Promise<StackInfo>;
+    throw new Error(
+      "getLayerStack is browser-only — Tauri receives the stack via LayerStackSnapshot",
+    );
   }
   await ensureWorkerReady();
   const result = await workerCall<{ data: string }>({ type: "get_stack" }, "stack");

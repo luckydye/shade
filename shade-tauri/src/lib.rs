@@ -141,7 +141,6 @@ pub fn run() {
             commands::export_image,
             commands::dispatch_mutation,
             commands::dispatch_read,
-            commands::get_layer_stack,
             commands::get_peer_image_bytes,
             commands::open_peer_image,
             commands::get_mask_thumbnail,
