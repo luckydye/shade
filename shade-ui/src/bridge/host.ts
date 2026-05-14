@@ -17,7 +17,16 @@
  * consumer.
  */
 
-import type { LibraryImage, LibraryImageListing, SharedPicture } from "./index";
+import type {
+  LibraryImage,
+  LibraryImageListing,
+  MaskThumbnail,
+  OpenImageInfo,
+  PreviewFrame,
+  PreviewRequest,
+  SharedPicture,
+  StackInfo,
+} from "./index";
 
 export type DragDropPayloadType = "enter" | "over" | "drop" | "leave";
 
@@ -63,6 +72,26 @@ export interface HostHooks {
   ): Promise<string>;
   resetLocalThumbnailFailure(path: string): void;
   resetCameraThumbnailFailure(path: string): void;
+
+  // ── Image lifecycle (open/export/preview/mask thumbnail) ────────────
+  // Truly platform-specific: Tauri uses direct invoke, web uses a worker
+  // pipeline backed by OPFS files + wasm decode.
+  openImage(path: string): Promise<OpenImageInfo>;
+  openImageFile(file: File): Promise<OpenImageInfo>;
+  openPeerImage(
+    peerEndpointId: string,
+    picture: SharedPicture,
+  ): Promise<OpenImageInfo>;
+  prepareImageOpen(path: string): Promise<void>;
+  exportImage(path: string): Promise<void>;
+  renderPreview(request?: PreviewRequest): Promise<PreviewFrame>;
+  getLayerStack(): Promise<StackInfo>;
+  getMaskThumbnail(
+    layerIdx: number,
+    maxW: number,
+    maxH: number,
+  ): Promise<MaskThumbnail>;
+  restoreCurrentBrowserSnapshot(imagePath: string): Promise<boolean>;
 }
 
 let _host: HostHooks | null = null;

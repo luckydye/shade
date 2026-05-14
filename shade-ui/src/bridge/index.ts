@@ -11,6 +11,19 @@ import {
 } from "./channel";
 import { getHostHooks } from "./host";
 
+/**
+ * Runtime detection. Tauri exposes `__TAURI_INTERNALS__` on `window`; the web
+ * build does not. Synchronous, no-throw — safe to call before any host hooks
+ * are installed (returns `false` if window is unavailable, e.g. inside a worker).
+ */
+export function isTauriRuntime(): boolean {
+  return (
+    typeof globalThis !== "undefined" &&
+    typeof (globalThis as { window?: unknown }).window !== "undefined" &&
+    "__TAURI_INTERNALS__" in (globalThis as { window: object }).window
+  );
+}
+
 export type FileSystemPermissionMode = "read" | "readwrite";
 export type FileSystemPermissionState = "granted" | "denied" | "prompt";
 
@@ -41,152 +54,6 @@ export interface NativeDragDropPayload {
   paths: string[];
 }
 
-export interface TauriPlatform {
-  kind: "tauri";
-  isTauri(): boolean;
-  invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
-}
-
-export interface BrowserPlatform {
-  kind: "browser";
-  createWorker(): Worker;
-  media: BrowserMediaPlatform;
-  // `snapshots` survives on the platform interface because
-  // `restoreCurrentBrowserSnapshot` reads it on the main thread to
-  // coordinate snapshot-on-open. Editor-state snapshot writes go through
-  // the unified `MutationRequest` protocol; this field is read-only in
-  // practice.
-  snapshots: BrowserSnapshotsPlatform;
-}
-
-export type Platform = BrowserPlatform | TauriPlatform;
-
-export async function isTauriRuntime() {
-  return getPlatform().kind === "tauri";
-}
-
-// ── Browser worker path ──────────────────────────────────────────────────────
-let worker: Worker | null = null;
-let nextWorkerRequestId = 1;
-const pendingRequests = new Map<
-  number,
-  {
-    responseType: string;
-    resolve: (value: unknown) => void;
-    reject: (reason: unknown) => void;
-  }
->();
-let workerReady = false;
-let workerReadyResolve: (() => void) | null = null;
-const workerReadyPromise = new Promise<void>((res) => {
-  workerReadyResolve = res;
-});
-
-function getWorker(): Worker {
-  if (!worker) {
-    worker = getBrowserPlatform().createWorker();
-    worker.onmessage = (e: MessageEvent) => {
-      const msg = e.data;
-      if (msg.type === "ready") {
-        workerReady = true;
-        workerReadyResolve?.();
-        return;
-      }
-      const requestId =
-        typeof msg.requestId === "number" ? (msg.requestId as number) : null;
-      if (requestId === null) {
-        return;
-      }
-      const pending = pendingRequests.get(requestId);
-      if (!pending) {
-        return;
-      }
-      pendingRequests.delete(requestId);
-      if (msg.type === "error") {
-        pending.reject(new Error(String(msg.message ?? "worker request failed")));
-        return;
-      }
-      if (msg.type !== pending.responseType) {
-        pending.reject(
-          new Error(
-            `unexpected worker response: expected ${pending.responseType}, got ${msg.type}`,
-          ),
-        );
-        return;
-      }
-      pending.resolve(msg);
-    };
-    worker.postMessage({ type: "init" });
-  }
-  return worker;
-}
-
-function workerCall<T>(
-  message: Record<string, unknown>,
-  responseType: string,
-  transfer: Transferable[] = [],
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const requestId = nextWorkerRequestId;
-    nextWorkerRequestId += 1;
-    pendingRequests.set(requestId, {
-      responseType,
-      resolve: resolve as (v: unknown) => void,
-      reject,
-    });
-    getWorker().postMessage({ ...message, requestId }, transfer);
-  });
-}
-
-async function ensureWorkerReady() {
-  getWorker();
-  await workerReadyPromise;
-}
-
-function previewFrameToImageData(frame: PreviewFrame) {
-  if (frame.kind === "rgba-float16") {
-    return new ImageData(frame.pixels as any, frame.width, frame.height, {
-      pixelFormat: "rgba-float16",
-      colorSpace: frame.colorSpace,
-    } as any);
-  }
-  return new ImageData(
-    new Uint8ClampedArray(
-      frame.pixels.buffer as ArrayBuffer,
-      frame.pixels.byteOffset,
-      frame.pixels.byteLength,
-    ),
-    frame.width,
-    frame.height,
-  );
-}
-
-async function imageDataToBlob(image: ImageData) {
-  const canvas = document.createElement("canvas");
-  canvas.width = image.width;
-  canvas.height = image.height;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("2d canvas context is unavailable");
-  }
-  context.putImageData(image, 0, 0);
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, "image/png");
-  });
-  if (!blob) {
-    throw new Error("failed to encode preview as png");
-  }
-  return blob;
-}
-
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -363,92 +230,31 @@ export interface PreviewRequest {
   ignore_crop_layers?: boolean;
 }
 
-export async function renderSnapshotThumbnail(
-  bytes: ArrayBuffer,
-  fileName: string | null,
-  layersJson: string,
-  targetWidth: number,
-  targetHeight: number,
-): Promise<{ pixels: Uint8Array; width: number; height: number }> {
-  await ensureWorkerReady();
-  return workerCall<{ pixels: Uint8Array; width: number; height: number }>(
-    { type: "render_snapshot_thumbnail", bytes, fileName, layersJson, targetWidth, targetHeight },
-    "snapshot_thumbnail_rendered",
-    [bytes],
-  );
-}
-
 /**
  * Browser-only synchronous preview render. The Tauri runtime uses the
  * push-based preview channel (`bridge/preview.ts` + `update_preview_viewports`)
  * and does not go through this path.
  */
-export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {
-  if (await isTauriRuntime()) {
-    throw new Error(
-      "renderPreview is browser-only in this build; tauri uses the push preview channel",
-    );
-  }
-  await ensureWorkerReady();
-  const result = await workerCall<{
-    pixels: Uint8Array;
-    width: number;
-    height: number;
-  }>({ type: "render_preview", request }, "preview_rendered");
-  if (!(result.pixels instanceof Uint8Array)) {
-    throw new Error("preview worker returned pixels in an unexpected format");
-  }
-  return {
-    kind: "rgba",
-    pixels: result.pixels,
-    width: result.width,
-    height: result.height,
-  };
+export async function renderPreview(
+  request?: PreviewRequest,
+): Promise<PreviewFrame> {
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().renderPreview(request);
 }
 
 export async function openImage(path: string): Promise<OpenImageInfo> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return inv("open_image", { path }) as Promise<any>;
-  }
-  const source = await getBrowserPlatform().media.getImageSource(path);
-  return _loadEncodedBytes(source.bytes, source.fileName ?? path);
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().openImage(path);
 }
 
-export function prepareImageOpen(path: string): Promise<void> {
-  return isTauriRuntime().then((isTauri) => {
-    if (isTauri) {
-      return;
-    }
-    return getBrowserPlatform().media.prepareImageOpen(path);
-  });
+export async function prepareImageOpen(path: string): Promise<void> {
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().prepareImageOpen(path);
 }
 
 export async function exportImage(path: string): Promise<void> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    await inv("export_image", { path });
-    return;
-  }
-  const stack = await getLayerStack();
-  const cropLayer = stack.layers.find(
-    (layer) => layer.kind === "crop" && layer.visible && layer.crop,
-  );
-  const crop = cropLayer?.crop;
-  const frame = await renderPreview({
-    target_width: crop?.width ?? stack.canvas_width,
-    target_height: crop?.height ?? stack.canvas_height,
-    crop: crop
-      ? {
-          x: crop.x,
-          y: crop.y,
-          width: crop.width,
-          height: crop.height,
-        }
-      : undefined,
-  });
-  const blob = await imageDataToBlob(previewFrameToImageData(frame));
-  downloadBlob(blob, path || "shade-export.png");
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().exportImage(path);
 }
 
 export async function pickDirectory(): Promise<string | null> {
@@ -522,14 +328,13 @@ export function listenImageOpenPhase(
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     return {
       local_endpoint_id: "browser-runtime",
       local_direct_addresses: [],
       peers: [],
     };
   }
-  const inv = await getTauriInvoke();
   return sendRead<LocalPeerDiscoverySnapshot>(
     { type: "get_local_peer_discovery_snapshot" },
     "local_peer_discovery_snapshot",
@@ -537,10 +342,9 @@ export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscover
 }
 
 export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     return;
   }
-  const inv = await getTauriInvoke();
   await sendMutation({
     type: "pair_peer_device",
     peer_endpoint_id,
@@ -550,10 +354,9 @@ export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
 export async function listPeerPictures(
   peer_endpoint_id: string,
 ): Promise<SharedPicture[]> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     return [];
   }
-  const inv = await getTauriInvoke();
   return sendRead<SharedPicture[]>(
     { type: "list_peer_pictures", peer_endpoint_id },
     "peer_pictures",
@@ -564,65 +367,19 @@ export async function openPeerImage(
   peer_endpoint_id: string,
   picture: SharedPicture,
 ): Promise<OpenImageInfo> {
-  if (!(await isTauriRuntime())) {
-    throw new Error("peer image loading requires the Tauri runtime");
-  }
-  const inv = await getTauriInvoke();
-  return inv("open_peer_image", {
-    peerEndpointId: peer_endpoint_id,
-    pictureId: picture.id,
-    file_name: picture.name,
-  }) as Promise<OpenImageInfo>;
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().openPeerImage(peer_endpoint_id, picture);
 }
 
 /** Open an image from a File object — works for both file picker and drag-and-drop. */
 export async function openImageFile(file: File): Promise<OpenImageInfo> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    return inv("open_image_encoded_bytes", {
-      bytes,
-      file_name: file.name,
-    }) as Promise<any>;
-  }
-  const source = await getBrowserPlatform().media.getImageFileSource(file, file.name);
-  return _loadEncodedBytes(source.bytes, source.fileName ?? file.name);
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().openImageFile(file);
 }
 
-async function _loadEncodedBytes(
-  bytes: ArrayBuffer,
-  fileName?: string,
-): Promise<OpenImageInfo> {
-  const result = await workerCall<{
-    layerCount: number;
-    canvasWidth: number;
-    canvasHeight: number;
-    source_bit_depth: string;
-  }>({ type: "load_image_encoded", bytes, fileName }, "image_loaded", [bytes]);
-  return {
-    layer_count: result.layerCount,
-    canvas_width: result.canvasWidth,
-    canvas_height: result.canvasHeight,
-    source_bit_depth: result.source_bit_depth,
-    fingerprint: null,
-  };
-}
-
-/**
- * Browser-only: synchronously fetch the layer stack via the worker. In the
- * Tauri runtime the authoritative stack is pushed reactively over the
- * coordination channel as `LayerStackSnapshot` and read from
- * `editor-store`; calling this on Tauri is a programming error.
- */
 export async function getLayerStack(): Promise<StackInfo> {
-  if (await isTauriRuntime()) {
-    throw new Error(
-      "getLayerStack is browser-only — Tauri receives the stack via LayerStackSnapshot",
-    );
-  }
-  await ensureWorkerReady();
-  const result = await workerCall<{ data: string }>({ type: "get_stack" }, "stack");
-  return JSON.parse(result.data) as StackInfo;
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().getLayerStack();
 }
 
 export async function applyEdit(params: Record<string, unknown>): Promise<void> {
@@ -750,40 +507,6 @@ export interface BrowserSnapshotsPlatform {
   markSnapshotCurrent(id: string): Promise<void>;
 }
 
-let _platform: Platform | null = null;
-
-async function getTauriInvoke() {
-  const platform = getTauriPlatform();
-  return platform.invoke.bind(platform);
-}
-
-export function setPlatform(platform: Platform): void {
-  _platform = platform;
-}
-
-export function getPlatform(): Platform {
-  if (!_platform) {
-    throw new Error("platform not initialized");
-  }
-  return _platform;
-}
-
-export function getBrowserPlatform(): BrowserPlatform {
-  const platform = getPlatform();
-  if (platform.kind !== "browser") {
-    throw new Error("browser platform not initialized");
-  }
-  return platform;
-}
-
-export function getTauriPlatform(): TauriPlatform {
-  const platform = getPlatform();
-  if (platform.kind !== "tauri") {
-    throw new Error("tauri platform not initialized");
-  }
-  return platform;
-}
-
 export interface S3MediaLibraryInput {
   name?: string | null;
   endpoint: string;
@@ -885,10 +608,9 @@ export async function addMediaLibrary(
 export async function addS3MediaLibrary(
   params: S3MediaLibraryInput,
 ): Promise<MediaLibrary> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   const upserted = awaitMediaLibraryUpserted();
   await sendMutation({ type: "add_s3_media_library", params });
   return upserted;
@@ -897,10 +619,9 @@ export async function addS3MediaLibrary(
 export async function getS3MediaLibrary(
   libraryId: string,
 ): Promise<S3MediaLibraryInput> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   return sendRead<S3MediaLibraryInput>(
     { type: "get_s3_media_library", library_id: libraryId },
     "s3_media_library",
@@ -911,10 +632,9 @@ export async function updateS3MediaLibrary(
   libraryId: string,
   params: S3MediaLibraryInput,
 ): Promise<MediaLibrary> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   const upserted = awaitMediaLibraryUpserted();
   await sendMutation({
     type: "update_s3_media_library",
@@ -929,10 +649,9 @@ export async function uploadMediaLibraryUrl(
   url: string,
   fileName: string,
 ): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("URL image uploads are only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   await sendMutation({
     type: "upload_media_library_url",
     library_id: libraryId,
@@ -946,10 +665,9 @@ export async function uploadMediaLibraryFile(
   file: File,
   appendTimestampOnConflict = false,
 ): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("library uploads are only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
   await sendMutation({
     type: "upload_media_library_file",
@@ -965,10 +683,9 @@ export async function uploadMediaLibraryPath(
   libraryId: string,
   path: string,
 ): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("library uploads from paths are only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   await sendMutation({
     type: "upload_media_library_path",
     library_id: libraryId,
@@ -977,10 +694,9 @@ export async function uploadMediaLibraryPath(
 }
 
 export async function deleteMediaLibraryItem(path: string): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("media item deletion is only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   await sendMutation({ type: "delete_media_library_item", path });
 }
 
@@ -1068,10 +784,9 @@ export function resetCameraThumbnailFailure(path: string): void {
 }
 
 export async function setLibraryMode(libraryId: string, mode: LibraryMode, syncTarget?: string | null): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("setLibraryMode is only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   await sendMutation({
     type: "set_library_mode",
     library_id: libraryId,
@@ -1081,10 +796,9 @@ export async function setLibraryMode(libraryId: string, mode: LibraryMode, syncT
 }
 
 export async function syncLibrary(libraryId: string): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     throw new Error("syncLibrary is only implemented for Tauri");
   }
-  const inv = await getTauriInvoke();
   await sendMutation({ type: "sync_library", library_id: libraryId });
 }
 
@@ -1097,10 +811,9 @@ export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void
 }
 
 export async function refreshLibraryIndex(libraryId: string): Promise<void> {
-  if (!(await isTauriRuntime())) {
+  if (!(isTauriRuntime())) {
     return;
   }
-  const inv = await getTauriInvoke();
   await sendMutation({
     type: "refresh_library_index",
     library_id: libraryId,
@@ -1132,165 +845,6 @@ function serializeBrowserPresetLayers(layers: LayerInfo[]): BrowserPresetLayer[]
     });
 }
 
-function requiredNumber(value: number | null | undefined, label: string) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`preset mask is missing ${label}`);
-  }
-  return value;
-}
-
-async function applyBrowserPresetAdjustment(
-  layerIdx: number,
-  adjustments: AdjustmentValues,
-) {
-  if (adjustments.tone) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "tone",
-      exposure: adjustments.tone.exposure,
-      contrast: adjustments.tone.contrast,
-      blacks: adjustments.tone.blacks,
-      whites: adjustments.tone.whites,
-      highlights: adjustments.tone.highlights,
-      shadows: adjustments.tone.shadows,
-      gamma: adjustments.tone.gamma,
-    });
-  }
-  if (adjustments.color) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "color",
-      saturation: adjustments.color.saturation,
-      vibrancy: adjustments.color.vibrancy,
-      temperature: adjustments.color.temperature,
-      tint: adjustments.color.tint,
-    });
-  }
-  if (adjustments.curves) {
-    if (!adjustments.curves.control_points) {
-      throw new Error("preset curves are missing control points");
-    }
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "curves",
-      curve_points: adjustments.curves.control_points,
-    });
-  }
-  if (adjustments.ls_curve) {
-    if (!adjustments.ls_curve.control_points) {
-      throw new Error("preset ls_curve are missing control points");
-    }
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "ls_curve",
-      curve_points: adjustments.ls_curve.control_points,
-    });
-  }
-  if (adjustments.vignette) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "vignette",
-      vignette_amount: adjustments.vignette.amount,
-    });
-  }
-  if (adjustments.sharpen) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "sharpen",
-      sharpen_amount: adjustments.sharpen.amount,
-    });
-  }
-  if (adjustments.grain) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "grain",
-      grain_amount: adjustments.grain.amount,
-      grain_size: adjustments.grain.size,
-    });
-  }
-  if (adjustments.glow) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "glow",
-      glow_amount: adjustments.glow.amount,
-    });
-  }
-  if (adjustments.hsl) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "hsl",
-      red_hue: adjustments.hsl.red_hue,
-      red_sat: adjustments.hsl.red_sat,
-      red_lum: adjustments.hsl.red_lum,
-      green_hue: adjustments.hsl.green_hue,
-      green_sat: adjustments.hsl.green_sat,
-      green_lum: adjustments.hsl.green_lum,
-      blue_hue: adjustments.hsl.blue_hue,
-      blue_sat: adjustments.hsl.blue_sat,
-      blue_lum: adjustments.hsl.blue_lum,
-    });
-  }
-  if (adjustments.denoise) {
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "denoise",
-      denoise_luma_strength: adjustments.denoise.luma_strength,
-      denoise_chroma_strength: adjustments.denoise.chroma_strength,
-      denoise_mode: adjustments.denoise.mode,
-    });
-  }
-}
-
-async function applyBrowserPresetLayer(layer: BrowserPresetLayer) {
-  const layerIdx = await addLayer(layer.kind);
-  if (layer.kind === "crop") {
-    if (!layer.crop) {
-      throw new Error("crop layer is missing crop values");
-    }
-    await applyEdit({
-      layer_idx: layerIdx,
-      op: "crop",
-      crop_x: layer.crop.x,
-      crop_y: layer.crop.y,
-      crop_width: layer.crop.width,
-      crop_height: layer.crop.height,
-      crop_rotation: layer.crop.rotation,
-    });
-  } else if (layer.adjustments) {
-    await applyBrowserPresetAdjustment(layerIdx, layer.adjustments);
-  }
-  if (layer.mask_params) {
-    if (layer.mask_params.kind === "linear") {
-      await applyGradientMask({
-        kind: "linear",
-        layer_idx: layerIdx,
-        x1: requiredNumber(layer.mask_params.x1, "x1"),
-        y1: requiredNumber(layer.mask_params.y1, "y1"),
-        x2: requiredNumber(layer.mask_params.x2, "x2"),
-        y2: requiredNumber(layer.mask_params.y2, "y2"),
-      });
-    } else if (layer.mask_params.kind === "radial") {
-      await applyGradientMask({
-        kind: "radial",
-        layer_idx: layerIdx,
-        cx: requiredNumber(layer.mask_params.cx, "cx"),
-        cy: requiredNumber(layer.mask_params.cy, "cy"),
-        radius: requiredNumber(layer.mask_params.radius, "radius"),
-      });
-    } else {
-      throw new Error("browser presets do not support brush masks");
-    }
-  }
-  if (layer.name !== null) {
-    await renameLayer(layerIdx, layer.name);
-  }
-  if (layer.opacity !== 1) {
-    await setLayerOpacity(layerIdx, layer.opacity);
-  }
-  if (!layer.visible) {
-    await setLayerVisible(layerIdx, false);
-  }
-}
 
 export async function listPresets(): Promise<PresetInfo[]> {
   return sendRead<PresetInfo[]>({ type: "list_presets" }, "presets");
@@ -1439,18 +993,11 @@ export async function setMediaRating(params: MediaRatingParams): Promise<void> {
  * Returns true if a snapshot was applied, false if there was nothing to restore.
  * No-op on Tauri (the native runtime restores edit state automatically).
  */
-export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<boolean> {
-  if (await isTauriRuntime()) {
-    return false;
-  }
-  const snapshot = await getBrowserPlatform().snapshots.getCurrentSnapshot(imagePath);
-  if (!snapshot) {
-    return false;
-  }
-  for (const layer of snapshot.layers) {
-    await applyBrowserPresetLayer(layer);
-  }
-  return true;
+export async function restoreCurrentBrowserSnapshot(
+  imagePath: string,
+): Promise<boolean> {
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().restoreCurrentBrowserSnapshot(imagePath);
 }
 
 export async function loadSnapshot(id: string): Promise<void> {
@@ -1604,13 +1151,8 @@ export async function getMaskThumbnail(
   maxW: number,
   maxH: number,
 ): Promise<MaskThumbnail> {
-  if (await isTauriRuntime()) {
-    const inv = await getTauriInvoke();
-    return inv("get_mask_thumbnail", {
-      params: { layer_idx: layerIdx, max_w: maxW, max_h: maxH },
-    }) as Promise<MaskThumbnail>;
-  }
-  throw new Error("getMaskThumbnail is only implemented for Tauri");
+  const { getHostHooks } = await import("./host");
+  return getHostHooks().getMaskThumbnail(layerIdx, maxW, maxH);
 }
 
 // ── Collections ──────────────────────────────────────────────────────────────

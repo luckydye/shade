@@ -933,16 +933,13 @@ export const MediaView: Component = () => {
       },
     });
     startP2pPolling();
-    void isTauriRuntime().then(setSupportsS3Libraries);
+    setSupportsS3Libraries(isTauriRuntime());
     let unlistenPeerPaired: (() => void) | null = null;
-    void isTauriRuntime().then(async (isTauri) => {
-      if (!isTauri) {
-        return;
-      }
-      unlistenPeerPaired = await listenPeerPaired(async () => {
+    if (isTauriRuntime()) {
+      unlistenPeerPaired = listenPeerPaired(async () => {
         await refetchLibraries();
       });
-    });
+    }
     const unlistenSyncProgress = listenLibrarySyncProgress((progress) => {
       if (progress.completed >= progress.total) {
         setSyncProgress(null);
@@ -1180,13 +1177,9 @@ export const MediaView: Component = () => {
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
-    let isUnmounted = false;
-    void isTauriRuntime().then(async (tauriRuntime) => {
-      if (!tauriRuntime || isUnmounted) {
-        return;
-      }
+    if (isTauriRuntime()) {
       setUsesNativeDragDrop(true);
-      unlisten = await listenNativeDragDrop((payload) => {
+      void listenNativeDragDrop((payload) => {
         if (!canWriteSelectedLibrary()) {
           setUploadDragFeedback(null);
           return;
@@ -1211,10 +1204,11 @@ export const MediaView: Component = () => {
           return;
         }
         void handleUploadLibraryPaths(payload.paths);
+      }).then((u) => {
+        unlisten = u;
       });
-    });
+    }
     onCleanup(() => {
-      isUnmounted = true;
       unlisten?.();
     });
   });
@@ -1732,7 +1726,7 @@ export const MediaView: Component = () => {
     try {
       const items = itemIds.map((id) => itemsById().get(id)).filter(Boolean) as MediaItem[];
       const hasPeer = items.some((item) => item.kind === "peer");
-      const isTauri = await isTauriRuntime();
+      const isTauri = isTauriRuntime();
       if (isTauri && !hasPeer) {
         const batchItems = items.map((item) => ({
           path: item.path,
@@ -1795,7 +1789,7 @@ export const MediaView: Component = () => {
     );
     try {
       const items = itemIds.map((id) => itemsById().get(id)).filter(Boolean) as MediaItem[];
-      const isTauri = await isTauriRuntime();
+      const isTauri = isTauriRuntime();
       if (isTauri) {
         const paths = items.map((item) => item.path);
         const count = await batchClearEdits(paths);
@@ -1874,7 +1868,7 @@ export const MediaView: Component = () => {
       if (localItems.length === 0) {
         throw new Error("export is only supported for local images");
       }
-      const isTauri = await isTauriRuntime();
+      const isTauri = isTauriRuntime();
       if (!isTauri) {
         setMediaActionStatus("Export is only supported in the native app");
         return;

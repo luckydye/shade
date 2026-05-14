@@ -1,13 +1,11 @@
 import { createSignal, ErrorBoundary } from "solid-js";
 import { render } from "solid-js/web";
 import App from "shade-ui/src/App";
-import { setPlatform } from "shade-ui/src/bridge/index";
 import { installCoordinationChannelFromTransport } from "shade-ui/src/bridge/channel";
 import { installPreviewChannel } from "shade-ui/src/bridge/preview";
 import { setTransport } from "shade-ui/src/bridge/transport";
 import { setHostHooks } from "shade-ui/src/bridge/host";
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { platform } from "./platform";
 import { createTauriTransport } from "./tauri-transport";
 import { tauriHostHooks } from "./tauri-host-hooks";
 import { startRemoteControlBridge } from "./remote-control";
@@ -66,7 +64,6 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 try {
-  setPlatform(platform);
   setTransport(createTauriTransport());
   setHostHooks(tauriHostHooks);
   void installCoordinationChannelFromTransport().catch(reportFatalError);

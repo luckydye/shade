@@ -1,11 +1,9 @@
 import { render } from "solid-js/web";
 import "./main.css";
 import App from "shade-ui/src/App";
-import { setPlatform } from "shade-ui/src/bridge/index";
 import { installCoordinationChannelFromTransport } from "shade-ui/src/bridge/channel";
 import { setTransport } from "shade-ui/src/bridge/transport";
 import { setHostHooks } from "shade-ui/src/bridge/host";
-import { browserPlatform } from "./platform";
 import { createWorkerTransport } from "./worker-transport";
 import { webHostHooks } from "./web-host-hooks";
 
@@ -15,7 +13,6 @@ if (!(root instanceof HTMLElement)) {
   throw new Error("root element not found");
 }
 
-setPlatform(browserPlatform);
 setTransport(createWorkerTransport());
 setHostHooks(webHostHooks);
 void installCoordinationChannelFromTransport();
