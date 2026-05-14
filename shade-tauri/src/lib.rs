@@ -151,7 +151,6 @@ pub fn run() {
             commands::get_peer_image_bytes,
             commands::open_peer_image,
             commands::get_mask_thumbnail,
-            commands::create_collection,
             remote_control::submit_remote_control_response,
             remote_control::get_remote_control_server_info,
             channel_server::register_coordination_channel,

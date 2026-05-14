@@ -118,6 +118,14 @@ pub enum ChannelMessage {
     // `library_id` is omitted when unknown — frontend can refetch globally.
     CollectionListChanged,
 
+    // A new collection was created. Carries the freshly-minted record so the
+    // bridge wrapper of `create_collection` (which is dispatched via
+    // `MutationRequest::CreateCollection`) can resolve with the full data
+    // without needing a mutation-id correlation.
+    CollectionCreated {
+        collection: serde_json::Value,
+    },
+
     // A persisted snapshot was created. Frontend can refresh `list_snapshots`
     // for the affected fingerprint, or just record the id.
     SnapshotSaved {
@@ -236,9 +244,13 @@ pub enum MutationRequest {
         name: String,
     },
 
-    // Collections (create_collection stays as a regular invoke because it
-    // returns the new Collection record by id/position/created_at — folding
-    // that into a fire-and-forget message is more plumbing than it saves).
+    // Collections (the new Collection record from `CreateCollection` lands
+    // via the `CollectionCreated` notification; the bridge wrapper correlates
+    // by library_id + name).
+    CreateCollection {
+        library_id: String,
+        name: String,
+    },
     RenameCollection {
         collection_id: String,
         name: String,

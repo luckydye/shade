@@ -66,6 +66,7 @@ export type ChannelMessage =
   | { type: "layer_stack_snapshot"; stack: unknown }
   | { type: "media_metadata_changed"; fingerprints: string[] }
   | { type: "collection_list_changed" }
+  | { type: "collection_created"; collection: unknown }
   | { type: "snapshot_saved"; fingerprint: string | null; id: string }
   | { type: "media_libraries_changed" }
   | {
@@ -200,6 +201,7 @@ export type MutationRequest =
   | { type: "save_preset_from_json"; name: string; json: string }
   | { type: "rename_preset"; old_name: string; new_name: string }
   | { type: "delete_preset"; name: string }
+  | { type: "create_collection"; library_id: string; name: string }
   | { type: "rename_collection"; collection_id: string; name: string }
   | { type: "delete_collection"; collection_id: string }
   | { type: "reorder_collection"; collection_id: string; new_position: number }

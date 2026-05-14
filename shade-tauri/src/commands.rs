@@ -6738,6 +6738,17 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                 .send(crate::ChannelMessage::PresetListChanged)
                 .await;
         }
+        M::CreateCollection { library_id, name } => {
+            let collection = create_collection(library_id, name).await?;
+            let value = serde_json::to_value(&collection).map_err(|e| e.to_string())?;
+            let coord = crate::channel_server::channel_from_app(&app);
+            coord
+                .send(crate::ChannelMessage::CollectionCreated { collection: value })
+                .await;
+            coord
+                .send(crate::ChannelMessage::CollectionListChanged)
+                .await;
+        }
         M::RenameCollection { collection_id, name } => {
             rename_collection(collection_id.clone(), name).await?;
             crate::channel_server::channel_from_app(&app)
