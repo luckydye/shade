@@ -177,24 +177,4 @@ export interface UpdatePreviewViewportsArgs {
   use_float16?: boolean;
 }
 
-/**
- * Send a viewport-state update to Rust. Fire-and-forget: the frontend never
- * awaits the response; the resulting frames are pushed back via the preview
- * channel.
- */
-export function sendUpdatePreviewViewports(
-  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
-  args: UpdatePreviewViewportsArgs,
-): void {
-  void invoke("update_preview_viewports", {
-    generation: args.generation,
-    quality: args.quality,
-    viewports: args.viewports,
-    useFloat16: args.use_float16 ?? false,
-  }).catch((err) => {
-    // eslint-disable-next-line no-console
-    console.error("[preview] update_preview_viewports failed", err);
-  });
-}
-
 export type { PreviewCropMessage };

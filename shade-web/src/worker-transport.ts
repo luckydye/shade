@@ -75,5 +75,9 @@ export function createWorkerTransport(): Transport {
         subscribers.delete(handler);
       };
     },
+    sendPreviewViewports() {
+      // Web preview pipeline doesn't route through `update_preview_viewports`
+      // — it uses the legacy renderPreview workerCall path. No-op.
+    },
   };
 }

@@ -5,7 +5,6 @@ import {
   getArtboardTiles,
   getCurrentGeneration,
   nextGeneration,
-  sendUpdatePreviewViewports,
   subscribeTiles,
   type RenderedTile as PushedRenderedTile,
 } from "../bridge/preview";
@@ -384,18 +383,14 @@ async function tauriRefresh(quality: PreviewQuality) {
     viewports.push(specToViewport(BACKDROP_ARTBOARD_ID, backdropSpec, 1));
   }
   if (viewports.length === 0) return;
-  const platform = bridge.getPlatform();
-  if (platform.kind !== "tauri") return;
   const generation = nextGeneration();
-  sendUpdatePreviewViewports(
-    (cmd, args) => platform.invoke(cmd, args ?? {}),
-    {
-      generation,
-      quality,
-      viewports,
-      use_float16: supportsFloat16Preview(),
-    },
-  );
+  const { getTransport } = await import("../bridge/transport");
+  getTransport().sendPreviewViewports({
+    generation,
+    quality,
+    viewports,
+    use_float16: supportsFloat16Preview(),
+  });
 }
 
 let float16PreviewSupport: boolean | null = null;

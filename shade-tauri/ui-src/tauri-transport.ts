@@ -52,5 +52,16 @@ export function createTauriTransport(): Transport {
         subscribers.delete(handler);
       };
     },
+    sendPreviewViewports(args) {
+      void invoke("update_preview_viewports", {
+        generation: args.generation,
+        quality: args.quality,
+        viewports: args.viewports,
+        useFloat16: args.use_float16 ?? false,
+      }).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[tauri-transport] update_preview_viewports failed", err);
+      });
+    },
   };
 }
