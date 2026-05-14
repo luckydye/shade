@@ -17,10 +17,10 @@
  */
 
 import init, * as wasm from "shade-wasm";
-import { browserCollectionsPlatform } from "./browser-collections-platform";
-import { browserPresetsPlatform } from "./browser-presets-platform";
-import { browserRatingsPlatform } from "./browser-ratings-platform";
-import { browserSnapshotsPlatform } from "./browser-snapshots-platform";
+import { browserCollectionsPlatform } from "./collections";
+import { browserPresetsPlatform } from "./presets";
+import { browserRatingsPlatform } from "./ratings";
+import { browserSnapshotsPlatform } from "./snapshots";
 import type {
   ChannelMessage,
   MutationRequest,

@@ -1,6 +1,6 @@
 import type { BrowserPlatform } from "shade-ui/src/bridge/index";
-import { browserMediaPlatform } from "./browser-media-platform";
-import { browserSnapshotsPlatform } from "./browser-snapshots-platform";
+import { browserMediaPlatform } from "./media";
+import { browserSnapshotsPlatform } from "./snapshots";
 import { getSharedWorker } from "./shared-worker";
 
 export const browserPlatform: BrowserPlatform = {

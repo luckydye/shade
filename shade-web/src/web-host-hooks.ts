@@ -2,7 +2,7 @@ import type {
   HostHooks,
   NativeDragDropPayload,
 } from "shade-ui/src/bridge/host";
-import { browserLibraryCache } from "./browser-library-cache";
+import { browserLibraryCache } from "./library-cache";
 
 /**
  * Web host-hook implementation. Uses File System Access APIs for the

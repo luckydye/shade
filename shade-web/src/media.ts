@@ -11,7 +11,7 @@ import {
   fileNameFromPath,
   loadBrowserEncodedBytes,
   loadBrowserThumbnailBytes,
-} from "./browser-image-preview";
+} from "./image-preview";
 import { requestToPromise, withStores } from "./indexed-db";
 
 const DB_NAME = "shade-browser-media-library";
