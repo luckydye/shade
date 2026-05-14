@@ -315,4 +315,17 @@ pub enum MutationRequest {
         library_id: String,
         path: String,
     },
+
+    // Peer
+    PairPeerDevice {
+        peer_endpoint_id: String,
+    },
+    SetLocalAwareness {
+        #[serde(default)]
+        display_name: Option<String>,
+        #[serde(default)]
+        fingerprint: Option<String>,
+        #[serde(default)]
+        snapshot_id: Option<String>,
+    },
 }

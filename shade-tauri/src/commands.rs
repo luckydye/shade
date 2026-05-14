@@ -6501,6 +6501,8 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
     state: tauri::State<'_, Mutex<EditorState>>,
     app: tauri::AppHandle<R>,
     p2p: tauri::State<'_, crate::P2pState>,
+    pairing_lock: tauri::State<'_, crate::PeerPairingState>,
+    awareness: tauri::State<'_, crate::AwarenessStateHandle>,
 ) -> Result<(), String> {
     use crate::channel_protocol::MutationRequest as M;
     match request {
@@ -6776,6 +6778,28 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
             crate::channel_server::channel_from_app(&app)
                 .send(crate::ChannelMessage::MediaLibrariesChanged)
                 .await;
+        }
+        M::PairPeerDevice { peer_endpoint_id } => {
+            let peer_id = peer_endpoint_id.clone();
+            pair_peer_device(app.clone(), peer_endpoint_id, pairing_lock).await?;
+            // PeerPaired is already emitted by the inbound handshake path
+            // (`emit_peer_paired`); fire it here too so outbound pairing is
+            // visible to subscribers uniformly.
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::PeerPaired {
+                    peer_id,
+                    name: String::new(),
+                })
+                .await;
+        }
+        M::SetLocalAwareness {
+            display_name,
+            fingerprint,
+            snapshot_id,
+        } => {
+            set_local_awareness(display_name, fingerprint, snapshot_id, awareness).await?;
+            // No notification — local awareness is owned by the frontend's
+            // view; remote awareness changes ride `PeerAwarenessUpdate`.
         }
     }
     Ok(())

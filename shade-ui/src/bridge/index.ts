@@ -551,9 +551,11 @@ export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
   if (!(await isTauriRuntime())) {
     return;
   }
+  const { sendMutation } = await import("./channel");
   const inv = await getTauriInvoke();
-  await inv("pair_peer_device", {
-    peerEndpointId: peer_endpoint_id,
+  await sendMutation(inv, {
+    type: "pair_peer_device",
+    peer_endpoint_id,
   });
 }
 
@@ -1819,11 +1821,13 @@ export async function setLocalAwareness(
   snapshotId: string | null,
 ): Promise<void> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    await inv("set_local_awareness", {
-      displayName: displayName ?? null,
-      fingerprint: fingerprint ?? null,
-      snapshotId: snapshotId ?? null,
+    await sendMutation(inv, {
+      type: "set_local_awareness",
+      display_name: displayName,
+      fingerprint,
+      snapshot_id: snapshotId,
     });
     return;
   }

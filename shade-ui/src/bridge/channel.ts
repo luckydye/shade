@@ -249,7 +249,14 @@ export type MutationRequest =
       modified_at: number | null;
       append_timestamp_on_conflict: boolean;
     }
-  | { type: "upload_media_library_path"; library_id: string; path: string };
+  | { type: "upload_media_library_path"; library_id: string; path: string }
+  | { type: "pair_peer_device"; peer_endpoint_id: string }
+  | {
+      type: "set_local_awareness";
+      display_name: string | null;
+      fingerprint: string | null;
+      snapshot_id: string | null;
+    };
 
 /**
  * Send an editor-state mutation. Fire-and-forget: the returned Promise
