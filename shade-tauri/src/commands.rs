@@ -103,14 +103,6 @@ pub struct LibraryImageListing {
     pub is_complete: bool,
 }
 
-#[derive(Serialize, Clone)]
-struct LibrarySyncProgress {
-    library_id: String,
-    total: usize,
-    completed: usize,
-    current_name: Option<String>,
-}
-
 static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 static LIBRARY_DB: tokio::sync::OnceCell<LibraryDb> = tokio::sync::OnceCell::const_new();
 static LIBRARY_INDEX_DB: tokio::sync::OnceCell<Arc<shade_io::LibraryIndexDb>> =
@@ -1971,14 +1963,12 @@ async fn sync_download_s3<R: tauri::Runtime>(
         if dest.exists() {
             continue;
         }
-        let _ = app.emit(
-            "library-sync-progress",
-            LibrarySyncProgress {
-                library_id: library_id.to_owned(),
-                total,
-                completed: i,
-                current_name: Some(file_name.clone()),
-            },
+        broadcast_sync_progress(
+            app,
+            library_id,
+            total,
+            i,
+            Some(file_name.clone()),
         );
         let bytes = shade_io::get_s3_object_bytes(&config, &entry.key).await?;
         std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
@@ -2007,14 +1997,12 @@ async fn sync_download_peer<R: tauri::Runtime>(
         if dest.exists() {
             continue;
         }
-        let _ = app.emit(
-            "library-sync-progress",
-            LibrarySyncProgress {
-                library_id: library_id.to_owned(),
-                total,
-                completed: i,
-                current_name: Some(picture.name.clone()),
-            },
+        broadcast_sync_progress(
+            app,
+            library_id,
+            total,
+            i,
+            Some(picture.name.clone()),
         );
         let bytes = p2p_handle
             .get_peer_image_bytes(peer_endpoint_id, &picture.id)
@@ -2057,14 +2045,12 @@ async fn sync_upload_local<R: tauri::Runtime>(
             completed += 1;
             continue;
         }
-        let _ = app.emit(
-            "library-sync-progress",
-            LibrarySyncProgress {
-                library_id: library_id.to_owned(),
-                total,
-                completed,
-                current_name: Some(file_name.to_owned()),
-            },
+        broadcast_sync_progress(
+            app,
+            library_id,
+            total,
+            completed,
+            Some(file_name.to_owned()),
         );
         let bytes = std::fs::read(local_path).map_err(|e| e.to_string())?;
         let key = s3_upload_object_key(&target, file_name);
@@ -2089,20 +2075,29 @@ async fn list_s3_remote_names(
         .collect())
 }
 
+fn broadcast_sync_progress<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    library_id: &str,
+    total: usize,
+    completed: usize,
+    current_name: Option<String>,
+) {
+    crate::channel_server::channel_from_app(app).send_blocking(
+        crate::ChannelMessage::LibrarySyncProgress {
+            library_id: library_id.to_owned(),
+            total: total as u64,
+            completed: completed as u64,
+            current_name,
+        },
+    );
+}
+
 fn emit_sync_complete<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     library_id: &str,
     total: usize,
 ) {
-    let _ = app.emit(
-        "library-sync-progress",
-        LibrarySyncProgress {
-            library_id: library_id.to_owned(),
-            total,
-            completed: total,
-            current_name: None,
-        },
-    );
+    broadcast_sync_progress(app, library_id, total, total, None);
 }
 
 fn resolve_desktop_library_path(library_id: &str) -> Result<PathBuf, String> {
@@ -3557,7 +3552,11 @@ pub async fn open_image<R: tauri::Runtime>(
                 let app = s3_app.clone();
                 async move {
                     let bytes = load_s3_image_from_tauri(&s3_path).await?;
-                    let _ = app.emit("image-open-phase", "processing");
+                    crate::channel_server::channel_from_app(&app).send_blocking(
+                        crate::ChannelMessage::ImageOpenPhase {
+                            phase: "processing".to_string(),
+                        },
+                    );
                     Ok(bytes)
                 }
             },

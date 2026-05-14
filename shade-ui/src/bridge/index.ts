@@ -46,16 +46,6 @@ export interface TauriPlatform {
   libraryCache: LibraryCachePlatform;
   isTauri(): boolean;
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
-  // Two legacy Tauri-event listeners survive on the platform interface —
-  // their Rust-side emit calls still go through `app.emit("library-sync-
-  // progress" | "image-open-phase")` rather than the coordination channel.
-  // Migrate those in a follow-up and remove these.
-  listenLibrarySyncProgress(
-    listener: (payload: LibrarySyncProgress) => void,
-  ): Promise<() => void>;
-  listenImageOpenPhase(
-    listener: (phase: string) => void,
-  ): Promise<() => void>;
 }
 
 export interface BrowserPlatform {
@@ -513,22 +503,25 @@ export function listenBatchExportProgress(
   });
 }
 
-// listenLibrarySyncProgress / listenImageOpenPhase are not yet
-// ChannelMessage-backed (Rust still emits them via legacy
-// `app.emit("library-sync-progress" / "image-open-phase")`). Keep them as
-// TauriPlatform listeners until the Rust side migrates to channel messages.
-export async function listenLibrarySyncProgress(
+export function listenLibrarySyncProgress(
   listener: (payload: LibrarySyncProgress) => void,
-): Promise<() => void> {
-  if (!(await isTauriRuntime())) return () => {};
-  return getTauriPlatform().listenLibrarySyncProgress(listener);
+): () => void {
+  return onChannelMessage("library_sync_progress", (msg) => {
+    listener({
+      library_id: msg.library_id,
+      total: msg.total,
+      completed: msg.completed,
+      current_name: msg.current_name ?? null,
+    });
+  });
 }
 
-export async function listenImageOpenPhase(
+export function listenImageOpenPhase(
   listener: (phase: string) => void,
-): Promise<() => void> {
-  if (!(await isTauriRuntime())) return () => {};
-  return getTauriPlatform().listenImageOpenPhase(listener);
+): () => void {
+  return onChannelMessage("image_open_phase", (msg) => {
+    listener(msg.phase);
+  });
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {

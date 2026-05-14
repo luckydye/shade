@@ -62,6 +62,16 @@ pub enum ChannelMessage {
     LibraryScanComplete {
         library_id: String,
     },
+    LibrarySyncProgress {
+        library_id: String,
+        total: u64,
+        completed: u64,
+        #[serde(default)]
+        current_name: Option<String>,
+    },
+    ImageOpenPhase {
+        phase: String,
+    },
     // Thumbnail (Rust → JS)
     ThumbnailReady {
         path: String,

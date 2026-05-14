@@ -46,6 +46,14 @@ export type ChannelMessage =
       total: number;
     }
   | { type: "library_scan_complete"; library_id: string }
+  | {
+      type: "library_sync_progress";
+      library_id: string;
+      total: number;
+      completed: number;
+      current_name?: string | null;
+    }
+  | { type: "image_open_phase"; phase: string }
   | { type: "thumbnail_ready"; path: string; edit_fingerprint: string }
   | {
       type: "batch_export_progress";
