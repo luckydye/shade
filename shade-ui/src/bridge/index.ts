@@ -1611,13 +1611,31 @@ export async function applyPresetSnapshot(
   return saveSnapshot(imagePath);
 }
 
+async function awaitBatchCompleted(kind: string): Promise<number> {
+  const { onChannelMessage } = await import("./channel");
+  return new Promise<number>((resolve) => {
+    const unsub = onChannelMessage("batch_completed", (msg) => {
+      if (msg.kind !== kind) return;
+      unsub();
+      resolve(msg.count);
+    });
+  });
+}
+
 export async function batchApplyPresetSnapshot(
   items: { path: string; fingerprint: string | null }[],
   name: string,
 ): Promise<number> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("batch_apply_preset_snapshot", { items, name }) as Promise<number>;
+    const completed = awaitBatchCompleted("apply_preset_snapshot");
+    await sendMutation(inv, {
+      type: "batch_apply_preset_snapshot",
+      items,
+      name,
+    });
+    return completed;
   }
   for (const item of items) {
     await loadPreset(name);
@@ -1628,8 +1646,11 @@ export async function batchApplyPresetSnapshot(
 
 export async function batchClearEdits(paths: string[]): Promise<number> {
   if (await isTauriRuntime()) {
+    const { sendMutation } = await import("./channel");
     const inv = await getTauriInvoke();
-    return inv("batch_clear_edits", { paths }) as Promise<number>;
+    const completed = awaitBatchCompleted("clear_edits");
+    await sendMutation(inv, { type: "batch_clear_edits", paths });
+    return completed;
   }
   return paths.length;
 }

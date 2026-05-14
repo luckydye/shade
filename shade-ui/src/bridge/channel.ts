@@ -54,6 +54,7 @@ export type ChannelMessage =
       name: string;
       error?: string | null;
     }
+  | { type: "batch_completed"; kind: string; count: number }
   | { type: "peer_paired"; peer_id: string; name: string }
   | {
       type: "peer_awareness_update";
@@ -212,6 +213,12 @@ export type MutationRequest =
       fingerprints: string[];
     }
   | { type: "save_snapshot" }
+  | {
+      type: "batch_apply_preset_snapshot";
+      items: { path: string; fingerprint: string | null }[];
+      name: string;
+    }
+  | { type: "batch_clear_edits"; paths: string[] }
   | { type: "set_media_library_order"; library_order: string[] }
   | {
       type: "set_library_mode";

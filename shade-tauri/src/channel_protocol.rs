@@ -76,6 +76,14 @@ pub enum ChannelMessage {
         #[serde(default)]
         error: Option<String>,
     },
+    // Final completion message for a batch mutation (apply_preset_snapshot /
+    // clear_edits). Carries the actual count of items the backend processed.
+    // Correlation is by `kind`; the UI never fires concurrent batches of the
+    // same kind, so the bridge can one-shot subscribe to the next message.
+    BatchCompleted {
+        kind: String,
+        count: u32,
+    },
 
     // Peer (Rust → JS)
     PeerPaired {
@@ -273,6 +281,17 @@ pub enum MutationRequest {
 
     // Snapshots
     SaveSnapshot,
+
+    // Batch operations (long-running; final count returns via
+    // `BatchCompleted`, per-item progress for export rides
+    // `BatchExportProgress`).
+    BatchApplyPresetSnapshot {
+        items: serde_json::Value,
+        name: String,
+    },
+    BatchClearEdits {
+        paths: Vec<String>,
+    },
 
     // Library config (add_media_library, add_s3_media_library,
     // update_s3_media_library return rich Library records and stay as

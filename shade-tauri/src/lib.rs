@@ -145,8 +145,6 @@ pub fn run() {
             commands::add_media_library,
             commands::add_s3_media_library,
             commands::update_s3_media_library,
-            commands::batch_apply_preset_snapshot,
-            commands::batch_clear_edits,
             commands::batch_export_images,
             commands::get_peer_image_bytes,
             commands::open_peer_image,

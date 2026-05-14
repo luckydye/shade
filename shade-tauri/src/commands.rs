@@ -6788,6 +6788,26 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                 .send(crate::ChannelMessage::CollectionChanged { collection_id })
                 .await;
         }
+        M::BatchApplyPresetSnapshot { items, name } => {
+            let items: Vec<BatchPresetItem> = serde_json::from_value(items)
+                .map_err(|e| format!("batch_apply_preset_snapshot: invalid items: {e}"))?;
+            let count = batch_apply_preset_snapshot(items, name, app.clone()).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::BatchCompleted {
+                    kind: "apply_preset_snapshot".to_string(),
+                    count,
+                })
+                .await;
+        }
+        M::BatchClearEdits { paths } => {
+            let count = batch_clear_edits(paths).await?;
+            crate::channel_server::channel_from_app(&app)
+                .send(crate::ChannelMessage::BatchCompleted {
+                    kind: "clear_edits".to_string(),
+                    count,
+                })
+                .await;
+        }
         M::SaveSnapshot => {
             let info = save_snapshot(state.clone()).await?;
             let fingerprint = {
