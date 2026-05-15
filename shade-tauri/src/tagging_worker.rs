@@ -167,7 +167,7 @@ pub fn process_thumbnail_tagging_entry(
     entry: ThumbnailCacheEntry,
 ) -> Result<(), String> {
     log::info!("thumbnail tagging processing fingerprint={}", entry.fingerprint);
-    if runtime.block_on(crate::commands::media_tags_exist(&entry.fingerprint))? {
+    if runtime.block_on(crate::media_metadata::media_tags_exist(&entry.fingerprint))? {
         log::info!(
             "thumbnail tagging skipped existing tags fingerprint={}",
             entry.fingerprint
@@ -182,7 +182,7 @@ pub fn process_thumbnail_tagging_entry(
         )
         .map_err(|e| e.to_string())?;
     if result.tags.is_empty() {
-        runtime.block_on(crate::commands::persist_media_tags_empty(&entry.fingerprint))?;
+        runtime.block_on(crate::media_metadata::persist_media_tags_empty(&entry.fingerprint))?;
         log::info!("thumbnail tagging no tags fingerprint={}", entry.fingerprint);
         return Ok(());
     }
@@ -191,7 +191,7 @@ pub fn process_thumbnail_tagging_entry(
         .iter()
         .map(|tag| tag.label.clone())
         .collect::<Vec<_>>();
-    runtime.block_on(crate::commands::persist_media_tags(&entry.fingerprint, &tags))?;
+    runtime.block_on(crate::media_metadata::persist_media_tags(&entry.fingerprint, &tags))?;
     log::info!(
         "thumbnail tagging persisted fingerprint={} tags={}",
         entry.fingerprint,
@@ -212,7 +212,7 @@ pub fn enqueue_thumbnail_for_tagging<R: tauri::Runtime>(
 pub async fn enqueue_existing_thumbnails_for_tagging<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    let last_tagged_at = crate::commands::max_media_tag_updated_at().await?;
+    let last_tagged_at = crate::media_metadata::max_media_tag_updated_at().await?;
     let entries = app
         .state::<crate::ThumbnailCacheDb>()
         .0

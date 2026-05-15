@@ -1,11 +1,33 @@
+mod batch;
+mod camera_discovery;
 mod channel_protocol;
 mod channel_server;
-mod commands;
+mod collections;
+mod config;
+mod db;
+mod dispatch;
+mod edit_apply;
+mod editor_state;
+mod image_loaders;
+mod layers;
+mod masks;
+mod media_libraries;
+mod media_metadata;
+mod open_image;
+mod paths;
+mod peers;
 mod photos;
+mod presets;
 mod preview_channel;
 mod preview_scheduler;
 mod remote_control;
+mod render;
+mod s3_scan;
+mod shade_uri;
+mod snapshots;
+mod sync;
 mod tagging_worker;
+mod text_layers;
 
 pub use channel_protocol::ChannelMessage;
 pub use channel_server::{CoordinationChannel, CoordinationChannelService};
@@ -20,15 +42,15 @@ pub struct AwarenessStateHandle(
     pub std::sync::Arc<tokio::sync::Mutex<shade_p2p::AwarenessState>>,
 );
 pub struct PeerPairingState(pub std::sync::Arc<tokio::sync::Mutex<()>>);
-pub struct RenderService(pub crossbeam_channel::Sender<commands::RenderJob>);
+pub struct RenderService(pub crossbeam_channel::Sender<render::RenderJob>);
 pub struct ThumbnailService {
     pub raw_queue:
         std::sync::Arc<shade_io::ThumbnailQueue<shade_io::ThumbnailResponseSender>>,
-    pub render_sender: crossbeam_channel::Sender<commands::ThumbnailRenderJob>,
+    pub render_sender: crossbeam_channel::Sender<render::ThumbnailRenderJob>,
     pub decode_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 pub struct LibraryScanService(pub std::sync::Arc<shade_io::LibraryScanService>);
-pub struct S3LibraryScanService(pub std::sync::Arc<commands::S3LibraryScanState>);
+pub struct S3LibraryScanService(pub std::sync::Arc<s3_scan::S3LibraryScanState>);
 pub struct CameraDiscoveryService(pub std::sync::Arc<shade_io::CameraDiscoveryService>);
 pub struct CameraThumbnailService(pub std::sync::Arc<shade_io::CameraThumbnailService>);
 pub struct ThumbnailCacheDb(pub std::sync::Arc<shade_io::ThumbnailCacheDb>);
@@ -43,7 +65,7 @@ pub fn run() {
             |ctx, request, responder| {
                 let app = ctx.app_handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let response = commands::serve_shade_uri(&app, request).await;
+                    let response = shade_uri::serve_shade_uri(&app, request).await;
                     responder.respond(response);
                 });
             },
@@ -52,11 +74,11 @@ pub fn run() {
         .manage(PreviewChannelService(PreviewChannel::new()))
         .manage(P2pState(tokio::sync::RwLock::new(None)))
         .manage(remote_control::RemoteControlState::default())
-        .manage(std::sync::Mutex::new(commands::EditorState::default()))
-        .manage(RenderService(commands::spawn_render_worker()))
+        .manage(std::sync::Mutex::new(editor_state::EditorState::default()))
+        .manage(RenderService(render::spawn_render_worker()))
         .manage(ThumbnailService {
             raw_queue: shade_io::spawn_thumbnail_workers(1),
-            render_sender: commands::spawn_thumbnail_render_worker(),
+            render_sender: render::spawn_thumbnail_render_worker(),
             decode_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
         })
         .manage(CameraDiscoveryService(
@@ -66,15 +88,15 @@ pub fn run() {
             shade_io::CameraThumbnailService::new(),
         ))
         .setup(|app| {
-            commands::init_app_paths(&app.handle().clone())?;
+            paths::init_app_paths(&app.handle().clone())?;
             tauri::async_runtime::block_on(remote_control::start(
                 app.handle().clone(),
                 app.state::<remote_control::RemoteControlState>().0.clone(),
             ))?;
-            tauri::async_runtime::block_on(commands::setup_library_db())
+            tauri::async_runtime::block_on(db::setup_library_db())
                 .map_err(|e| e.to_string())?;
             let library_index_db =
-                tauri::async_runtime::block_on(commands::setup_library_index_db())
+                tauri::async_runtime::block_on(db::setup_library_index_db())
                     .map_err(|e| e.to_string())?;
             let handle_progress = app.handle().clone();
             let handle_complete = app.handle().clone();
@@ -97,11 +119,11 @@ pub fn run() {
                     );
                 },
             )));
-            app.manage(S3LibraryScanService(commands::S3LibraryScanState::new(
+            app.manage(S3LibraryScanService(s3_scan::S3LibraryScanState::new(
                 library_index_db,
             )));
             let thumbnail_cache = std::sync::Arc::new(
-                tauri::async_runtime::block_on(commands::open_thumbnail_cache_db())
+                tauri::async_runtime::block_on(db::open_thumbnail_cache_db())
                     .map_err(|e| e.to_string())?,
             );
             app.manage(ThumbnailCacheDb(thumbnail_cache.clone()));
@@ -110,7 +132,7 @@ pub fn run() {
             let pairing_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
             app.manage(PeerPairingState(pairing_lock.clone()));
             let handle = app.handle().clone();
-            let secret_key = commands::load_p2p_secret_key()?;
+            let secret_key = config::load_p2p_secret_key()?;
             let awareness = std::sync::Arc::new(tokio::sync::Mutex::new(
                 shade_p2p::AwarenessState::default(),
             ));
@@ -118,7 +140,7 @@ pub fn run() {
             let p2p = std::sync::Arc::new(
                 tauri::async_runtime::block_on(shade_p2p::LocalPeerDiscovery::bind(
                     secret_key,
-                    std::sync::Arc::new(commands::AppPeerProvider::new(
+                    std::sync::Arc::new(peers::AppPeerProvider::new(
                         handle,
                         awareness,
                         pairing_lock,
@@ -126,24 +148,24 @@ pub fn run() {
                 ))
                 .map_err(|error| error.to_string())?,
             );
-            commands::save_p2p_secret_key(p2p.secret_key_bytes())?;
+            config::save_p2p_secret_key(p2p.secret_key_bytes())?;
             tauri::async_runtime::block_on(async {
                 *app.state::<P2pState>().0.write().await = Some(p2p);
             });
-            commands::spawn_camera_discovery(app.handle().clone());
-            commands::prime_missing_library_indexes(&app.handle().clone())?;
+            camera_discovery::spawn_camera_discovery(app.handle().clone());
+            s3_scan::prime_missing_library_indexes(&app.handle().clone())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::open_image,
-            commands::open_image_encoded_bytes,
-            commands::open_image_bytes,
-            commands::export_image,
-            commands::dispatch_mutation,
-            commands::dispatch_read,
-            commands::get_peer_image_bytes,
-            commands::open_peer_image,
-            commands::get_mask_thumbnail,
+            open_image::open_image,
+            open_image::open_image_encoded_bytes,
+            open_image::open_image_bytes,
+            open_image::export_image,
+            dispatch::dispatch_mutation,
+            dispatch::dispatch_read,
+            peers::get_peer_image_bytes,
+            peers::open_peer_image,
+            masks::get_mask_thumbnail,
             remote_control::submit_remote_control_response,
             remote_control::get_remote_control_server_info,
             channel_server::register_coordination_channel,

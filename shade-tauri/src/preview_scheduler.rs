@@ -12,9 +12,8 @@
 //! frontend's generation counter discards stale frames that finish anyway.
 
 use crate::channel_protocol::{ArtboardViewport, PreviewQuality};
-use crate::commands::{
-    snapshot_render_state, EditorState, PreviewCrop, PreviewRenderRequest, RenderJob,
-};
+use crate::editor_state::{snapshot_render_state, EditorState};
+use crate::render::{PreviewCrop, PreviewRenderRequest, RenderJob};
 use std::sync::Mutex;
 
 #[tauri::command]
