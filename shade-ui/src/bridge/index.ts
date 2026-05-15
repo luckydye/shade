@@ -251,6 +251,16 @@ export interface TextLayerValues {
   content: string;
   style: TextStyleValues;
   transform: TextTransformValues;
+  /** Layout-derived AABB in canvas pixels (translation applied). `null` when
+   *  the layer is empty or no font is registered. */
+  bounds?: TextBoundsValues | null;
+}
+
+export interface TextBoundsValues {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface FontInfo {
@@ -1097,9 +1107,11 @@ export async function addLayer(kind: string): Promise<number> {
  *  font_id returned by the AddFont mutation with the entry in the subsequent
  *  ListFonts read (which is keyed by content hash on the Rust side). */
 function fnv1a64Hex(bytes: Uint8Array): string {
-  let h = 0xcbf29ce484222325n;
-  const mul = 0x00000100000001b3n;
-  const mask = 0xffffffffffffffffn;
+  // BigInt literals with the `n` suffix are blocked by the configured build
+  // target; use the `BigInt(...)` constructor instead.
+  let h = BigInt("0xcbf29ce484222325");
+  const mul = BigInt("0x00000100000001b3");
+  const mask = BigInt("0xffffffffffffffff");
   for (let i = 0; i < bytes.length; i++) {
     h = (h ^ BigInt(bytes[i])) & mask;
     h = (h * mul) & mask;

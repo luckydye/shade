@@ -259,6 +259,18 @@ pub struct TextLayerValues {
     pub content: String,
     pub style: TextStyleValues,
     pub transform: TextTransformValues,
+    /// Layout-derived AABB in canvas pixels, with the layer's translation
+    /// already applied. `None` when the layer is empty or no font is
+    /// registered. Used by the viewport for hit-testing and selection chrome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<TextBoundsValues>,
+}
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TextBoundsValues {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TextStyleValues {

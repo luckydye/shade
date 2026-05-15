@@ -875,6 +875,8 @@ impl Renderer {
                         content,
                         style,
                         transform,
+                        canvas_width,
+                        canvas_height,
                         target_width,
                         target_height,
                     )?;
@@ -1014,6 +1016,8 @@ impl Renderer {
         content: &TextContent,
         style: &TextStyle,
         transform: &AffineTransform,
+        canvas_width: u32,
+        canvas_height: u32,
         target_width: u32,
         target_height: u32,
     ) -> Result<Option<wgpu::Texture>> {
@@ -1026,14 +1030,26 @@ impl Renderer {
             return Ok(None);
         }
 
+        // Layout coordinates and tx/ty are in canvas pixels, but the text
+        // pipeline rasterizes into a `target_width × target_height` texture
+        // whose shader interprets pen positions as pixel coordinates of the
+        // *target*. Scale every glyph's position and size so a canvas-space
+        // layer at (270, 270) lands at the proportional position in the
+        // preview/export. Uses the same factor on both axes — preview is a
+        // uniform scale of the canvas; differential scaling only happens via
+        // crops, which the V1 text path doesn't yet honour.
+        let scale_x = target_width as f32 / canvas_width.max(1) as f32;
+        let scale_y = target_height as f32 / canvas_height.max(1) as f32;
+
         // V1: apply only the translation component of the layer transform.
         // Rotation and per-axis scale require feeding the matrix through the
         // vertex shader; deferred to a follow-up.
         let placed: Vec<PlacedGlyph> = placed_raw
             .into_iter()
             .map(|p| PlacedGlyph {
-                x: p.x + transform.tx,
-                y: p.y + transform.ty,
+                x: (p.x + transform.tx) * scale_x,
+                y: (p.y + transform.ty) * scale_y,
+                size_px: p.size_px * scale_y,
                 ..p
             })
             .collect();

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use crate::layers::{AdjustmentValues, ColorValues, CropValues, CurvesValues, DenoiseValues, GlowValues, GrainValues, HslValues, LayerEntryInfo, LayerStackInfo, LsCurveValues, MaskParamsInfo, SharpenValues, ToneValues, VignetteValues};
 use crate::snapshots::persist_current_edit_version;
-use crate::text_layers::{TextLayerValues, TextStyleValues, TextTransformValues, text_align_str, text_anchor_str};
+use crate::text_layers::{TextBoundsValues, TextLayerValues, TextStyleValues, TextTransformValues, text_align_str, text_anchor_str};
 
 
 pub struct EditorState {
@@ -344,6 +344,19 @@ pub(crate) fn snapshot_render_state(
     ))
 }
 pub(crate) fn build_layer_stack_info(st: &EditorState) -> LayerStackInfo {
+    // Build a single layout engine for all text layers in this snapshot pass.
+    // cosmic-text/fontdb init dominates per-call cost (~ms), so amortizing it
+    // matters when a document has several text layers.
+    let has_text = st
+        .stack
+        .layers
+        .iter()
+        .any(|l| matches!(l.layer, shade_lib::Layer::Text { .. }));
+    let mut layout_engine = if has_text {
+        shade_lib::TextLayoutEngine::new(&st.stack.fonts).ok()
+    } else {
+        None
+    };
     let layers = st
         .stack
         .layers
@@ -376,6 +389,19 @@ pub(crate) fn build_layer_stack_info(st: &EditorState) -> LayerStackInfo {
             },
             text: match &l.layer {
                 shade_lib::Layer::Text { content, style, transform } => {
+                    let bounds = layout_engine
+                        .as_mut()
+                        .and_then(|e| e.layout(content, style).ok())
+                        .and_then(|placed| shade_lib::compute_text_aabb(&placed))
+                        .map(|b| TextBoundsValues {
+                            // Renderer applies only the translation component
+                            // of the transform today; mirror that here so the
+                            // bbox lines up with the rendered glyphs.
+                            x: b.x + transform.tx,
+                            y: b.y + transform.ty,
+                            width: b.width,
+                            height: b.height,
+                        });
                     Some(TextLayerValues {
                         content: content.text.clone(),
                         style: TextStyleValues {
@@ -397,6 +423,7 @@ pub(crate) fn build_layer_stack_info(st: &EditorState) -> LayerStackInfo {
                             scale_y: transform.scale_y,
                             rotation: transform.rotation,
                         },
+                        bounds,
                     })
                 }
                 _ => None,

@@ -126,6 +126,43 @@ impl TextLayoutEngine {
     }
 }
 
+/// Axis-aligned bounding box in canvas pixels (top-down Y), pre-transform.
+/// Used by the editor UI for hit-testing and drawing the selection rectangle
+/// around a text layer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextBounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Loose AABB over a laid-out glyph sequence. The advance and ascent/descent
+/// are estimated from `size_px` (we don't carry per-font metrics through to
+/// `PlacedGlyph` yet) so the rectangle is a few pixels generous on each side
+/// — adequate for a selection chrome and pointer hit-test.
+pub fn compute_text_aabb(placed: &[PlacedGlyph]) -> Option<TextBounds> {
+    if placed.is_empty() {
+        return None;
+    }
+    let mut x_min = f32::INFINITY;
+    let mut x_max = f32::NEG_INFINITY;
+    let mut y_min = f32::INFINITY;
+    let mut y_max = f32::NEG_INFINITY;
+    for p in placed {
+        x_min = x_min.min(p.x);
+        x_max = x_max.max(p.x + 0.6 * p.size_px);
+        y_min = y_min.min(p.y - 0.8 * p.size_px);
+        y_max = y_max.max(p.y + 0.2 * p.size_px);
+    }
+    Some(TextBounds {
+        x: x_min,
+        y: y_min,
+        width: x_max - x_min,
+        height: y_max - y_min,
+    })
+}
+
 /// One-shot layout: build a [`TextLayoutEngine`], call [`TextLayoutEngine::layout`],
 /// and discard the engine. Convenient for tests and ad-hoc rendering; for
 /// production use, hold an engine on the renderer to reuse the font cache.

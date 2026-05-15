@@ -18,6 +18,7 @@ import {
   resetViewport,
   selectArtboard,
   setCropAspectRatioPreset,
+  setTextTransform,
   setViewportScreenSize,
   setViewportToneSample,
   stampBrushMask,
@@ -179,7 +180,26 @@ export const Viewport: Component = () => {
         lastImgY: number;
         erase: boolean;
       }
+    | {
+        kind: "text_move";
+        pointerId: number;
+        layerIdx: number;
+        startImgX: number;
+        startImgY: number;
+        originTx: number;
+        originTy: number;
+      }
     | null = null;
+
+  // Live drag offset for a text layer (image-pixel deltas). The rasterized
+  // glyphs stay where they are until commit on pointer-up; the selection
+  // rectangle alone tracks the pointer for smooth feedback without per-frame
+  // Rust roundtrips.
+  const [draftTextOffset, setDraftTextOffset] = createSignal<
+    { layerIdx: number; dx: number; dy: number } | null
+  >(null);
+
+  const TEXT_HANDLE_PADDING = 4;
 
   const selectedCropLayer = () => {
     const layer = state.layers[state.selectedLayerIdx];
@@ -866,6 +886,81 @@ export const Viewport: Component = () => {
     ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
   }
 
+  /** Apply any in-flight drag offset to a text layer's snapshot bbox so the
+   *  selection rectangle tracks the pointer between commit and refresh. */
+  function effectiveTextBounds(layerIdx: number) {
+    const layer = state.layers[layerIdx];
+    if (layer?.kind !== "text" || !layer.text?.bounds) return null;
+    const b = layer.text.bounds;
+    const draft = draftTextOffset();
+    const dx = draft && draft.layerIdx === layerIdx ? draft.dx : 0;
+    const dy = draft && draft.layerIdx === layerIdx ? draft.dy : 0;
+    return { x: b.x + dx, y: b.y + dy, width: b.width, height: b.height };
+  }
+
+  /** Topmost text layer (in render order) whose canvas-pixel bbox contains
+   *  the given image-pixel point. Returns the layer index, or `null`. */
+  function textLayerAtImagePoint(imgX: number, imgY: number) {
+    for (let i = state.layers.length - 1; i >= 0; i--) {
+      const layer = state.layers[i];
+      if (layer.kind !== "text" || !layer.visible) continue;
+      const b = effectiveTextBounds(i);
+      if (!b) continue;
+      const pad = TEXT_HANDLE_PADDING;
+      if (
+        imgX >= b.x - pad &&
+        imgX <= b.x + b.width + pad &&
+        imgY >= b.y - pad &&
+        imgY <= b.y + b.height + pad
+      ) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  /** Selection rectangle around the currently-selected text layer, drawn in
+   *  stage-screen space using the same canvas→world transform as the artboard
+   *  chrome. */
+  function drawTextOverlay(
+    ctx: CanvasRenderingContext2D,
+    cssWidth: number,
+    cssHeight: number,
+  ) {
+    const idx = state.selectedLayerIdx;
+    if (idx < 0) return;
+    const layer = state.layers[idx];
+    if (layer?.kind !== "text") return;
+    const b = effectiveTextBounds(idx);
+    if (!b) return;
+    const t = getViewTransform(cssWidth, cssHeight);
+    if (t.scale <= 0) return;
+    const topLeft = worldToScreen(toWorldX(b.x), toWorldY(b.y), t);
+    const bottomRight = worldToScreen(
+      toWorldX(b.x + b.width),
+      toWorldY(b.y + b.height),
+      t,
+    );
+    const sx = topLeft.x;
+    const sy = topLeft.y;
+    const sw = bottomRight.x - topLeft.x;
+    const sh = bottomRight.y - topLeft.y;
+    ctx.save();
+    ctx.strokeStyle = "rgba(96, 165, 250, 0.95)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(sx, sy, sw, sh);
+    ctx.fillStyle = "#60a5fa";
+    for (const [hx, hy] of [
+      [sx, sy],
+      [sx + sw, sy],
+      [sx + sw, sy + sh],
+      [sx, sy + sh],
+    ]) {
+      ctx.fillRect(hx - 3, hy - 3, 6, 6);
+    }
+    ctx.restore();
+  }
+
   function drawFrame() {
     const container = containerRef();
     if (!canvasRef || !container) return;
@@ -982,6 +1077,7 @@ export const Viewport: Component = () => {
 
     drawCropOverlay(ctx, cssWidth, cssHeight);
     drawMaskOverlay(ctx, cssWidth, cssHeight);
+    drawTextOverlay(ctx, cssWidth, cssHeight);
   }
 
   createEffect(() => {
@@ -1000,6 +1096,7 @@ export const Viewport: Component = () => {
     backdropTile();
     previewTile();
     loadingArtboardImage();
+    draftTextOffset();
     drawFrame();
   });
 
@@ -1300,6 +1397,48 @@ export const Viewport: Component = () => {
       stageRef.setPointerCapture(e.pointerId);
       return;
     }
+    if (clickedArtboard && e.button === 0) {
+      // Text-layer interaction: hit-test the current selected artboard's text
+      // layers in canvas-pixel space. A hit starts a drag (selecting first if
+      // needed); a miss over the artboard clears any selected text layer so
+      // the next gesture falls through to pan, matching Figma's empty-canvas
+      // click-to-deselect.
+      const tView = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+      if (tView.scale > 0) {
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const world = screenToWorld(sx, sy, tView);
+        const imgX = world.x - getViewWorldOffset().x;
+        const imgY = world.y - getViewWorldOffset().y;
+        const hitIdx = textLayerAtImagePoint(imgX, imgY);
+        if (hitIdx !== null) {
+          const layer = state.layers[hitIdx];
+          const tx = layer.text?.transform.tx ?? 0;
+          const ty = layer.text?.transform.ty ?? 0;
+          if (state.selectedLayerIdx !== hitIdx) {
+            setState("selectedLayerIdx", hitIdx);
+            setState("selectedLayerPart", "layer");
+          }
+          gesture = {
+            kind: "text_move",
+            pointerId: e.pointerId,
+            layerIdx: hitIdx,
+            startImgX: imgX,
+            startImgY: imgY,
+            originTx: tx,
+            originTy: ty,
+          };
+          setDraftTextOffset({ layerIdx: hitIdx, dx: 0, dy: 0 });
+          stageRef.setPointerCapture(e.pointerId);
+          drawFrame();
+          return;
+        }
+        const sel = state.layers[state.selectedLayerIdx];
+        if (sel?.kind === "text") {
+          setState("selectedLayerIdx", -1);
+        }
+      }
+    }
     if (clickedArtboard) {
       setPressedArtboardChrome(null);
       gesture = {
@@ -1430,6 +1569,23 @@ export const Viewport: Component = () => {
         gesture = { kind: "pinch", dist: newDist, midX: newMidX, midY: newMidY };
         drawFrame();
       }
+      return;
+    }
+    if (gesture.kind === "text_move") {
+      const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
+      if (t.scale <= 0) return;
+      const rect = stageRef.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy, t);
+      const imgX = world.x - getViewWorldOffset().x;
+      const imgY = world.y - getViewWorldOffset().y;
+      setDraftTextOffset({
+        layerIdx: gesture.layerIdx,
+        dx: imgX - gesture.startImgX,
+        dy: imgY - gesture.startImgY,
+      });
+      drawFrame();
       return;
     }
     if (gesture.kind === "mask") {
@@ -1566,6 +1722,32 @@ export const Viewport: Component = () => {
       return;
     }
     setPressedArtboardChrome(null);
+    if (gesture?.kind === "text_move") {
+      const g = gesture;
+      const draft = draftTextOffset();
+      gesture = null;
+      setDraftTextOffset(null);
+      if (stageRef && e && stageRef.hasPointerCapture(g.pointerId)) {
+        stageRef.releasePointerCapture(g.pointerId);
+      }
+      // Commit only when the layer actually moved; an idle click should still
+      // count as a select-only operation.
+      if (draft && (draft.dx !== 0 || draft.dy !== 0)) {
+        const layer = state.layers[g.layerIdx];
+        const tr = layer?.text?.transform;
+        if (tr) {
+          void setTextTransform(g.layerIdx, {
+            tx: g.originTx + draft.dx,
+            ty: g.originTy + draft.dy,
+            scale_x: tr.scale_x,
+            scale_y: tr.scale_y,
+            rotation: tr.rotation,
+          });
+        }
+      }
+      drawFrame();
+      return;
+    }
     if (gesture?.kind === "brush_paint") {
       if (stageRef && e && stageRef.hasPointerCapture(e.pointerId)) {
         stageRef.releasePointerCapture(e.pointerId);

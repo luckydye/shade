@@ -55,7 +55,7 @@ pub use text::{
 pub use text_buffer::{
     GlyphBufferLayout, GpuBandHeader, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph, FLOATS_PER_CURVE,
 };
-pub use text_layout::{layout_text, TextLayoutEngine};
+pub use text_layout::{compute_text_aabb, layout_text, TextBounds, TextLayoutEngine};
 pub use text_outline::{
     build_h_bands, build_v_bands, outline_glyph, GlyphBand, GlyphCurves, QuadBezier,
     Rect as GlyphRect, DEFAULT_BANDS_PER_AXIS,
