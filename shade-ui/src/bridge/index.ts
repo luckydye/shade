@@ -196,6 +196,7 @@ export interface LayerInfo {
   mask_params?: MaskParamsInfo | null;
   adjustments?: AdjustmentValues | null;
   crop?: CropValues | null;
+  text?: TextLayerValues | null;
 }
 
 export interface CropValues {
@@ -204,6 +205,74 @@ export interface CropValues {
   width: number;
   height: number;
   rotation: number;
+}
+
+export type TextAlignName = "left" | "center" | "right" | "justify";
+export type TextAnchorName =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "center-left"
+  | "center"
+  | "center-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right"
+  | "baseline-left"
+  | "baseline-center"
+  | "baseline-right";
+
+export interface TextStyleValues {
+  /** Font ID into the LayerStack font registry (decoded `u64` as JS number). */
+  font_id: number;
+  size_px: number;
+  line_height: number;
+  letter_spacing: number;
+  /** `null` disables wrapping. */
+  max_width: number | null;
+  align: TextAlignName;
+  anchor: TextAnchorName;
+  /** OpenType weight (100..=900). */
+  weight: number;
+  italic: boolean;
+  /** Linear sRGB straight alpha — `[r, g, b, a]`. */
+  color: [number, number, number, number];
+}
+
+export interface TextTransformValues {
+  tx: number;
+  ty: number;
+  scale_x: number;
+  scale_y: number;
+  rotation: number;
+}
+
+export interface TextLayerValues {
+  content: string;
+  style: TextStyleValues;
+  transform: TextTransformValues;
+}
+
+export interface FontInfo {
+  font_id: number;
+  family: string;
+  /** Decimal-encoded `u64` content hash (FNV-1a over the blob). */
+  blob_hash: string;
+}
+
+/** Partial style update — undefined fields leave the corresponding style
+ * field unchanged. To clear `max_width`, set it to `null` explicitly. */
+export interface TextStylePatch {
+  font_id?: number;
+  size_px?: number;
+  line_height?: number;
+  letter_spacing?: number;
+  max_width?: number | null;
+  align?: TextAlignName;
+  anchor?: TextAnchorName;
+  weight?: number;
+  italic?: boolean;
+  color?: [number, number, number, number];
 }
 
 export type PreviewFrame =
@@ -1020,6 +1089,103 @@ export async function addLayer(kind: string): Promise<number> {
   // exact index. Callers should use `state.layers.length - 1` after the
   // snapshot has been applied.
   return -1;
+}
+
+// ── Text layers & fonts ────────────────────────────────────────────────
+
+/** FNV-1a 64-bit — mirrors `shade_lib::text::fnv1a_64`. Used to correlate the
+ *  font_id returned by the AddFont mutation with the entry in the subsequent
+ *  ListFonts read (which is keyed by content hash on the Rust side). */
+function fnv1a64Hex(bytes: Uint8Array): string {
+  let h = 0xcbf29ce484222325n;
+  const mul = 0x00000100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let i = 0; i < bytes.length; i++) {
+    h = (h ^ BigInt(bytes[i])) & mask;
+    h = (h * mul) & mask;
+  }
+  return h.toString();
+}
+
+export async function addTextLayer(
+  content: string,
+  fontId: number,
+  sizePx: number,
+): Promise<number> {
+  await sendMutation({
+    type: "add_text_layer",
+    content,
+    font_id: fontId,
+    size_px: sizePx,
+  });
+  // Always appended; LayerStackSnapshot lands before the mutation resolves,
+  // so callers derive the idx from `state.layers.length - 1`.
+  return -1;
+}
+
+export async function updateTextContent(layerIdx: number, content: string): Promise<void> {
+  await sendMutation({
+    type: "update_text_content",
+    layer_idx: layerIdx,
+    content,
+  });
+}
+
+export async function updateTextStyle(
+  layerIdx: number,
+  patch: TextStylePatch,
+): Promise<void> {
+  await sendMutation({
+    type: "update_text_style",
+    layer_idx: layerIdx,
+    ...patch,
+  } as Parameters<typeof sendMutation>[0]);
+}
+
+export async function setTextTransform(
+  layerIdx: number,
+  transform: TextTransformValues,
+): Promise<void> {
+  await sendMutation({
+    type: "set_text_transform",
+    layer_idx: layerIdx,
+    tx: transform.tx,
+    ty: transform.ty,
+    scale_x: transform.scale_x,
+    scale_y: transform.scale_y,
+    rotation: transform.rotation,
+  });
+}
+
+/** Register a font blob with the LayerStack and return its `font_id`.
+ *  Idempotent on contents — the same bytes return the existing id.
+ *  Rust dedups by content hash; the wrapper recovers the canonical id from
+ *  the registry via `list_fonts` rather than threading the `AddFont` return
+ *  value through the mutation dispatcher. */
+export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
+  const blobHash = fnv1a64Hex(bytes);
+  await sendMutation({
+    type: "add_font",
+    family,
+    bytes: Array.from(bytes),
+  });
+  const fonts = await sendRead<FontInfo[]>({ type: "list_fonts" }, "fonts");
+  const match = fonts.find((f) => f.blob_hash === blobHash);
+  if (!match) {
+    throw new Error("add_font: registered font not found in list_fonts");
+  }
+  return match.font_id;
+}
+
+export async function listFonts(): Promise<FontInfo[]> {
+  return sendRead<FontInfo[]>({ type: "list_fonts" }, "fonts");
+}
+
+/** Drop fonts that no text layer references. The dispatched mutation
+ *  discards Rust's removed-count return; callers that need it can diff
+ *  `listFonts` before/after. */
+export async function pruneUnusedFonts(): Promise<void> {
+  await sendMutation({ type: "prune_unused_fonts" });
 }
 
 export interface LinearGradientMask {

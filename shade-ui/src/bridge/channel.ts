@@ -200,6 +200,20 @@ export type MutationRequest =
   | { type: "load_snapshot"; id: string }
   | { type: "load_preset"; name: string }
   | { type: "apply_preset_snapshot"; name: string }
+  | { type: "add_text_layer"; content: string; font_id: number; size_px: number }
+  | { type: "update_text_content"; layer_idx: number; content: string }
+  | ({ type: "update_text_style" } & Record<string, unknown>)
+  | {
+      type: "set_text_transform";
+      layer_idx: number;
+      tx: number;
+      ty: number;
+      scale_x: number;
+      scale_y: number;
+      rotation: number;
+    }
+  | { type: "add_font"; family: string; bytes: number[] }
+  | { type: "prune_unused_fonts" }
   | { type: "set_media_rating"; fingerprint: string; rating: number | null }
   | { type: "set_media_tags"; fingerprint: string; tags: string[] }
   | {
@@ -303,6 +317,7 @@ export type ReadRequest =
   | { type: "get_snapshot_preset_json"; fingerprint: string }
   | { type: "get_peer_awareness"; peer_endpoint_id: string }
   | { type: "get_stack_snapshot" }
+  | { type: "list_fonts" }
   | {
       type: "sync_peer_snapshots";
       peer_endpoint_id: string;

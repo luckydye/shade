@@ -581,3 +581,72 @@ export async function loadSnapshot(id: string) {
   await refreshPreview();
   queueHistorySnapshot();
 }
+
+// ── Text layers & fonts ────────────────────────────────────────────────
+
+export async function addTextLayer(
+  content: string,
+  fontId: number,
+  sizePx: number,
+  position: number,
+) {
+  await bridge.addTextLayer(content, fontId, sizePx);
+  // Rust appends the new text layer and broadcasts the new stack via
+  // LayerStackSnapshot before the mutation resolves; the appended layer is
+  // therefore at `state.layers.length - 1`.
+  await refreshLayerStack();
+  if (position < 0 || position > state.layers.length) {
+    throw new Error("layer insertion position is out of bounds");
+  }
+  let idx = state.layers.length - 1;
+  if (idx < 0) {
+    throw new Error("new layer could not be resolved after insertion");
+  }
+  if (idx !== position) {
+    await bridge.moveLayer(idx, position);
+    await refreshLayerStack();
+    idx = getMovedLayerIndex(idx, idx, position);
+  }
+  setState("selectedLayerIdx", idx);
+  await refreshPreview();
+  queueHistorySnapshot();
+  return idx;
+}
+
+export async function updateTextContent(layerIdx: number, content: string) {
+  await runLayerMutation(() => bridge.updateTextContent(layerIdx, content));
+}
+
+export async function updateTextStyle(
+  layerIdx: number,
+  patch: bridge.TextStylePatch,
+) {
+  await runLayerMutation(() => bridge.updateTextStyle(layerIdx, patch));
+}
+
+export async function setTextTransform(
+  layerIdx: number,
+  transform: bridge.TextTransformValues,
+) {
+  await runLayerMutation(() => bridge.setTextTransform(layerIdx, transform));
+}
+
+export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
+  const id = await bridge.addFont(family, bytes);
+  await refreshFontList();
+  return id;
+}
+
+export async function refreshFontList() {
+  const fonts = await bridge.listFonts();
+  setState("fonts", fonts);
+}
+
+export async function pruneUnusedFonts() {
+  await bridge.pruneUnusedFonts();
+  // The dispatched mutation discards Rust's count; refresh unconditionally
+  // (cheap) and snapshot history so an undoable point exists if anything
+  // actually changed. A no-op prune just costs one extra list_fonts read.
+  await refreshFontList();
+  queueHistorySnapshot();
+}

@@ -240,6 +240,34 @@ pub enum MutationRequest {
         name: String,
     },
 
+    // Text layers & fonts. `AddTextLayer`/`AddFont` return values
+    // (`layer_idx` / `font_id`) are discarded by the dispatcher: text layers
+    // are always appended (caller derives idx from the next `LayerStackSnapshot`),
+    // and font ids are recovered via the `ListFonts` read by content hash.
+    AddTextLayer {
+        content: String,
+        font_id: u64,
+        size_px: f32,
+    },
+    UpdateTextContent {
+        layer_idx: usize,
+        content: String,
+    },
+    UpdateTextStyle(serde_json::Value),
+    SetTextTransform {
+        layer_idx: usize,
+        tx: f32,
+        ty: f32,
+        scale_x: f32,
+        scale_y: f32,
+        rotation: f32,
+    },
+    AddFont {
+        family: String,
+        bytes: Vec<u8>,
+    },
+    PruneUnusedFonts,
+
     // Media metadata
     SetMediaRating {
         fingerprint: String,
@@ -409,4 +437,5 @@ pub enum ReadRequest {
     GetPeerAwareness { peer_endpoint_id: String },
     GetStackSnapshot,
     SyncPeerSnapshots { peer_endpoint_id: String, fingerprint: String },
+    ListFonts,
 }

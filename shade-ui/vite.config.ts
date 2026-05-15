@@ -1,4 +1,4 @@
-/// <reference types="vitest" />
+/ <reference types="vitest" />
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import solid from "vite-plugin-solid";

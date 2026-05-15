@@ -1,5 +1,14 @@
 import type { Accessor, Component } from "solid-js";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+} from "solid-js";
 import { backdropTile } from "../../viewport/preview";
 import { isAdjustmentSliderActive, state, viewportToneSample } from "../../store/editor";
 import { curveSvg } from "./inspector-icons";
@@ -54,25 +63,27 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
     on(
       () => state.selectedLayerIdx,
       (layerIdx) => {
-        const layer = state.layers[layerIdx];
-        if (layer?.kind !== "adjustment") {
-          setPts([]);
+        untrack(() => {
+          const layer = state.layers[layerIdx];
+          if (layer?.kind !== "adjustment") {
+            setPts([]);
+            setDraggingId(null);
+            setHoveredId(null);
+            return;
+          }
+          const points =
+            props.curvePointCache().get(layerIdx) ??
+            props.getStoredPoints(layer.adjustments) ??
+            props.defaultCurvePoints();
+          nextId = 0;
+          setPts(
+            props
+              .normalizePoints(points.length === 0 ? props.defaultCurvePoints() : points)
+              .map((point) => ({ ...point, id: nextId++ })),
+          );
           setDraggingId(null);
           setHoveredId(null);
-          return;
-        }
-        const points =
-          props.curvePointCache().get(layerIdx) ??
-          props.getStoredPoints(layer.adjustments) ??
-          props.defaultCurvePoints();
-        nextId = 0;
-        setPts(
-          props
-            .normalizePoints(points.length === 0 ? props.defaultCurvePoints() : points)
-            .map((point) => ({ ...point, id: nextId++ })),
-        );
-        setDraggingId(null);
-        setHoveredId(null);
+        });
       },
     ),
   );
