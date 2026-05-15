@@ -879,6 +879,7 @@ impl Renderer {
                         canvas_height,
                         target_width,
                         target_height,
+                        &current_view,
                     )?;
                     match result {
                         Some(tex) => tex,
@@ -1020,6 +1021,7 @@ impl Renderer {
         canvas_height: u32,
         target_width: u32,
         target_height: u32,
+        current_view: &PreviewCrop,
     ) -> Result<Option<wgpu::Texture>> {
         // V1: build a fresh layout engine per call. Caching by `stack.generation`
         // is a follow-up; a poster with frequent edits will pay an FT/HB
@@ -1030,26 +1032,19 @@ impl Renderer {
             return Ok(None);
         }
 
-        // Layout coordinates and tx/ty are in canvas pixels, but the text
-        // pipeline rasterizes into a `target_width × target_height` texture
-        // whose shader interprets pen positions as pixel coordinates of the
-        // *target*. Scale every glyph's position and size so a canvas-space
-        // layer at (270, 270) lands at the proportional position in the
-        // preview/export. Uses the same factor on both axes — preview is a
-        // uniform scale of the canvas; differential scaling only happens via
-        // crops, which the V1 text path doesn't yet honour.
-        let scale_x = target_width as f32 / canvas_width.max(1) as f32;
-        let scale_y = target_height as f32 / canvas_height.max(1) as f32;
-
         // V1: apply only the translation component of the layer transform.
         // Rotation and per-axis scale require feeding the matrix through the
         // vertex shader; deferred to a follow-up.
+        //
+        // Coordinates here are in canvas (image-pixel) space — same as the
+        // bbox in `LayerStackSnapshot`. Mapping to target-pixel space is the
+        // job of the resample step below, mirroring how `Layer::Image`
+        // positions itself within the current view rect.
         let placed: Vec<PlacedGlyph> = placed_raw
             .into_iter()
             .map(|p| PlacedGlyph {
-                x: (p.x + transform.tx) * scale_x,
-                y: (p.y + transform.ty) * scale_y,
-                size_px: p.size_px * scale_y,
+                x: p.x + transform.tx,
+                y: p.y + transform.ty,
                 ..p
             })
             .collect();
@@ -1089,15 +1084,44 @@ impl Renderer {
             return Ok(None);
         }
 
+        // Rasterize at canvas resolution — texels map 1:1 to image-pixel
+        // coordinates, so glyph pen positions are texel indices. This keeps
+        // the text pipeline target-resolution-agnostic; placement within the
+        // preview is decided by the resample step below.
         let instances = buffer_layout.build_instances(&renderable)?;
-        let tex = self.text_pipeline.process(
+        let canvas_tex = self.text_pipeline.process(
             &self.ctx,
             &buffer_layout,
             &instances,
+            canvas_width,
+            canvas_height,
+        )?;
+
+        // Resample/position the canvas-sized text texture onto the current
+        // view rect — same call shape `Layer::Image` uses above, so text
+        // tracks crops and preview downscale identically.
+        let positioned = self.crop_pipeline.process_to_size(
+            &self.ctx,
+            &canvas_tex,
             target_width,
             target_height,
+            CropUniform {
+                out_x: current_view.x,
+                out_y: current_view.y,
+                out_width: current_view.width,
+                out_height: current_view.height,
+                pivot_x: 0.0,
+                pivot_y: 0.0,
+                in_x: 0.0,
+                in_y: 0.0,
+                in_width: canvas_width as f32,
+                in_height: canvas_height as f32,
+                cos_r: 1.0,
+                sin_r: 0.0,
+            },
         )?;
-        Ok(Some(tex))
+        self.ctx.release_work_texture(canvas_tex);
+        Ok(Some(positioned))
     }
 
     /// Apply a GPU colour transform to an existing texture.
