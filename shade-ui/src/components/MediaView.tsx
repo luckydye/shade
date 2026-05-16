@@ -12,18 +12,11 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
-  addMediaLibrary,
-  addS3MediaLibrary,
-  addToCollection,
   applyPresetSnapshot,
   type BatchExportProgress,
   batchApplyPresetSnapshot,
   batchClearEdits,
   batchExportImages,
-  createCollection,
-  deleteCollection,
-  deleteMediaLibraryItem,
-  getS3MediaLibrary,
   isTauriRuntime,
   type LibrarySyncProgress,
   listenBatchExportProgress,
@@ -36,24 +29,39 @@ import {
   openPeerImage,
   pairPeerDevice,
   pickDirectory,
-  refreshLibraryIndex,
+  type S3MediaLibraryInput,
+} from "../bridge/index";
+import {
+  addToCollection,
   removeFromCollection,
+  useCollectionItems,
+} from "../data/use-collection-items";
+import {
+  createCollection,
+  deleteCollection,
+  renameCollection,
+  useCollectionList,
+} from "../data/use-collection-list";
+import {
+  deleteMediaLibraryItem,
+  uploadMediaLibraryFile,
+  uploadMediaLibraryPath,
+  uploadMediaLibraryUrl,
+  useLibraryItems,
+} from "../data/use-library-items";
+import {
+  addMediaLibrary,
+  addS3MediaLibrary,
+  getS3MediaLibrary,
+  refreshLibraryIndex,
   removeMediaLibrary,
   removePeerLibrary,
-  renameCollection,
-  type S3MediaLibraryInput,
   setLibraryMode,
   setMediaLibraryOrder,
   syncLibrary,
   updateS3MediaLibrary,
-  uploadMediaLibraryFile,
-  uploadMediaLibraryPath,
-  uploadMediaLibraryUrl,
-} from "../bridge/index";
-import { useCollectionItems } from "../data/use-collection-items";
-import { useCollectionList } from "../data/use-collection-list";
-import { useLibraryItems } from "../data/use-library-items";
-import { useMediaLibraryList } from "../data/use-media-library-list";
+  useMediaLibraryList,
+} from "../data/use-media-library-list";
 import { usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
 import { actions, buildActionContext } from "../store/actions";

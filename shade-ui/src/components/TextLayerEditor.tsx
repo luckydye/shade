@@ -1,9 +1,7 @@
 import { type Component, createMemo, For, Show } from "solid-js";
 import type { TextAlignName, TextStyleValues } from "../bridge";
-import { useFontList } from "../data/use-font-list";
+import { addFont, pruneUnusedFonts, useFontList } from "../data/use-font-list";
 import {
-  addFont,
-  pruneUnusedFonts,
   setTextTransform,
   updateTextContent,
   updateTextStyle,

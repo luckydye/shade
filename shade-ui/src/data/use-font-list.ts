@@ -1,8 +1,10 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
-import { type FontInfo, listFonts as fetchFonts } from "../bridge/index";
+import * as bridge from "../bridge/index";
+import { type FontInfo } from "../bridge/index";
+import { queueHistorySnapshot } from "../store/editor-layers";
 
 const { fonts, refetch } = createRoot(() => {
-  const [resource, { refetch }] = createResource(fetchFonts, {
+  const [resource, { refetch }] = createResource(bridge.listFonts, {
     initialValue: [] as FontInfo[],
   });
   return { fonts: resource, refetch };
@@ -18,4 +20,22 @@ export function useFontList(): {
       await refetch();
     },
   };
+}
+
+// ── Mutations ───────────────────────────────────────────────────────────────
+// No Rust channel for font changes — mutations explicitly refetch.
+
+export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
+  const id = await bridge.addFont(family, bytes);
+  await refetch();
+  return id;
+}
+
+export async function pruneUnusedFonts(): Promise<void> {
+  await bridge.pruneUnusedFonts();
+  // The dispatched mutation discards Rust's count; refresh unconditionally
+  // (cheap) and snapshot history so an undoable point exists if anything
+  // actually changed. A no-op prune just costs one extra list_fonts read.
+  await refetch();
+  queueHistorySnapshot();
 }

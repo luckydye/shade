@@ -4,7 +4,7 @@ import {
   getSnapshotPresetJson,
   savePresetFromJson,
   serializeCurrentPreset,
-} from "./bridge/index";
+} from "./data/use-preset-list";
 import { Inspector } from "./components/Inspector";
 import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";

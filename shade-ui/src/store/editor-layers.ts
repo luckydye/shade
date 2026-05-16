@@ -1,6 +1,5 @@
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import { useFontList } from "../data/use-font-list";
 import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 import {
   fullCanvasCrop,
@@ -62,7 +61,7 @@ async function captureAndRecordSnapshot() {
 
 let deferredHistorySnapshot = false;
 
-function queueHistorySnapshot() {
+export function queueHistorySnapshot() {
   if (isAdjustmentSliderActive()) {
     deferredHistorySnapshot = true;
     return;
@@ -531,18 +530,6 @@ export async function moveLayer(fromIdx: number, toIdx: number) {
   queueHistorySnapshot();
 }
 
-export async function savePreset(name: string) {
-  return bridge.savePreset(name);
-}
-
-export async function renamePreset(oldName: string, newName: string) {
-  return bridge.renamePreset(oldName, newName);
-}
-
-export async function deletePreset(name: string) {
-  return bridge.deletePreset(name);
-}
-
 export async function loadPreset(name: string) {
   await bridge.loadPreset(name);
   await refreshLayerStack();
@@ -558,12 +545,6 @@ export async function applyPresetSnapshot(name: string) {
   await refreshPreview();
   queueHistorySnapshot();
   return snapshot;
-}
-
-export async function saveSnapshot() {
-  const artboard = getSelectedArtboard();
-  const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;
-  return bridge.saveSnapshot(imagePath);
 }
 
 export async function loadSnapshot(id: string) {
@@ -619,17 +600,3 @@ export async function setTextTransform(
   await runLayerMutation(() => bridge.setTextTransform(layerIdx, transform));
 }
 
-export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
-  const id = await bridge.addFont(family, bytes);
-  await useFontList().refetch();
-  return id;
-}
-
-export async function pruneUnusedFonts() {
-  await bridge.pruneUnusedFonts();
-  // The dispatched mutation discards Rust's count; refresh unconditionally
-  // (cheap) and snapshot history so an undoable point exists if anything
-  // actually changed. A no-op prune just costs one extra list_fonts read.
-  await useFontList().refetch();
-  queueHistorySnapshot();
-}

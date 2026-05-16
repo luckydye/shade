@@ -1,5 +1,6 @@
 import { type Accessor, createResource, onCleanup, type Resource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
+import * as bridge from "../bridge/index";
 import {
   getCachedCameraLibraryItems,
   getCachedLocalLibraryItems,
@@ -119,4 +120,32 @@ export function useLibraryItems(libraryId: Accessor<string | null>): {
       await Promise.all([refetchItems(), refetchCached()]);
     },
   };
+}
+
+// ── Mutations ───────────────────────────────────────────────────────────────
+// Rust emits `library_scan_*` after writes for ongoing scans; uploads are
+// reflected via the next library scan tick.
+
+export function uploadMediaLibraryFile(
+  libraryId: string,
+  file: File,
+  appendTimestampOnConflict = false,
+): Promise<void> {
+  return bridge.uploadMediaLibraryFile(libraryId, file, appendTimestampOnConflict);
+}
+
+export function uploadMediaLibraryUrl(
+  libraryId: string,
+  url: string,
+  fileName: string,
+): Promise<void> {
+  return bridge.uploadMediaLibraryUrl(libraryId, url, fileName);
+}
+
+export function uploadMediaLibraryPath(libraryId: string, path: string): Promise<void> {
+  return bridge.uploadMediaLibraryPath(libraryId, path);
+}
+
+export function deleteMediaLibraryItem(path: string): Promise<void> {
+  return bridge.deleteMediaLibraryItem(path);
 }

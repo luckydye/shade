@@ -1,6 +1,7 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
-import { listSnapshots as fetchSnapshots, type SnapshotInfo } from "../bridge/index";
+import * as bridge from "../bridge/index";
+import { type SnapshotInfo } from "../bridge/index";
 import { getSelectedArtboard } from "../store/editor-store";
 
 function currentImagePath(): string | null {
@@ -11,7 +12,7 @@ function currentImagePath(): string | null {
 const { snapshots, refetch } = createRoot(() => {
   const [resource, { refetch }] = createResource(
     currentImagePath,
-    (imagePath) => fetchSnapshots(imagePath),
+    (imagePath) => bridge.listSnapshots(imagePath),
     { initialValue: [] as SnapshotInfo[] },
   );
   onChannelMessage("snapshot_saved", () => {
@@ -30,4 +31,12 @@ export function useSnapshotList(): {
       await refetch();
     },
   };
+}
+
+// ── Mutations ───────────────────────────────────────────────────────────────
+// Snapshot writes funnel through this module. Rust emits `snapshot_saved` after
+// each save, which triggers the auto-refetch wired above.
+
+export function saveSnapshot(): Promise<unknown> {
+  return bridge.saveSnapshot(currentImagePath());
 }
