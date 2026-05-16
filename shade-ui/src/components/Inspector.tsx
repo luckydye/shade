@@ -17,6 +17,9 @@ import {
   fitCropRectToAspectRatio,
   resolveCropAspectRatio,
 } from "../crop-aspect";
+import { useFontList } from "../data/use-font-list";
+import { usePresetList } from "../data/use-preset-list";
+import { useSnapshotList } from "../data/use-snapshot-list";
 import {
   addLayer,
   addTextLayer,
@@ -25,8 +28,6 @@ import {
   createBrushMask,
   deleteLayer,
   deletePreset,
-  listPresets,
-  listSnapshots,
   loadPreset,
   loadSnapshot,
   moveLayer,
@@ -294,10 +295,9 @@ export const Inspector: Component = () => {
     "sliders",
   );
   const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
-  const [presets, setPresets] = createSignal<{ name: string; created_at: number }[]>([]);
-  const [snapshots, setSnapshots] = createSignal<
-    { id: string; display_index: number; created_at: number; is_current: boolean }[]
-  >([]);
+  const { presets, refetch: refetchPresets } = usePresetList();
+  const { snapshots, refetch: refetchSnapshots } = useSnapshotList();
+  const { fonts } = useFontList();
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);
   const [editingPresetName, setEditingPresetName] = createSignal<string | null>(null);
@@ -1200,8 +1200,8 @@ export const Inspector: Component = () => {
    * a placeholder when none exist (the user is expected to upload a font
    * via the editor's font picker afterwards). */
   const handleAddTextLayer = async () => {
-    const fonts = state.fonts;
-    const fontId = fonts.length > 0 ? fonts[0].font_id : 0;
+    const list = fonts();
+    const fontId = list.length > 0 ? list[0].font_id : 0;
     await addTextLayer("Text", fontId, 32, topLayerInsertPosition());
   };
 
@@ -1213,15 +1213,6 @@ export const Inspector: Component = () => {
       setPresetStatus(toErrorMessage(error));
     } finally {
       setIsPresetBusy(false);
-    }
-  };
-
-  const refreshPresetList = async () => {
-    try {
-      setPresets(await listPresets());
-      setSnapshots(await listSnapshots());
-    } catch (error) {
-      setPresetStatus(toErrorMessage(error));
     }
   };
 
@@ -1244,9 +1235,13 @@ export const Inspector: Component = () => {
     ),
   );
 
+  // Safety refresh when the user opens the presets tab — covers the case where
+  // a Rust channel event was missed (e.g. before the tab was first opened).
   createEffect(() => {
     if (inspectorTab() !== "presets") return;
-    void refreshPresetList();
+    void Promise.all([refetchPresets(), refetchSnapshots()]).catch((error) =>
+      setPresetStatus(toErrorMessage(error)),
+    );
   });
 
   const nextPresetName = () => {
@@ -1260,7 +1255,6 @@ export const Inspector: Component = () => {
     const name = nextPresetName();
     await withPresetBusy(async () => {
       await savePreset(name);
-      await refreshPresetList();
       setEditingPresetName(name);
       setEditingPresetValue(name);
     });
@@ -1269,7 +1263,6 @@ export const Inspector: Component = () => {
   const handleDeletePreset = async (name: string) => {
     await withPresetBusy(async () => {
       await deletePreset(name);
-      await refreshPresetList();
     });
   };
 
@@ -1277,7 +1270,7 @@ export const Inspector: Component = () => {
     await withPresetBusy(async () => {
       await loadPreset(name);
       setPresetStatus(`Loaded ${name}`);
-      await refreshPresetList();
+      await refetchSnapshots();
     });
   };
 
@@ -1289,7 +1282,6 @@ export const Inspector: Component = () => {
     }
     await withPresetBusy(async () => {
       await renamePreset(oldName, trimmed);
-      await refreshPresetList();
     });
     setEditingPresetName(null);
   };
@@ -1298,7 +1290,7 @@ export const Inspector: Component = () => {
     await withPresetBusy(async () => {
       await loadSnapshot(id);
       setPresetStatus(`Loaded snapshot`);
-      await refreshPresetList();
+      await refetchSnapshots();
     });
   };
 
@@ -1306,7 +1298,6 @@ export const Inspector: Component = () => {
     await withPresetBusy(async () => {
       await saveSnapshot();
       setPresetStatus(`Saved snapshot`);
-      await refreshPresetList();
     });
   };
 

@@ -1,13 +1,13 @@
-import circleSvg from "../../icons/circle.svg?raw";
-import cropSvg from "../../icons/crop.svg?raw";
-import curveSvg from "../../icons/curve.svg?raw";
-import denoiseSvg from "../../icons/denoise.svg?raw";
-import dropletSvg from "../../icons/droplet.svg?raw";
-import grainSvg from "../../icons/grain.svg?raw";
-import hslSvg from "../../icons/hsl.svg?raw";
-import sparkSvg from "../../icons/spark.svg?raw";
-import toneSvg from "../../icons/tone.svg?raw";
-import trashSvg from "../../icons/trash.svg?raw";
+import circleSvg from "../../assets/icons/circle.svg?raw";
+import cropSvg from "../../assets/icons/crop.svg?raw";
+import curveSvg from "../../assets/icons/curve.svg?raw";
+import denoiseSvg from "../../assets/icons/denoise.svg?raw";
+import dropletSvg from "../../assets/icons/droplet.svg?raw";
+import grainSvg from "../../assets/icons/grain.svg?raw";
+import hslSvg from "../../assets/icons/hsl.svg?raw";
+import sparkSvg from "../../assets/icons/spark.svg?raw";
+import toneSvg from "../../assets/icons/tone.svg?raw";
+import trashSvg from "../../assets/icons/trash.svg?raw";
 import type { MobileLayerFocus } from "./inspector-constants";
 
 export {

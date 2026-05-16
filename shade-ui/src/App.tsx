@@ -5,7 +5,6 @@ import {
   savePresetFromJson,
   serializeCurrentPreset,
 } from "./bridge/index";
-import { checkWebGPU } from "./webgpu-check";
 import { Inspector } from "./components/Inspector";
 import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
@@ -20,6 +19,7 @@ import { redo, undo } from "./store/history";
 import { getMediaBrowserController } from "./store/media-browser-control";
 import { mediaViewFocusedItem } from "./store/media-view-context";
 import { showToast } from "./store/toast";
+import { checkWebGPU } from "./webgpu-check";
 
 const CLIPBOARD_PRESET_NAME = "__clipboard__";
 

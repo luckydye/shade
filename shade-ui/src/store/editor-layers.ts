@@ -1,5 +1,6 @@
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
+import { useFontList } from "../data/use-font-list";
 import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 import {
   fullCanvasCrop,
@@ -530,16 +531,6 @@ export async function moveLayer(fromIdx: number, toIdx: number) {
   queueHistorySnapshot();
 }
 
-export async function listPresets() {
-  return bridge.listPresets();
-}
-
-export async function listSnapshots() {
-  const artboard = getSelectedArtboard();
-  const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;
-  return bridge.listSnapshots(imagePath);
-}
-
 export async function savePreset(name: string) {
   return bridge.savePreset(name);
 }
@@ -630,13 +621,8 @@ export async function setTextTransform(
 
 export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
   const id = await bridge.addFont(family, bytes);
-  await refreshFontList();
+  await useFontList().refetch();
   return id;
-}
-
-export async function refreshFontList() {
-  const fonts = await bridge.listFonts();
-  setState("fonts", fonts);
 }
 
 export async function pruneUnusedFonts() {
@@ -644,6 +630,6 @@ export async function pruneUnusedFonts() {
   // The dispatched mutation discards Rust's count; refresh unconditionally
   // (cheap) and snapshot history so an undoable point exists if anything
   // actually changed. A no-op prune just costs one extra list_fonts read.
-  await refreshFontList();
+  await useFontList().refetch();
   queueHistorySnapshot();
 }

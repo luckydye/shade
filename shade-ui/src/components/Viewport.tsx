@@ -8,7 +8,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { getMaskThumbnail, type MaskParamsInfo, setMediaRating } from "../bridge/index";
+import type { MaskParamsInfo } from "../bridge/index";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,
@@ -19,7 +19,7 @@ import {
   resizeCropFromHandle,
   resolveCropAspectRatio,
 } from "../crop-aspect";
-import { closeArtboard, openImageFile, selectArtboard } from "../store/editor-image";
+import { closeArtboard, selectArtboard } from "../store/editor-image";
 import {
   applyEdit,
   applyGradientMask,
@@ -35,14 +35,12 @@ import {
   moveArtboardBy,
   setCropAspectRatioPreset,
   setState,
-  setViewportToneSample,
   state,
 } from "../store/editor-store";
 import { makeBrushCursor } from "../viewport/brush-cursor";
 import { compositeArtboard } from "../viewport/compositor";
 import {
   backdropTile,
-  getViewportFitRef,
   getViewportZoomPercent,
   offsetViewportCenter,
   panViewport,
@@ -53,29 +51,29 @@ import {
   setViewportScreenSize,
   zoomViewport,
 } from "../viewport/preview";
-import type { WorldTransform } from "../viewport/transform";
-import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
+import { screenToWorld, type WorldTransform, worldToScreen } from "../viewport/transform";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import { Slider } from "./Slider";
-
-type CropHandle =
-  | "move"
-  | "top-left"
-  | "top"
-  | "top-right"
-  | "right"
-  | "bottom-right"
-  | "bottom"
-  | "bottom-left"
-  | "left"
-  | "rotate";
-
-type MaskHandle = "start" | "end" | "center" | "edge";
-type PressedArtboardChrome =
-  | { kind: "title"; artboardId: string }
-  | { kind: "close"; artboardId: string }
-  | null;
+import {
+  getCropEditTransform,
+  getViewTransform,
+  getViewWorldOffset,
+  toWorldX,
+  toWorldY,
+} from "./viewport/transforms";
+import type {
+  CropHandle,
+  CropRectWithRotation,
+  Gesture,
+  MaskHandle,
+  PressedArtboardChrome,
+} from "./viewport/types";
+import { useBrushOverlay } from "./viewport/use-brush-overlay";
+import { useElementSize } from "./viewport/use-element-size";
+import { useFileDrop } from "./viewport/use-file-drop";
+import { useArtboardRating } from "./viewport/use-rating";
+import { useToneSmoothing } from "./viewport/use-tone-smoothing";
 
 const HANDLE_SIZE = 10;
 const ARTBOARD_TITLE_HEIGHT = 24;
@@ -86,22 +84,6 @@ const ARTBOARD_CLOSE_MARGIN = 6;
 const ARTBOARD_CHROME_FADE = 0;
 const ARTBOARD_DRAG_THRESHOLD = 6;
 const CROP_ROTATION_SNAP_STEP = Math.PI / 36;
-
-function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
-  if (!artboard) {
-    return null;
-  }
-  switch (artboard.source.kind) {
-    case "path":
-      return artboard.activeFingerprint ?? artboard.source.path;
-    case "peer":
-      return `peer:${artboard.source.peerEndpointId}:${artboard.source.picture.id}`;
-    case "file":
-      return artboard.activeFingerprint;
-    default:
-      throw new Error("unknown artboard source");
-  }
-}
 
 function rotatePoint(
   x: number,
@@ -128,87 +110,21 @@ export const Viewport: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
   const [containerRef, setContainerRef] = createSignal<HTMLDivElement | null>(null);
-  const [dragging, setDragging] = createSignal(false);
+  const fileDrop = useFileDrop();
   const [pressedArtboardChrome, setPressedArtboardChrome] =
     createSignal<PressedArtboardChrome>(null);
-  const [draftCrop, setDraftCrop] = createSignal<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    rotation: number;
-  } | null>(null);
+  const [draftCrop, setDraftCrop] = createSignal<CropRectWithRotation | null>(null);
   const [draftMask, setDraftMask] = createSignal<MaskParamsInfo | null>(null);
   const [brushSize, setBrushSize] = createSignal(100);
   const [brushSoftness, setBrushSoftness] = createSignal(0.5);
-  let brushOverlayCanvas: HTMLCanvasElement | null = null;
-  // R8 pixel values (0–255) at thumbnail resolution — single source of truth for the overlay
-  let brushOverlayPixels: Uint8Array | null = null;
-  const BRUSH_OVERLAY_MAX = 512;
+  const brushOverlay = useBrushOverlay(() => activeMask()?.kind === "brush");
   const [loadingArtboardImage, setLoadingArtboardImage] =
     createSignal<HTMLImageElement | null>(null);
-  const [isSavingRating, setIsSavingRating] = createSignal(false);
+  const rating = useArtboardRating(() => getSelectedArtboard());
   const activePointers = new Map<number, { x: number; y: number }>();
   let lastStagePointer: { x: number; y: number } | null = null;
-  let toneSmoothingFrame: number | null = null;
-  let smoothedToneSample: number | null = null;
-  let targetToneSample: number | null = null;
-  let lastToneSampleTime = 0;
-  let gesture:
-    | {
-        kind: "pan";
-        x: number;
-        y: number;
-        startX: number;
-        startY: number;
-        moved: boolean;
-        tapArtboardId: string | null;
-      }
-    | { kind: "pinch"; dist: number; midX: number; midY: number }
-    | {
-        kind: "crop";
-        pointerId: number;
-        handle: CropHandle;
-        startX: number;
-        startY: number;
-        crop: { x: number; y: number; width: number; height: number; rotation: number };
-      }
-    | {
-        kind: "mask";
-        pointerId: number;
-        handle: MaskHandle;
-        startX: number;
-        startY: number;
-        params: MaskParamsInfo;
-      }
-    | {
-        kind: "artboard";
-        pointerId: number;
-        artboardId: string;
-        draggable: boolean;
-        moved: boolean;
-        startX: number;
-        startY: number;
-        x: number;
-        y: number;
-      }
-    | {
-        kind: "brush_paint";
-        pointerId: number;
-        lastImgX: number;
-        lastImgY: number;
-        erase: boolean;
-      }
-    | {
-        kind: "text_move";
-        pointerId: number;
-        layerIdx: number;
-        startImgX: number;
-        startImgY: number;
-        originTx: number;
-        originTy: number;
-      }
-    | null = null;
+  const setToneTarget = useToneSmoothing();
+  let gesture: Gesture | null = null;
 
   // Live drag offset for a text layer (image-pixel deltas). The rasterized
   // glyphs stay where they are until commit on pointer-up; the selection
@@ -290,129 +206,6 @@ export const Viewport: Component = () => {
     return makeBrushCursor(brushSize(), fitScale);
   });
 
-  async function initBrushOverlay() {
-    const w = state.canvasWidth;
-    const h = state.canvasHeight;
-    if (w === 0 || h === 0) return;
-    const scale = Math.min(1, BRUSH_OVERLAY_MAX / Math.max(w, h));
-    const tw = Math.max(1, Math.round(w * scale));
-    const th = Math.max(1, Math.round(h * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = tw;
-    canvas.height = th;
-    brushOverlayCanvas = canvas;
-    brushOverlayPixels = new Uint8Array(tw * th);
-    // Populate with current mask state
-    const layerIdx = state.selectedLayerIdx;
-    if (state.layers[layerIdx]?.has_mask) {
-      try {
-        const thumb = await getMaskThumbnail(
-          layerIdx,
-          BRUSH_OVERLAY_MAX,
-          BRUSH_OVERLAY_MAX,
-        );
-        brushOverlayPixels = new Uint8Array(thumb.pixels);
-        redrawOverlayCanvas();
-      } catch {
-        // mask has no data yet
-      }
-    }
-    drawFrame();
-  }
-
-  function redrawOverlayCanvas() {
-    if (!brushOverlayCanvas || !brushOverlayPixels) return;
-    const ctx = brushOverlayCanvas.getContext("2d");
-    if (!ctx) return;
-    const tw = brushOverlayCanvas.width;
-    const th = brushOverlayCanvas.height;
-    const imgData = ctx.createImageData(tw, th);
-    for (let i = 0; i < brushOverlayPixels.length; i++) {
-      imgData.data[i * 4 + 0] = 220;
-      imgData.data[i * 4 + 1] = 30;
-      imgData.data[i * 4 + 2] = 30;
-      imgData.data[i * 4 + 3] = Math.round(brushOverlayPixels[i] * 0.65);
-    }
-    ctx.putImageData(imgData, 0, 0);
-  }
-
-  function stampBrushOverlay(
-    imageX: number,
-    imageY: number,
-    radius: number,
-    softness: number,
-    erase: boolean,
-  ) {
-    if (!brushOverlayCanvas || !brushOverlayPixels) return;
-    const tw = brushOverlayCanvas.width;
-    const th = brushOverlayCanvas.height;
-    const scaleX = tw / state.canvasWidth;
-    const scaleY = th / state.canvasHeight;
-    const tx = imageX * scaleX;
-    const ty = imageY * scaleY;
-    const tr = radius * scaleX;
-    const rCeil = Math.ceil(tr);
-    const hardEdge = 1 - softness;
-    for (let dy = -rCeil; dy <= rCeil; dy++) {
-      for (let dx = -rCeil; dx <= rCeil; dx++) {
-        const px = Math.round(tx) + dx;
-        const py = Math.round(ty) + dy;
-        if (px < 0 || px >= tw || py < 0 || py >= th) continue;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const t = Math.min(1, dist / (tr + 0.001));
-        const alpha =
-          t <= hardEdge
-            ? 1
-            : 0.5 * (1 + Math.cos((Math.PI * (t - hardEdge)) / (1 - hardEdge + 0.001)));
-        const idx = py * tw + px;
-        if (erase) {
-          const floor = Math.round((1 - alpha) * 255);
-          brushOverlayPixels[idx] = Math.min(brushOverlayPixels[idx], floor);
-        } else {
-          brushOverlayPixels[idx] = Math.max(
-            brushOverlayPixels[idx],
-            Math.round(alpha * 255),
-          );
-        }
-      }
-    }
-    redrawOverlayCanvas();
-  }
-  const selectedArtboardRating = () => selectedArtboard()?.activeMediaRating ?? null;
-
-  async function handleSetRating(rating: number | null) {
-    const artboard = selectedArtboard();
-    const mediaId = mediaRatingIdForArtboard(artboard);
-    if (!artboard || !mediaId || isSavingRating()) {
-      return;
-    }
-    const nextRating = rating ?? artboard.activeMediaBaseRating;
-    const previousRating = artboard.activeMediaRating;
-    setState(
-      "artboards",
-      (candidate) => candidate.id === artboard.id,
-      "activeMediaRating",
-      nextRating,
-    );
-    setIsSavingRating(true);
-    try {
-      await setMediaRating({
-        fingerprint: mediaId,
-        rating,
-      });
-    } catch (error) {
-      setState(
-        "artboards",
-        (candidate) => candidate.id === artboard.id,
-        "activeMediaRating",
-        previousRating,
-      );
-      setState("loadError", error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsSavingRating(false);
-    }
-  }
-
   function handleViewportArtboardActionError(error: unknown) {
     if (isMissingArtboardError(error)) {
       return;
@@ -429,115 +222,6 @@ export const Viewport: Component = () => {
   }
 
   // Build the camera for the current viewport state
-  function getCamera() {
-    return {
-      centerX: state.viewportCenterX,
-      centerY: state.viewportCenterY,
-      zoom: state.viewportZoom,
-    };
-  }
-
-  function getViewWorldOffset() {
-    const artboard = getSelectedArtboard();
-    return artboard ? { x: artboard.worldX, y: artboard.worldY } : { x: 0, y: 0 };
-  }
-
-  function toWorldX(localX: number) {
-    return localX + getViewWorldOffset().x;
-  }
-
-  function toWorldY(localY: number) {
-    return localY + getViewWorldOffset().y;
-  }
-
-  // Transform for normal viewing and mask overlays (fits to crop rect or full canvas in crop mode)
-  function getViewTransform(cssWidth: number, cssHeight: number): WorldTransform {
-    const offset = getViewWorldOffset();
-    const fit = getViewportFitRef();
-    return buildTransform(
-      {
-        centerX: state.viewportCenterX + offset.x,
-        centerY: state.viewportCenterY + offset.y,
-        zoom: state.viewportZoom,
-      },
-      { width: cssWidth, height: cssHeight },
-      {
-        x: fit.x + offset.x,
-        y: fit.y + offset.y,
-        width: fit.width,
-        height: fit.height,
-      },
-    );
-  }
-
-  // Transform for crop-edit overlays (always fits to full canvas)
-  function getCropEditTransform(cssWidth: number, cssHeight: number): WorldTransform {
-    const offset = getViewWorldOffset();
-    return buildTransform(
-      {
-        centerX: state.viewportCenterX + offset.x,
-        centerY: state.viewportCenterY + offset.y,
-        zoom: state.viewportZoom,
-      },
-      { width: cssWidth, height: cssHeight },
-      {
-        x: offset.x,
-        y: offset.y,
-        width: state.canvasWidth,
-        height: state.canvasHeight,
-      },
-    );
-  }
-
-  function stopToneSmoothing() {
-    if (toneSmoothingFrame === null) {
-      return;
-    }
-    cancelAnimationFrame(toneSmoothingFrame);
-    toneSmoothingFrame = null;
-  }
-
-  function updateSmoothedToneSample(nextTarget: number | null) {
-    targetToneSample = nextTarget;
-    if (nextTarget === null) {
-      stopToneSmoothing();
-      smoothedToneSample = null;
-      lastToneSampleTime = 0;
-      setViewportToneSample(null);
-      return;
-    }
-    if (smoothedToneSample === null) {
-      smoothedToneSample = nextTarget;
-      lastToneSampleTime = performance.now();
-      setViewportToneSample(nextTarget);
-      return;
-    }
-    if (toneSmoothingFrame !== null) {
-      return;
-    }
-    const tick = (time: number) => {
-      if (targetToneSample === null || smoothedToneSample === null) {
-        stopToneSmoothing();
-        return;
-      }
-      const deltaMs = Math.max(1, time - lastToneSampleTime);
-      lastToneSampleTime = time;
-      const blend = 1 - Math.exp(-deltaMs / 90);
-      smoothedToneSample += (targetToneSample - smoothedToneSample) * blend;
-      if (Math.abs(targetToneSample - smoothedToneSample) < 0.002) {
-        smoothedToneSample = targetToneSample;
-      }
-      setViewportToneSample(smoothedToneSample);
-      if (smoothedToneSample === targetToneSample) {
-        toneSmoothingFrame = null;
-        return;
-      }
-      toneSmoothingFrame = requestAnimationFrame(tick);
-    };
-    lastToneSampleTime = performance.now();
-    toneSmoothingFrame = requestAnimationFrame(tick);
-  }
-
   function sampleTileTone(
     tile: {
       image: ImageData;
@@ -606,12 +290,12 @@ export const Viewport: Component = () => {
 
   function updateViewportToneFromPointer(clientX: number, clientY: number) {
     if (!stageRef) {
-      updateSmoothedToneSample(null);
+      setToneTarget(null);
       return;
     }
     const artboard = getSelectedArtboard();
     if (!artboard) {
-      updateSmoothedToneSample(null);
+      setToneTarget(null);
       return;
     }
     const rect = stageRef.getBoundingClientRect();
@@ -619,7 +303,7 @@ export const Viewport: Component = () => {
     const cssY = clientY - rect.top;
     const transform = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
     if (transform.scale <= 0) {
-      updateSmoothedToneSample(null);
+      setToneTarget(null);
       return;
     }
     let sampleX = cssX;
@@ -651,7 +335,7 @@ export const Viewport: Component = () => {
       localX >= artboard.width ||
       localY >= artboard.height
     ) {
-      updateSmoothedToneSample(null);
+      setToneTarget(null);
       return;
     }
     if (
@@ -661,7 +345,7 @@ export const Viewport: Component = () => {
         localX >= committedCrop.x + committedCrop.width ||
         localY >= committedCrop.y + committedCrop.height)
     ) {
-      updateSmoothedToneSample(null);
+      setToneTarget(null);
       return;
     }
     const visiblePreview = cropLayer ? null : (previewTile() ?? artboard.previewTile);
@@ -669,7 +353,7 @@ export const Viewport: Component = () => {
     const tone =
       sampleTileTone(visiblePreview, localX, localY) ??
       sampleTileTone(visibleBackdrop, localX, localY);
-    updateSmoothedToneSample(tone);
+    setToneTarget(tone);
   }
 
   function maskHandleAtPoint(sx: number, sy: number): MaskHandle | null {
@@ -734,14 +418,15 @@ export const Viewport: Component = () => {
     };
 
     if (mp.kind === "brush") {
-      if (brushOverlayCanvas) {
+      const overlayCanvas = brushOverlay.canvas();
+      if (overlayCanvas) {
         const tl = worldToScreen(toWorldX(0), toWorldY(0), t);
         const br = worldToScreen(
           toWorldX(state.canvasWidth),
           toWorldY(state.canvasHeight),
           t,
         );
-        ctx.drawImage(brushOverlayCanvas, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+        ctx.drawImage(overlayCanvas, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
       }
       ctx.restore();
       return;
@@ -1177,17 +862,6 @@ export const Viewport: Component = () => {
     drawFrame();
   });
 
-  // Initialize / clear brush overlay when brush mask mode changes
-  createEffect(() => {
-    const isBrush = activeMask()?.kind === "brush";
-    if (!isBrush) {
-      brushOverlayCanvas = null;
-      brushOverlayPixels = null;
-      return;
-    }
-    void initBrushOverlay();
-  });
-
   createEffect(() => {
     const src = state.loadingMediaSrc;
     if (!src) {
@@ -1218,72 +892,7 @@ export const Viewport: Component = () => {
     setDraftCrop(cropLayer?.crop ?? null);
   });
 
-  createEffect(() => {
-    const container = containerRef();
-    if (!(container instanceof HTMLDivElement)) {
-      return;
-    }
-    let frame = 0;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const flushViewportSize = () => {
-      frame = 0;
-      timeout = null;
-      setViewportScreenSize(container.clientWidth, container.clientHeight);
-    };
-    flushViewportSize();
-    const observer = new ResizeObserver(() => {
-      if (frame !== 0) {
-        cancelAnimationFrame(frame);
-      }
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        if (timeout !== null) {
-          clearTimeout(timeout);
-        }
-        timeout = setTimeout(flushViewportSize, 60);
-      });
-    });
-    observer.observe(container);
-    onCleanup(() => {
-      observer.disconnect();
-      if (frame !== 0) {
-        cancelAnimationFrame(frame);
-      }
-      if (timeout !== null) {
-        clearTimeout(timeout);
-      }
-    });
-  });
-
-  const onDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-    setDragging(true);
-  };
-
-  const onDragLeave = (e: DragEvent) => {
-    if (!(e.currentTarget as Element).contains(e.relatedTarget as Node)) {
-      setDragging(false);
-    }
-  };
-
-  const onDrop = async (e: DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    if (!state.webgpuAvailable) {
-      return;
-    }
-    const files = Array.from(e.dataTransfer?.files ?? []).filter((file) =>
-      file.type.startsWith("image/"),
-    );
-    try {
-      for (const [index, file] of files.entries()) {
-        await openImageFile(file, index === 0 ? "replace" : "append");
-      }
-    } catch {
-      return;
-    }
-  };
+  useElementSize(containerRef, setViewportScreenSize);
 
   function artboardAtPoint(sx: number, sy: number): ArtboardState | null {
     if (!stageRef) return null;
@@ -1421,7 +1030,7 @@ export const Viewport: Component = () => {
         const imgX = world.x - getViewWorldOffset().x;
         const imgY = world.y - getViewWorldOffset().y;
         const erase = e.altKey;
-        stampBrushOverlay(imgX, imgY, brushSize(), brushSoftness(), erase);
+        brushOverlay.stamp(imgX, imgY, brushSize(), brushSoftness(), erase);
         void stampBrushMask(
           state.selectedLayerIdx,
           imgX,
@@ -1582,7 +1191,7 @@ export const Viewport: Component = () => {
           const f = i / steps;
           const ix = gesture.lastImgX + (imgX - gesture.lastImgX) * f;
           const iy = gesture.lastImgY + (imgY - gesture.lastImgY) * f;
-          stampBrushOverlay(ix, iy, brushSize(), brushSoftness(), erase);
+          brushOverlay.stamp(ix, iy, brushSize(), brushSoftness(), erase);
           void stampBrushMask(
             state.selectedLayerIdx,
             ix,
@@ -1949,11 +1558,7 @@ export const Viewport: Component = () => {
       updateViewportToneFromPointer(lastStagePointer.x, lastStagePointer.y);
       return;
     }
-    updateSmoothedToneSample(null);
-  });
-
-  onCleanup(() => {
-    stopToneSmoothing();
+    setToneTarget(null);
   });
 
   return (
@@ -1963,21 +1568,21 @@ export const Viewport: Component = () => {
         class="relative flex-1 overflow-hidden"
         style={{ "touch-action": "none", cursor: brushCursorStyle() }}
         onContextMenu={(e) => e.preventDefault()}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        onDragOver={fileDrop.onDragOver}
+        onDragLeave={fileDrop.onDragLeave}
+        onDrop={fileDrop.onDrop}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={(e) => {
           lastStagePointer = null;
-          updateSmoothedToneSample(null);
+          setToneTarget(null);
           onPointerUp(e);
         }}
         onPointerCancel={(e) => {
           lastStagePointer = null;
-          updateSmoothedToneSample(null);
+          setToneTarget(null);
           onPointerUp(e);
         }}
       >
@@ -2080,11 +1685,11 @@ export const Viewport: Component = () => {
               <span class="text-white/35">{viewportZoomPercent()}%</span>
             </Button>
           )}
-          <Show when={mediaRatingIdForArtboard(selectedArtboard()) !== null}>
+          <Show when={rating.ratingId() !== null}>
             <MediaRating
-              rating={selectedArtboardRating()}
-              pending={isSavingRating()}
-              onChange={(rating) => void handleSetRating(rating)}
+              rating={rating.rating()}
+              pending={rating.saving()}
+              onChange={(next) => void rating.setRating(next)}
               class="absolute bottom-4 left-1/2 -translate-x-1/2"
             />
           </Show>
@@ -2123,7 +1728,7 @@ export const Viewport: Component = () => {
           )}
         </div>
 
-        {dragging() && (
+        {fileDrop.dragging() && (
           <div class="absolute inset-4 flex items-center justify-center rounded-[24px] border border-dashed border-white/35 bg-black/55 backdrop-blur-sm">
             <span class="rounded-full border border-white/15 bg-white/8 px-4 py-2 text-sm font-medium text-white">
               Release to open image

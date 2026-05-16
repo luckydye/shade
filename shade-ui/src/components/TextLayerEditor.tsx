@@ -1,14 +1,14 @@
-import { type Component, createMemo, For, onMount, Show } from "solid-js";
-import type { FontInfo, TextAlignName, TextStyleValues } from "../bridge";
+import { type Component, createMemo, For, Show } from "solid-js";
+import type { TextAlignName, TextStyleValues } from "../bridge";
+import { useFontList } from "../data/use-font-list";
 import {
   addFont,
   pruneUnusedFonts,
-  refreshFontList,
   setTextTransform,
   updateTextContent,
   updateTextStyle,
 } from "../store/editor-layers";
-import { type LayerInfo, state } from "../store/editor-store";
+import type { LayerInfo } from "../store/editor-store";
 import { Slider } from "./Slider";
 
 const ALIGN_OPTIONS: { value: TextAlignName; label: string }[] = [
@@ -66,7 +66,7 @@ export const TextLayerEditor: Component<{
   const text = createMemo(() => props.layer.text ?? null);
   const style = createMemo<TextStyleValues | null>(() => text()?.style ?? null);
 
-  const fonts = createMemo<FontInfo[]>(() => state.fonts);
+  const { fonts } = useFontList();
 
   const onContentInput = (event: InputEvent) => {
     const target = event.currentTarget as HTMLTextAreaElement;
@@ -127,10 +127,6 @@ export const TextLayerEditor: Component<{
     // Reset the input so picking the same file twice still fires `change`.
     input.value = "";
   };
-
-  onMount(() => {
-    void refreshFontList();
-  });
 
   return (
     <div class="flex flex-col gap-3 px-3 py-2">

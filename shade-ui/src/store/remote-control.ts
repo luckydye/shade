@@ -1,10 +1,19 @@
-import { listMediaLibraries } from "../bridge/index";
 import {
-  loadLibraryData,
   type MediaItem,
   mediaItemKey,
   openMediaItem,
 } from "../components/media-view/media-utils";
+import { loadLibraryData } from "../data/use-library-items";
+import { useMediaLibraryList } from "../data/use-media-library-list";
+import {
+  getViewportDisplaySize,
+  getViewportFitRef,
+  getViewportZoomPercent,
+  offsetViewportCenter,
+  panViewport,
+  refreshPreview,
+  setViewportState,
+} from "../viewport/preview";
 import { openImage, showEditorView, showMediaView } from "./editor-image";
 import {
   addLayer,
@@ -26,15 +35,6 @@ import {
   getSelectedArtboard,
   state,
 } from "./editor-store";
-import {
-  getViewportDisplaySize,
-  getViewportFitRef,
-  getViewportZoomPercent,
-  offsetViewportCenter,
-  panViewport,
-  refreshPreview,
-  setViewportState,
-} from "../viewport/preview";
 import { getMediaBrowserController } from "./media-browser-control";
 
 type JsonObject = Record<string, unknown>;
@@ -697,7 +697,7 @@ export async function executeRemoteControlTool(
     case "show_view":
       return handleShowView(call.arguments);
     case "list_media_libraries":
-      return listMediaLibraries();
+      return useMediaLibraryList().libraries();
     case "select_media_library":
       return handleSelectMediaLibrary(call.arguments);
     case "list_library_images":

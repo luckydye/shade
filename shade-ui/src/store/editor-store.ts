@@ -82,7 +82,6 @@ export interface EditorState {
   cropDraft: CropRect | null;
   isCropMode: boolean;
   loadingMediaSrc: string | null;
-  fonts: bridge.FontInfo[];
 }
 
 export const [state, setState] = createStore<EditorState>({
@@ -115,7 +114,6 @@ export const [state, setState] = createStore<EditorState>({
   cropDraft: null,
   isCropMode: false,
   loadingMediaSrc: null,
-  fonts: [],
 });
 
 export const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);

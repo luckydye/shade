@@ -2,7 +2,6 @@ import type { Component, JSX } from "solid-js";
 import {
   createEffect,
   createMemo,
-  createResource,
   createSignal,
   For,
   on,
@@ -21,25 +20,18 @@ import {
   batchApplyPresetSnapshot,
   batchClearEdits,
   batchExportImages,
-  type Collection,
   createCollection,
   deleteCollection,
   deleteMediaLibraryItem,
-  getCachedCameraLibraryItems,
-  getCachedLocalLibraryItems,
-  getCachedPeerLibraryItems,
   getS3MediaLibrary,
   isTauriRuntime,
   type LibrarySyncProgress,
-  listCollectionItems,
-  listCollections,
   listenBatchExportProgress,
   listenLibraryScanComplete,
   listenLibraryScanProgress,
   listenLibrarySyncProgress,
   listenNativeDragDrop,
   listenPeerPaired,
-  listMediaLibraries,
   openImage,
   openPeerImage,
   pairPeerDevice,
@@ -58,9 +50,14 @@ import {
   uploadMediaLibraryPath,
   uploadMediaLibraryUrl,
 } from "../bridge/index";
+import { useCollectionItems } from "../data/use-collection-items";
+import { useCollectionList } from "../data/use-collection-list";
+import { useLibraryItems } from "../data/use-library-items";
+import { useMediaLibraryList } from "../data/use-media-library-list";
+import { usePeerDiscovery } from "../data/use-peer-discovery";
+import { usePresetList } from "../data/use-preset-list";
 import { actions, buildActionContext } from "../store/actions";
 import { showMediaView } from "../store/editor-image";
-import { listPresets } from "../store/editor-layers";
 import { isAdjustmentSliderActive, state } from "../store/editor-store";
 import { registerMediaBrowserController } from "../store/media-browser-control";
 import {
@@ -70,14 +67,11 @@ import {
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
 } from "../store/media-view-context";
-import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
 import { MediaTile } from "./media-view/MediaTile";
 import {
-  applyStoredRatings,
-  cameraLibraryHost,
   clipboardImageFiles,
   draggedItemCount,
   draggedPathCount,
@@ -90,11 +84,8 @@ import {
   isPeerLibrary,
   isPinnedLibrary,
   isS3Library,
-  type LibraryData,
   type LibraryEntry,
   libraryIsWritable,
-  loadLibraryData,
-  localMediaItem,
   type MediaGridRow,
   type MediaItem,
   mediaItemKey,
@@ -104,7 +95,6 @@ import {
   normalizeFilenameFilter,
   openMediaItem,
   peerLibraryPeerId,
-  peerMediaItem,
   targetAcceptsTextInput,
   targetUsesOwnFocus,
   type UploadDragFeedback,
@@ -142,42 +132,16 @@ function toErrorMessage(err: unknown): string {
 }
 
 export const MediaView: Component = () => {
-  const [libraries, { refetch: refetchLibraries }] = createResource(listMediaLibraries);
+  const { libraries, refetch: refetchLibraries } = useMediaLibraryList();
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
-  const [items, { refetch: refetchItems }] = createResource(
-    selectedLibraryId,
-    loadLibraryData,
-  );
-  const [presets, { refetch: refetchPresets }] = createResource(listPresets);
-  const [cachedLibraryItems, { refetch: refetchCachedLibraryItems }] = createResource(
-    selectedLibraryId,
-    async (libraryId) => {
-      if (!libraryId) {
-        return [];
-      }
-      if (libraryId.startsWith("peer:")) {
-        const peerId = libraryId.slice("peer:".length);
-        return applyStoredRatings(
-          (await getCachedPeerLibraryItems(peerId)).map((picture) =>
-            peerMediaItem({
-              ...picture,
-              peerId,
-            }),
-          ),
-        );
-      }
-      if (libraryId.startsWith("ccapi:")) {
-        return applyStoredRatings(
-          (await getCachedCameraLibraryItems(cameraLibraryHost(libraryId))).map(
-            localMediaItem,
-          ),
-        );
-      }
-      return applyStoredRatings(
-        (await getCachedLocalLibraryItems(libraryId)).map(localMediaItem),
-      );
-    },
-  );
+  const {
+    items,
+    cached: cachedLibraryItems,
+    refetch: refetchLibraryItems,
+  } = useLibraryItems(selectedLibraryId);
+  const refetchItems = () => refetchLibraryItems();
+  const refetchCachedLibraryItems = () => refetchLibraryItems();
+  const { presets, refetch: refetchPresets } = usePresetList();
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
   const [showS3Form, setShowS3Form] = createSignal(false);
@@ -226,11 +190,15 @@ export const MediaView: Component = () => {
   const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(
     null,
   );
-  const [collections, setCollections] = createSignal<Collection[]>([]);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
-  const [collectionItemPaths, setCollectionItemPaths] = createSignal<Set<string>>(
-    new Set(),
+  const { collections: collectionList, refetch: refetchCollections } =
+    useCollectionList(selectedLibraryId);
+  const collections = () => collectionList() ?? [];
+  const { items: collectionItemList, refetch: refetchCollectionItemsRaw } =
+    useCollectionItems(selectedCollectionId);
+  const collectionItemPaths = createMemo(
+    () => new Set((collectionItemList() ?? []).map((i) => i.fingerprint)),
   );
+  const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   const [showAddToCollectionMenu, setShowAddToCollectionMenu] = createSignal(false);
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
@@ -543,8 +511,9 @@ export const MediaView: Component = () => {
     clearLibraryDragState();
   };
 
+  const { peers: discoveredPeers } = usePeerDiscovery();
   const discoveredPeerIds = createMemo(() =>
-    p2pState.peers.map((peer) => peer.endpoint_id),
+    discoveredPeers().map((peer) => peer.endpoint_id),
   );
   const onlinePeerIds = createMemo(() => new Set(discoveredPeerIds()));
   const libraryEntries = createMemo<LibraryEntry[]>(() => libraries() ?? []);
@@ -570,7 +539,7 @@ export const MediaView: Component = () => {
         .filter(isPeerLibrary)
         .map((library) => peerLibraryPeerId(library)),
     );
-    return p2pState.peers.filter((peer) => !addedPeerIds.has(peer.endpoint_id));
+    return discoveredPeers().filter((peer) => !addedPeerIds.has(peer.endpoint_id));
   });
   const selectedLibrary = createMemo(
     () =>
@@ -951,7 +920,6 @@ export const MediaView: Component = () => {
         await handleApplyPresetToSelected(presetName);
       },
     });
-    startP2pPolling();
     setSupportsS3Libraries(isTauriRuntime());
     let unlistenPeerPaired: (() => void) | null = null;
     if (isTauriRuntime()) {
@@ -982,7 +950,6 @@ export const MediaView: Component = () => {
       isDisposed = true;
       unregisterMediaBrowserController();
       window.clearInterval(libraryRefreshTimer);
-      stopP2pPolling();
       void unlistenPeerPaired?.();
       unlistenSyncProgress();
       unlistenExportProgress();
@@ -1423,7 +1390,7 @@ export const MediaView: Component = () => {
   async function handleAddPeerLibrary(peerId: string) {
     await withSubmitting(async () => {
       await pairPeerDevice(peerId);
-      const peer = p2pState.peers.find((entry) => entry.endpoint_id === peerId);
+      const peer = discoveredPeers().find((entry) => entry.endpoint_id === peerId);
       if (!peer) {
         throw new Error("peer is no longer available");
       }
@@ -1916,24 +1883,8 @@ export const MediaView: Component = () => {
     }
   }
 
-  async function refreshCollections() {
-    const libId = selectedLibraryId();
-    if (!libId) {
-      setCollections([]);
-      return;
-    }
-    setCollections(await listCollections(libId));
-  }
-
-  async function refreshCollectionItems() {
-    const colId = selectedCollectionId();
-    if (!colId) {
-      setCollectionItemPaths(new Set<string>());
-      return;
-    }
-    const items = await listCollectionItems(colId);
-    setCollectionItemPaths(new Set(items.map((i) => i.fingerprint)));
-  }
+  const refreshCollections = refetchCollections;
+  const refreshCollectionItems = refetchCollectionItemsRaw;
 
   function selectedCollectionFileHashes() {
     return selectedMediaItemIds().map((itemId) => {

@@ -8,7 +8,7 @@ import {
   isTauriRuntime,
   type SyncPeerSnapshotsResult,
 } from "../bridge";
-import { p2pState } from "./p2p";
+import { usePeerDiscovery } from "../data/use-peer-discovery";
 
 export interface PeerAwareness {
   endpoint_id: string;
@@ -60,7 +60,7 @@ export async function fetchPeerAwareness(peerId: string): Promise<void> {
 }
 
 export async function refreshAllPeerAwareness(): Promise<void> {
-  const peers = p2pState.peers;
+  const peers = usePeerDiscovery().peers();
   await Promise.allSettled(peers.map((peer) => fetchPeerAwareness(peer.endpoint_id)));
 }
 
@@ -85,7 +85,7 @@ export async function syncPeerSnapshots(
 
 /** Sync snapshots for a fingerprint from all currently connected peers. */
 export async function syncSnapshotsFromAllPeers(fingerprint: string): Promise<string[]> {
-  const peers = p2pState.peers;
+  const peers = usePeerDiscovery().peers();
   if (peers.length === 0) return [];
   setSyncState("is_syncing", true);
   setSyncState("last_sync_error", "");
@@ -122,7 +122,7 @@ export async function applyPeerMetadata(
 
 /** Apply metadata from all connected peers for the given file hashes. */
 export async function applyMetadataFromAllPeers(fingerprints: string[]): Promise<void> {
-  const peers = p2pState.peers;
+  const peers = usePeerDiscovery().peers();
   if (peers.length === 0 || fingerprints.length === 0) return;
   await Promise.allSettled(
     peers.map((peer) => applyPeerMetadata(peer.endpoint_id, fingerprints)),

@@ -1,4 +1,5 @@
 import * as bridge from "../bridge/index";
+import { onImageOpenPhase } from "../data/use-image-open-phase";
 import {
   clearPreviewTiles,
   refreshPreview,
@@ -563,7 +564,7 @@ export async function openImage(
   }
   let unlistenPhase: (() => void) | null = null;
   if (isS3) {
-    unlistenPhase = bridge.listenImageOpenPhase((phase) => {
+    unlistenPhase = onImageOpenPhase((phase) => {
       if (phase === "processing") {
         setState("isDownloading", false);
       }

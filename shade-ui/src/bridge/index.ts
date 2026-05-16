@@ -390,12 +390,6 @@ export function listenLibrarySyncProgress(
   });
 }
 
-export function listenImageOpenPhase(listener: (phase: string) => void): () => void {
-  return onChannelMessage("image_open_phase", (msg) => {
-    listener(msg.phase);
-  });
-}
-
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
   if (!isTauriRuntime()) {
     return {

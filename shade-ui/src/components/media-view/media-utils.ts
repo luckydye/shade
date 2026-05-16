@@ -1,9 +1,6 @@
 import {
   type LibraryImage,
   listMediaRatings,
-  loadCameraLibraryItemsCachedOrRemote,
-  loadLocalLibraryItemsCachedOrRemote,
-  loadPeerLibraryItemsCachedOrRemote,
   type MediaLibrary,
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
@@ -69,14 +66,7 @@ export type UploadDragFeedback = {
   itemCount: number | null;
 };
 
-type PeerLibraryItem = SharedPicture & { peerId: string };
-
-function toPeerLibraryItem(peerId: string, picture: SharedPicture): PeerLibraryItem {
-  return {
-    ...picture,
-    peerId,
-  };
-}
+export type PeerLibraryItem = SharedPicture & { peerId: string };
 
 export function isPeerLibrary(
   library: LibraryEntry | null,
@@ -388,65 +378,6 @@ export function peerMediaItem(image: PeerLibraryItem): MediaItem {
 
 export function mediaItemKey(item: MediaItem) {
   return item.kind === "peer" ? `peer:${item.peerId}:${item.id}` : `local:${item.id}`;
-}
-
-async function loadLibraryItems(libraryId: string | null): Promise<MediaItem[]> {
-  if (!libraryId) {
-    return [];
-  }
-  if (libraryId.startsWith("peer:")) {
-    const peerId = libraryId.slice("peer:".length);
-    return applyStoredRatings(
-      (await loadPeerLibraryItemsCachedOrRemote(peerId)).map((picture) =>
-        peerMediaItem(toPeerLibraryItem(peerId, picture)),
-      ),
-    );
-  }
-  if (libraryId.startsWith("ccapi:")) {
-    return applyStoredRatings(
-      (await loadCameraLibraryItemsCachedOrRemote(cameraLibraryHost(libraryId))).map(
-        localMediaItem,
-      ),
-    );
-  }
-  return applyStoredRatings(
-    (await loadLocalLibraryItemsCachedOrRemote(libraryId)).items.map(localMediaItem),
-  );
-}
-
-export async function loadLibraryData(libraryId: string | null): Promise<LibraryData> {
-  if (!libraryId) {
-    return {
-      libraryId,
-      items: [],
-      isComplete: true,
-      error: null,
-    };
-  }
-  try {
-    if (libraryId.startsWith("peer:") || libraryId.startsWith("ccapi:")) {
-      return {
-        libraryId,
-        items: await loadLibraryItems(libraryId),
-        isComplete: true,
-        error: null,
-      };
-    }
-    const listing = await loadLocalLibraryItemsCachedOrRemote(libraryId);
-    return {
-      libraryId,
-      items: await applyStoredRatings(listing.items.map(localMediaItem)),
-      isComplete: listing.is_complete,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      libraryId,
-      items: [],
-      isComplete: true,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 export async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string> {
