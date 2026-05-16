@@ -1,19 +1,17 @@
 import { type Component, Show } from "solid-js";
-import { MEDIA_FILE_ACCEPT } from "../media-file-accept";
 import {
   exportImage,
-  isAdjustmentSliderActive,
   openImageFile,
   pickExportTarget,
   showEditorView,
   showMediaView,
-  state,
-} from "../store/editor";
+} from "../store/editor-image";
+import { isAdjustmentSliderActive, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 
-const STATUS_TRIGGER_CLASS =
-  "min-w-0 rounded-md px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
+const MEDIA_FILE_ACCEPT =
+  "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
 
 const UploadIcon = () => (
   <svg
@@ -135,7 +133,7 @@ export const Toolbar: Component = () => {
       <div class="min-w-0 flex justify-center text-center pointer-events-none">
         <Button
           type="button"
-          class={`pointer-events-auto min-w-0 max-w-full ${STATUS_TRIGGER_CLASS} ${
+          class={`pointer-events-auto min-w-0 max-w-full min-w-0 rounded-md px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
             canResumeEditor()
               ? "cursor-pointer hover:bg-[var(--surface-subtle)]"
               : "cursor-default"

@@ -19,36 +19,40 @@ import {
   resizeCropFromHandle,
   resolveCropAspectRatio,
 } from "../crop-aspect";
+import { closeArtboard, openImageFile, selectArtboard } from "../store/editor-image";
 import {
   applyEdit,
   applyGradientMask,
-  backdropTile,
-  closeArtboard,
+  setTextTransform,
+  stampBrushMask,
+} from "../store/editor-layers";
+import {
+  type ArtboardState,
+  clamp,
   cropAspectRatioPreset,
   getCommittedCropRect,
   getSelectedArtboard,
-  getViewportZoomPercent,
   moveArtboardBy,
+  setCropAspectRatioPreset,
+  setState,
+  setViewportToneSample,
+  state,
+} from "../store/editor-store";
+import { makeBrushCursor } from "../viewport/brush-cursor";
+import { compositeArtboard } from "../viewport/compositor";
+import {
+  backdropTile,
+  getViewportFitRef,
+  getViewportZoomPercent,
   offsetViewportCenter,
-  openImageFile,
   panViewport,
   previewTile,
   refreshFinalPreview,
   refreshPreview,
   resetViewport,
-  selectArtboard,
-  setCropAspectRatioPreset,
-  setTextTransform,
   setViewportScreenSize,
-  setViewportToneSample,
-  stampBrushMask,
-  state,
   zoomViewport,
-} from "../store/editor";
-import { type ArtboardState, clamp, setState } from "../store/editor-store";
-import { makeBrushCursor } from "../viewport/brush-cursor";
-import { compositeArtboard } from "../viewport/compositor";
-import { getViewportFitRef } from "../viewport/preview";
+} from "../viewport/preview";
 import type { WorldTransform } from "../viewport/transform";
 import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
 import { Button } from "./Button";

@@ -10,7 +10,7 @@ import {
   untrack,
 } from "solid-js";
 import type { AdjustmentValues } from "../../bridge";
-import { isAdjustmentSliderActive, state, viewportToneSample } from "../../store/editor";
+import { isAdjustmentSliderActive, state, viewportToneSample } from "../../store/editor-store";
 import { backdropTile } from "../../viewport/preview";
 import {
   buildLuminanceHistogram,

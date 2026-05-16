@@ -1,15 +1,14 @@
 import { type Component, createMemo, For, onMount, Show } from "solid-js";
 import type { FontInfo, TextAlignName, TextStyleValues } from "../bridge";
-import type { LayerInfo } from "../store/editor";
 import {
   addFont,
   pruneUnusedFonts,
   refreshFontList,
   setTextTransform,
-  state,
   updateTextContent,
   updateTextStyle,
-} from "../store/editor";
+} from "../store/editor-layers";
+import { type LayerInfo, state } from "../store/editor-store";
 import { Slider } from "./Slider";
 
 const ALIGN_OPTIONS: { value: TextAlignName; label: string }[] = [

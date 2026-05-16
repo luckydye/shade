@@ -5,7 +5,7 @@ import {
   savePresetFromJson,
   serializeCurrentPreset,
 } from "./bridge/index";
-import { checkWebGPU } from "./bridge/webgpu-check";
+import { checkWebGPU } from "./webgpu-check";
 import { Inspector } from "./components/Inspector";
 import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
@@ -13,14 +13,15 @@ import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
 import { actions, buildActionContext } from "./store/actions";
-import { CLIPBOARD_PRESET_NAME } from "./store/edit-clipboard";
-import { showEditorView, showMediaView } from "./store/editor";
+import { showEditorView, showMediaView } from "./store/editor-image";
 import { loadPreset } from "./store/editor-layers";
 import { setState, state } from "./store/editor-store";
 import { redo, undo } from "./store/history";
 import { getMediaBrowserController } from "./store/media-browser-control";
 import { mediaViewFocusedItem } from "./store/media-view-context";
 import { showToast } from "./store/toast";
+
+const CLIPBOARD_PRESET_NAME = "__clipboard__";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };

@@ -17,20 +17,14 @@ import {
   fitCropRectToAspectRatio,
   resolveCropAspectRatio,
 } from "../crop-aspect";
-import type { LayerInfo } from "../store/editor";
 import {
   addLayer,
   addTextLayer,
   applyEdit,
   applyGradientMask,
-  backdropTile,
   createBrushMask,
-  cropAspectRatioPreset,
   deleteLayer,
   deletePreset,
-  findCropLayerIdx,
-  isAdjustmentSliderActive,
-  isDrawerOpen,
   listPresets,
   listSnapshots,
   loadPreset,
@@ -42,19 +36,25 @@ import {
   savePreset,
   saveSnapshot,
   selectLayer,
-  setCropAspectRatioPreset,
-  setIsAdjustmentSliderActive,
-  setIsDrawerOpen,
+  selectMaskLayer,
   setLayerVisible,
-  state,
-} from "../store/editor";
-import { selectMaskLayer } from "../store/editor-layers";
+} from "../store/editor-layers";
 import {
   type ArtboardSource,
+  cropAspectRatioPreset,
+  findCropLayerIdx,
   getLayerDefaultName,
   getLayerDisplayName,
   getSelectedArtboard,
+  isAdjustmentSliderActive,
+  isDrawerOpen,
+  type LayerInfo,
+  setCropAspectRatioPreset,
+  setIsAdjustmentSliderActive,
+  setIsDrawerOpen,
+  state,
 } from "../store/editor-store";
+import { backdropTile } from "../viewport/preview";
 import { Button } from "./Button";
 import { buildVectorScope, VectorScope, type WheelPoint } from "./ColorWheel";
 import { CurvesEditor } from "./inspector/CurvesEditor";

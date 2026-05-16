@@ -1,4 +1,4 @@
-import type { LayerInfo } from "../../store/editor";
+import type { LayerInfo } from "../../store/editor-store";
 import { IDENTITY_LUT } from "./curve-utils";
 
 export type MobileLayerFocus =

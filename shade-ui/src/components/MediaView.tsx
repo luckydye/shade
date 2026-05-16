@@ -59,12 +59,9 @@ import {
   uploadMediaLibraryUrl,
 } from "../bridge/index";
 import { actions, buildActionContext } from "../store/actions";
-import {
-  isAdjustmentSliderActive,
-  listPresets,
-  showMediaView,
-  state,
-} from "../store/editor";
+import { showMediaView } from "../store/editor-image";
+import { listPresets } from "../store/editor-layers";
+import { isAdjustmentSliderActive, state } from "../store/editor-store";
 import { registerMediaBrowserController } from "../store/media-browser-control";
 import {
   setMediaViewFocusedItem,

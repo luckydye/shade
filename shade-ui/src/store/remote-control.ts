@@ -5,32 +5,36 @@ import {
   mediaItemKey,
   openMediaItem,
 } from "../components/media-view/media-utils";
+import { openImage, showEditorView, showMediaView } from "./editor-image";
 import {
   addLayer,
   applyEdit,
   applyGradientMask,
   createBrushMask,
   deleteLayer,
-  getViewportDisplaySize,
-  getViewportFitRef,
-  getViewportZoomPercent,
   moveLayer,
-  offsetViewportCenter,
-  openImage,
-  panViewport,
-  refreshPreview,
   removeMask,
   renameLayer,
   selectLayer,
   setLayerOpacity,
   setLayerVisible,
-  setViewportState,
-  showEditorView,
-  showMediaView,
   stampBrushMask,
+} from "./editor-layers";
+import {
+  type ArtboardSource,
+  fullCanvasCrop,
+  getSelectedArtboard,
   state,
-} from "./editor";
-import { type ArtboardSource, fullCanvasCrop, getSelectedArtboard } from "./editor-store";
+} from "./editor-store";
+import {
+  getViewportDisplaySize,
+  getViewportFitRef,
+  getViewportZoomPercent,
+  offsetViewportCenter,
+  panViewport,
+  refreshPreview,
+  setViewportState,
+} from "../viewport/preview";
 import { getMediaBrowserController } from "./media-browser-control";
 
 type JsonObject = Record<string, unknown>;

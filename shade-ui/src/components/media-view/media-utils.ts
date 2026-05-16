@@ -11,7 +11,7 @@ import {
   type SharedPicture,
 } from "../../bridge/index";
 import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../cache-utils";
-import { openImage, openPeerImage } from "../../store/editor";
+import { openImage, openPeerImage } from "../../store/editor-image";
 
 export type LibraryEntry = MediaLibrary;
 export type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };

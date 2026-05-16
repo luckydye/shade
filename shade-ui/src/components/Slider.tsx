@@ -1,13 +1,13 @@
 import { type Component, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
+import { flushDeferredHistorySnapshot } from "../store/editor-layers";
 import {
   activeAdjustmentSliderId,
-  flushDeferredHistorySnapshot,
+  clamp,
   isAdjustmentSliderActive,
-  refreshFinalPreview,
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
-} from "../store/editor";
-import { clamp } from "../store/editor-store";
+} from "../store/editor-store";
+import { refreshFinalPreview } from "../viewport/preview";
 
 const PARAMETER_ROW_CLASS =
   "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";
