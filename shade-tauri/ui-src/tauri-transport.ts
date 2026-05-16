@@ -42,10 +42,7 @@ export function createTauriTransport(): Transport {
         registered = true;
         void invoke("register_coordination_channel", { channel }).catch((err) => {
           // eslint-disable-next-line no-console
-          console.error(
-            "[tauri-transport] register_coordination_channel failed",
-            err,
-          );
+          console.error("[tauri-transport] register_coordination_channel failed", err);
         });
       }
       return () => {

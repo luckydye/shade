@@ -13,26 +13,30 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
-  getCachedCameraLibraryItems,
-  getCachedLocalLibraryItems,
-  getCachedPeerLibraryItems,
   addMediaLibrary,
   addS3MediaLibrary,
   addToCollection,
+  applyPresetSnapshot,
+  type BatchExportProgress,
+  batchApplyPresetSnapshot,
+  batchClearEdits,
+  batchExportImages,
   type Collection,
   createCollection,
   deleteCollection,
   deleteMediaLibraryItem,
+  getCachedCameraLibraryItems,
+  getCachedLocalLibraryItems,
+  getCachedPeerLibraryItems,
   getS3MediaLibrary,
   isTauriRuntime,
+  type LibrarySyncProgress,
   listCollectionItems,
   listCollections,
+  listenBatchExportProgress,
   listenLibraryScanComplete,
   listenLibraryScanProgress,
   listenLibrarySyncProgress,
-  type LibrarySyncProgress,
-  listenBatchExportProgress,
-  type BatchExportProgress,
   listenNativeDragDrop,
   listenPeerPaired,
   listMediaLibraries,
@@ -41,9 +45,9 @@ import {
   pairPeerDevice,
   pickDirectory,
   refreshLibraryIndex,
-  removePeerLibrary,
   removeFromCollection,
   removeMediaLibrary,
+  removePeerLibrary,
   renameCollection,
   type S3MediaLibraryInput,
   setLibraryMode,
@@ -53,11 +57,8 @@ import {
   uploadMediaLibraryFile,
   uploadMediaLibraryPath,
   uploadMediaLibraryUrl,
-  applyPresetSnapshot,
-  batchApplyPresetSnapshot,
-  batchClearEdits,
-  batchExportImages,
 } from "../bridge/index";
+import { actions, buildActionContext } from "../store/actions";
 import {
   isAdjustmentSliderActive,
   listPresets,
@@ -65,17 +66,16 @@ import {
   state,
 } from "../store/editor";
 import { registerMediaBrowserController } from "../store/media-browser-control";
-import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import {
+  setMediaViewFocusedItem,
   setMediaViewFocusedItemId,
+  setMediaViewSelectedBatchItems,
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
-  setMediaViewSelectedBatchItems,
-  setMediaViewFocusedItem,
 } from "../store/media-view-context";
-import { actions, buildActionContext } from "../store/actions";
-import { Button } from "./Button";
+import { p2pState, startP2pPolling, stopP2pPolling } from "../store/p2p";
 import { ActionButton } from "./ActionButton";
+import { Button } from "./Button";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
 import { MediaTile } from "./media-view/MediaTile";
 import {
@@ -93,9 +93,13 @@ import {
   isPeerLibrary,
   isPinnedLibrary,
   isS3Library,
+  type LibraryData,
+  type LibraryEntry,
   libraryIsWritable,
   loadLibraryData,
   localMediaItem,
+  type MediaGridRow,
+  type MediaItem,
   mediaItemKey,
   mergeLibraryOrder,
   modificationMonthKey,
@@ -106,17 +110,10 @@ import {
   peerMediaItem,
   targetAcceptsTextInput,
   targetUsesOwnFocus,
-  type LibraryData,
-  type LibraryEntry,
-  type MediaGridRow,
-  type MediaItem,
   type UploadDragFeedback,
   type UploadProgress,
 } from "./media-view/media-utils";
-import {
-  filenameFromUrl,
-  transformImageUrl,
-} from "./media-view/url-transformers";
+import { filenameFromUrl, transformImageUrl } from "./media-view/url-transformers";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -136,8 +133,7 @@ const MENU_DANGER_ITEM_BUTTON_CLASS =
   "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
 const INPUT_CLASS =
   "h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)] touch-mobile:h-10 touch-mobile:rounded-full touch-mobile:px-4 touch-mobile:text-base";
-const EMPTY_STATE_CLASS =
-  "px-3 py-4 text-sm text-[var(--text-faint)]";
+const EMPTY_STATE_CLASS = "px-3 py-4 text-sm text-[var(--text-faint)]";
 const EMPTY_STATE_PANEL_CLASS =
   "mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-8 text-center";
 const LIBRARY_TAB_BASE_CLASS =
@@ -192,7 +188,9 @@ export const MediaView: Component = () => {
   const [showLibraryActions, setShowLibraryActions] = createSignal(false);
   const [showAddDropdown, setShowAddDropdown] = createSignal(false);
   const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
-  const [lastSelectedMediaItemId, setLastSelectedMediaItemId] = createSignal<string | null>(null);
+  const [lastSelectedMediaItemId, setLastSelectedMediaItemId] = createSignal<
+    string | null
+  >(null);
   const [showApplyPresetMenu, setShowApplyPresetMenu] = createSignal(false);
   const [mediaActionStatus, setMediaActionStatus] = createSignal<string | null>(null);
   const [filenameFilter, setFilenameFilter] = createSignal("");
@@ -228,16 +226,22 @@ export const MediaView: Component = () => {
     dragging: boolean;
   } | null = null;
   let suppressLibraryClickUntil = 0;
-  const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(null);
+  const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(
+    null,
+  );
   const [collections, setCollections] = createSignal<Collection[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
-  const [collectionItemPaths, setCollectionItemPaths] = createSignal<Set<string>>(new Set());
+  const [collectionItemPaths, setCollectionItemPaths] = createSignal<Set<string>>(
+    new Set(),
+  );
   const [showAddToCollectionMenu, setShowAddToCollectionMenu] = createSignal(false);
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const [syncProgress, setSyncProgress] = createSignal<LibrarySyncProgress | null>(null);
-  const [exportProgress, setExportProgress] = createSignal<BatchExportProgress | null>(null);
+  const [exportProgress, setExportProgress] = createSignal<BatchExportProgress | null>(
+    null,
+  );
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
   const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
@@ -261,7 +265,13 @@ export const MediaView: Component = () => {
     setMediaViewFocusedItem(
       item
         ? item.kind === "peer"
-          ? { path: item.name, fingerprint: item.fingerprint, kind: "peer", peerId: item.peerId, id: item.id }
+          ? {
+              path: item.name,
+              fingerprint: item.fingerprint,
+              kind: "peer",
+              peerId: item.peerId,
+              id: item.id,
+            }
           : { path: item.path, fingerprint: item.fingerprint, kind: "local" }
         : null,
     );
@@ -282,7 +292,13 @@ export const MediaView: Component = () => {
       .filter((item): item is MediaItem => !!item)
       .map((item) =>
         item.kind === "peer"
-          ? { path: item.name, fingerprint: item.fingerprint, kind: "peer" as const, peerId: item.peerId, id: item.id }
+          ? {
+              path: item.name,
+              fingerprint: item.fingerprint,
+              kind: "peer" as const,
+              peerId: item.peerId,
+              id: item.id,
+            }
           : { path: item.path, fingerprint: item.fingerprint, kind: "local" as const },
       );
     setMediaViewSelectedBatchItems(batchItems);
@@ -576,7 +592,9 @@ export const MediaView: Component = () => {
     }
     return cachedLibraryItems() ?? [];
   });
-  const normalizedFilenameFilter = createMemo(() => normalizeFilenameFilter(filenameFilter()));
+  const normalizedFilenameFilter = createMemo(() =>
+    normalizeFilenameFilter(filenameFilter()),
+  );
   const activeFilenameFilter = createMemo(() =>
     state.currentView === "editor" ? [] : normalizedFilenameFilter(),
   );
@@ -593,7 +611,9 @@ export const MediaView: Component = () => {
       (item) => item.kind === "local" && fingerprints.has(item.fingerprint ?? item.path),
     );
   });
-  const flatItemIds = createMemo(() => displayedItems().map((item) => mediaItemKey(item)));
+  const flatItemIds = createMemo(() =>
+    displayedItems().map((item) => mediaItemKey(item)),
+  );
   const itemsById = createMemo(
     () => new Map(displayedItems().map((item) => [mediaItemKey(item), item])),
   );
@@ -635,7 +655,9 @@ export const MediaView: Component = () => {
     const library = selectedLibrary();
     if (!library) return false;
     if (isS3Library(library)) return true;
-    return !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_online !== false;
+    return (
+      !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_online !== false
+    );
   });
   const canWriteSelectedLibrary = createMemo(() => libraryIsWritable(selectedLibrary()));
   const shouldDeferEditorStripThumbnails = createMemo(
@@ -1626,10 +1648,20 @@ export const MediaView: Component = () => {
     setIsSubmitting(true);
     setError(null);
     const fileName = filenameFromUrl(originalUrl);
-    setUploadProgress({ phase: "uploading", totalFiles: 1, completedFiles: 0, currentFileName: fileName });
+    setUploadProgress({
+      phase: "uploading",
+      totalFiles: 1,
+      completedFiles: 0,
+      currentFileName: fileName,
+    });
     try {
       await uploadMediaLibraryUrl(library.id, fetchUrl, fileName);
-      setUploadProgress({ phase: "refreshing", totalFiles: 1, completedFiles: 1, currentFileName: null });
+      setUploadProgress({
+        phase: "refreshing",
+        totalFiles: 1,
+        completedFiles: 1,
+        currentFileName: null,
+      });
       if (isS3Library(library)) {
         await refreshLibraryIndex(library.id);
       }
@@ -1656,7 +1688,9 @@ export const MediaView: Component = () => {
   function rangeSelectMedia(itemId: string) {
     const lastId = lastSelectedMediaItemId();
     const allIds = stableGridRows()
-      .filter((row): row is Extract<MediaGridRow, { kind: "items" }> => row.kind === "items")
+      .filter(
+        (row): row is Extract<MediaGridRow, { kind: "items" }> => row.kind === "items",
+      )
       .flatMap((row) => row.ids);
     const fromIndex = lastId != null ? allIds.indexOf(lastId) : -1;
     const toIndex = allIds.indexOf(itemId);
@@ -1664,7 +1698,8 @@ export const MediaView: Component = () => {
       toggleMediaSelection(itemId);
       return;
     }
-    const [start, end] = fromIndex <= toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+    const [start, end] =
+      fromIndex <= toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
     const rangeIds = allIds.slice(start, end + 1);
     setSelectedMediaItemIds((current) => {
       const result = new Set(current);
@@ -1724,7 +1759,9 @@ export const MediaView: Component = () => {
       `Applying ${name} to ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
     );
     try {
-      const items = itemIds.map((id) => itemsById().get(id)).filter(Boolean) as MediaItem[];
+      const items = itemIds
+        .map((id) => itemsById().get(id))
+        .filter(Boolean) as MediaItem[];
       const hasPeer = items.some((item) => item.kind === "peer");
       const isTauri = isTauriRuntime();
       if (isTauri && !hasPeer) {
@@ -1752,18 +1789,13 @@ export const MediaView: Component = () => {
             await openImage(item.path);
             await applyPresetSnapshot(name, item.path);
           }
-          setMediaActionStatus(
-            `Applying ${name}... (${index + 1}/${items.length})`,
-          );
+          setMediaActionStatus(`Applying ${name}... (${index + 1}/${items.length})`);
         }
         setMediaActionStatus(
           `Applied ${name} and saved ${items.length} snapshot${items.length > 1 ? "s" : ""}`,
         );
       }
-      await Promise.all([
-        refetchItems(),
-        refetchCachedLibraryItems(),
-      ]);
+      await Promise.all([refetchItems(), refetchCachedLibraryItems()]);
     } catch (err) {
       setError(toErrorMessage(err));
       setMediaActionStatus(null);
@@ -1788,21 +1820,18 @@ export const MediaView: Component = () => {
       `Clearing edits for ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
     );
     try {
-      const items = itemIds.map((id) => itemsById().get(id)).filter(Boolean) as MediaItem[];
+      const items = itemIds
+        .map((id) => itemsById().get(id))
+        .filter(Boolean) as MediaItem[];
       const isTauri = isTauriRuntime();
       if (isTauri) {
         const paths = items.map((item) => item.path);
         const count = await batchClearEdits(paths);
-        setMediaActionStatus(
-          `Cleared edits for ${count} image${count > 1 ? "s" : ""}`,
-        );
+        setMediaActionStatus(`Cleared edits for ${count} image${count > 1 ? "s" : ""}`);
       } else {
         setMediaActionStatus("Clear edits is only supported in the native app");
       }
-      await Promise.all([
-        refetchItems(),
-        refetchCachedLibraryItems(),
-      ]);
+      await Promise.all([refetchItems(), refetchCachedLibraryItems()]);
     } catch (err) {
       setError(toErrorMessage(err));
       setMediaActionStatus(null);
@@ -1981,7 +2010,8 @@ export const MediaView: Component = () => {
   );
 
   const isEditorStrip = () => state.currentView === "editor";
-  const mediaVisibleClass = () => (isEditorStrip() ? "flex touch-compact:hidden" : "flex");
+  const mediaVisibleClass = () =>
+    isEditorStrip() ? "flex touch-compact:hidden" : "flex";
   const shellClass = () =>
     isEditorStrip()
       ? "flex w-[112px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel-bg)] touch-compact:hidden"
@@ -1992,7 +2022,7 @@ export const MediaView: Component = () => {
       : "media-scroll flex-1 min-h-0 overflow-y-auto p-4 touch-mobile:p-1";
 
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
-  
+
   return (
     <section
       ref={mediaShellRef}
@@ -2029,10 +2059,7 @@ export const MediaView: Component = () => {
           class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-4 touch-mobile:px-4`}
         >
           <div class="relative flex w-full flex-wrap items-center gap-3">
-            <div
-              ref={libraryTabsRef}
-              class="relative gap-2 flex flex-1 overflow-x-auto"
-            >
+            <div ref={libraryTabsRef} class="relative gap-2 flex flex-1 overflow-x-auto">
               <div
                 aria-hidden="true"
                 class="pointer-events-none absolute z-10 w-[3px] rounded-full bg-blue-400 shadow-[0_0_0_3px_rgba(96,165,250,0.18)]"
@@ -2087,7 +2114,9 @@ export const MediaView: Component = () => {
                             }`}
                           />
                         )}
-                        <span class="block max-w-[140px] overflow-hidden text-ellipsis">{library.name}</span>
+                        <span class="block max-w-[140px] overflow-hidden text-ellipsis">
+                          {library.name}
+                        </span>
                       </span>
                     </Button>
                   );
@@ -2101,11 +2130,16 @@ export const MediaView: Component = () => {
                     disabled={isSubmitting()}
                     onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
                   >
-                    <span class="block max-w-[140px] overflow-hidden text-ellipsis">{peer.name}</span>
+                    <span class="block max-w-[140px] overflow-hidden text-ellipsis">
+                      {peer.name}
+                    </span>
                   </Button>
                 )}
               </For>
-              <div class="relative flex shrink-0 items-center touch-mobile:hidden" ref={addDropdownRef}>
+              <div
+                class="relative flex shrink-0 items-center touch-mobile:hidden"
+                ref={addDropdownRef}
+              >
                 <Button
                   type="button"
                   class={`${LIBRARY_TAB_BASE_CLASS} w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full`}
@@ -2194,7 +2228,9 @@ export const MediaView: Component = () => {
                     type="button"
                     class={`${GHOST_BUTTON_CLASS} min-w-7 px-1.5 text-[13px] leading-none`}
                     disabled={zoomIndex() === ZOOM_LEVELS.length - 1}
-                    onClick={() => setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1))}
+                    onClick={() =>
+                      setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1))
+                    }
                     aria-label="Increase thumbnail size"
                   >
                     +
@@ -2240,13 +2276,21 @@ export const MediaView: Component = () => {
                         const library = selectedLibrary();
                         if (!library) return;
                         setShowLibraryActions(false);
-                        void setLibraryMode(library.id, "browse", null).then(() => refetchLibraries());
+                        void setLibraryMode(library.id, "browse", null).then(() =>
+                          refetchLibraries(),
+                        );
                       }}
                     >
                       Disable Sync
                     </Button>
                   </Show>
-                  <Show when={selectedLibrary()?.mode !== "sync" && (selectedLibrary()?.kind === "s3" || selectedLibrary()?.kind === "peer")}>
+                  <Show
+                    when={
+                      selectedLibrary()?.mode !== "sync" &&
+                      (selectedLibrary()?.kind === "s3" ||
+                        selectedLibrary()?.kind === "peer")
+                    }
+                  >
                     <Button
                       type="button"
                       role="menuitem"
@@ -2256,28 +2300,40 @@ export const MediaView: Component = () => {
                         const library = selectedLibrary();
                         if (!library) return;
                         setShowLibraryActions(false);
-                        void setLibraryMode(library.id, "sync").then(
-                          () => {
+                        void setLibraryMode(library.id, "sync")
+                          .then(() => {
                             void refetchLibraries();
                             return syncLibrary(library.id);
-                          },
-                        ).catch((err) => {
-                          setError(toErrorMessage(err));
-                        });
+                          })
+                          .catch((err) => {
+                            setError(toErrorMessage(err));
+                          });
                       }}
                     >
                       Enable Sync
                     </Button>
                   </Show>
-                  <Show when={selectedLibrary()?.mode !== "sync" && selectedLibrary()?.kind === "directory" && orderedLibraryEntries().filter(
-                    (lib) => lib.id !== selectedLibrary()?.id && (lib.kind === "s3" || lib.kind === "peer"),
-                  ).length > 0}>
+                  <Show
+                    when={
+                      selectedLibrary()?.mode !== "sync" &&
+                      selectedLibrary()?.kind === "directory" &&
+                      orderedLibraryEntries().filter(
+                        (lib) =>
+                          lib.id !== selectedLibrary()?.id &&
+                          (lib.kind === "s3" || lib.kind === "peer"),
+                      ).length > 0
+                    }
+                  >
                     <div class="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.05em] text-[var(--text-subtle)]">
                       Sync to
                     </div>
-                    <For each={orderedLibraryEntries().filter(
-                      (lib) => lib.id !== selectedLibrary()?.id && (lib.kind === "s3" || lib.kind === "peer"),
-                    )}>
+                    <For
+                      each={orderedLibraryEntries().filter(
+                        (lib) =>
+                          lib.id !== selectedLibrary()?.id &&
+                          (lib.kind === "s3" || lib.kind === "peer"),
+                      )}
+                    >
                       {(target) => (
                         <Button
                           type="button"
@@ -2288,14 +2344,14 @@ export const MediaView: Component = () => {
                             const library = selectedLibrary();
                             if (!library) return;
                             setShowLibraryActions(false);
-                            void setLibraryMode(library.id, "sync", target.id).then(
-                              () => {
+                            void setLibraryMode(library.id, "sync", target.id)
+                              .then(() => {
                                 void refetchLibraries();
                                 return syncLibrary(library.id);
-                              },
-                            ).catch((err) => {
-                              setError(toErrorMessage(err));
-                            });
+                              })
+                              .catch((err) => {
+                                setError(toErrorMessage(err));
+                              });
                           }}
                         >
                           {target.name}
@@ -2332,7 +2388,7 @@ export const MediaView: Component = () => {
                 </div>
               </Show>
             </div>
-            
+
             <Show when={showS3Form()}>
               <div class="absolute left-1/4 top-full z-10 mt-2 grid grid-cols-3 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-3 touch-mobile:grid-cols-1">
                 <div class="col-span-3 touch-mobile:col-span-1">
@@ -2470,7 +2526,10 @@ export const MediaView: Component = () => {
             collections={collections()}
             selectedCollectionId={selectedCollectionId()}
             totalCount={availableItems().length}
-            onSelect={(id) => { setSelectedCollectionId(id); setMobileSidebarOpen(false); }}
+            onSelect={(id) => {
+              setSelectedCollectionId(id);
+              setMobileSidebarOpen(false);
+            }}
             onCreate={() => void handleCreateCollection()}
             onRename={(id, name) => void handleRenameCollection(id, name)}
             onDelete={(id) => void handleDeleteCollection(id)}
@@ -2479,172 +2538,235 @@ export const MediaView: Component = () => {
           />
         </Show>
         <div class="relative flex-1 min-h-0 flex flex-col">
-        <Show when={hasImage() && state.currentView === "editor"}>
-          <div class="px-2 pt-2 pb-1 w-full flex">
-            <ActionButton
-              class="w-full"
-              label="Back"
-              icon={
-                <svg
-                  width="24px"
-                  height="24px"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  class="h-4 w-4"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              }
-              onClick={() => {
-                showMediaView();
-              }}
-            />
-          </div>
-        </Show>
-      
-        <Show when={!isEditorStrip() && !isLibraryScanComplete() && availableItems().length > 0}>
-          <div class="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-5 py-2 text-[11px] font-medium text-[var(--text-dim)]">
-            <div class="h-2.5 w-2.5 animate-spin rounded-full border border-[var(--border-medium)] border-t-[var(--text-muted)]" />
-            Indexing · {availableItems().length.toLocaleString()} images found so far
-          </div>
-        </Show>
-        <div
-          ref={setScrollRef}
-          class={scrollClass()}
-          onScroll={(event) => {
-            const top = event.currentTarget.scrollTop;
-            setScrollTop(top);
-            updateScrollAnchor(top);
-            setIsScrolling(true);
-            clearTimeout(scrollLabelTimeout);
-            scrollLabelTimeout = setTimeout(() => setIsScrolling(false), 1000);
-          }}
-        >
-          <Show
-            when={displayedItems().length > 0}
-            fallback={
-              <Show
-                when={hasLibraries()}
-                fallback={
-                  <Show
-                    when={!isEditorStrip()}
-                    fallback={
-                      <div class={`${EMPTY_STATE_CLASS} mx-1 text-xs`}>
-                        Open the media view to add your first library.
-                      </div>
-                    }
+          <Show when={hasImage() && state.currentView === "editor"}>
+            <div class="px-2 pt-2 pb-1 w-full flex">
+              <ActionButton
+                class="w-full"
+                label="Back"
+                icon={
+                  <svg
+                    width="24px"
+                    height="24px"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    class="h-4 w-4"
                   >
-                    <div class={EMPTY_STATE_PANEL_CLASS}>
-                      <div class="space-y-1">
-                        <p class={PANEL_SECTION_TITLE_CLASS}>Media Library</p>
-                        <h2 class="text-lg font-semibold text-[var(--text)]">
-                          Add your first library
-                        </h2>
-                      </div>
-                      <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                        Pick a folder with your images. Shade will index it and show it
-                        here in the media view.
-                      </p>
-                      <Button
-                        type="button"
-                        class={SURFACE_BUTTON_CLASS}
-                        disabled={isSubmitting()}
-                        onClick={() => void handleAddLibrary()}
-                      >
-                        Add Library
-                      </Button>
-                      <p class="text-xs text-[var(--text-faint)]">
-                        You can also use the + button in the library bar.
-                      </p>
-                    </div>
-                  </Show>
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
                 }
-              >
+                onClick={() => {
+                  showMediaView();
+                }}
+              />
+            </div>
+          </Show>
+
+          <Show
+            when={
+              !isEditorStrip() && !isLibraryScanComplete() && availableItems().length > 0
+            }
+          >
+            <div class="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-5 py-2 text-[11px] font-medium text-[var(--text-dim)]">
+              <div class="h-2.5 w-2.5 animate-spin rounded-full border border-[var(--border-medium)] border-t-[var(--text-muted)]" />
+              Indexing · {availableItems().length.toLocaleString()} images found so far
+            </div>
+          </Show>
+          <div
+            ref={setScrollRef}
+            class={scrollClass()}
+            onScroll={(event) => {
+              const top = event.currentTarget.scrollTop;
+              setScrollTop(top);
+              updateScrollAnchor(top);
+              setIsScrolling(true);
+              clearTimeout(scrollLabelTimeout);
+              scrollLabelTimeout = setTimeout(() => setIsScrolling(false), 1000);
+            }}
+          >
+            <Show
+              when={displayedItems().length > 0}
+              fallback={
                 <Show
-                  when={selectedLibraryIsOffline()}
+                  when={hasLibraries()}
                   fallback={
                     <Show
-                      when={items.loading || !isLibraryScanComplete()}
+                      when={!isEditorStrip()}
                       fallback={
-                        <div
-                          class={`${EMPTY_STATE_CLASS} ${
-                            isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                          }`}
-                        >
-                          {activeFilenameFilter().length > 0
-                            ? `No media match "${filenameFilter().trim()}".`
-                            : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+                        <div class={`${EMPTY_STATE_CLASS} mx-1 text-xs`}>
+                          Open the media view to add your first library.
                         </div>
                       }
                     >
-                      <div
-                        class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                          isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                        }`}
-                      >
-                        <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
-                          <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]">
-                          </div>
-                        </div>
+                      <div class={EMPTY_STATE_PANEL_CLASS}>
                         <div class="space-y-1">
-                          <h2 class="text-sm font-semibold text-[var(--text)]">
-                            {availableItems().length > 0
-                              ? `Found ${availableItems().length.toLocaleString()} images…`
-                              : "Scanning library…"}
+                          <p class={PANEL_SECTION_TITLE_CLASS}>Media Library</p>
+                          <h2 class="text-lg font-semibold text-[var(--text)]">
+                            Add your first library
                           </h2>
-                          <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                            {items.loading
-                              ? "Loading your library."
-                              : "Indexing images in this library. This may take a while for large or remote libraries."}
-                          </p>
                         </div>
+                        <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                          Pick a folder with your images. Shade will index it and show it
+                          here in the media view.
+                        </p>
+                        <Button
+                          type="button"
+                          class={SURFACE_BUTTON_CLASS}
+                          disabled={isSubmitting()}
+                          onClick={() => void handleAddLibrary()}
+                        >
+                          Add Library
+                        </Button>
+                        <p class="text-xs text-[var(--text-faint)]">
+                          You can also use the + button in the library bar.
+                        </p>
                       </div>
                     </Show>
                   }
                 >
-                  <div
-                    class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                      isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                    }`}
-                  >
-                    <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
-                      <svg
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
-                        class="h-7 w-7"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.7"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
+                  <Show
+                    when={selectedLibraryIsOffline()}
+                    fallback={
+                      <Show
+                        when={items.loading || !isLibraryScanComplete()}
+                        fallback={
+                          <div
+                            class={`${EMPTY_STATE_CLASS} ${
+                              isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                            }`}
+                          >
+                            {activeFilenameFilter().length > 0
+                              ? `No media match "${filenameFilter().trim()}".`
+                              : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
+                          </div>
+                        }
                       >
-                        <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
-                        <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />
-                        <path d="M8 9.5h.01" />
-                        <path d="M5 19 19 5" />
-                      </svg>
+                        <div
+                          class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
+                            isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                          }`}
+                        >
+                          <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
+                            <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]"></div>
+                          </div>
+                          <div class="space-y-1">
+                            <h2 class="text-sm font-semibold text-[var(--text)]">
+                              {availableItems().length > 0
+                                ? `Found ${availableItems().length.toLocaleString()} images…`
+                                : "Scanning library…"}
+                            </h2>
+                            <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                              {items.loading
+                                ? "Loading your library."
+                                : "Indexing images in this library. This may take a while for large or remote libraries."}
+                            </p>
+                          </div>
+                        </div>
+                      </Show>
+                    }
+                  >
+                    <div
+                      class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
+                        isEditorStrip() ? "mx-1 text-xs" : "text-sm"
+                      }`}
+                    >
+                      <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
+                        <svg
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                          class="h-7 w-7"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.7"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
+                          <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />
+                          <path d="M8 9.5h.01" />
+                          <path d="M5 19 19 5" />
+                        </svg>
+                      </div>
+                      <div class="space-y-1">
+                        <h2 class="text-sm font-semibold text-[var(--text)]">
+                          This library is currently offline
+                        </h2>
+                        <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
+                          Reconnect it to browse the images that are already cached.
+                        </p>
+                      </div>
                     </div>
-                    <div class="space-y-1">
-                      <h2 class="text-sm font-semibold text-[var(--text)]">
-                        This library is currently offline
-                      </h2>
-                      <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                        Reconnect it to browse the images that are already cached.
-                      </p>
+                  </Show>
+                </Show>
+              }
+            >
+              <Show
+                when={!isEditorStrip()}
+                fallback={
+                  <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
+                    <div
+                      class="grid gap-x-0 gap-y-1"
+                      style={{
+                        "grid-template-columns": gridTemplateColumns(),
+                        transform: `translateY(${offsetY()}px)`,
+                      }}
+                    >
+                      <For each={visibleRows()}>
+                        {(row) =>
+                          row.kind === "date" ? (
+                            <h2 class="col-span-full px-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
+                              {formatModificationMonth(row.modifiedAt)}
+                            </h2>
+                          ) : (
+                            <For each={row.ids}>
+                              {(id) => {
+                                const item = () => itemsById().get(id);
+                                return (
+                                  <Show when={item()}>
+                                    <MediaTile
+                                      item={item()!}
+                                      cachedSrc={getBufferedThumbnailSrc(item()!)}
+                                      compact
+                                      offline={selectedLibraryIsOffline()}
+                                      disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
+                                      active={activeMediaItemId() === id}
+                                      selected={selectedMediaItemIdSet().has(id)}
+                                      focused={
+                                        keyboardNavActive() && focusedItemId() === id
+                                      }
+                                      showSelectionControls={showSelectionControls()}
+                                      onThumbnailLoaded={(src) =>
+                                        rememberThumbnailSrc(item()!, src)
+                                      }
+                                      onActivate={(src) => {
+                                        const libraryId = selectedLibraryId();
+                                        if (!libraryId) {
+                                          throw new Error("selected library is required");
+                                        }
+                                        void handleOpenItem(item()!, libraryId, src);
+                                      }}
+                                      onToggleSelection={() => toggleMediaSelection(id)}
+                                      onShiftSelect={() => rangeSelectMedia(id)}
+                                      onFocus={() => {
+                                        setFocusedItemId(id);
+                                        setKeyboardNavActive(false);
+                                      }}
+                                    />
+                                  </Show>
+                                );
+                              }}
+                            </For>
+                          )
+                        }
+                      </For>
                     </div>
                   </div>
-                </Show>
-              </Show>
-            }
-          >
-            <Show
-              when={!isEditorStrip()}
-              fallback={
+                }
+              >
                 <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
                   <div
-                    class="grid gap-x-0 gap-y-1"
+                    class="grid gap-1"
                     style={{
                       "grid-template-columns": gridTemplateColumns(),
                       transform: `translateY(${offsetY()}px)`,
@@ -2653,7 +2775,7 @@ export const MediaView: Component = () => {
                     <For each={visibleRows()}>
                       {(row) =>
                         row.kind === "date" ? (
-                          <h2 class="col-span-full px-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
+                          <h2 class="px-1 col-span-full py-3 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
                             {formatModificationMonth(row.modifiedAt)}
                           </h2>
                         ) : (
@@ -2665,12 +2787,12 @@ export const MediaView: Component = () => {
                                   <MediaTile
                                     item={item()!}
                                     cachedSrc={getBufferedThumbnailSrc(item()!)}
-                                    compact
                                     offline={selectedLibraryIsOffline()}
-                                    disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
                                     active={activeMediaItemId() === id}
                                     selected={selectedMediaItemIdSet().has(id)}
-                                    focused={keyboardNavActive() && focusedItemId() === id}
+                                    focused={
+                                      keyboardNavActive() && focusedItemId() === id
+                                    }
                                     showSelectionControls={showSelectionControls()}
                                     onThumbnailLoaded={(src) =>
                                       rememberThumbnailSrc(item()!, src)
@@ -2698,78 +2820,22 @@ export const MediaView: Component = () => {
                     </For>
                   </div>
                 </div>
-              }
-            >
-              <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
-                <div
-                  class="grid gap-1"
-                  style={{
-                    "grid-template-columns": gridTemplateColumns(),
-                    transform: `translateY(${offsetY()}px)`,
-                  }}
-                >
-                  <For each={visibleRows()}>
-                    {(row) =>
-                      row.kind === "date" ? (
-                        <h2 class="px-1 col-span-full py-3 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
-                          {formatModificationMonth(row.modifiedAt)}
-                        </h2>
-                      ) : (
-                        <For each={row.ids}>
-                          {(id) => {
-                            const item = () => itemsById().get(id);
-                            return (
-                              <Show when={item()}>
-                                <MediaTile
-                                  item={item()!}
-                                  cachedSrc={getBufferedThumbnailSrc(item()!)}
-                                  offline={selectedLibraryIsOffline()}
-                                  active={activeMediaItemId() === id}
-                                  selected={selectedMediaItemIdSet().has(id)}
-                                  focused={keyboardNavActive() && focusedItemId() === id}
-                                  showSelectionControls={showSelectionControls()}
-                                  onThumbnailLoaded={(src) =>
-                                    rememberThumbnailSrc(item()!, src)
-                                  }
-                                  onActivate={(src) => {
-                                    const libraryId = selectedLibraryId();
-                                    if (!libraryId) {
-                                      throw new Error("selected library is required");
-                                    }
-                                    void handleOpenItem(item()!, libraryId, src);
-                                  }}
-                                  onToggleSelection={() => toggleMediaSelection(id)}
-                                  onShiftSelect={() => rangeSelectMedia(id)}
-                                  onFocus={() => {
-                                    setFocusedItemId(id);
-                                    setKeyboardNavActive(false);
-                                  }}
-                                />
-                              </Show>
-                            );
-                          }}
-                        </For>
-                      )
-                    }
-                  </For>
-                </div>
-              </div>
+              </Show>
             </Show>
+          </div>
+          <Show when={isScrolling() && scrollLabel()}>
+            <div
+              class={`pointer-events-none absolute ${
+                isEditorStrip()
+                  ? "right-0 translate-x-[calc(100%+0.5rem)] text-left"
+                  : "right-4"
+              } z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]`}
+              style={{ top: `${tooltipTop()}px` }}
+            >
+              {scrollLabel()}
+            </div>
           </Show>
         </div>
-        <Show when={isScrolling() && scrollLabel()}>
-          <div
-            class={`pointer-events-none absolute ${
-              isEditorStrip()
-                ? "right-0 translate-x-[calc(100%+0.5rem)] text-left"
-                : "right-4"
-            } z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]`}
-            style={{ top: `${tooltipTop()}px` }}
-          >
-            {scrollLabel()}
-          </div>
-        </Show>
-      </div>
       </div>
 
       <div
@@ -2779,9 +2845,7 @@ export const MediaView: Component = () => {
           <p class="text-sm py-3 text-[var(--danger-text)]">{displayedError()}</p>
         )}
         <Show when={mediaActionStatus()}>
-          {(status) => (
-            <p class="text-sm py-3 text-[var(--text-value)]">{status()}</p>
-          )}
+          {(status) => <p class="text-sm py-3 text-[var(--text-value)]">{status()}</p>}
         </Show>
         <Show when={selectedMediaItemIds().length > 0}>
           <div class="flex items-center justify-between gap-2 py-3">
@@ -2808,10 +2872,7 @@ export const MediaView: Component = () => {
                 <Button
                   type="button"
                   class={SURFACE_BUTTON_CLASS}
-                  disabled={
-                    isSubmitting() ||
-                    selectedMediaItemIds().length === 0
-                  }
+                  disabled={isSubmitting() || selectedMediaItemIds().length === 0}
                   onClick={() => {
                     setShowApplyPresetMenu(!showApplyPresetMenu());
                     if (!presets()) {
@@ -2937,7 +2998,7 @@ export const MediaView: Component = () => {
           </p>
         </Show>*/}
       </div>
-      
+
       <Show when={selectedLibrary()}>
         <div class="fixed bottom-[env(safe-area-inset-bottom)] left-0 right-0 hidden w-auto px-2 pb-2 touch-mobile:block">
           <input
@@ -2950,7 +3011,7 @@ export const MediaView: Component = () => {
           />
         </div>
       </Show>
-      
+
       <Show when={uploadProgress()}>
         {(progress) => (
           <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
@@ -2994,7 +3055,9 @@ export const MediaView: Component = () => {
             <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
               <div
                 class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
-                style={{ width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%` }}
+                style={{
+                  width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%`,
+                }}
               />
             </div>
           </div>
@@ -3018,7 +3081,9 @@ export const MediaView: Component = () => {
             <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
               <div
                 class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
-                style={{ width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%` }}
+                style={{
+                  width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%`,
+                }}
               />
             </div>
           </div>

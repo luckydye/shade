@@ -1,5 +1,5 @@
-import * as Y from "yjs";
 import { createSignal } from "solid-js";
+import * as Y from "yjs";
 
 const doc = new Y.Doc();
 const snapshot = doc.getMap("snapshot");
@@ -58,4 +58,4 @@ export function resetHistory() {
   syncSignals();
 }
 
-export { canUndo, canRedo };
+export { canRedo, canUndo };

@@ -6,14 +6,13 @@ use image::{ColorType, DynamicImage, ImageFormat};
 use rawler::{
     decoders::{Orientation as RawOrientation, RawDecodeParams},
     imgop::develop::{
-        Intermediate as RawIntermediate, ProcessingStep as RawProcessingStep,
-        RawDevelop,
+        Intermediate as RawIntermediate, ProcessingStep as RawProcessingStep, RawDevelop,
     },
     rawsource::RawSource,
     RawImage,
 };
 use shade_lib::color::{
-    from_acescct_f32, linear_srgb_lut_u8, linear_srgb_lut_u16, quantize_rgba_f32,
+    from_acescct_f32, linear_srgb_lut_u16, linear_srgb_lut_u8, quantize_rgba_f32,
     to_acescct_f32,
 };
 use shade_lib::{ColorSpace, FloatImage};
@@ -25,15 +24,15 @@ pub mod file_fingerprint;
 #[cfg(feature = "native")]
 pub mod app_config;
 #[cfg(feature = "native")]
-pub(crate) mod file_fingerprint_cache;
-#[cfg(feature = "native")]
-pub(crate) mod file_fingerprint_io;
-#[cfg(feature = "native")]
 pub mod camera_services;
 #[cfg(feature = "native")]
 pub mod ccapi;
 #[cfg(feature = "native")]
 pub mod collections;
+#[cfg(feature = "native")]
+pub(crate) mod file_fingerprint_cache;
+#[cfg(feature = "native")]
+pub(crate) mod file_fingerprint_io;
 #[cfg(feature = "native")]
 pub mod image_loader;
 #[cfg(feature = "native")]
@@ -58,7 +57,8 @@ pub use file_fingerprint::{fingerprint_from_bytes, fingerprint_local};
 #[cfg(feature = "native")]
 pub use app_config::{
     append_library_order_id, is_peer_paired, load_app_config, normalize_library_order,
-    pair_peer, remove_library_order_id, save_app_config, upsert_library_config, AppConfig,
+    pair_peer, remove_library_order_id, save_app_config, upsert_library_config,
+    AppConfig,
 };
 #[cfg(feature = "native")]
 pub use camera_services::{CameraDiscoveryService, CameraThumbnailService};
@@ -74,9 +74,10 @@ pub use image_loader::{load_picture_bytes, open_image, OpenedImage};
 pub use library_index::{
     delete_persisted_library_index, delete_persisted_library_index_item,
     has_persisted_library_index, has_persisted_library_index_by_root,
-    is_supported_library_image, library_index_db_path, load_persisted_library_index_by_root,
-    picture_display_name, rating_for_image_path, replace_persisted_library_index_by_root,
-    scan_directory_images, sort_indexed_library_items, IndexedLibraryImage, LibraryIndexDb,
+    is_supported_library_image, library_index_db_path,
+    load_persisted_library_index_by_root, picture_display_name, rating_for_image_path,
+    replace_persisted_library_index_by_root, scan_directory_images,
+    sort_indexed_library_items, IndexedLibraryImage, LibraryIndexDb,
 };
 #[cfg(feature = "native")]
 pub use library_scan_service::{
@@ -90,8 +91,8 @@ pub use library_source::{
     media_path_for_s3_object, normalize_s3_library_input, parse_s3_media_path,
     peer_library_id, put_s3_object_bytes, put_s3_object_bytes_with_atime,
     resolve_s3_source_id_from_library_id, s3_library_id, AddS3LibraryParams,
-    CameraLibraryConfig, LibraryConfig, LibraryMode, LocalLibraryConfig, PeerLibraryConfig,
-    S3LibraryConfig,
+    CameraLibraryConfig, LibraryConfig, LibraryMode, LocalLibraryConfig,
+    PeerLibraryConfig, S3LibraryConfig,
 };
 #[cfg(feature = "native")]
 pub use thumbnail_cache::{thumbnail_cache_key, ThumbnailCacheDb, ThumbnailCacheEntry};
@@ -142,8 +143,12 @@ pub fn load_image_preview(path: &Path, max_dim: u32) -> Result<(Vec<u8>, u32, u3
     assert!(max_dim > 0, "max_dim must be > 0");
     let bytes = std::fs::read(path)
         .with_context(|| format!("Cannot read file: {}", path.display()))?;
-    load_image_bytes_preview(&bytes, path.file_name().and_then(|name| name.to_str()), max_dim)
-        .with_context(|| format!("Failed to decode image preview: {}", path.display()))
+    load_image_bytes_preview(
+        &bytes,
+        path.file_name().and_then(|name| name.to_str()),
+        max_dim,
+    )
+    .with_context(|| format!("Failed to decode image preview: {}", path.display()))
 }
 
 pub fn load_image_bytes_preview(
@@ -165,7 +170,10 @@ pub fn load_image_bytes_preview(
     Ok((rgba.into_raw(), width, height))
 }
 
-pub fn load_image_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<(Vec<u8>, u32, u32)> {
+pub fn load_image_bytes(
+    bytes: &[u8],
+    name_hint: Option<&str>,
+) -> Result<(Vec<u8>, u32, u32)> {
     if is_exr(name_hint, bytes) || is_camera_raw(name_hint, bytes) {
         let (image, _info) = load_image_bytes_f32_with_info(bytes, name_hint)?;
         let mut pixels = image.pixels.to_vec();
@@ -200,7 +208,6 @@ pub fn load_image_f32_with_info(path: &Path) -> Result<(FloatImage, SourceImageI
     .with_context(|| format!("Failed to decode image: {}", path.display()))?;
     Ok((image, info))
 }
-
 
 pub fn load_image_bytes_f32_with_info(
     bytes: &[u8],
@@ -304,7 +311,6 @@ fn raw_orientation_to_exif(orientation: RawOrientation) -> Option<u32> {
     }
 }
 
-
 /// Save raw RGBA8 bytes to a file.
 pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<()> {
     let expected = (width * height * 4) as usize;
@@ -350,7 +356,12 @@ pub fn save_image(path: &Path, data: &[u8], width: u32, height: u32) -> Result<(
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn resize_rgba_within(rgba: Vec<u8>, width: u32, height: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
+fn resize_rgba_within(
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    max_dim: u32,
+) -> (Vec<u8>, u32, u32) {
     let current_max = width.max(height);
     if current_max <= max_dim {
         return (rgba, width, height);
@@ -395,7 +406,6 @@ fn is_cr3(bytes: &[u8]) -> bool {
     }
     bytes[4..8] == *b"ftyp" && matches!(&bytes[8..12], b"cr3 " | b"crx ")
 }
-
 
 fn decode_exr_f32(bytes: &[u8]) -> Result<FloatImage> {
     struct ExrPixels {
@@ -455,7 +465,6 @@ fn detect_exr_bit_depth(bytes: &[u8]) -> Result<String> {
     })
 }
 
-
 fn into_linear_float_image(
     image: DynamicImage,
     color_type: ColorType,
@@ -498,13 +507,16 @@ fn develop_raw_image_linear_srgb(raw_image: &RawImage) -> Result<FloatImage> {
     .develop_intermediate(raw_image)
     .context("RAW development failed")?;
     Ok(match developed {
-        RawIntermediate::ThreeColor(image) => {
-            oriented_rgb_f32_to_float_image(image.width, image.height, image.data, raw_image.orientation)
-        }
+        RawIntermediate::ThreeColor(image) => oriented_rgb_f32_to_float_image(
+            image.width,
+            image.height,
+            image.data,
+            raw_image.orientation,
+        ),
         developed => into_linear_float_image_raw_srgb_oriented(
-            developed
-                .to_dynamic_image()
-                .ok_or_else(|| anyhow!("RAW development produced an invalid image buffer"))?,
+            developed.to_dynamic_image().ok_or_else(|| {
+                anyhow!("RAW development produced an invalid image buffer")
+            })?,
             raw_image.orientation,
         ),
     })
@@ -625,9 +637,7 @@ fn oriented_rgb_f32_to_float_image(
                 RawOrientation::VerticalFlip => (sx, src_height - 1 - sy),
                 RawOrientation::Transpose => (sy, sx),
                 RawOrientation::Rotate90 => (src_height - 1 - sy, sx),
-                RawOrientation::Transverse => {
-                    (src_height - 1 - sy, src_width - 1 - sx)
-                }
+                RawOrientation::Transverse => (src_height - 1 - sy, src_width - 1 - sx),
                 RawOrientation::Rotate270 => (sy, src_width - 1 - sx),
             };
             let rgb = src[sy * src_width + sx];
@@ -674,9 +684,7 @@ fn oriented_rgb16_to_linear_float_image(
                 RawOrientation::VerticalFlip => (sx, src_height - 1 - sy),
                 RawOrientation::Transpose => (sy, sx),
                 RawOrientation::Rotate90 => (src_height - 1 - sy, sx),
-                RawOrientation::Transverse => {
-                    (src_height - 1 - sy, src_width - 1 - sx)
-                }
+                RawOrientation::Transverse => (src_height - 1 - sy, src_width - 1 - sx),
                 RawOrientation::Rotate270 => (sy, src_width - 1 - sx),
             };
             let src_base = (sy * src_width + sx) * 3;
@@ -719,13 +727,12 @@ fn working_space_image(image: FloatImage, color_space: &ColorSpace) -> FloatImag
 mod tests {
     use super::{
         apply_orientation, into_linear_float_image, load_image,
-        load_image_bytes_f32_with_info, load_image_f32_with_info, raw_orientation_to_exif,
+        load_image_bytes_f32_with_info, load_image_f32_with_info,
+        raw_orientation_to_exif,
     };
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use rawler::{
-        decoders::RawDecodeParams,
-        imgop::develop::RawDevelop,
-        rawsource::RawSource,
+        decoders::RawDecodeParams, imgop::develop::RawDevelop, rawsource::RawSource,
     };
     use shade_lib::color::{acescct_to_linear_channel, to_linear_srgb_f32};
     use shade_lib::ColorSpace;
@@ -780,18 +787,17 @@ mod tests {
     #[test]
     fn loads_srgb_png_into_acescct_working_space() {
         let mut encoded = Vec::new();
-        DynamicImage::ImageRgba8(RgbaImage::from_pixel(
-            1,
-            1,
-            Rgba([118, 118, 118, 255]),
-        ))
-        .write_to(&mut std::io::Cursor::new(&mut encoded), ImageFormat::Png)
-        .expect("PNG should encode");
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([118, 118, 118, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut encoded), ImageFormat::Png)
+            .expect("PNG should encode");
 
         let (image, info) = load_image_bytes_f32_with_info(&encoded, Some("midgrey.png"))
             .expect("PNG should decode");
 
-        assert!(matches!(info.color_space, ColorSpace::Srgb | ColorSpace::Unknown));
+        assert!(matches!(
+            info.color_space,
+            ColorSpace::Srgb | ColorSpace::Unknown
+        ));
         let rgb = &image.pixels[..3];
         for channel in rgb {
             let linear = acescct_to_linear_channel(*channel);

@@ -1,12 +1,11 @@
 use crate::engine::WasmEngine;
 use js_sys::{Object, Reflect, Uint8Array};
 use serde::{Deserialize, Serialize};
-use shade_lib::{
-    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams,
-    LayerStack, MaskData, MaskParams, PreviewCrop as GpuPreviewCrop,
-    Renderer, TextureId, ToneParams,
-};
 use shade_io::load_image_bytes_f32_with_info;
+use shade_lib::{
+    ColorParams, CropRect, CurveControlPoint, DenoiseParams, HslParams, LayerStack,
+    MaskData, MaskParams, PreviewCrop as GpuPreviewCrop, Renderer, TextureId, ToneParams,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -452,7 +451,8 @@ pub fn update_text_style_json(layer_idx: usize, json: String) -> Result<(), JsVa
         Option::<f32>::deserialize(d).map(Some)
     }
 
-    let patch: Patch = serde_json::from_str(&json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let patch: Patch =
+        serde_json::from_str(&json).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let align = patch
         .align
         .as_deref()
@@ -947,11 +947,10 @@ pub async fn render_snapshot_thumbnail(
     let renderer = RENDERER
         .with(|slot| slot.borrow().clone())
         .ok_or_else(|| JsValue::from_str("renderer is not initialized"))?;
-    let (image, _info) =
-        load_image_bytes_f32_with_info(&bytes, file_name.as_deref())
-            .map_err(|err| JsValue::from_str(&err.to_string()))?;
-    let snap: StackSnapshot =
-        serde_json::from_str(&layers_json).map_err(|err| JsValue::from_str(&err.to_string()))?;
+    let (image, _info) = load_image_bytes_f32_with_info(&bytes, file_name.as_deref())
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
+    let snap: StackSnapshot = serde_json::from_str(&layers_json)
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
     let canvas_width = image.width;
     let canvas_height = image.height;
     let texture_id: TextureId = 1;
@@ -992,7 +991,15 @@ pub async fn render_snapshot_thumbnail(
     }
     let sources = HashMap::from([(texture_id, image)]);
     let pixels = renderer
-        .render_stack_preview(&stack, &sources, canvas_width, canvas_height, target_width, target_height, None)
+        .render_stack_preview(
+            &stack,
+            &sources,
+            canvas_width,
+            canvas_height,
+            target_width,
+            target_height,
+            None,
+        )
         .await
         .map_err(|err| JsValue::from_str(&err.to_string()))?;
     let frame = Object::new();

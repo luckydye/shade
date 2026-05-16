@@ -1,3 +1,14 @@
+use crate::camera_discovery::ccapi_host_is_online;
+use crate::config::{
+    load_app_config, ordered_library_entries, save_app_config, set_library_order,
+    sync_persisted_peer_names,
+};
+use crate::db::{library_db_conn, library_index_db};
+#[cfg(target_os = "ios")]
+use crate::image_loaders::IosPhotoEntry;
+use crate::media_metadata::load_media_tags_map;
+use crate::paths::default_pictures_dir;
+use crate::peers::{discovered_peers_by_endpoint, peer_library_for_endpoint};
 use serde::{Deserialize, Serialize};
 use shade_io::{
     delete_persisted_library_index, picture_display_name, scan_directory_images,
@@ -6,15 +17,6 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
-use crate::camera_discovery::ccapi_host_is_online;
-use crate::config::{load_app_config, ordered_library_entries, save_app_config, set_library_order, sync_persisted_peer_names};
-use crate::db::{library_db_conn, library_index_db};
-#[cfg(target_os = "ios")]
-use crate::image_loaders::IosPhotoEntry;
-use crate::media_metadata::load_media_tags_map;
-use crate::paths::default_pictures_dir;
-use crate::peers::{discovered_peers_by_endpoint, peer_library_for_endpoint};
-
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MediaLibrary {
@@ -66,7 +68,11 @@ pub(crate) fn ccapi_library_id(host: &str) -> String {
 pub(crate) fn ccapi_media_path(host: &str, file_path: &str) -> String {
     format!("ccapi://{host}{file_path}")
 }
-pub(crate) fn ccapi_library_for_host(host: &str, is_online: bool, removable: bool) -> MediaLibrary {
+pub(crate) fn ccapi_library_for_host(
+    host: &str,
+    is_online: bool,
+    removable: bool,
+) -> MediaLibrary {
     MediaLibrary {
         id: ccapi_library_id(host),
         name: format!("Camera {host}"),
@@ -140,7 +146,10 @@ pub(crate) fn normalize_upload_file_name(file_name: &str) -> Result<String, Stri
     }
     Ok(trimmed.to_string())
 }
-pub(crate) fn s3_upload_object_key(config: &shade_io::S3LibraryConfig, file_name: &str) -> String {
+pub(crate) fn s3_upload_object_key(
+    config: &shade_io::S3LibraryConfig,
+    file_name: &str,
+) -> String {
     match config.prefix.as_deref() {
         Some(prefix) => format!("{prefix}/{file_name}"),
         None => file_name.to_string(),
@@ -232,17 +241,27 @@ pub async fn set_media_library_order(library_order: Vec<String>) -> Result<(), S
     set_library_order(library_order)
 }
 #[tauri::command]
-pub async fn set_library_mode(library_id: String, mode: String, sync_target: Option<String>) -> Result<(), String> {
+pub async fn set_library_mode(
+    library_id: String,
+    mode: String,
+    sync_target: Option<String>,
+) -> Result<(), String> {
     let library_mode = match mode.as_str() {
         "browse" => shade_io::LibraryMode::Browse,
         "sync" => shade_io::LibraryMode::Sync,
         other => return Err(format!("invalid library mode: {other}")),
     };
     let mut config = load_app_config()?;
-    config.library_modes.insert(library_id.clone(), library_mode);
+    config
+        .library_modes
+        .insert(library_id.clone(), library_mode);
     match sync_target {
-        Some(target) => { config.sync_targets.insert(library_id, target); }
-        None => { config.sync_targets.remove(&library_id); }
+        Some(target) => {
+            config.sync_targets.insert(library_id, target);
+        }
+        None => {
+            config.sync_targets.remove(&library_id);
+        }
     }
     save_app_config(&config)
 }
@@ -332,7 +351,9 @@ pub(crate) fn local_upload_target_path_with_conflict_policy(
         Err(error) => Err(error),
     }
 }
-pub(crate) fn resolve_local_library_item(path: &str) -> Result<(String, PathBuf), String> {
+pub(crate) fn resolve_local_library_item(
+    path: &str,
+) -> Result<(String, PathBuf), String> {
     let item_path = PathBuf::from(path);
     if !item_path.is_file() {
         return Err(format!("media item path is not a file: {path}"));
@@ -369,7 +390,9 @@ pub(crate) fn resolve_ccapi_library_host(library_id: &str) -> Result<String, Str
     }
     Ok(host.to_string())
 }
-pub(crate) fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage>, String> {
+pub(crate) fn collect_images_in_directory(
+    dir: &Path,
+) -> Result<Vec<LibraryImage>, String> {
     Ok(scan_directory_images(dir)?
         .into_iter()
         .map(|item| LibraryImage {
@@ -390,7 +413,9 @@ pub(crate) fn collect_images_in_directory(dir: &Path) -> Result<Vec<LibraryImage
 pub(crate) fn ccapi_rating(value: &str) -> Result<Option<u8>, String> {
     shade_io::library_index::normalize_rating(value)
 }
-pub(crate) async fn list_ccapi_library_images(host: &str) -> Result<LibraryImageListing, String> {
+pub(crate) async fn list_ccapi_library_images(
+    host: &str,
+) -> Result<LibraryImageListing, String> {
     let api = shade_io::ccapi::CCAPI::new(host);
     let storage = api.storage().await.map_err(|e| e.to_string())?;
     let mut items = Vec::new();
@@ -681,7 +706,8 @@ pub(crate) async fn enrich_listing_metadata(
     for item in &mut listing.items {
         item.fingerprint = fingerprints_by_source.get(&item.path).cloned();
         item.metadata.latest_snapshot_id = snapshot_ids.get(&item.path).cloned();
-        item.metadata.latest_snapshot_created_at = snapshot_created_ats.get(&item.path).copied();
+        item.metadata.latest_snapshot_created_at =
+            snapshot_created_ats.get(&item.path).copied();
         item.metadata.has_snapshots = item.metadata.latest_snapshot_id.is_some();
         item.metadata.tags = item
             .fingerprint
@@ -811,10 +837,7 @@ pub async fn refresh_library_index<R: tauri::Runtime>(
         if library_id.starts_with("s3:") {
             _app.state::<crate::S3LibraryScanService>()
                 .0
-                .refresh_library(
-                    _app.clone(),
-                    &resolve_s3_library_config(&library_id)?,
-                )
+                .refresh_library(_app.clone(), &resolve_s3_library_config(&library_id)?)
                 .await?;
             crate::tagging_worker::enqueue_existing_thumbnails_for_tagging(&_app).await?;
             return Ok(());
@@ -914,9 +937,10 @@ pub async fn update_s3_media_library<R: tauri::Runtime>(
     let mut config = load_app_config()?;
 
     if updated_library_id != library_id
-        && config.libraries.iter().any(|library| {
-            shade_io::library_config_id(library) == updated_library_id
-        })
+        && config
+            .libraries
+            .iter()
+            .any(|library| shade_io::library_config_id(library) == updated_library_id)
     {
         return Err(format!(
             "another media library already uses this S3 source: {updated_library_id}"
@@ -1124,9 +1148,9 @@ pub async fn delete_media_library_item<R: tauri::Runtime>(
             .0
             .remove_item(&library_id, &path)
             .await?;
-        crate::channel_server::channel_from_app(&_app).send(
-            crate::ChannelMessage::LibraryScanComplete { library_id },
-        ).await;
+        crate::channel_server::channel_from_app(&_app)
+            .send(crate::ChannelMessage::LibraryScanComplete { library_id })
+            .await;
         return Ok(());
     }
     #[cfg(any(target_os = "ios", target_os = "android"))]

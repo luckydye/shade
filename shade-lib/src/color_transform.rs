@@ -1,4 +1,7 @@
-use crate::{context::{create_upload_buffer, GpuContext}, INTERNAL_TEXTURE_FORMAT};
+use crate::{
+    context::{create_upload_buffer, GpuContext},
+    INTERNAL_TEXTURE_FORMAT,
+};
 use shade_lib::{ColorMatrix3x3, ColorSpace};
 use wgpu::*;
 

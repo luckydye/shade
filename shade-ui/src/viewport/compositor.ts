@@ -1,5 +1,5 @@
-import type { ArtboardClip, Artboard, RenderedTile } from "./types";
 import type { WorldTransform } from "./transform";
+import type { Artboard, ArtboardClip, RenderedTile } from "./types";
 
 type TileSurface = HTMLCanvasElement | OffscreenCanvas;
 

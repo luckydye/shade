@@ -8,7 +8,6 @@ import {
   suspendPreview,
 } from "../viewport/preview";
 import { refreshLayerStack } from "./editor-layers";
-import { resetHistory } from "./history";
 import {
   type ArtboardSource,
   type ArtboardState,
@@ -16,6 +15,7 @@ import {
   setState,
   state,
 } from "./editor-store";
+import { resetHistory } from "./history";
 
 const ARTBOARD_GAP = 96;
 const DEFAULT_PENDING_ARTBOARD_WIDTH = 1600;
@@ -177,8 +177,14 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
     preserveViewport,
   );
   if (preserveViewport && previousArtboard) {
-    setState("viewportCenterX", (prev) => prev + previousArtboard.worldX - artboard.worldX);
-    setState("viewportCenterY", (prev) => prev + previousArtboard.worldY - artboard.worldY);
+    setState(
+      "viewportCenterX",
+      (prev) => prev + previousArtboard.worldX - artboard.worldX,
+    );
+    setState(
+      "viewportCenterY",
+      (prev) => prev + previousArtboard.worldY - artboard.worldY,
+    );
   }
   try {
     const info = await loadArtboardSource(artboard.source);
@@ -225,7 +231,11 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
   }
 }
 
-function resetViewportState(canvasWidth: number, canvasHeight: number, preserveViewport: boolean = false) {
+function resetViewportState(
+  canvasWidth: number,
+  canvasHeight: number,
+  preserveViewport: boolean = false,
+) {
   const crop = fullCanvasCrop(canvasWidth, canvasHeight);
   if (preserveViewport) {
     setState({

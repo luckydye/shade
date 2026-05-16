@@ -13,5 +13,8 @@
     "jsx": "preserve",
     "jsxImportSource": "solid-js"
   },
-  "include": ["ui-src", "../shade-ui/src"]
+  "include": [
+    "ui-src",
+    "../shade-ui/src"
+  ]
 }

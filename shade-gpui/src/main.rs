@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 
 use gpui::{
-    canvas, div, img, px, rgb, size, App, AppContext, Application, Bounds, ClickEvent, Context,
-    Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, RenderImage, SharedString, StatefulInteractiveElement, Styled,
-    TitlebarOptions, Window, WindowBounds, WindowOptions,
+    canvas, div, img, px, rgb, size, App, AppContext, Application, Bounds, ClickEvent,
+    Context, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, RenderImage, SharedString,
+    StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBounds,
+    WindowOptions,
 };
 use image::{imageops::FilterType, Frame, ImageBuffer, RgbaImage};
 use shade_lib::{AdjustmentOp, ColorParams, Renderer};
@@ -123,7 +124,13 @@ struct Edits {
 
 impl Edits {
     fn zero() -> Self {
-        Self { exposure: 0.0, contrast: 0.0, saturation: 0.0, vibrancy: 0.0, temperature: 0.0 }
+        Self {
+            exposure: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            vibrancy: 0.0,
+            temperature: 0.0,
+        }
     }
 
     fn to_ops(self) -> Vec<AdjustmentOp> {
@@ -132,7 +139,11 @@ impl Edits {
             ops.push(AdjustmentOp::Tone {
                 exposure: self.exposure,
                 contrast: self.contrast,
-                blacks: 0.0, whites: 0.0, highlights: 0.0, shadows: 0.0, gamma: 1.0,
+                blacks: 0.0,
+                whites: 0.0,
+                highlights: 0.0,
+                shadows: 0.0,
+                gamma: 1.0,
             });
         }
         if self.saturation != 0.0 || self.vibrancy != 0.0 || self.temperature != 0.0 {
@@ -149,7 +160,11 @@ impl Edits {
 
 #[derive(Clone, Copy, PartialEq)]
 enum SliderField {
-    Exposure, Contrast, Saturation, Vibrancy, Temperature,
+    Exposure,
+    Contrast,
+    Saturation,
+    Vibrancy,
+    Temperature,
 }
 
 struct SliderDrag {
@@ -202,15 +217,25 @@ impl Shade {
 
     fn open_picker(&mut self, cx: &mut Context<Self>) {
         let files = rfd::FileDialog::new()
-            .add_filter("Image", &["jpg","jpeg","png","webp","tif","tiff","exr","dng","cr3","arw","nef"])
+            .add_filter(
+                "Image",
+                &[
+                    "jpg", "jpeg", "png", "webp", "tif", "tiff", "exr", "dng", "cr3",
+                    "arw", "nef",
+                ],
+            )
             .pick_files();
         let Some(files) = files else { return };
         for path in files {
             match load_photo(&path) {
                 Ok(photo) => self.photos.push(photo),
-                Err(e) => self.status = Some(SharedString::from(
-                    format!("Failed to open {}: {}", path.display(), e)
-                )),
+                Err(e) => {
+                    self.status = Some(SharedString::from(format!(
+                        "Failed to open {}: {}",
+                        path.display(),
+                        e
+                    )))
+                }
             }
         }
         if self.selected.is_none() {
@@ -220,7 +245,8 @@ impl Shade {
     }
 
     fn clear_photos(&mut self, cx: &mut Context<Self>) {
-        self.pending_drops.extend(self.photos.drain(..).map(|photo| photo.thumb));
+        self.pending_drops
+            .extend(self.photos.drain(..).map(|photo| photo.thumb));
         self.set_rendered(None);
         self.selected = None;
         self.render_source = None;
@@ -238,7 +264,9 @@ impl Shade {
     }
 
     fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
-        if matches!(view, View::Editor) && self.selected.is_none() { return; }
+        if matches!(view, View::Editor) && self.selected.is_none() {
+            return;
+        }
         self.view = view;
         if matches!(view, View::Editor) && self.rendered.is_none() {
             self.rerender(cx);
@@ -249,10 +277,10 @@ impl Shade {
 
     fn set_field(&mut self, field: SliderField, val: f32, cx: &mut Context<Self>) {
         match field {
-            SliderField::Exposure    => self.edits.exposure    = val.clamp(-3.0, 3.0),
-            SliderField::Contrast    => self.edits.contrast    = val.clamp(-1.0, 1.0),
-            SliderField::Saturation  => self.edits.saturation  = val.clamp(-1.0, 1.0),
-            SliderField::Vibrancy    => self.edits.vibrancy    = val.clamp(-1.0, 1.0),
+            SliderField::Exposure => self.edits.exposure = val.clamp(-3.0, 3.0),
+            SliderField::Contrast => self.edits.contrast = val.clamp(-1.0, 1.0),
+            SliderField::Saturation => self.edits.saturation = val.clamp(-1.0, 1.0),
+            SliderField::Vibrancy => self.edits.vibrancy = val.clamp(-1.0, 1.0),
             SliderField::Temperature => self.edits.temperature = val.clamp(-1.0, 1.0),
         }
         self.rerender(cx);
@@ -293,21 +321,41 @@ impl Shade {
             }
             cx.notify();
         } else {
-            self.worker.submit(RenderJob { pixels, w, h, ops, trim_before, reply: tx });
+            self.worker.submit(RenderJob {
+                pixels,
+                w,
+                h,
+                ops,
+                trim_before,
+                reply: tx,
+            });
             // Await the reply on the foreground executor (non-blocking).
             // Must use async closure (not a closure calling async fn) to satisfy
             // the AsyncFnOnce HRTB bound on cx.spawn.
             self._render_task = Some(cx.spawn(async move |weak_this, cx| {
-                let result = rx.await.unwrap_or_else(|_| Err(anyhow::anyhow!("cancelled")));
+                let result = rx
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("cancelled")));
                 cx.update(|app| {
-                    weak_this.update(app, |this: &mut Shade, cx| {
-                        match result {
-                            Ok(bytes) => { this.set_rendered(render_image_from_rgba(bytes, w, h)); }
-                            Err(e) => { this.status = Some(SharedString::from(format!("Render failed: {e}"))); }
-                        }
-                        cx.notify();
-                    }).ok();
-                }).ok();
+                    weak_this
+                        .update(app, |this: &mut Shade, cx| {
+                            match result {
+                                Ok(bytes) => {
+                                    this.set_rendered(render_image_from_rgba(
+                                        bytes, w, h,
+                                    ));
+                                }
+                                Err(e) => {
+                                    this.status = Some(SharedString::from(format!(
+                                        "Render failed: {e}"
+                                    )));
+                                }
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .ok();
             }));
         }
     }
@@ -319,7 +367,11 @@ impl Shade {
             .add_filter("JPEG", &["jpg"])
             .set_file_name(format!(
                 "{}-edited.png",
-                self.photos[idx].path.file_stem().and_then(|s| s.to_str()).unwrap_or("export")
+                self.photos[idx]
+                    .path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("export")
             ))
             .save_file();
         let Some(path) = path else { return };
@@ -329,17 +381,27 @@ impl Shade {
             photo.preview_rgba.as_ref().clone()
         } else {
             match pollster::block_on(Renderer::new()).and_then(|r| {
-                pollster::block_on(r.render_with_ops(&photo.preview_rgba, photo.preview_w, photo.preview_h, &ops))
+                pollster::block_on(r.render_with_ops(
+                    &photo.preview_rgba,
+                    photo.preview_w,
+                    photo.preview_h,
+                    &ops,
+                ))
             }) {
                 Ok(b) => b,
                 Err(e) => {
-                    self.status = Some(SharedString::from(format!("Export render failed: {e}")));
-                    cx.notify(); return;
+                    self.status =
+                        Some(SharedString::from(format!("Export render failed: {e}")));
+                    cx.notify();
+                    return;
                 }
             }
         };
         match shade_io::save_image(&path, &bytes, photo.preview_w, photo.preview_h) {
-            Ok(()) => self.status = Some(SharedString::from(format!("Saved {}", path.display()))),
+            Ok(()) => {
+                self.status =
+                    Some(SharedString::from(format!("Saved {}", path.display())))
+            }
             Err(e) => self.status = Some(SharedString::from(format!("Save failed: {e}"))),
         }
         cx.notify();
@@ -353,7 +415,11 @@ fn load_photo(path: &std::path::Path) -> anyhow::Result<Photo> {
     let (thumb_pixels, tw, th) = fit_within(&preview_pixels, pw, ph, THUMB_MAX_DIM);
     let thumb = render_image_from_rgba(thumb_pixels, tw, th)
         .ok_or_else(|| anyhow::anyhow!("thumbnail build failed"))?;
-    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("image").to_string();
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image")
+        .to_string();
     Ok(Photo {
         path: path.to_path_buf(),
         name: SharedString::from(name),
@@ -370,7 +436,9 @@ fn fit_within(rgba: &[u8], w: u32, h: u32, max_dim: u32) -> (Vec<u8>, u32, u32) 
 
 fn fit_within_owned(rgba: Vec<u8>, w: u32, h: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
     let m = w.max(h);
-    if m <= max_dim { return (rgba, w, h); }
+    if m <= max_dim {
+        return (rgba, w, h);
+    }
     let scale = max_dim as f32 / m as f32;
     let nw = ((w as f32 * scale).round() as u32).max(1);
     let nh = ((h as f32 * scale).round() as u32).max(1);
@@ -380,10 +448,17 @@ fn fit_within_owned(rgba: Vec<u8>, w: u32, h: u32, max_dim: u32) -> (Vec<u8>, u3
 }
 
 fn render_image_from_rgba(mut rgba: Vec<u8>, w: u32, h: u32) -> Option<Arc<RenderImage>> {
-    if rgba.len() != w as usize * h as usize * 4 { return None; }
-    for px in rgba.chunks_exact_mut(4) { px.swap(0, 2); }
+    if rgba.len() != w as usize * h as usize * 4 {
+        return None;
+    }
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
     let buf: RgbaImage = ImageBuffer::from_raw(w, h, rgba)?;
-    Some(Arc::new(RenderImage::new(SmallVec::from_elem(Frame::new(buf), 1))))
+    Some(Arc::new(RenderImage::new(SmallVec::from_elem(
+        Frame::new(buf),
+        1,
+    ))))
 }
 
 // ── Theme ────────────────────────────────────────────────────────────────────
@@ -413,9 +488,14 @@ fn slider(
     };
 
     div()
-        .flex().flex_col().gap_1()
+        .flex()
+        .flex_col()
+        .gap_1()
         .child(
-            div().flex().flex_row().justify_between()
+            div()
+                .flex()
+                .flex_row()
+                .justify_between()
                 .child(div().text_color(rgb(MUTED)).child(label))
                 .child(div().text_color(rgb(TEXT)).child(val_text)),
         )
@@ -429,58 +509,77 @@ fn slider(
                 .bg(rgb(0x3a3a3c))
                 .child(
                     div()
-                        .absolute().left(px(0.0)).top(px(0.0))
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(0.0))
                         .h(px(6.0))
                         .w(gpui::relative(frac))
                         .rounded_full()
                         .bg(rgb(ACCENT)),
                 )
                 .child(
-                    canvas(
-                        move |_, _, _| (),
-                        {
-                            let entity = entity.clone();
-                            move |track_bounds, _, window, _| {
-                                let entity_down = entity.clone();
-                                let entity_move = entity.clone();
-                                let entity_up   = entity.clone();
-                                window.on_mouse_event(move |ev: &MouseDownEvent, _, _, cx| {
+                    canvas(move |_, _, _| (), {
+                        let entity = entity.clone();
+                        move |track_bounds, _, window, _| {
+                            let entity_down = entity.clone();
+                            let entity_move = entity.clone();
+                            let entity_up = entity.clone();
+                            window.on_mouse_event(
+                                move |ev: &MouseDownEvent, _, _, cx| {
                                     if ev.button != MouseButton::Left
-                                        || !track_bounds.contains(&ev.position) { return; }
+                                        || !track_bounds.contains(&ev.position)
+                                    {
+                                        return;
+                                    }
                                     entity_down.update(cx, |this, cx| {
-                                        let t = ((f32::from(ev.position.x) - f32::from(track_bounds.origin.x))
-                                            / f32::from(track_bounds.size.width)).clamp(0.0, 1.0);
+                                        let t = ((f32::from(ev.position.x)
+                                            - f32::from(track_bounds.origin.x))
+                                            / f32::from(track_bounds.size.width))
+                                        .clamp(0.0, 1.0);
                                         let val = min + t * (max - min);
                                         this.drag = Some(SliderDrag {
                                             field,
                                             start_x: f32::from(ev.position.x),
                                             start_val: val,
-                                            track_width: f32::from(track_bounds.size.width),
+                                            track_width: f32::from(
+                                                track_bounds.size.width,
+                                            ),
                                         });
                                         this.set_field(field, val, cx);
                                     });
-                                });
-                                window.on_mouse_event(move |ev: &MouseMoveEvent, _, _, cx| {
-                                    if !ev.dragging() { return; }
+                                },
+                            );
+                            window.on_mouse_event(
+                                move |ev: &MouseMoveEvent, _, _, cx| {
+                                    if !ev.dragging() {
+                                        return;
+                                    }
                                     entity_move.update(cx, |this, cx| {
                                         let Some(ref d) = this.drag else { return };
-                                        if d.field != field { return; }
+                                        if d.field != field {
+                                            return;
+                                        }
                                         let dx = f32::from(ev.position.x) - d.start_x;
-                                        let val = d.start_val + dx / d.track_width * (max - min);
+                                        let val = d.start_val
+                                            + dx / d.track_width * (max - min);
                                         this.set_field(field, val, cx);
                                     });
-                                });
-                                window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
-                                    entity_up.update(cx, |this, _| {
-                                        if let Some(ref d) = this.drag {
-                                            if d.field == field { this.drag = None; }
+                                },
+                            );
+                            window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
+                                entity_up.update(cx, |this, _| {
+                                    if let Some(ref d) = this.drag {
+                                        if d.field == field {
+                                            this.drag = None;
                                         }
-                                    });
+                                    }
                                 });
-                            }
-                        },
-                    )
-                    .absolute().inset_0().cursor_ew_resize(),
+                            });
+                        }
+                    })
+                    .absolute()
+                    .inset_0()
+                    .cursor_ew_resize(),
                 ),
         )
 }
@@ -494,54 +593,114 @@ fn header(
     cx: &mut Context<Shade>,
 ) -> impl IntoElement {
     div()
-        .flex().flex_row().items_center().justify_between()
-        .px_4().py_3()
-        .bg(rgb(PANEL)).border_b_1().border_color(rgb(BORDER))
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .px_4()
+        .py_3()
+        .bg(rgb(PANEL))
+        .border_b_1()
+        .border_color(rgb(BORDER))
         .child(div().text_color(rgb(TEXT)).child("Shade"))
         .child(
-            div().flex().gap_2()
-                .child(tab("Library", view == View::Library,
-                    cx.listener(|this, _: &ClickEvent, _, cx| this.set_view(View::Library, cx))))
-                .child(tab("Editor", view == View::Editor,
-                    cx.listener(|this, _: &ClickEvent, _, cx| this.set_view(View::Editor, cx)))),
+            div()
+                .flex()
+                .gap_2()
+                .child(tab(
+                    "Library",
+                    view == View::Library,
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.set_view(View::Library, cx)
+                    }),
+                ))
+                .child(tab(
+                    "Editor",
+                    view == View::Editor,
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.set_view(View::Editor, cx)
+                    }),
+                )),
         )
         .child(
-            div().flex().gap_2()
-                .child(primary_button("Open…",
-                    cx.listener(|this, _: &ClickEvent, _, cx| this.open_picker(cx))))
+            div()
+                .flex()
+                .gap_2()
+                .child(primary_button(
+                    "Open…",
+                    cx.listener(|this, _: &ClickEvent, _, cx| this.open_picker(cx)),
+                ))
                 .child(if has_photos {
-                    secondary_button("Clear",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.clear_photos(cx))
-                    ).into_any_element()
-                } else { div().into_any_element() })
+                    secondary_button(
+                        "Clear",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.clear_photos(cx)),
+                    )
+                    .into_any_element()
+                } else {
+                    div().into_any_element()
+                })
                 .child(if has_image {
-                    primary_button("Save Edited…",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.save_as(cx))
-                    ).into_any_element()
-                } else { div().into_any_element() }),
+                    primary_button(
+                        "Save Edited…",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.save_as(cx)),
+                    )
+                    .into_any_element()
+                } else {
+                    div().into_any_element()
+                }),
         )
 }
 
-fn tab(label: &'static str, active: bool,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> impl IntoElement {
-    div().id(label).px_3().py_1().rounded_md()
+fn tab(
+    label: &'static str,
+    active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(label)
+        .px_3()
+        .py_1()
+        .rounded_md()
         .text_color(rgb(if active { TEXT } else { MUTED }))
         .bg(rgb(if active { 0x2c2c2e } else { PANEL }))
-        .hover(|s| s.bg(rgb(0x333336))).cursor_pointer().child(label).on_click(on_click)
+        .hover(|s| s.bg(rgb(0x333336)))
+        .cursor_pointer()
+        .child(label)
+        .on_click(on_click)
 }
 
-fn primary_button(label: &'static str,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> impl IntoElement {
-    div().id(label).px_3().py_1().rounded_md()
-        .bg(rgb(ACCENT)).text_color(rgb(0x0b0b0b))
-        .hover(|s| s.bg(rgb(0x6fa3ff))).cursor_pointer().child(label).on_click(on_click)
+fn primary_button(
+    label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(label)
+        .px_3()
+        .py_1()
+        .rounded_md()
+        .bg(rgb(ACCENT))
+        .text_color(rgb(0x0b0b0b))
+        .hover(|s| s.bg(rgb(0x6fa3ff)))
+        .cursor_pointer()
+        .child(label)
+        .on_click(on_click)
 }
 
-fn secondary_button(label: &'static str,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> impl IntoElement {
-    div().id(label).px_3().py_1().rounded_md()
-        .bg(rgb(0x2c2c2e)).text_color(rgb(TEXT))
-        .hover(|s| s.bg(rgb(0x3a3a3c))).cursor_pointer().child(label).on_click(on_click)
+fn secondary_button(
+    label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(label)
+        .px_3()
+        .py_1()
+        .rounded_md()
+        .bg(rgb(0x2c2c2e))
+        .text_color(rgb(TEXT))
+        .hover(|s| s.bg(rgb(0x3a3a3c)))
+        .cursor_pointer()
+        .child(label)
+        .on_click(on_click)
 }
 
 // ── Views ────────────────────────────────────────────────────────────────────
@@ -550,15 +709,27 @@ impl Shade {
     fn render_library(&self, cx: &mut Context<Self>) -> impl IntoElement {
         if self.photos.is_empty() {
             return div()
-                .size_full().flex().items_center().justify_center().flex_col().gap_3()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .flex_col()
+                .gap_3()
                 .child(div().text_color(rgb(MUTED)).child("No images loaded."))
-                .child(primary_button("Open Image…",
-                    cx.listener(|this, _: &ClickEvent, _, cx| this.open_picker(cx))))
+                .child(primary_button(
+                    "Open Image…",
+                    cx.listener(|this, _: &ClickEvent, _, cx| this.open_picker(cx)),
+                ))
                 .into_any_element();
         }
         let mut grid = div()
             .id("library-grid")
-            .flex().flex_row().flex_wrap().gap_3().p_4().size_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap_3()
+            .p_4()
+            .size_full()
             .overflow_y_scroll();
         for (i, photo) in self.photos.iter().enumerate() {
             let is_selected = self.selected == Some(i);
@@ -566,51 +737,130 @@ impl Shade {
             let thumb = photo.thumb.clone();
             let tile = div()
                 .id(("tile", i))
-                .w(px(220.0)).h(px(200.0))
-                .flex().flex_col().rounded_md().overflow_hidden()
-                .border_2().border_color(rgb(if is_selected { ACCENT } else { BORDER }))
-                .cursor_pointer().hover(|s| s.border_color(rgb(ACCENT)))
+                .w(px(220.0))
+                .h(px(200.0))
+                .flex()
+                .flex_col()
+                .rounded_md()
+                .overflow_hidden()
+                .border_2()
+                .border_color(rgb(if is_selected { ACCENT } else { BORDER }))
+                .cursor_pointer()
+                .hover(|s| s.border_color(rgb(ACCENT)))
                 .child(
-                    div().flex_1().bg(rgb(0x0e0e0e)).flex().items_center().justify_center()
+                    div()
+                        .flex_1()
+                        .bg(rgb(0x0e0e0e))
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .child(img(thumb).max_w_full().max_h_full()),
                 )
-                .child(div().px_2().py_1().bg(rgb(PANEL)).text_color(rgb(TEXT)).child(name))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.open_editor(i, cx)));
+                .child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .bg(rgb(PANEL))
+                        .text_color(rgb(TEXT))
+                        .child(name),
+                )
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.open_editor(i, cx)
+                }));
             grid = grid.child(tile);
         }
         grid.into_any_element()
     }
 
     fn render_editor(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = self.selected.and_then(|i| self.photos.get(i))
+        let title = self
+            .selected
+            .and_then(|i| self.photos.get(i))
             .map(|p| p.name.clone())
             .unwrap_or_else(|| SharedString::from("(no image)"));
 
         let preview_inner: gpui::AnyElement = match &self.rendered {
             Some(ri) => img(ri.clone()).absolute().inset_0().into_any_element(),
-            None => div().absolute().inset_0().flex().items_center().justify_center()
-                .text_color(rgb(MUTED)).child("(no preview)").into_any_element(),
+            None => div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(rgb(MUTED))
+                .child("(no preview)")
+                .into_any_element(),
         };
 
         let entity = cx.entity();
         let inspector = div()
-            .w(px(300.0)).h_full()
-            .bg(rgb(PANEL)).border_l_1().border_color(rgb(BORDER))
-            .p_4().flex().flex_col().gap_4()
+            .w(px(300.0))
+            .h_full()
+            .bg(rgb(PANEL))
+            .border_l_1()
+            .border_color(rgb(BORDER))
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_4()
             .child(div().text_color(rgb(TEXT)).child(title))
-            .child(slider(SliderField::Exposure,    "Exposure",    self.edits.exposure,    -3.0, 3.0, entity.clone()))
-            .child(slider(SliderField::Contrast,    "Contrast",    self.edits.contrast,    -1.0, 1.0, entity.clone()))
-            .child(slider(SliderField::Saturation,  "Saturation",  self.edits.saturation,  -1.0, 1.0, entity.clone()))
-            .child(slider(SliderField::Vibrancy,    "Vibrancy",    self.edits.vibrancy,    -1.0, 1.0, entity.clone()))
-            .child(slider(SliderField::Temperature, "Temperature", self.edits.temperature, -1.0, 1.0, entity.clone()))
-            .child(div().mt_2().child(
-                secondary_button("Reset", cx.listener(|this, _: &ClickEvent, _, cx| this.reset(cx)))
-            ));
+            .child(slider(
+                SliderField::Exposure,
+                "Exposure",
+                self.edits.exposure,
+                -3.0,
+                3.0,
+                entity.clone(),
+            ))
+            .child(slider(
+                SliderField::Contrast,
+                "Contrast",
+                self.edits.contrast,
+                -1.0,
+                1.0,
+                entity.clone(),
+            ))
+            .child(slider(
+                SliderField::Saturation,
+                "Saturation",
+                self.edits.saturation,
+                -1.0,
+                1.0,
+                entity.clone(),
+            ))
+            .child(slider(
+                SliderField::Vibrancy,
+                "Vibrancy",
+                self.edits.vibrancy,
+                -1.0,
+                1.0,
+                entity.clone(),
+            ))
+            .child(slider(
+                SliderField::Temperature,
+                "Temperature",
+                self.edits.temperature,
+                -1.0,
+                1.0,
+                entity.clone(),
+            ))
+            .child(div().mt_2().child(secondary_button(
+                "Reset",
+                cx.listener(|this, _: &ClickEvent, _, cx| this.reset(cx)),
+            )));
 
-        div().flex().flex_row().size_full()
+        div()
+            .flex()
+            .flex_row()
+            .size_full()
             .child(
-                div().relative().flex_1().h_full().overflow_hidden().bg(rgb(0x0a0a0a))
-                    .child(preview_inner)
+                div()
+                    .relative()
+                    .flex_1()
+                    .h_full()
+                    .overflow_hidden()
+                    .bg(rgb(0x0a0a0a))
+                    .child(preview_inner),
             )
             .child(inspector)
     }
@@ -619,7 +869,11 @@ impl Shade {
 // ── Root ─────────────────────────────────────────────────────────────────────
 
 impl gpui::Render for Shade {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         // Evict replaced images from the sprite atlas before drawing the new frame.
         for old in self.pending_drops.drain(..) {
             let _ = window.drop_image(old);
@@ -627,18 +881,32 @@ impl gpui::Render for Shade {
 
         let body = match self.view {
             View::Library => self.render_library(cx).into_any_element(),
-            View::Editor  => self.render_editor(cx).into_any_element(),
+            View::Editor => self.render_editor(cx).into_any_element(),
         };
         let mut root = div()
-            .size_full().flex().flex_col()
-            .bg(rgb(BG)).text_color(rgb(TEXT))
-            .child(header(self.view, self.selected.is_some(), !self.photos.is_empty(), cx))
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(BG))
+            .text_color(rgb(TEXT))
+            .child(header(
+                self.view,
+                self.selected.is_some(),
+                !self.photos.is_empty(),
+                cx,
+            ))
             .child(div().flex_1().overflow_hidden().child(body));
 
         if let Some(status) = self.status.clone() {
             root = root.child(
-                div().px_4().py_2().bg(rgb(PANEL)).border_t_1().border_color(rgb(BORDER))
-                    .text_color(rgb(MUTED)).child(status),
+                div()
+                    .px_4()
+                    .py_2()
+                    .bg(rgb(PANEL))
+                    .border_t_1()
+                    .border_color(rgb(BORDER))
+                    .text_color(rgb(MUTED))
+                    .child(status),
             );
         }
         root

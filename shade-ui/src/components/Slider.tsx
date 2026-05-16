@@ -1,5 +1,4 @@
 import { type Component, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
-import { clamp } from "../store/editor-store";
 import {
   activeAdjustmentSliderId,
   flushDeferredHistorySnapshot,
@@ -8,8 +7,10 @@ import {
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
 } from "../store/editor";
+import { clamp } from "../store/editor-store";
 
-const PARAMETER_ROW_CLASS = "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";
+const PARAMETER_ROW_CLASS =
+  "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";
 
 export const Slider: Component<{
   label: string;
@@ -94,7 +95,10 @@ export const Slider: Component<{
       class={`${props.containerClass ?? PARAMETER_ROW_CLASS} ${props.class ?? ""} mobile-slider-fade-row transition-opacity duration-150 pr-2`}
     >
       <Show when={props.icon !== undefined}>
-        <span class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={props.icon} />
+        <span
+          class="flex h-4 w-4 items-center justify-center text-[var(--text-subtle)] [&>svg]:h-4 [&>svg]:w-4"
+          innerHTML={props.icon}
+        />
       </Show>
       <span class="self-center text-[12px] font-medium text-[var(--text-strong)]">
         {props.label}
@@ -104,7 +108,9 @@ export const Slider: Component<{
           {props.valueLabel ?? props.value.toFixed(2)}
         </span>
       </Show>
-      <div class={`${props.sliderClass} relative col-start-2 col-end-4 h-7 w-full self-center`}>
+      <div
+        class={`${props.sliderClass} relative col-start-2 col-end-4 h-7 w-full self-center`}
+      >
         <input
           type="range"
           min={props.min}

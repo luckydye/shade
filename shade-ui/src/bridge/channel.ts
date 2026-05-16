@@ -90,9 +90,7 @@ export type ChannelMessage =
 
 type MessageType = ChannelMessage["type"];
 
-type Handler<T extends MessageType> = (
-  msg: Extract<ChannelMessage, { type: T }>,
-) => void;
+type Handler<T extends MessageType> = (msg: Extract<ChannelMessage, { type: T }>) => void;
 
 type AnyHandler = (msg: ChannelMessage) => void;
 
@@ -148,10 +146,7 @@ export async function installCoordinationChannel(
  * protocol handler. The `editFingerprint` is part of the cache key — passing
  * a new fingerprint forces the browser image pipeline to re-fetch.
  */
-export function shadeThumbnailUrl(
-  path: string,
-  editFingerprint?: string | null,
-): string {
+export function shadeThumbnailUrl(path: string, editFingerprint?: string | null): string {
   const encoded = encodeURIComponent(path);
   const base = `shade://thumb/${encoded}`;
   if (!editFingerprint) return base;

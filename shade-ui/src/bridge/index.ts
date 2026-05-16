@@ -3,12 +3,7 @@
  * falls back to a browser worker when running on the web.
  */
 
-import {
-  onChannelMessage,
-  sendChunkedRead,
-  sendMutation,
-  sendRead,
-} from "./channel";
+import { onChannelMessage, sendChunkedRead, sendMutation, sendRead } from "./channel";
 import { getHostHooks } from "./host";
 
 /**
@@ -53,7 +48,6 @@ export interface NativeDragDropPayload {
   type: "enter" | "over" | "drop" | "leave";
   paths: string[];
 }
-
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -314,9 +308,7 @@ export interface PreviewRequest {
  * push-based preview channel (`bridge/preview.ts` + `update_preview_viewports`)
  * and does not go through this path.
  */
-export async function renderPreview(
-  request?: PreviewRequest,
-): Promise<PreviewFrame> {
+export async function renderPreview(request?: PreviewRequest): Promise<PreviewFrame> {
   const { getHostHooks } = await import("./host");
   return getHostHooks().renderPreview(request);
 }
@@ -398,16 +390,14 @@ export function listenLibrarySyncProgress(
   });
 }
 
-export function listenImageOpenPhase(
-  listener: (phase: string) => void,
-): () => void {
+export function listenImageOpenPhase(listener: (phase: string) => void): () => void {
   return onChannelMessage("image_open_phase", (msg) => {
     listener(msg.phase);
   });
 }
 
 export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscoverySnapshot> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     return {
       local_endpoint_id: "browser-runtime",
       local_direct_addresses: [],
@@ -421,7 +411,7 @@ export async function getLocalPeerDiscoverySnapshot(): Promise<LocalPeerDiscover
 }
 
 export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     return;
   }
   await sendMutation({
@@ -433,7 +423,7 @@ export async function pairPeerDevice(peer_endpoint_id: string): Promise<void> {
 export async function listPeerPictures(
   peer_endpoint_id: string,
 ): Promise<SharedPicture[]> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     return [];
   }
   return sendRead<SharedPicture[]>(
@@ -546,9 +536,7 @@ export interface BrowserMediaPlatform {
   addMediaLibrary(handle: BrowserDirectoryHandle): Promise<MediaLibrary>;
   removeMediaLibrary(id: string): Promise<void>;
   prepareImageOpen(path: string): Promise<void>;
-  getImageSource(
-    path: string,
-  ): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
+  getImageSource(path: string): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
   getImageFileSource(
     file: Blob,
     fileName: string,
@@ -619,10 +607,7 @@ export interface MediaRatingParams {
 }
 
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
-  return sendRead<MediaLibrary[]>(
-    { type: "list_media_libraries" },
-    "media_libraries",
-  );
+  return sendRead<MediaLibrary[]>({ type: "list_media_libraries" }, "media_libraries");
 }
 
 interface RawLibraryImage {
@@ -687,7 +672,7 @@ export async function addMediaLibrary(
 export async function addS3MediaLibrary(
   params: S3MediaLibraryInput,
 ): Promise<MediaLibrary> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
   const upserted = awaitMediaLibraryUpserted();
@@ -695,10 +680,8 @@ export async function addS3MediaLibrary(
   return upserted;
 }
 
-export async function getS3MediaLibrary(
-  libraryId: string,
-): Promise<S3MediaLibraryInput> {
-  if (!(isTauriRuntime())) {
+export async function getS3MediaLibrary(libraryId: string): Promise<S3MediaLibraryInput> {
+  if (!isTauriRuntime()) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
   return sendRead<S3MediaLibraryInput>(
@@ -711,7 +694,7 @@ export async function updateS3MediaLibrary(
   libraryId: string,
   params: S3MediaLibraryInput,
 ): Promise<MediaLibrary> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("S3 media libraries are only implemented for Tauri");
   }
   const upserted = awaitMediaLibraryUpserted();
@@ -728,7 +711,7 @@ export async function uploadMediaLibraryUrl(
   url: string,
   fileName: string,
 ): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("URL image uploads are only implemented for Tauri");
   }
   await sendMutation({
@@ -744,7 +727,7 @@ export async function uploadMediaLibraryFile(
   file: File,
   appendTimestampOnConflict = false,
 ): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("library uploads are only implemented for Tauri");
   }
   const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
@@ -762,7 +745,7 @@ export async function uploadMediaLibraryPath(
   libraryId: string,
   path: string,
 ): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("library uploads from paths are only implemented for Tauri");
   }
   await sendMutation({
@@ -773,7 +756,7 @@ export async function uploadMediaLibraryPath(
 }
 
 export async function deleteMediaLibraryItem(path: string): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("media item deletion is only implemented for Tauri");
   }
   await sendMutation({ type: "delete_media_library_item", path });
@@ -823,11 +806,7 @@ export function resolveLocalThumbnailSrc(
   latestSnapshotId: string | null,
   signal: AbortSignal,
 ): Promise<string> {
-  return getHostHooks().resolveLocalThumbnailSrc(
-    path,
-    latestSnapshotId,
-    signal,
-  );
+  return getHostHooks().resolveLocalThumbnailSrc(path, latestSnapshotId, signal);
 }
 
 export function resolveCameraThumbnailSrc(
@@ -835,11 +814,7 @@ export function resolveCameraThumbnailSrc(
   latestSnapshotId: string | null,
   signal: AbortSignal,
 ): Promise<string> {
-  return getHostHooks().resolveCameraThumbnailSrc(
-    path,
-    latestSnapshotId,
-    signal,
-  );
+  return getHostHooks().resolveCameraThumbnailSrc(path, latestSnapshotId, signal);
 }
 
 export function resolvePeerThumbnailSrc(
@@ -847,11 +822,7 @@ export function resolvePeerThumbnailSrc(
   pictureId: string,
   signal: AbortSignal,
 ): Promise<string> {
-  return getHostHooks().resolvePeerThumbnailSrc(
-    peerId,
-    pictureId,
-    signal,
-  );
+  return getHostHooks().resolvePeerThumbnailSrc(peerId, pictureId, signal);
 }
 
 export function resetLocalThumbnailFailure(path: string): void {
@@ -862,8 +833,12 @@ export function resetCameraThumbnailFailure(path: string): void {
   getHostHooks().resetCameraThumbnailFailure(path);
 }
 
-export async function setLibraryMode(libraryId: string, mode: LibraryMode, syncTarget?: string | null): Promise<void> {
-  if (!(isTauriRuntime())) {
+export async function setLibraryMode(
+  libraryId: string,
+  mode: LibraryMode,
+  syncTarget?: string | null,
+): Promise<void> {
+  if (!isTauriRuntime()) {
     throw new Error("setLibraryMode is only implemented for Tauri");
   }
   await sendMutation({
@@ -875,7 +850,7 @@ export async function setLibraryMode(libraryId: string, mode: LibraryMode, syncT
 }
 
 export async function syncLibrary(libraryId: string): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     throw new Error("syncLibrary is only implemented for Tauri");
   }
   await sendMutation({ type: "sync_library", library_id: libraryId });
@@ -890,7 +865,7 @@ export async function setMediaLibraryOrder(libraryOrder: string[]): Promise<void
 }
 
 export async function refreshLibraryIndex(libraryId: string): Promise<void> {
-  if (!(isTauriRuntime())) {
+  if (!isTauriRuntime()) {
     return;
   }
   await sendMutation({
@@ -923,7 +898,6 @@ function serializeBrowserPresetLayers(layers: LayerInfo[]): BrowserPresetLayer[]
       };
     });
 }
-
 
 export async function listPresets(): Promise<PresetInfo[]> {
   return sendRead<PresetInfo[]>({ type: "list_presets" }, "presets");
@@ -963,7 +937,10 @@ export async function savePresetFromJson(name: string, json: string): Promise<vo
   return;
 }
 
-export async function renamePreset(oldName: string, newName: string): Promise<PresetInfo | void> {
+export async function renamePreset(
+  oldName: string,
+  newName: string,
+): Promise<PresetInfo | void> {
   await sendMutation({ type: "rename_preset", old_name: oldName, new_name: newName });
   return;
 }
@@ -1036,7 +1013,9 @@ export async function batchExportImages(
   return completed;
 }
 
-export async function saveSnapshot(imagePath?: string | null): Promise<EditSnapshotInfo | void> {
+export async function saveSnapshot(
+  imagePath?: string | null,
+): Promise<EditSnapshotInfo | void> {
   await sendMutation({ type: "save_snapshot" });
   // Snapshot id surfaces through the SnapshotSaved channel notification.
   return;
@@ -1046,9 +1025,7 @@ export async function listSnapshots(imagePath?: string | null): Promise<Snapshot
   return sendRead<SnapshotInfo[]>({ type: "list_snapshots" }, "snapshots");
 }
 
-export async function listMediaRatings(
-  ids: string[],
-): Promise<Record<string, number>> {
+export async function listMediaRatings(ids: string[]): Promise<Record<string, number>> {
   if (ids.length === 0) {
     return {};
   }
@@ -1072,9 +1049,7 @@ export async function setMediaRating(params: MediaRatingParams): Promise<void> {
  * Returns true if a snapshot was applied, false if there was nothing to restore.
  * No-op on Tauri (the native runtime restores edit state automatically).
  */
-export async function restoreCurrentBrowserSnapshot(
-  imagePath: string,
-): Promise<boolean> {
+export async function restoreCurrentBrowserSnapshot(imagePath: string): Promise<boolean> {
   const { getHostHooks } = await import("./host");
   return getHostHooks().restoreCurrentBrowserSnapshot(imagePath);
 }
@@ -1135,7 +1110,10 @@ export async function addTextLayer(
   return -1;
 }
 
-export async function updateTextContent(layerIdx: number, content: string): Promise<void> {
+export async function updateTextContent(
+  layerIdx: number,
+  content: string,
+): Promise<void> {
   await sendMutation({
     type: "update_text_content",
     layer_idx: layerIdx,

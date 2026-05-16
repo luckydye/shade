@@ -1,26 +1,26 @@
 import { createSignal } from "solid-js";
-import * as bridge from "../bridge/index";
 import type { ArtboardViewport, PreviewQuality } from "../bridge/channel";
+import * as bridge from "../bridge/index";
 import {
   getArtboardTiles,
   getCurrentGeneration,
   nextGeneration,
-  subscribeTiles,
   type RenderedTile as PushedRenderedTile,
+  subscribeTiles,
 } from "../bridge/preview";
 import {
   fullCanvasCrop,
   getCommittedCropRect,
   isAdjustmentSliderActive,
+  selectedLayerIsCrop,
   setSelectedArtboardBackdropTile,
   setSelectedArtboardPreviewTile,
-  selectedLayerIsCrop,
   setState,
   state,
 } from "../store/editor-store";
-import type { FitReference, RenderedTile } from "./types";
-import { computeFitScale } from "./transform";
 import { releaseTileSurface } from "./compositor";
+import { computeFitScale } from "./transform";
+import type { FitReference, RenderedTile } from "./types";
 
 export const [previewTile, setPreviewTile] = createSignal<RenderedTile | null>(null);
 export const [backdropTile, setBackdropTile] = createSignal<RenderedTile | null>(null);
@@ -146,7 +146,9 @@ export function getViewportZoomPercent(): number | null {
   if (w <= 0 || h <= 0) return null;
   const fit = getViewportFitRef();
   if (fit.width <= 0 || fit.height <= 0) return null;
-  return Math.round(computeFitScale({ width: w, height: h }, fit) * state.viewportZoom * 100);
+  return Math.round(
+    computeFitScale({ width: w, height: h }, fit) * state.viewportZoom * 100,
+  );
 }
 
 export function getMaxViewportZoom(): number {
@@ -159,7 +161,12 @@ export function fitPreviewSize(
   imageWidth: number,
   imageHeight: number,
 ) {
-  if (containerWidth <= 0 || containerHeight <= 0 || imageWidth <= 0 || imageHeight <= 0) {
+  if (
+    containerWidth <= 0 ||
+    containerHeight <= 0 ||
+    imageWidth <= 0 ||
+    imageHeight <= 0
+  ) {
     return { width: 0, height: 0 };
   }
   const scale = Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
@@ -248,11 +255,9 @@ function buildPreviewSpec(quality: PreviewQuality): ViewportSpec | null {
   );
   if (!visible) return null;
   const inCropEdit = selectedLayerIsCrop();
-  const hasRotation =
-    !inCropEdit && Math.abs(getCommittedCropRect().rotation) > 0.001;
+  const hasRotation = !inCropEdit && Math.abs(getCommittedCropRect().rotation) > 0.001;
   const dpr =
-    (window.devicePixelRatio || 1) *
-    (quality === "interactive" ? INTERACTIVE_SCALE : 1);
+    (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_SCALE : 1);
   return {
     target_width: Math.max(1, Math.round(visible.screenWidth * dpr)),
     target_height: Math.max(1, Math.round(visible.screenHeight * dpr)),
@@ -274,16 +279,15 @@ function buildBackdropSpec(quality: PreviewQuality): ViewportSpec | null {
           width: state.canvasWidth,
           height: state.canvasHeight,
         }
-      : committedCrop ?? {
+      : (committedCrop ?? {
           x: 0,
           y: 0,
           width: state.canvasWidth,
           height: state.canvasHeight,
-        };
+        });
   const { viewportScreenWidth: sw, viewportScreenHeight: sh } = state;
   const dpr =
-    (window.devicePixelRatio || 1) *
-    (quality === "interactive" ? INTERACTIVE_SCALE : 1);
+    (window.devicePixelRatio || 1) * (quality === "interactive" ? INTERACTIVE_SCALE : 1);
   const fitted = fitPreviewSize(sw * dpr, sh * dpr, crop.width, crop.height);
   if (fitted.width <= 0 || fitted.height <= 0) return null;
   return {
@@ -471,7 +475,12 @@ export function resetViewport() {
   void refreshFinalPreview();
 }
 
-export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anchorY: number) {
+export function zoomViewport(
+  delta: number,
+  pinch: boolean,
+  anchorX: number,
+  anchorY: number,
+) {
   const {
     viewportScreenWidth: sw,
     viewportScreenHeight: sh,
@@ -485,7 +494,10 @@ export function zoomViewport(delta: number, pinch: boolean, anchorX: number, anc
   const sensitivity = pinch ? 0.0005 : 0.001;
   const multiplier = Math.exp(-delta * sensitivity);
   const oldScale = fitScale * viewportZoom;
-  const zoom = Math.max(MIN_ZOOM, Math.min(getMaxViewportZoom(), viewportZoom * multiplier));
+  const zoom = Math.max(
+    MIN_ZOOM,
+    Math.min(getMaxViewportZoom(), viewportZoom * multiplier),
+  );
   const newScale = fitScale * zoom;
   const vcx = sw * 0.5;
   const vcy = sh * 0.5;

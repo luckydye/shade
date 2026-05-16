@@ -1,37 +1,37 @@
+import { listMediaLibraries } from "../bridge/index";
+import {
+  loadLibraryData,
+  type MediaItem,
+  mediaItemKey,
+  openMediaItem,
+} from "../components/media-view/media-utils";
 import {
   addLayer,
   applyEdit,
   applyGradientMask,
   createBrushMask,
   deleteLayer,
+  getViewportDisplaySize,
+  getViewportFitRef,
+  getViewportZoomPercent,
   moveLayer,
+  offsetViewportCenter,
   openImage,
+  panViewport,
   refreshPreview,
   removeMask,
   renameLayer,
   selectLayer,
   setLayerOpacity,
   setLayerVisible,
+  setViewportState,
   showEditorView,
   showMediaView,
   stampBrushMask,
   state,
-  setViewportState,
-  getViewportDisplaySize,
-  getViewportFitRef,
-  getViewportZoomPercent,
-  offsetViewportCenter,
-  panViewport,
 } from "./editor";
-import { fullCanvasCrop, getSelectedArtboard, type ArtboardSource } from "./editor-store";
+import { type ArtboardSource, fullCanvasCrop, getSelectedArtboard } from "./editor-store";
 import { getMediaBrowserController } from "./media-browser-control";
-import { listMediaLibraries } from "../bridge/index";
-import {
-  loadLibraryData,
-  mediaItemKey,
-  openMediaItem,
-  type MediaItem,
-} from "../components/media-view/media-utils";
 
 type JsonObject = Record<string, unknown>;
 
@@ -308,7 +308,9 @@ function serializeArtboardSource(source: ArtboardSource) {
   }
 }
 
-function serializeArtboard(artboard: NonNullable<ReturnType<typeof getSelectedArtboard>>) {
+function serializeArtboard(
+  artboard: NonNullable<ReturnType<typeof getSelectedArtboard>>,
+) {
   return {
     id: artboard.id,
     title: artboard.title,
@@ -456,8 +458,7 @@ async function handleApplyLayerEdit(args: unknown) {
         contrast: readOptionalFiniteNumber(values, "contrast") ?? current.contrast,
         blacks: readOptionalFiniteNumber(values, "blacks") ?? current.blacks,
         whites: readOptionalFiniteNumber(values, "whites") ?? current.whites,
-        highlights:
-          readOptionalFiniteNumber(values, "highlights") ?? current.highlights,
+        highlights: readOptionalFiniteNumber(values, "highlights") ?? current.highlights,
         shadows: readOptionalFiniteNumber(values, "shadows") ?? current.shadows,
         gamma: readOptionalFiniteNumber(values, "gamma") ?? current.gamma,
       });
@@ -468,8 +469,7 @@ async function handleApplyLayerEdit(args: unknown) {
       await applyEdit({
         layer_idx: layerIndex,
         op,
-        saturation:
-          readOptionalFiniteNumber(values, "saturation") ?? current.saturation,
+        saturation: readOptionalFiniteNumber(values, "saturation") ?? current.saturation,
         vibrancy: readOptionalFiniteNumber(values, "vibrancy") ?? current.vibrancy,
         temperature:
           readOptionalFiniteNumber(values, "temperature") ?? current.temperature,
@@ -527,12 +527,9 @@ async function handleApplyLayerEdit(args: unknown) {
         red_hue: readOptionalFiniteNumber(values, "red_hue") ?? current.red_hue,
         red_sat: readOptionalFiniteNumber(values, "red_sat") ?? current.red_sat,
         red_lum: readOptionalFiniteNumber(values, "red_lum") ?? current.red_lum,
-        green_hue:
-          readOptionalFiniteNumber(values, "green_hue") ?? current.green_hue,
-        green_sat:
-          readOptionalFiniteNumber(values, "green_sat") ?? current.green_sat,
-        green_lum:
-          readOptionalFiniteNumber(values, "green_lum") ?? current.green_lum,
+        green_hue: readOptionalFiniteNumber(values, "green_hue") ?? current.green_hue,
+        green_sat: readOptionalFiniteNumber(values, "green_sat") ?? current.green_sat,
+        green_lum: readOptionalFiniteNumber(values, "green_lum") ?? current.green_lum,
         blue_hue: readOptionalFiniteNumber(values, "blue_hue") ?? current.blue_hue,
         blue_sat: readOptionalFiniteNumber(values, "blue_sat") ?? current.blue_sat,
         blue_lum: readOptionalFiniteNumber(values, "blue_lum") ?? current.blue_lum,
@@ -552,11 +549,9 @@ async function handleApplyLayerEdit(args: unknown) {
         layer_idx: layerIndex,
         op,
         denoise_luma_strength:
-          readOptionalFiniteNumber(values, "luma_strength") ??
-          current.luma_strength,
+          readOptionalFiniteNumber(values, "luma_strength") ?? current.luma_strength,
         denoise_chroma_strength:
-          readOptionalFiniteNumber(values, "chroma_strength") ??
-          current.chroma_strength,
+          readOptionalFiniteNumber(values, "chroma_strength") ?? current.chroma_strength,
         denoise_mode: (mode as number | undefined) ?? current.mode,
       });
       break;
@@ -570,8 +565,7 @@ async function handleApplyLayerEdit(args: unknown) {
         crop_y: readOptionalFiniteNumber(values, "y") ?? current.y,
         crop_width: readOptionalFiniteNumber(values, "width") ?? current.width,
         crop_height: readOptionalFiniteNumber(values, "height") ?? current.height,
-        crop_rotation:
-          readOptionalFiniteNumber(values, "rotation") ?? current.rotation,
+        crop_rotation: readOptionalFiniteNumber(values, "rotation") ?? current.rotation,
       });
       break;
     }

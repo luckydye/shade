@@ -1,12 +1,19 @@
+use crate::db::SUPERSEDED_IMAGE_LOAD_ERROR;
+use crate::editor_state::{
+    broadcast_layer_stack, lock_editor_state, restore_persisted_layers,
+    snapshot_render_state, EditorState, LayerInfoResponse,
+};
+use crate::image_loaders::{
+    decode_image_bytes_with_info, load_camera_image_from_tauri,
+    load_photo_image_from_tauri, load_s3_image_from_tauri, open_local_image_sync,
+};
+use crate::peers::sync_snapshots_from_all_peers_for_fingerprint;
+use crate::render::{export_render_request, RenderJob};
+use crate::snapshots::{
+    load_latest_edit_version, load_latest_edit_version_by_source, register_image_source,
+};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use crate::db::SUPERSEDED_IMAGE_LOAD_ERROR;
-use crate::editor_state::{EditorState, LayerInfoResponse, broadcast_layer_stack, lock_editor_state, restore_persisted_layers, snapshot_render_state};
-use crate::image_loaders::{decode_image_bytes_with_info, load_camera_image_from_tauri, load_photo_image_from_tauri, load_s3_image_from_tauri, open_local_image_sync};
-use crate::peers::sync_snapshots_from_all_peers_for_fingerprint;
-use crate::render::{RenderJob, export_render_request};
-use crate::snapshots::{load_latest_edit_version, load_latest_edit_version_by_source, register_image_source};
-
 
 #[tauri::command]
 #[allow(unused_variables)]
@@ -30,16 +37,19 @@ pub async fn open_image<R: tauri::Runtime>(
         };
         if let Some(bytes) = photo_bytes {
             let path_clone = path.clone();
-            tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
-                let (image, info) = decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
-                Ok(shade_io::OpenedImage {
-                    fingerprint,
-                    source_name: Some(path_clone),
-                    image,
-                    info,
-                })
-            })
+            tokio::task::spawn_blocking(
+                move || -> Result<shade_io::OpenedImage, String> {
+                    let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
+                    let (image, info) =
+                        decode_image_bytes_with_info(&bytes, Some(&path_clone))?;
+                    Ok(shade_io::OpenedImage {
+                        fingerprint,
+                        source_name: Some(path_clone),
+                        image,
+                        info,
+                    })
+                },
+            )
             .await
             .map_err(|e| e.to_string())??
         } else {

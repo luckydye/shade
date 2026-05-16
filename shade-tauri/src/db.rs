@@ -1,9 +1,9 @@
+use crate::paths::{library_db_path, library_index_db_path, thumbnail_cache_db_path};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use crate::paths::{library_db_path, library_index_db_path, thumbnail_cache_db_path};
 
-
-pub(crate) static LIBRARY_DB: tokio::sync::OnceCell<LibraryDb> = tokio::sync::OnceCell::const_new();
+pub(crate) static LIBRARY_DB: tokio::sync::OnceCell<LibraryDb> =
+    tokio::sync::OnceCell::const_new();
 pub(crate) static LIBRARY_INDEX_DB: tokio::sync::OnceCell<Arc<shade_io::LibraryIndexDb>> =
     tokio::sync::OnceCell::const_new();
 pub struct LibraryDb {
@@ -162,7 +162,8 @@ pub(crate) async fn init_library_db() -> Result<LibraryDb, String> {
         conn: TokioMutex::new(conn),
     })
 }
-pub(crate) async fn library_db_conn() -> tokio::sync::MutexGuard<'static, libsql::Connection> {
+pub(crate) async fn library_db_conn(
+) -> tokio::sync::MutexGuard<'static, libsql::Connection> {
     LIBRARY_DB
         .get()
         .expect("library db not initialized")
@@ -189,7 +190,8 @@ pub(crate) fn library_index_db() -> &'static Arc<shade_io::LibraryIndexDb> {
         .get()
         .expect("library index db not initialized")
 }
-pub(crate) const SUPERSEDED_IMAGE_LOAD_ERROR: &str = "image load superseded by newer request";
+pub(crate) const SUPERSEDED_IMAGE_LOAD_ERROR: &str =
+    "image load superseded by newer request";
 pub async fn open_thumbnail_cache_db() -> Result<shade_io::ThumbnailCacheDb, String> {
     shade_io::ThumbnailCacheDb::open(&thumbnail_cache_db_path()?).await
 }

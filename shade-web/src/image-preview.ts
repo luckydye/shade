@@ -71,7 +71,9 @@ function rgbaPixelsFromParsedImageData(imageData: ParsedImageData): Uint8Clamped
   if (width <= 0 || height <= 0) {
     throw new Error("parsed image dimensions are invalid");
   }
-  if (!(imageData.data instanceof Uint8Array || imageData.data instanceof Uint8ClampedArray)) {
+  if (
+    !(imageData.data instanceof Uint8Array || imageData.data instanceof Uint8ClampedArray)
+  ) {
     throw new Error("parsed image pixels are unavailable");
   }
   if (imageData.format === "RGBA") {
@@ -135,7 +137,10 @@ async function resolveRenderableBlob(fileName: string, blob: Blob): Promise<Blob
   if (!PARSED_PREVIEW_EXTENSIONS.has(extension)) {
     return blob;
   }
-  if ((extension === ".tif" || extension === ".tiff") && (await canRenderNatively(blob))) {
+  if (
+    (extension === ".tif" || extension === ".tiff") &&
+    (await canRenderNatively(blob))
+  ) {
     return blob;
   }
   const parsedFile = (await parseRawImageFile(fileName, blob)) as ParsedDisplayFile;

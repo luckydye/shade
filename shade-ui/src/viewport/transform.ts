@@ -17,7 +17,8 @@ export interface WorldTransform {
 
 // Compute the scale that makes the fit reference fill the screen at zoom = 1.
 export function computeFitScale(screen: ScreenSize, fit: FitReference): number {
-  if (screen.width <= 0 || screen.height <= 0 || fit.width <= 0 || fit.height <= 0) return 1;
+  if (screen.width <= 0 || screen.height <= 0 || fit.width <= 0 || fit.height <= 0)
+    return 1;
   return Math.min(screen.width / fit.width, screen.height / fit.height);
 }
 

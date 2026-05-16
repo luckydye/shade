@@ -1,13 +1,15 @@
-use serde::{Deserialize, Serialize};
-use shade_lib::{
-    FloatImage, LayerStack, PreviewCrop as GpuPreviewCrop, Renderer,
+use crate::editor_state::{build_persisted_layer_stack, texture_id_for_fingerprint};
+use crate::image_loaders::{
+    decode_image_bytes_with_info, load_camera_image_from_tauri,
+    load_photo_image_from_tauri, load_s3_image_from_tauri, open_local_image_sync,
 };
+use crate::snapshots::{
+    has_snapshot_for_source, load_latest_edit_version, load_latest_edit_version_by_source,
+};
+use serde::{Deserialize, Serialize};
+use shade_lib::{FloatImage, LayerStack, PreviewCrop as GpuPreviewCrop, Renderer};
 use std::sync::Arc;
 use tauri::Manager;
-use crate::editor_state::{build_persisted_layer_stack, texture_id_for_fingerprint};
-use crate::image_loaders::{decode_image_bytes_with_info, load_camera_image_from_tauri, load_photo_image_from_tauri, load_s3_image_from_tauri, open_local_image_sync};
-use crate::snapshots::{has_snapshot_for_source, load_latest_edit_version, load_latest_edit_version_by_source};
-
 
 pub enum RenderJob {
     /// Push-based preview render. Result is pushed to the preview channel
@@ -408,7 +410,8 @@ pub(crate) async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         .clone();
     let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
     let photo_app = app.clone();
-    let is_local = !picture_id.starts_with("ccapi://") && !picture_id.starts_with("s3://");
+    let is_local =
+        !picture_id.starts_with("ccapi://") && !picture_id.starts_with("s3://");
     let opened = if is_local {
         let photo_bytes = {
             let app = photo_app.clone();
@@ -416,16 +419,19 @@ pub(crate) async fn render_snapshot_thumbnail_bytes<R: tauri::Runtime>(
         };
         if let Some(bytes) = photo_bytes {
             let picture_id_owned = picture_id.to_string();
-            tokio::task::spawn_blocking(move || -> Result<shade_io::OpenedImage, String> {
-                let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
-                let (image, info) = decode_image_bytes_with_info(&bytes, Some(&picture_id_owned))?;
-                Ok(shade_io::OpenedImage {
-                    fingerprint,
-                    source_name: Some(picture_id_owned),
-                    image,
-                    info,
-                })
-            })
+            tokio::task::spawn_blocking(
+                move || -> Result<shade_io::OpenedImage, String> {
+                    let fingerprint = shade_io::fingerprint_from_bytes(&bytes).to_hex();
+                    let (image, info) =
+                        decode_image_bytes_with_info(&bytes, Some(&picture_id_owned))?;
+                    Ok(shade_io::OpenedImage {
+                        fingerprint,
+                        source_name: Some(picture_id_owned),
+                        image,
+                        info,
+                    })
+                },
+            )
             .await
             .map_err(|e| e.to_string())??
         } else {

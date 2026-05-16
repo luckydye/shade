@@ -105,8 +105,7 @@ const transformers: UrlTransformer[] = [
   {
     name: "instagram",
     match: (url) =>
-      (url.hostname === "www.instagram.com" ||
-        url.hostname === "instagram.com") &&
+      (url.hostname === "www.instagram.com" || url.hostname === "instagram.com") &&
       /^\/(p|reel)\/[\w-]+/.test(url.pathname),
     transform: (url) => url.href,
   },
@@ -122,8 +121,7 @@ const transformers: UrlTransformer[] = [
   {
     name: "wikimedia",
     match: (url) =>
-      url.hostname === "upload.wikimedia.org" ||
-      url.hostname === "commons.wikimedia.org",
+      url.hostname === "upload.wikimedia.org" || url.hostname === "commons.wikimedia.org",
     transform: (url) => url.href,
   },
 
@@ -178,9 +176,10 @@ export function filenameFromUrl(raw: string): string {
     return decoded;
   }
   const format = url.searchParams.get("format");
-  const ext = format && /^(jpe?g|png|webp|tiff?|avif|gif)$/i.test(format)
-    ? format.replace("jpeg", "jpg")
-    : "jpg";
+  const ext =
+    format && /^(jpe?g|png|webp|tiff?|avif|gif)$/i.test(format)
+      ? format.replace("jpeg", "jpg")
+      : "jpg";
   const now = new Date()
     .toISOString()
     .replace(/T/, "-")

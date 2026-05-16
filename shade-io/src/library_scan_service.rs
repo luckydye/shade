@@ -61,7 +61,8 @@ impl LibraryScanService {
         {
             return Ok((snapshot, false));
         }
-        let persisted = load_persisted_library_index(&self.index_db, library_id, &root).await?;
+        let persisted =
+            load_persisted_library_index(&self.index_db, library_id, &root).await?;
         let should_scan = persisted.is_none();
         let completed_at = persisted.as_ref().map(|listing| listing.indexed_at);
         let snapshot = Arc::new(Mutex::new(LibraryScanSnapshot {
@@ -104,12 +105,7 @@ impl LibraryScanService {
         watcher
             .watch(&root, RecursiveMode::Recursive)
             .map_err(|error| error.to_string())?;
-        spawn_library_watch_loop(
-            self.clone(),
-            library_id.to_string(),
-            root,
-            rx,
-        )?;
+        spawn_library_watch_loop(self.clone(), library_id.to_string(), root, rx)?;
         watches.insert(
             library_id.to_string(),
             LibraryWatchHandle { _watcher: watcher },
@@ -253,10 +249,9 @@ fn spawn_library_watch_loop(
                     continue;
                 }
                 loop {
-                    match runtime.block_on(service.request_refresh(
-                        &library_id,
-                        root.clone(),
-                    )) {
+                    match runtime
+                        .block_on(service.request_refresh(&library_id, root.clone()))
+                    {
                         Ok(true) => break,
                         Ok(false) => std::thread::sleep(LIBRARY_WATCH_DEBOUNCE),
                         Err(_) => break,
@@ -298,21 +293,27 @@ pub fn start_library_scan(
     std::thread::Builder::new()
         .name("shade-library-scan".into())
         .spawn(move || {
-            let result = scan_library_into_snapshot(&root, &snapshot, &index_db, &library_id, &*on_progress)
-                .and_then(|items| {
-                    let runtime = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .map_err(|error| error.to_string())?;
-                    runtime
-                        .block_on(replace_persisted_library_index(
-                            &index_db,
-                            &library_id,
-                            &root,
-                            &items,
-                        ))
-                        .map(|indexed_at| (items, indexed_at))
-                });
+            let result = scan_library_into_snapshot(
+                &root,
+                &snapshot,
+                &index_db,
+                &library_id,
+                &*on_progress,
+            )
+            .and_then(|items| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                runtime
+                    .block_on(replace_persisted_library_index(
+                        &index_db,
+                        &library_id,
+                        &root,
+                        &items,
+                    ))
+                    .map(|indexed_at| (items, indexed_at))
+            });
             let mut guard = snapshot
                 .lock()
                 .expect("library scan snapshot lock poisoned");
@@ -359,7 +360,9 @@ pub fn scan_library_into_snapshot(
         for entry in entries {
             let Ok(entry) = entry else { continue };
             let path = entry.path();
-            let Ok(file_type) = entry.file_type() else { continue };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
             if file_type.is_dir() {
                 dirs.push(path);
                 continue;
@@ -367,7 +370,9 @@ pub fn scan_library_into_snapshot(
             if !file_type.is_file() || !is_supported_library_image(&path) {
                 continue;
             }
-            let Some(path_str) = path.to_str() else { continue };
+            let Some(path_str) = path.to_str() else {
+                continue;
+            };
             let modified_at = entry
                 .metadata()
                 .and_then(|m| m.modified())
@@ -384,10 +389,7 @@ pub fn scan_library_into_snapshot(
             batch.push(item);
             if batch.len() >= 16 {
                 let _ = runtime.block_on(upsert_library_index_items(
-                    index_db,
-                    library_id,
-                    &root_key,
-                    &batch,
+                    index_db, library_id, &root_key, &batch,
                 ));
                 flush_library_scan_batch(snapshot, &mut batch)?;
                 on_progress(library_id);
@@ -396,10 +398,7 @@ pub fn scan_library_into_snapshot(
     }
     if !batch.is_empty() {
         let _ = runtime.block_on(upsert_library_index_items(
-            index_db,
-            library_id,
-            &root_key,
-            &batch,
+            index_db, library_id, &root_key, &batch,
         ));
         flush_library_scan_batch(snapshot, &mut batch)?;
         on_progress(library_id);

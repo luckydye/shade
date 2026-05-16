@@ -16,16 +16,16 @@
  * `{ type: "X_applied", requestId }` shape.
  */
 
-import init, * as wasm from "shade-wasm";
-import { browserCollectionsPlatform } from "./collections";
-import { browserPresetsPlatform } from "./presets";
-import { browserRatingsPlatform } from "./ratings";
-import { browserSnapshotsPlatform } from "./snapshots";
 import type {
   ChannelMessage,
   MutationRequest,
   ReadRequest,
 } from "shade-ui/src/bridge/channel";
+import init, * as wasm from "shade-wasm";
+import { browserCollectionsPlatform } from "./collections";
+import { browserPresetsPlatform } from "./presets";
+import { browserRatingsPlatform } from "./ratings";
+import { browserSnapshotsPlatform } from "./snapshots";
 
 declare const self: {
   postMessage(msg: unknown, transferOrOptions?: unknown): void;
@@ -103,7 +103,9 @@ function broadcastLayerStack() {
   }
 }
 
-function applyEditOp(params: Record<string, unknown> & { layer_idx: number; op: string }) {
+function applyEditOp(
+  params: Record<string, unknown> & { layer_idx: number; op: string },
+) {
   const idx = params.layer_idx;
   switch (params.op) {
     case "crop":
@@ -220,10 +222,12 @@ async function handleMutation(request: MutationRequest): Promise<void> {
       return;
     // ── Adjustments / crop (wasm) ───────────────────────────────────────
     case "apply_edit":
-      applyEditOp(request as unknown as Record<string, unknown> & {
-        layer_idx: number;
-        op: string;
-      });
+      applyEditOp(
+        request as unknown as Record<string, unknown> & {
+          layer_idx: number;
+          op: string;
+        },
+      );
       broadcastLayerStack();
       return;
     // ── Masks (wasm) ────────────────────────────────────────────────────
@@ -344,10 +348,7 @@ async function handleMutation(request: MutationRequest): Promise<void> {
       const stackJson = wasm.get_stack_json();
       const stack = JSON.parse(stackJson) as { layers: { kind: string }[] };
       const nonImage = stack.layers.filter((l) => l.kind !== "image");
-      const info = await browserSnapshotsPlatform.saveSnapshot(
-        nonImage as never,
-        null,
-      );
+      const info = await browserSnapshotsPlatform.saveSnapshot(nonImage as never, null);
       send({ type: "snapshot_saved", fingerprint: null, id: info.id });
       return;
     }
@@ -505,9 +506,7 @@ async function handleRead(readId: number, request: ReadRequest): Promise<void> {
       case "get_snapshot_preset_json": {
         const snapshot = await browserSnapshotsPlatform.getCurrentSnapshot("");
         kind = "snapshot_preset_json";
-        value = snapshot
-          ? JSON.stringify({ version: 1, layers: snapshot.layers })
-          : null;
+        value = snapshot ? JSON.stringify({ version: 1, layers: snapshot.layers }) : null;
         break;
       }
       case "get_stack_snapshot": {
@@ -589,7 +588,11 @@ async function handleLegacy(msg: Record<string, unknown>): Promise<void> {
                 layersJson: string,
                 targetWidth: number,
                 targetHeight: number,
-              ) => Promise<{ pixels: Uint8Array | number[]; width: number; height: number }>;
+              ) => Promise<{
+                pixels: Uint8Array | number[];
+                width: number;
+                height: number;
+              }>;
             }
           ).render_snapshot_thumbnail(
             new Uint8Array(msg.bytes as ArrayBuffer),
@@ -618,9 +621,7 @@ async function handleLegacy(msg: Record<string, unknown>): Promise<void> {
       case "render_preview": {
         const frame = await retryWithFreshRenderer(async () => {
           await ensureRendererReady();
-          return wasm.render_preview_rgba(
-            (msg.request as unknown) ?? null,
-          );
+          return wasm.render_preview_rgba((msg.request as unknown) ?? null);
         });
         const pixels =
           frame.pixels instanceof Uint8Array

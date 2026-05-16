@@ -13,12 +13,13 @@ use anyhow::{anyhow, Result};
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingType, BlendComponent, BlendFactor, BlendOperation, BlendState,
-    BufferBindingType, BufferUsages, ColorTargetState, ColorWrites, CommandEncoderDescriptor,
-    Face, FragmentState, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor,
-    PrimitiveState, PrimitiveTopology, RenderPassColorAttachment, RenderPassDescriptor,
-    RenderPipeline, RenderPipelineDescriptor, ShaderStages, StoreOp, Texture,
-    TextureViewDescriptor, VertexState,
+    BindGroupLayoutEntry, BindingType, BlendComponent, BlendFactor, BlendOperation,
+    BlendState, BufferBindingType, BufferUsages, ColorTargetState, ColorWrites,
+    CommandEncoderDescriptor, Face, FragmentState, LoadOp, MultisampleState, Operations,
+    PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology,
+    RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
+    RenderPipelineDescriptor, ShaderStages, StoreOp, Texture, TextureViewDescriptor,
+    VertexState,
 };
 
 use crate::context::create_upload_buffer;
@@ -47,26 +48,27 @@ impl TextPipeline {
     pub fn new(ctx: &GpuContext) -> Result<Self> {
         let device = &ctx.device;
 
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("text glyph bind group layout"),
-            entries: &[
-                storage_entry(0),
-                storage_entry(1),
-                storage_entry(2),
-                storage_entry(3),
-                storage_entry(4),
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::VERTEX_FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+        let bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("text glyph bind group layout"),
+                entries: &[
+                    storage_entry(0),
+                    storage_entry(1),
+                    storage_entry(2),
+                    storage_entry(3),
+                    storage_entry(4),
+                    BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: ShaderStages::VERTEX_FRAGMENT,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("text_glyph.wgsl"),

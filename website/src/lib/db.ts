@@ -1,12 +1,12 @@
 import { createClient } from "@libsql/client";
 
 export const db = createClient({
-    url: import.meta.env.TURSO_DATABASE_URL,
-    authToken: import.meta.env.TURSO_AUTH_TOKEN,
+  url: import.meta.env.TURSO_DATABASE_URL,
+  authToken: import.meta.env.TURSO_AUTH_TOKEN,
 });
 
 export async function initSchema(): Promise<void> {
-    await db.executeMultiple(`
+  await db.executeMultiple(`
         CREATE TABLE IF NOT EXISTS releases (
             id TEXT PRIMARY KEY,
             tag_name TEXT NOT NULL,
@@ -44,10 +44,12 @@ export async function initSchema(): Promise<void> {
             ON waitlist_signups (unsubscribe_token_hash);
     `);
 
-    try {
-        await db.execute("ALTER TABLE releases ADD COLUMN prerelease INTEGER NOT NULL DEFAULT 0");
-    } catch (e: unknown) {
-        // column already exists — ignore
-        if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
-    }
+  try {
+    await db.execute(
+      "ALTER TABLE releases ADD COLUMN prerelease INTEGER NOT NULL DEFAULT 0",
+    );
+  } catch (e: unknown) {
+    // column already exists — ignore
+    if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+  }
 }

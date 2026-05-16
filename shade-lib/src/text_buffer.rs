@@ -132,8 +132,9 @@ impl GlyphBufferLayout {
         // first new curve's index in `QuadBezier` units.
         let curves_base = (self.curves.len() / FLOATS_PER_CURVE) as u32;
         for q in &glyph.curves {
-            self.curves
-                .extend_from_slice(&[q.p0[0], q.p0[1], q.p1[0], q.p1[1], q.p2[0], q.p2[1]]);
+            self.curves.extend_from_slice(&[
+                q.p0[0], q.p0[1], q.p1[0], q.p1[1], q.p2[0], q.p2[1],
+            ]);
         }
 
         // Bands: H first, then V. Each band emits one header plus a slice of
@@ -336,16 +337,32 @@ mod tests {
             p2: [10.0, 0.0],
         }];
         let h_bands = vec![
-            GlyphBand { curve_indices: vec![0] },
-            GlyphBand { curve_indices: vec![] },
-            GlyphBand { curve_indices: vec![] },
+            GlyphBand {
+                curve_indices: vec![0],
+            },
+            GlyphBand {
+                curve_indices: vec![],
+            },
+            GlyphBand {
+                curve_indices: vec![],
+            },
         ];
         let v_bands = vec![
-            GlyphBand { curve_indices: vec![0] },
-            GlyphBand { curve_indices: vec![0] },
-            GlyphBand { curve_indices: vec![0] },
-            GlyphBand { curve_indices: vec![] },
-            GlyphBand { curve_indices: vec![] },
+            GlyphBand {
+                curve_indices: vec![0],
+            },
+            GlyphBand {
+                curve_indices: vec![0],
+            },
+            GlyphBand {
+                curve_indices: vec![0],
+            },
+            GlyphBand {
+                curve_indices: vec![],
+            },
+            GlyphBand {
+                curve_indices: vec![],
+            },
         ];
         let g = GlyphCurves {
             curves,
@@ -365,7 +382,7 @@ mod tests {
         let meta = layout.glyph_metas[0];
         assert_eq!(meta.band_max_y, 2); // 3 H bands
         assert_eq!(meta.band_max_x, 4); // 5 V bands
-        // First three headers are H bands (counts 1, 0, 0).
+                                        // First three headers are H bands (counts 1, 0, 0).
         assert_eq!(layout.band_headers[0].curve_count, 1);
         assert_eq!(layout.band_headers[1].curve_count, 0);
         assert_eq!(layout.band_headers[2].curve_count, 0);

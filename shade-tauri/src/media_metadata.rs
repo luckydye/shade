@@ -1,6 +1,5 @@
-use std::collections::HashMap;
 use crate::db::library_db_conn;
-
+use std::collections::HashMap;
 
 pub(crate) fn unix_timestamp_millis() -> Result<i64, String> {
     let duration = std::time::SystemTime::now()
@@ -67,7 +66,10 @@ pub(crate) async fn load_media_tags_map(
         .collect::<std::collections::HashSet<_>>();
     let conn = library_db_conn().await;
     let mut rows = conn
-        .query("SELECT fingerprint, tag FROM media_tags ORDER BY tag ASC", ())
+        .query(
+            "SELECT fingerprint, tag FROM media_tags ORDER BY tag ASC",
+            (),
+        )
         .await
         .map_err(|error| error.to_string())?;
     let mut tags = HashMap::<String, Vec<String>>::new();
@@ -84,7 +86,10 @@ pub(crate) async fn load_media_tags_map(
     }
     Ok(tags)
 }
-pub(crate) async fn persist_media_rating(fingerprint: &str, rating: Option<u8>) -> Result<(), String> {
+pub(crate) async fn persist_media_rating(
+    fingerprint: &str,
+    rating: Option<u8>,
+) -> Result<(), String> {
     let normalized = validate_media_rating(rating)?;
     let conn = library_db_conn().await;
     if let Some(value) = normalized {
@@ -120,26 +125,31 @@ pub(crate) async fn import_xmp_rating(picture_id: &str, fingerprint: &str) {
     let Ok(now) = unix_timestamp_millis() else {
         return;
     };
-    if let Ok(conn) = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        library_db_conn(),
-    ).await {
+    if let Ok(conn) =
+        tokio::time::timeout(std::time::Duration::from_secs(2), library_db_conn()).await
+    {
         let _ = conn.execute(
             "INSERT OR IGNORE INTO media_ratings (fingerprint, rating, updated_at) VALUES (?1, ?2, ?3)",
             libsql::params![fingerprint, i64::from(rating), now],
         ).await;
     }
 }
-pub async fn persist_media_tags(fingerprint: &str, tags: &[String]) -> Result<(), String> {
+pub async fn persist_media_tags(
+    fingerprint: &str,
+    tags: &[String],
+) -> Result<(), String> {
     let normalized = normalize_media_tags(tags);
     let conn = library_db_conn().await;
     conn.execute("BEGIN IMMEDIATE", ())
         .await
         .map_err(|error| error.to_string())?;
     let result = async {
-        conn.execute("DELETE FROM media_tags WHERE fingerprint = ?1", [fingerprint])
-            .await
-            .map_err(|error| error.to_string())?;
+        conn.execute(
+            "DELETE FROM media_tags WHERE fingerprint = ?1",
+            [fingerprint],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
         let updated_at = unix_timestamp_millis()?;
         for tag in normalized {
             conn.execute(
@@ -172,9 +182,12 @@ pub async fn persist_media_tags_empty(fingerprint: &str) -> Result<(), String> {
         .await
         .map_err(|error| error.to_string())?;
     let result = async {
-        conn.execute("DELETE FROM media_tags WHERE fingerprint = ?1", [fingerprint])
-            .await
-            .map_err(|error| error.to_string())?;
+        conn.execute(
+            "DELETE FROM media_tags WHERE fingerprint = ?1",
+            [fingerprint],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
         conn.execute(
             "INSERT INTO media_tags (fingerprint, tag, updated_at)
              VALUES (?1, '', ?2)",

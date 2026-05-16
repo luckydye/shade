@@ -6,9 +6,7 @@ export interface MediaBrowserController {
 
 let controller: MediaBrowserController | null = null;
 
-export function registerMediaBrowserController(
-  next: MediaBrowserController,
-): () => void {
+export function registerMediaBrowserController(next: MediaBrowserController): () => void {
   controller = next;
   return () => {
     if (controller === next) {

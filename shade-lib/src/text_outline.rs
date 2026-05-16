@@ -190,11 +190,7 @@ fn cubic_to_quads(
     let err = K * (dx * dx + dy * dy).sqrt();
 
     if err <= max_err || depth >= CUBIC_TO_QUAD_MAX_DEPTH {
-        out.push(QuadBezier {
-            p0,
-            p1: q,
-            p2: p3,
-        });
+        out.push(QuadBezier { p0, p1: q, p2: p3 });
         return;
     }
     let p01 = midpoint(p0, c1);
@@ -283,18 +279,13 @@ fn build_axis_bands(
     let offset = -bbox.min[i] * scale;
     let max_idx = (num_bands - 1) as i32;
 
-    let mut bands: Vec<GlyphBand> = (0..num_bands)
-        .map(|_| GlyphBand::default())
-        .collect();
+    let mut bands: Vec<GlyphBand> =
+        (0..num_bands).map(|_| GlyphBand::default()).collect();
 
     for (idx, q) in curves.iter().enumerate() {
         let (lo, hi) = quad_axis_extent(q, axis);
-        let i0 = ((lo * scale + offset).floor() as i32)
-            .max(0)
-            .min(max_idx) as usize;
-        let i1 = ((hi * scale + offset).floor() as i32)
-            .max(0)
-            .min(max_idx) as usize;
+        let i0 = ((lo * scale + offset).floor() as i32).max(0).min(max_idx) as usize;
+        let i1 = ((hi * scale + offset).floor() as i32).max(0).min(max_idx) as usize;
         for slot in i0..=i1 {
             bands[slot].curve_indices.push(idx as u32);
         }

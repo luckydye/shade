@@ -1,7 +1,7 @@
-import { defineConfig } from "vite";
 import { resolve } from "node:path";
-import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+import solid from "vite-plugin-solid";
 
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
@@ -10,9 +10,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     fs: {
-      allow: [
-        resolve(__dirname, "../"),
-      ],
+      allow: [resolve(__dirname, "../")],
     },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",

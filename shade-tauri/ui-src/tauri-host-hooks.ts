@@ -1,10 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type {
-  HostHooks,
-  NativeDragDropPayload,
-} from "shade-ui/src/bridge/host";
+import type { HostHooks, NativeDragDropPayload } from "shade-ui/src/bridge/host";
 import { tauriLibraryCache } from "./tauri-library-cache";
 
 function normalizeDialogPath(path: string | string[] | null): string | null {
@@ -75,9 +72,7 @@ export const tauriHostHooks: HostHooks = {
     await invoke("export_image", { path });
   },
   async renderPreview() {
-    throw new Error(
-      "renderPreview is browser-only; tauri uses the push preview channel",
-    );
+    throw new Error("renderPreview is browser-only; tauri uses the push preview channel");
   },
   async getLayerStack() {
     throw new Error(

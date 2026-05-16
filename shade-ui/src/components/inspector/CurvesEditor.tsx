@@ -1,13 +1,13 @@
 import type { Accessor, Component } from "solid-js";
+import { CurveEditorBase } from "./CurveEditorBase";
 import {
   buildLutFromPoints,
-  curvePath,
+  type ControlPoint,
   CURVE_MIN_X,
+  curvePath,
   normalizeInteriorPoint,
   normalizePoints,
-  type ControlPoint,
 } from "./curve-utils";
-import { CurveEditorBase } from "./CurveEditorBase";
 
 type CurvesEditorProps = {
   curvePointCache: Accessor<Map<number, ControlPoint[]>>;

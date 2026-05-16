@@ -3,8 +3,8 @@ use futures_channel::oneshot;
 use half::f16;
 use shade_lib::{
     outline_glyph, AdjustmentOp, AffineTransform, ColorMatrix3x3, ColorSpace, FloatImage,
-    GlyphBufferLayout, HslParams, Layer, LayerStack, PlacedGlyph, TextContent, TextLayoutEngine,
-    TextStyle, TextureId, ToneParams, DEFAULT_BANDS_PER_AXIS,
+    GlyphBufferLayout, HslParams, Layer, LayerStack, PlacedGlyph, TextContent,
+    TextLayoutEngine, TextStyle, TextureId, ToneParams, DEFAULT_BANDS_PER_AXIS,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -171,7 +171,11 @@ impl Renderer {
             texture_cache_bytes: texture_cache.bytes,
             texture_cache_textures: texture_cache.map.len(),
             readback_buffer_pool_bytes: readback_pool.bytes,
-            readback_buffer_pool_buffers: readback_pool.buffers.values().map(Vec::len).sum(),
+            readback_buffer_pool_buffers: readback_pool
+                .buffers
+                .values()
+                .map(Vec::len)
+                .sum(),
         }
     }
 
@@ -224,7 +228,9 @@ impl Renderer {
             full_texture_effect_space(&input_tex),
             None,
         )?;
-        let result = self.readback_work_texture_to_u8(&final_tex, width, height).await;
+        let result = self
+            .readback_work_texture_to_u8(&final_tex, width, height)
+            .await;
         self.ctx.release_work_texture(final_tex);
         result
     }
@@ -246,7 +252,9 @@ impl Renderer {
             full_texture_effect_space(&input_tex),
             None,
         )?;
-        let result = self.readback_work_texture_to_f32(&final_tex, width, height).await;
+        let result = self
+            .readback_work_texture_to_f32(&final_tex, width, height)
+            .await;
         self.ctx.release_work_texture(final_tex);
         result
     }
@@ -274,7 +282,9 @@ impl Renderer {
             full_texture_effect_space(&input_tex),
             Some(frame_index),
         )?;
-        let result = self.readback_work_texture_to_u8(&final_tex, width, height).await;
+        let result = self
+            .readback_work_texture_to_u8(&final_tex, width, height)
+            .await;
         self.ctx.release_work_texture(final_tex);
         result
     }
@@ -441,7 +451,11 @@ impl Renderer {
             crop,
         )?;
         let result = self
-            .readback_work_texture_to_preview_u8(&final_accum, target_width, target_height)
+            .readback_work_texture_to_preview_u8(
+                &final_accum,
+                target_width,
+                target_height,
+            )
             .await;
         self.ctx.release_work_texture(final_accum);
         result
@@ -498,9 +512,9 @@ impl Renderer {
         };
 
         // 1. Create accumulator texture (black RGBA8).
-        let accum_tex = self
-            .ctx
-            .acquire_work_texture(target_width, target_height, "accumulator");
+        let accum_tex =
+            self.ctx
+                .acquire_work_texture(target_width, target_height, "accumulator");
 
         // We accumulate results via a mutable "current accumulator" Texture reference.
         // Because wgpu textures aren't Clone, we keep a Vec and always work with the last.
@@ -806,13 +820,15 @@ impl Renderer {
                             )?
                         }
                     } else {
-                        let cropped_view =
-                            intersect_preview_crop(&prev_view, &PreviewCrop {
+                        let cropped_view = intersect_preview_crop(
+                            &prev_view,
+                            &PreviewCrop {
                                 x: rect.x,
                                 y: rect.y,
                                 width: rect.width,
                                 height: rect.height,
-                            });
+                            },
+                        );
                         current_view = cropped_view.clone();
                         post_crop_view = PreviewCrop {
                             x: rect.x,
@@ -1321,8 +1337,14 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>> {
-        self.readback_texture_bytes(tex, width, height, width * 4, "readback rgba8 encoder")
-            .await
+        self.readback_texture_bytes(
+            tex,
+            width,
+            height,
+            width * 4,
+            "readback rgba8 encoder",
+        )
+        .await
     }
 
     /// Read back the pixels of a float work texture to CPU memory and quantize to preview RGBA8.
@@ -1745,18 +1767,16 @@ fn rgba_display_f32_to_u8(pixels: &[f32]) -> Vec<u8> {
         .collect()
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::{
         acescct_to_linear_f32, acescct_to_srgb_u8_lut_from_f16, encode_preview_pixels,
-        normalize_preview_crop, resample_mask_region, rgba_display_f32_to_u8, view_uv_mapping,
-        FloatImage, PreviewCrop, Renderer,
+        normalize_preview_crop, resample_mask_region, rgba_display_f32_to_u8,
+        view_uv_mapping, FloatImage, PreviewCrop, Renderer,
     };
     use shade_lib::{
-        AdjustmentOp, ColorSpace, ColorTransformUniform, CropRect, GlowParams, LayerStack,
-        MaskData, TextureId, ToneParams, VignetteParams,
+        AdjustmentOp, ColorSpace, ColorTransformUniform, CropRect, GlowParams,
+        LayerStack, MaskData, TextureId, ToneParams, VignetteParams,
     };
     use std::collections::HashMap;
 
@@ -2995,10 +3015,8 @@ mod tests {
             }
         }
 
-        for (i, (preview, expected)) in px_preview
-            .iter()
-            .zip(expected_subregion.iter())
-            .enumerate()
+        for (i, (preview, expected)) in
+            px_preview.iter().zip(expected_subregion.iter()).enumerate()
         {
             let diff = (preview - expected).abs();
             assert!(
@@ -3831,22 +3849,38 @@ mod tests {
         };
 
         let cases: &[(&str, ColorSpace, [f32; 4])] = &[
-            ("linear grey 0.01", ColorSpace::LinearSrgb, [0.01, 0.01, 0.01, 1.0]),
-            ("linear grey 0.18", ColorSpace::LinearSrgb, [0.18, 0.18, 0.18, 1.0]),
-            ("linear grey 1.0",  ColorSpace::LinearSrgb, [1.0,  1.0,  1.0,  1.0]),
+            (
+                "linear grey 0.01",
+                ColorSpace::LinearSrgb,
+                [0.01, 0.01, 0.01, 1.0],
+            ),
+            (
+                "linear grey 0.18",
+                ColorSpace::LinearSrgb,
+                [0.18, 0.18, 0.18, 1.0],
+            ),
+            (
+                "linear grey 1.0",
+                ColorSpace::LinearSrgb,
+                [1.0, 1.0, 1.0, 1.0],
+            ),
             // Chromatic pixel: exercises the full AP1 ↔ linear sRGB matrix paths.
-            ("linear warm",      ColorSpace::LinearSrgb, [0.8,  0.2,  0.05, 1.0]),
+            ("linear warm", ColorSpace::LinearSrgb, [0.8, 0.2, 0.05, 1.0]),
             // sRGB-encoded grey (mode 6 / mode 7 paths).
-            ("sRGB grey 0.46",   ColorSpace::Srgb,       [0.46, 0.46, 0.46, 1.0]),
-            ("sRGB warm",        ColorSpace::Srgb,       [0.8,  0.2,  0.05, 1.0]),
+            ("sRGB grey 0.46", ColorSpace::Srgb, [0.46, 0.46, 0.46, 1.0]),
+            ("sRGB warm", ColorSpace::Srgb, [0.8, 0.2, 0.05, 1.0]),
         ];
 
         for (label, cs, input) in cases {
             let in_tex = renderer.upload_float_texture(input, 1, 1, "rt_in");
-            let fwd_tex = renderer
-                .apply_color_transform(&in_tex, ColorTransformUniform::to_linear_srgb(cs));
-            let inv_tex = renderer
-                .apply_color_transform(&fwd_tex, ColorTransformUniform::from_linear_srgb(cs));
+            let fwd_tex = renderer.apply_color_transform(
+                &in_tex,
+                ColorTransformUniform::to_linear_srgb(cs),
+            );
+            let inv_tex = renderer.apply_color_transform(
+                &fwd_tex,
+                ColorTransformUniform::from_linear_srgb(cs),
+            );
             let pixels = renderer
                 .readback_work_texture_to_f32(&inv_tex, 1, 1)
                 .await
@@ -3876,8 +3910,7 @@ mod tests {
         let log_step = 1.0_f32 / 17.52;
 
         // Inline ACEScct→linear matching tone.wgsl / acescct_to_linear_f32.
-        let decode =
-            |v: f32| -> f32 { acescct_to_linear_f32(v) };
+        let decode = |v: f32| -> f32 { acescct_to_linear_f32(v) };
 
         // Shadow (0.25), midgrey (0.4136), highlight (0.52).
         for &acescct_in in &[0.25_f32, 0.4136, 0.52] {

@@ -4,10 +4,7 @@
  * Used by `webHostHooks.restoreCurrentBrowserSnapshot`.
  */
 
-import type {
-  AdjustmentValues,
-  BrowserPresetLayer,
-} from "shade-ui/src/bridge/index";
+import type { AdjustmentValues, BrowserPresetLayer } from "shade-ui/src/bridge/index";
 import {
   addLayer,
   applyEdit,

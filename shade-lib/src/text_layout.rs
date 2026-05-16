@@ -67,15 +67,24 @@ impl TextLayoutEngine {
 
     /// Shape and layout `content` according to `style`. Coordinates are in
     /// canvas pixels (top-down Y), with glyph positions on the baseline.
-    pub fn layout(&mut self, content: &TextContent, style: &TextStyle) -> Result<Vec<PlacedGlyph>> {
+    pub fn layout(
+        &mut self,
+        content: &TextContent,
+        style: &TextStyle,
+    ) -> Result<Vec<PlacedGlyph>> {
         if content.text.is_empty() {
             return Ok(Vec::new());
         }
-        let family_name = self
-            .font_families
-            .get(&style.font_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("font_id {} is not registered with the engine", style.font_id))?;
+        let family_name =
+            self.font_families
+                .get(&style.font_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "font_id {} is not registered with the engine",
+                        style.font_id
+                    )
+                })?;
 
         let metrics = Metrics::new(style.size_px, style.size_px * style.line_height);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
@@ -92,7 +101,12 @@ impl TextLayoutEngine {
             .weight(weight)
             .style(cstyle);
 
-        buffer.set_text(&mut self.font_system, &content.text, attrs, Shaping::Advanced);
+        buffer.set_text(
+            &mut self.font_system,
+            &content.text,
+            attrs,
+            Shaping::Advanced,
+        );
         buffer.shape_until_scroll(&mut self.font_system, false);
 
         let mut placed = Vec::new();
@@ -171,7 +185,8 @@ pub fn layout_text(
     style: &TextStyle,
     fonts: &HashMap<FontId, FontEntry>,
 ) -> Result<Vec<PlacedGlyph>> {
-    let mut engine = TextLayoutEngine::new(fonts).context("constructing TextLayoutEngine")?;
+    let mut engine =
+        TextLayoutEngine::new(fonts).context("constructing TextLayoutEngine")?;
     engine.layout(content, style)
 }
 
@@ -201,8 +216,8 @@ mod tests {
         None
     }
 
-    fn skip_or_engine_with_font() -> Option<(TextLayoutEngine, FontId, HashMap<FontId, FontEntry>)>
-    {
+    fn skip_or_engine_with_font(
+    ) -> Option<(TextLayoutEngine, FontId, HashMap<FontId, FontEntry>)> {
         let (path, bytes) = match try_load_test_font() {
             Some(v) => v,
             None => {
@@ -221,24 +236,17 @@ mod tests {
     #[test]
     fn empty_text_yields_empty_glyphs() {
         let fonts: HashMap<FontId, FontEntry> = HashMap::new();
-        let placed = layout_text(
-            &TextContent::new(""),
-            &TextStyle::new(0, 16.0),
-            &fonts,
-        )
-        .unwrap();
+        let placed =
+            layout_text(&TextContent::new(""), &TextStyle::new(0, 16.0), &fonts).unwrap();
         assert!(placed.is_empty());
     }
 
     #[test]
     fn unregistered_font_id_is_an_error() {
         let fonts: HashMap<FontId, FontEntry> = HashMap::new();
-        let err = layout_text(
-            &TextContent::new("hello"),
-            &TextStyle::new(0, 16.0),
-            &fonts,
-        )
-        .unwrap_err();
+        let err =
+            layout_text(&TextContent::new("hello"), &TextStyle::new(0, 16.0), &fonts)
+                .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("not registered"), "unexpected error: {msg}");
     }
@@ -252,7 +260,10 @@ mod tests {
     #[test]
     fn engine_constructor_rejects_garbage_blob() {
         let mut fonts = HashMap::new();
-        fonts.insert(1u64, FontEntry::new("not-a-font", b"definitely not a font".to_vec()));
+        fonts.insert(
+            1u64,
+            FontEntry::new("not-a-font", b"definitely not a font".to_vec()),
+        );
         match TextLayoutEngine::new(&fonts) {
             Ok(_) => panic!("expected fontdb to reject the garbage blob"),
             Err(e) => assert!(format!("{e}").contains("fontdb refused")),
@@ -301,10 +312,7 @@ mod tests {
         // Narrow box should force wrapping for a multi-word string.
         style.max_width = Some(40.0);
         let placed = engine
-            .layout(
-                &TextContent::new("the quick brown fox"),
-                &style,
-            )
+            .layout(&TextContent::new("the quick brown fox"), &style)
             .expect("layout failed");
         // Multiple lines → at least one glyph y > the first glyph's y.
         let first_y = placed[0].y;

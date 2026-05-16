@@ -1,4 +1,4 @@
-import { Component, For, Show } from "solid-js";
+import { type Component, For, Show } from "solid-js";
 
 type MediaRatingProps = {
   rating: number | null;
@@ -10,9 +10,7 @@ type MediaRatingProps = {
 
 export const MediaRating: Component<MediaRatingProps> = (props) => {
   return (
-    <div
-      class={`flex items-center gap-0.5 ${props.class ?? ""}`}
-    >
+    <div class={`flex items-center gap-0.5 ${props.class ?? ""}`}>
       <For each={[1, 2, 3, 4, 5]}>
         {(value) => {
           const active = () => (props.rating ?? 0) >= value;
@@ -39,9 +37,7 @@ export const MediaRating: Component<MediaRatingProps> = (props) => {
                     ? `Clear ${value} star rating`
                     : `Set ${value} star rating`
               }
-              onClick={() =>
-                props.onChange?.(props.rating === value ? null : value)
-              }
+              onClick={() => props.onChange?.(props.rating === value ? null : value)}
             >
               {active() ? "★" : "☆"}
             </button>

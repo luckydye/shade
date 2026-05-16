@@ -1,19 +1,19 @@
-import TIFFFile from './TIFF';
-import DNGFile from './DNG';
-import CR2File from './CR2';
-import CR3File from './CR3';
-import ARWFile from './ARW';
-import NEFFile from './NEF';
-import PNGFile from './PNG';
-import JPEGFile from './JPEG';
+import ARWFile from "./ARW";
+import CR2File from "./CR2";
+import CR3File from "./CR3";
+import DNGFile from "./DNG";
+import JPEGFile from "./JPEG";
+import NEFFile from "./NEF";
+import PNGFile from "./PNG";
+import TIFFFile from "./TIFF";
 
 export async function parseRawImageFile(filename: string, blob: Blob) {
   const parts = filename.split(".");
-  const ending = parts[parts.length-1];
+  const ending = parts[parts.length - 1];
 
   let FileType;
 
-  switch(ending.toLocaleUpperCase()) {
+  switch (ending.toLocaleUpperCase()) {
     case "CR2":
       FileType = CR2File;
       break;
@@ -35,8 +35,8 @@ export async function parseRawImageFile(filename: string, blob: Blob) {
       break;
   }
 
-  if(!FileType) {
-    throw new Error('File type not supported.');
+  if (!FileType) {
+    throw new Error("File type not supported.");
   }
 
   const arrayBuffer = await blob.arrayBuffer();

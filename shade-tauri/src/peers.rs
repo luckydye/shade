@@ -1,16 +1,24 @@
+use crate::config::{emit_peer_paired, is_peer_paired, pair_peer};
+use crate::db::{library_db_conn, SUPERSEDED_IMAGE_LOAD_ERROR};
+use crate::editor_state::{
+    broadcast_layer_stack, lock_editor_state, restore_persisted_layers, EditorState,
+    LayerInfoResponse, PersistedLayerData,
+};
+use crate::image_loaders::{
+    decode_image_bytes_with_info, load_picture_bytes, load_picture_entries,
+    load_thumbnail_bytes,
+};
+use crate::media_libraries::MediaLibrary;
+use crate::snapshots::{
+    load_latest_edit_version, persist_snapshot, register_image_source,
+    snapshot_ids_by_source_name,
+};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tokio::sync::Mutex as TokioMutex;
-use crate::config::{emit_peer_paired, is_peer_paired, pair_peer};
-use crate::db::{SUPERSEDED_IMAGE_LOAD_ERROR, library_db_conn};
-use crate::editor_state::{EditorState, LayerInfoResponse, PersistedLayerData, broadcast_layer_stack, lock_editor_state, restore_persisted_layers};
-use crate::image_loaders::{decode_image_bytes_with_info, load_picture_bytes, load_picture_entries, load_thumbnail_bytes};
-use crate::media_libraries::MediaLibrary;
-use crate::snapshots::{load_latest_edit_version, persist_snapshot, register_image_source, snapshot_ids_by_source_name};
-
 
 pub(crate) async fn require_p2p(
     p2p: &tauri::State<'_, crate::P2pState>,
@@ -114,8 +122,13 @@ pub(crate) async fn sync_snapshots_from_all_peers_for_fingerprint(
     let mut synced_ids = Vec::new();
     for peer in snapshot.peers {
         synced_ids.extend(
-            sync_peer_snapshots_for_fingerprint(&peer.endpoint_id, fingerprint, p2p, None)
-                .await?,
+            sync_peer_snapshots_for_fingerprint(
+                &peer.endpoint_id,
+                fingerprint,
+                p2p,
+                None,
+            )
+            .await?,
         );
     }
     Ok(synced_ids)

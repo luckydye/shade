@@ -12,10 +12,7 @@
  * The CSS cursor spec caps usable bitmap sizes at 128×128 on most platforms,
  * so the rendered size is clamped accordingly.
  */
-export function makeBrushCursor(
-  brushRadius: number,
-  screenScale: number,
-): string {
+export function makeBrushCursor(brushRadius: number, screenScale: number): string {
   const MAX_CURSOR = 128;
   const screenDiameter = brushRadius * 2 * screenScale;
   // +4 gives room for the stroke to not clip at the edge, but total must stay within MAX_CURSOR

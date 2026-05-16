@@ -1,18 +1,18 @@
 #[cfg_attr(not(feature = "video"), allow(unused_imports))]
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use shade_lib::{
-    from_acescct_f32, from_linear_srgb_f32, quantize_rgba_f32, to_acescct_f32,
-    to_linear_srgb_f32, AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect,
-    FloatImage, GrainParams, LayerStack, MaskData, MaskParams, PreviewCrop, Renderer,
-    SharpenParams, ToneParams, VignetteParams,
-};
 use shade_io::{
     generate_desktop_thumbnail, load_image, load_image_f32_with_info, save_image,
     scan_directory_images,
 };
 #[cfg(feature = "video")]
 use shade_io::{VideoCodec, VideoDecoder, VideoEncoder};
+use shade_lib::{
+    from_acescct_f32, from_linear_srgb_f32, quantize_rgba_f32, to_acescct_f32,
+    to_linear_srgb_f32, AdjustmentOp, BlendMode, ColorParams, ColorSpace, CropRect,
+    FloatImage, GrainParams, LayerStack, MaskData, MaskParams, PreviewCrop, Renderer,
+    SharpenParams, ToneParams, VignetteParams,
+};
 use shade_p2p::{
     AwarenessState, LocalPeerDiscovery, PeerProvider, PictureMetadata, SharedPicture,
     SyncSnapshotInfo,
@@ -967,11 +967,11 @@ mod tests {
     use anyhow::Result;
     use image::{ImageBuffer, Rgba};
     use shade_p2p::{
-        AwarenessState, LocalPeerDiscovery, PeerProvider, PictureMetadata,
-        SharedPicture, SyncSnapshotInfo,
+        AwarenessState, LocalPeerDiscovery, PeerProvider, PictureMetadata, SharedPicture,
+        SyncSnapshotInfo,
     };
-    use std::sync::Arc;
     use std::fs;
+    use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::time::{sleep, timeout, Duration};
 
@@ -1090,14 +1090,9 @@ mod tests {
     async fn serve_provider_is_browsable_over_p2p() {
         let dir = tempdir().expect("failed to create temp dir");
         let image_path = dir.path().join("peer.png");
-        let image = ImageBuffer::<Rgba<u8>, _>::from_pixel(
-            2,
-            2,
-            Rgba([32, 128, 224, 255]),
-        );
-        image
-            .save(&image_path)
-            .expect("failed to write test image");
+        let image =
+            ImageBuffer::<Rgba<u8>, _>::from_pixel(2, 2, Rgba([32, 128, 224, 255]));
+        image.save(&image_path).expect("failed to write test image");
         let expected_bytes = fs::read(&image_path).expect("failed to read test image");
 
         let server_provider = Arc::new(

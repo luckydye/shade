@@ -9,10 +9,7 @@ interface CollectionsHandlers {
   reorderCollection(collectionId: string, newPosition: number): Promise<void>;
   listCollectionItems(collectionId: string): Promise<CollectionItem[]>;
   addToCollection(collectionId: string, fingerprints: string[]): Promise<void>;
-  removeFromCollection(
-    collectionId: string,
-    fingerprints: string[],
-  ): Promise<void>;
+  removeFromCollection(collectionId: string, fingerprints: string[]): Promise<void>;
 }
 
 const DB_NAME = "shade-browser-collections";
@@ -71,9 +68,8 @@ async function countItems(
   collectionId: string,
 ): Promise<number> {
   const all = await requestToPromise(stores[ITEMS_STORE].getAll());
-  return (all as CollectionItemRecord[]).filter(
-    (r) => r.collection_id === collectionId,
-  ).length;
+  return (all as CollectionItemRecord[]).filter((r) => r.collection_id === collectionId)
+    .length;
 }
 
 export const browserCollectionsPlatform: CollectionsHandlers = {
@@ -107,47 +103,35 @@ export const browserCollectionsPlatform: CollectionsHandlers = {
   async createCollection(libraryId, name) {
     const id = crypto.randomUUID();
     const now = Date.now();
-    return withStores(
-      openDb,
-      [COLLECTIONS_STORE],
-      "readwrite",
-      async (stores) => {
-        const all = await requestToPromise(stores[COLLECTIONS_STORE].getAll());
-        const siblings = (all as CollectionRecord[]).filter(
-          (r) => r.library_id === libraryId,
-        );
-        const maxPos = siblings.reduce((m, r) => Math.max(m, r.position), -1);
-        const record: CollectionRecord = {
-          id,
-          library_id: libraryId,
-          name,
-          position: maxPos + 1,
-          created_at: now,
-        };
-        await requestToPromise(
-          stores[COLLECTIONS_STORE].put(record, collectionKey(id)),
-        );
-        return { ...record, item_count: 0 };
-      },
-    );
+    return withStores(openDb, [COLLECTIONS_STORE], "readwrite", async (stores) => {
+      const all = await requestToPromise(stores[COLLECTIONS_STORE].getAll());
+      const siblings = (all as CollectionRecord[]).filter(
+        (r) => r.library_id === libraryId,
+      );
+      const maxPos = siblings.reduce((m, r) => Math.max(m, r.position), -1);
+      const record: CollectionRecord = {
+        id,
+        library_id: libraryId,
+        name,
+        position: maxPos + 1,
+        created_at: now,
+      };
+      await requestToPromise(stores[COLLECTIONS_STORE].put(record, collectionKey(id)));
+      return { ...record, item_count: 0 };
+    });
   },
 
   async renameCollection(collectionId, name) {
-    await withStores(
-      openDb,
-      [COLLECTIONS_STORE],
-      "readwrite",
-      async (stores) => {
-        const record = (await requestToPromise(
-          stores[COLLECTIONS_STORE].get(collectionKey(collectionId)),
-        )) as CollectionRecord | undefined;
-        if (!record) throw new Error(`collection not found: ${collectionId}`);
-        record.name = name;
-        await requestToPromise(
-          stores[COLLECTIONS_STORE].put(record, collectionKey(collectionId)),
-        );
-      },
-    );
+    await withStores(openDb, [COLLECTIONS_STORE], "readwrite", async (stores) => {
+      const record = (await requestToPromise(
+        stores[COLLECTIONS_STORE].get(collectionKey(collectionId)),
+      )) as CollectionRecord | undefined;
+      if (!record) throw new Error(`collection not found: ${collectionId}`);
+      record.name = name;
+      await requestToPromise(
+        stores[COLLECTIONS_STORE].put(record, collectionKey(collectionId)),
+      );
+    });
   },
 
   async deleteCollection(collectionId) {
@@ -171,21 +155,16 @@ export const browserCollectionsPlatform: CollectionsHandlers = {
   },
 
   async reorderCollection(collectionId, newPosition) {
-    await withStores(
-      openDb,
-      [COLLECTIONS_STORE],
-      "readwrite",
-      async (stores) => {
-        const record = (await requestToPromise(
-          stores[COLLECTIONS_STORE].get(collectionKey(collectionId)),
-        )) as CollectionRecord | undefined;
-        if (!record) throw new Error(`collection not found: ${collectionId}`);
-        record.position = newPosition;
-        await requestToPromise(
-          stores[COLLECTIONS_STORE].put(record, collectionKey(collectionId)),
-        );
-      },
-    );
+    await withStores(openDb, [COLLECTIONS_STORE], "readwrite", async (stores) => {
+      const record = (await requestToPromise(
+        stores[COLLECTIONS_STORE].get(collectionKey(collectionId)),
+      )) as CollectionRecord | undefined;
+      if (!record) throw new Error(`collection not found: ${collectionId}`);
+      record.position = newPosition;
+      await requestToPromise(
+        stores[COLLECTIONS_STORE].put(record, collectionKey(collectionId)),
+      );
+    });
   },
 
   async listCollectionItems(collectionId) {

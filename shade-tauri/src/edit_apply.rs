@@ -1,14 +1,14 @@
+use crate::editor_state::{
+    finalize_layer_stack_mutation, lock_editor_state, EditorState,
+};
+use crate::masks::normalize_crop_rect;
 use serde::{Deserialize, Serialize};
 use shade_lib::{
-    build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams,
-    CropRect, CurveControlPoint, DenoiseParams, GlowParams, GrainParams,
-    HslParams,
-    SharpenParams, VignetteParams,
+    build_curve_lut_from_points, linear_lut, AdjustmentOp, ColorParams, CropRect,
+    CurveControlPoint, DenoiseParams, GlowParams, GrainParams, HslParams, SharpenParams,
+    VignetteParams,
 };
 use std::sync::Mutex;
-use crate::editor_state::{EditorState, finalize_layer_stack_mutation, lock_editor_state};
-use crate::masks::normalize_crop_rect;
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EditParams {

@@ -134,7 +134,9 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
 
   const isHighlighted = () => props.active || props.selected;
   const keyboardFocusClass = () =>
-    props.focused ? "ring-2 ring-[var(--border-active)] ring-offset-2 ring-offset-[var(--surface)]" : "";
+    props.focused
+      ? "ring-2 ring-[var(--border-active)] ring-offset-2 ring-offset-[var(--surface)]"
+      : "";
   const buttonClass = () =>
     props.compact
       ? `group flex w-full min-w-0 flex-col rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
@@ -212,7 +214,9 @@ export const MediaTile: Component<MediaTileProps> = (props) => {
             />
           </Show>
         </div>
-        <div class={`w-full min-w-0 items-center gap-1 touch-mobile:hidden my-1 px-1 ${props.compact ? "hidden" : "flex"}`}>
+        <div
+          class={`w-full min-w-0 items-center gap-1 touch-mobile:hidden my-1 px-1 ${props.compact ? "hidden" : "flex"}`}
+        >
           <span
             class={`block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[10px] font-medium ${isHighlighted() ? "text-[var(--text)]" : "text-[var(--text-faint)]"}`}
           >

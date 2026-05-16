@@ -1,13 +1,12 @@
-use serde::{Deserialize, Serialize};
-use shade_lib::{
-    linear_lut, AdjustmentOp,
-    CropRect, CurveControlPoint, MaskParams,
+use crate::editor_state::{
+    broadcast_layer_stack, finalize_layer_stack_mutation, lock_editor_state,
+    restore_masks_from_params, EditorState,
 };
+use crate::text_layers::TextLayerValues;
+use serde::{Deserialize, Serialize};
+use shade_lib::{linear_lut, AdjustmentOp, CropRect, CurveControlPoint, MaskParams};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::editor_state::{EditorState, broadcast_layer_stack, finalize_layer_stack_mutation, lock_editor_state, restore_masks_from_params};
-use crate::text_layers::TextLayerValues;
-
 
 #[tauri::command]
 pub async fn add_layer<R: tauri::Runtime>(

@@ -1,7 +1,9 @@
 import DNGFile from "./DNG";
 
 export default class ARWFile extends DNGFile {
-  get type() { return "ARW"; }
+  get type() {
+    return "ARW";
+  }
 
   static handleJPEGImage(tags, image) {
     image.type = "jpeg";

@@ -1,11 +1,13 @@
+use crate::db::library_db_conn;
+use crate::editor_state::{
+    broadcast_layer_stack, finalize_layer_stack_mutation, lock_editor_state,
+    non_image_layer_data, restore_masks_from_params, EditorState, PersistedLayerData,
+};
+use crate::paths::{preset_file_path, presets_dir_path};
+use crate::snapshots::{persist_snapshot, save_new_snapshot, EditSnapshotInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::db::library_db_conn;
-use crate::editor_state::{EditorState, PersistedLayerData, broadcast_layer_stack, finalize_layer_stack_mutation, lock_editor_state, non_image_layer_data, restore_masks_from_params};
-use crate::paths::{preset_file_path, presets_dir_path};
-use crate::snapshots::{EditSnapshotInfo, persist_snapshot, save_new_snapshot};
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct PresetFile {
@@ -99,7 +101,9 @@ pub async fn get_preset_json(name: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub async fn get_snapshot_preset_json(fingerprint: String) -> Result<Option<String>, String> {
+pub async fn get_snapshot_preset_json(
+    fingerprint: String,
+) -> Result<Option<String>, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
         .query(
@@ -112,13 +116,16 @@ pub async fn get_snapshot_preset_json(fingerprint: String) -> Result<Option<Stri
         return Ok(None);
     };
     let layers_json: String = row.get::<String>(0).map_err(|e| e.to_string())?;
-    let data: PersistedLayerData = serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
+    let data: PersistedLayerData =
+        serde_json::from_str(&layers_json).map_err(|e| e.to_string())?;
     let preset = PresetFile {
         version: 1,
         layers: data.layers,
         mask_params: data.mask_params,
     };
-    Ok(Some(serde_json::to_string(&preset).map_err(|e| e.to_string())?))
+    Ok(Some(
+        serde_json::to_string(&preset).map_err(|e| e.to_string())?,
+    ))
 }
 #[tauri::command]
 pub async fn rename_preset(

@@ -1,14 +1,14 @@
-import { createSignal, ErrorBoundary } from "solid-js";
-import { render } from "solid-js/web";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import App from "shade-ui/src/App";
 import { installCoordinationChannelFromTransport } from "shade-ui/src/bridge/channel";
+import { setHostHooks } from "shade-ui/src/bridge/host";
 import { installPreviewChannel } from "shade-ui/src/bridge/preview";
 import { setTransport } from "shade-ui/src/bridge/transport";
-import { setHostHooks } from "shade-ui/src/bridge/host";
-import { Channel, invoke } from "@tauri-apps/api/core";
-import { createTauriTransport } from "./tauri-transport";
-import { tauriHostHooks } from "./tauri-host-hooks";
+import { createSignal, ErrorBoundary } from "solid-js";
+import { render } from "solid-js/web";
 import { startRemoteControlBridge } from "./remote-control";
+import { tauriHostHooks } from "./tauri-host-hooks";
+import { createTauriTransport } from "./tauri-transport";
 
 const root = document.getElementById("root");
 
@@ -75,7 +75,7 @@ try {
   }).catch(reportFatalError);
   void startRemoteControlBridge().catch(reportFatalError);
   render(
-    () => (
+    () =>
       fatalError() ? (
         <FatalErrorView message={fatalError()!} />
       ) : (
@@ -84,8 +84,7 @@ try {
         >
           <App />
         </ErrorBoundary>
-      )
-    ),
+      ),
     root,
   );
 } catch (error) {

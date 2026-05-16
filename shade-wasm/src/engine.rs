@@ -1,8 +1,9 @@
 use shade_lib::{
     build_curve_lut_from_points, linear_lut, to_acescct_f32, AdjustmentOp, ColorParams,
-    CropRect, CurveControlPoint, DenoiseParams, FloatImage, FontEntry, FontId, GlowParams,
-    GrainParams, HslParams, Layer, LayerStack, MaskData, MaskParams, SharpenParams, TextAlign,
-    TextAnchor, TextContent, TextStyle, TextureId, ToneParams, VignetteParams,
+    CropRect, CurveControlPoint, DenoiseParams, FloatImage, FontEntry, FontId,
+    GlowParams, GrainParams, HslParams, Layer, LayerStack, MaskData, MaskParams,
+    SharpenParams, TextAlign, TextAnchor, TextContent, TextStyle, TextureId, ToneParams,
+    VignetteParams,
 };
 use std::collections::HashMap;
 
@@ -485,12 +486,14 @@ impl WasmEngine {
             };
             let mask = match params {
                 MaskParams::Linear { x1, y1, x2, y2 } => {
-                    let mut m = MaskData::new_empty(self.canvas_width, self.canvas_height);
+                    let mut m =
+                        MaskData::new_empty(self.canvas_width, self.canvas_height);
                     m.fill_linear_gradient(*x1, *y1, *x2, *y2);
                     m
                 }
                 MaskParams::Radial { cx, cy, radius } => {
-                    let mut m = MaskData::new_empty(self.canvas_width, self.canvas_height);
+                    let mut m =
+                        MaskData::new_empty(self.canvas_width, self.canvas_height);
                     m.fill_radial_gradient(*cx, *cy, *radius);
                     m
                 }
@@ -532,11 +535,15 @@ impl WasmEngine {
         out
     }
 
-    pub fn add_text_layer(&mut self, content: &str, font_id: FontId, size_px: f32) -> usize {
+    pub fn add_text_layer(
+        &mut self,
+        content: &str,
+        font_id: FontId,
+        size_px: f32,
+    ) -> usize {
         let mut style = TextStyle::new(font_id, size_px);
         style.color = [1.0, 1.0, 1.0, 1.0];
-        self.stack
-            .add_text_layer(TextContent::new(content), style)
+        self.stack.add_text_layer(TextContent::new(content), style)
     }
 
     pub fn update_text_content(&mut self, layer_idx: usize, content: &str) {
@@ -750,7 +757,11 @@ mod tests {
             .get(&mask_id)
             .expect("mask params should be stored");
         match params {
-            MaskParams::Brush { width, height, pixels } => {
+            MaskParams::Brush {
+                width,
+                height,
+                pixels,
+            } => {
                 assert_eq!((*width, *height), (1, 2));
                 assert!(pixels.is_empty());
             }

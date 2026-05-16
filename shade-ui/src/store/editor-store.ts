@@ -1,8 +1,8 @@
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
-import * as bridge from "../bridge/index";
-import type { RenderedTile } from "../viewport/types";
+import type * as bridge from "../bridge/index";
 import type { CropAspectRatioPreset } from "../crop-aspect";
+import type { RenderedTile } from "../viewport/types";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop" | "text";
@@ -121,9 +121,12 @@ export const [state, setState] = createStore<EditorState>({
 export const [isDrawerOpen, setIsDrawerOpen] = createSignal(false);
 export const [isAdjustmentSliderActive, setIsAdjustmentSliderActive] =
   createSignal(false);
-export const [activeAdjustmentSliderId, setActiveAdjustmentSliderId] =
-  createSignal<string | null>(null);
-export const [viewportToneSample, setViewportToneSample] = createSignal<number | null>(null);
+export const [activeAdjustmentSliderId, setActiveAdjustmentSliderId] = createSignal<
+  string | null
+>(null);
+export const [viewportToneSample, setViewportToneSample] = createSignal<number | null>(
+  null,
+);
 export const [cropAspectRatioPreset, setCropAspectRatioPreset] =
   createSignal<CropAspectRatioPreset>("free");
 
@@ -131,18 +134,15 @@ export function getSelectedArtboard() {
   if (!state.selectedArtboardId) {
     return null;
   }
-  return state.artboards.find((artboard) => artboard.id === state.selectedArtboardId) ?? null;
+  return (
+    state.artboards.find((artboard) => artboard.id === state.selectedArtboardId) ?? null
+  );
 }
 
 export function setSelectedArtboardPreviewTile(tile: RenderedTile | null) {
   const artboard = getSelectedArtboard();
   if (!artboard) return;
-  setState(
-    "artboards",
-    (candidate) => candidate.id === artboard.id,
-    "previewTile",
-    tile,
-  );
+  setState("artboards", (candidate) => candidate.id === artboard.id, "previewTile", tile);
 }
 
 export function setSelectedArtboardBackdropTile(tile: RenderedTile | null) {
@@ -161,15 +161,11 @@ export function moveArtboardBy(id: string, deltaX: number, deltaY: number) {
   if (!artboard) {
     throw new Error("artboard not found");
   }
-  setState(
-    "artboards",
-    (candidate) => candidate.id === id,
-    {
-      ...artboard,
-      worldX: artboard.worldX + deltaX,
-      worldY: artboard.worldY + deltaY,
-    },
-  );
+  setState("artboards", (candidate) => candidate.id === id, {
+    ...artboard,
+    worldX: artboard.worldX + deltaX,
+    worldY: artboard.worldY + deltaY,
+  });
 }
 
 export function resolveSelectedLayerIdx(layers: LayerInfo[], currentIdx: number) {

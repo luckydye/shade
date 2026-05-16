@@ -1,12 +1,12 @@
 / <reference types="vitest" />
-import { defineConfig } from "vite";
+
 import { resolve } from "node:path";
-import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
-import terminal from "vite-plugin-terminal";
+import { defineConfig } from "vite";
+import solid from "vite-plugin-solid";
 
 export default defineConfig({
-  plugins: [solid(), tailwindcss(), terminal({ output: ["terminal", "console"] })],
+  plugins: [solid(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 5173,

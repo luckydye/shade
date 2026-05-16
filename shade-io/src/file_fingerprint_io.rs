@@ -93,10 +93,7 @@ async fn http_head(
     client: &reqwest::Client,
     url: &str,
 ) -> Result<(u64, Option<String>), FingerprintError> {
-    let _permit = http_head_semaphore()
-        .acquire()
-        .await
-        .map_err(io_other)?;
+    let _permit = http_head_semaphore().acquire().await.map_err(io_other)?;
     let response = with_retry(|| async {
         client
             .head(url)
@@ -190,20 +187,23 @@ pub async fn fingerprint_s3(
     key: &str,
     hints: FingerprintHints,
 ) -> Result<FingerprintResult, FingerprintError> {
-    let (size, etag, sse_mode, mtime_ms) = match (&hints.size, &hints.etag, &hints.sse_mode) {
-        (Some(size), Some(etag), sse) => (*size, Some(etag.clone()), sse.clone(), hints.mtime_ms),
-        _ => {
-            let metadata = head_s3_object_metadata(config, key)
-                .await
-                .map_err(io_other)?;
-            (
-                metadata.size,
-                metadata.etag,
-                metadata.sse_mode,
-                metadata.modified_at.map(|ms| ms as i64).or(hints.mtime_ms),
-            )
-        }
-    };
+    let (size, etag, sse_mode, mtime_ms) =
+        match (&hints.size, &hints.etag, &hints.sse_mode) {
+            (Some(size), Some(etag), sse) => {
+                (*size, Some(etag.clone()), sse.clone(), hints.mtime_ms)
+            }
+            _ => {
+                let metadata = head_s3_object_metadata(config, key)
+                    .await
+                    .map_err(io_other)?;
+                (
+                    metadata.size,
+                    metadata.etag,
+                    metadata.sse_mode,
+                    metadata.modified_at.map(|ms| ms as i64).or(hints.mtime_ms),
+                )
+            }
+        };
 
     if let Some(etag_value) = etag.as_deref() {
         if etag_is_content_hash(sse_mode.as_deref()) {

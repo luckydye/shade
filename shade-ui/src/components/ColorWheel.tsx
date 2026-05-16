@@ -208,7 +208,10 @@ export function buildVectorScope(
   const reds = new Float32Array(size * size);
   const greens = new Float32Array(size * size);
   const blues = new Float32Array(size * size);
-  const sampleStep = Math.max(1, Math.ceil(Math.sqrt((image.width * image.height) / sampleBudget)));
+  const sampleStep = Math.max(
+    1,
+    Math.ceil(Math.sqrt((image.width * image.height) / sampleBudget)),
+  );
   const data = image.data;
 
   for (let y = 0; y < image.height; y += sampleStep) {
@@ -245,9 +248,45 @@ export function buildVectorScope(
         g,
         b,
       );
-      addScopeSample(weights, reds, greens, blues, size, x1, y0, tx * (1 - ty) * alpha, r, g, b);
-      addScopeSample(weights, reds, greens, blues, size, x0, y1, (1 - tx) * ty * alpha, r, g, b);
-      addScopeSample(weights, reds, greens, blues, size, x1, y1, tx * ty * alpha, r, g, b);
+      addScopeSample(
+        weights,
+        reds,
+        greens,
+        blues,
+        size,
+        x1,
+        y0,
+        tx * (1 - ty) * alpha,
+        r,
+        g,
+        b,
+      );
+      addScopeSample(
+        weights,
+        reds,
+        greens,
+        blues,
+        size,
+        x0,
+        y1,
+        (1 - tx) * ty * alpha,
+        r,
+        g,
+        b,
+      );
+      addScopeSample(
+        weights,
+        reds,
+        greens,
+        blues,
+        size,
+        x1,
+        y1,
+        tx * ty * alpha,
+        r,
+        g,
+        b,
+      );
     }
   }
 
@@ -318,7 +357,13 @@ function drawScope(
   context.arc(center, center, scaledRadius, 0, Math.PI * 2);
   context.clip();
   context.imageSmoothingEnabled = true;
-  context.drawImage(source, center - scaledRadius, center - scaledRadius, diameter, diameter);
+  context.drawImage(
+    source,
+    center - scaledRadius,
+    center - scaledRadius,
+    diameter,
+    diameter,
+  );
   context.restore();
 }
 
@@ -364,7 +409,13 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
     return canvas;
   });
   const hueLines = createMemo(() => {
-    const lines: Array<{ x1: number; y1: number; x2: number; y2: number; color: string }> = [];
+    const lines: Array<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color: string;
+    }> = [];
     for (let degree = 0; degree < 360; degree += 1) {
       const vector = hueToScopeUnitVector(degree);
       lines.push({
@@ -514,10 +565,16 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
     if (!props.onChange) {
       throw new Error("point creation requires an onChange handler");
     }
-    const maxId = points().reduce((currentMax, point) => Math.max(currentMax, point.id), 0);
+    const maxId = points().reduce(
+      (currentMax, point) => Math.max(currentMax, point.id),
+      0,
+    );
     const nextId = maxId + 1;
     const nextPolar = svgPolar({ clientX, clientY });
-    props.onChange([...points(), { id: nextId, angle: nextPolar.angle, radius: nextPolar.radius }]);
+    props.onChange([
+      ...points(),
+      { id: nextId, angle: nextPolar.angle, radius: nextPolar.radius },
+    ]);
     setDraggingId(nextId);
   };
 
@@ -560,11 +617,16 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
         viewBox={`0 0 ${svgSize()} ${svgSize()}`}
         class="absolute inset-0 h-full w-full"
         style={{
-          cursor: draggingId() !== null ? "grabbing" : isEditable() ? "crosshair" : "default",
+          cursor:
+            draggingId() !== null ? "grabbing" : isEditable() ? "crosshair" : "default",
           "touch-action": "none",
         }}
         onPointerDown={(event) => {
-          if (event.button !== 0 || event.pointerType === "touch" || !allowPointCreation()) {
+          if (
+            event.button !== 0 ||
+            event.pointerType === "touch" ||
+            !allowPointCreation()
+          ) {
             return;
           }
           if (event.target !== svgRef) {
@@ -715,7 +777,11 @@ export const VectorScope: Component<VectorScopeProps> = (props) => {
                 r="14"
                 fill="transparent"
                 onPointerDown={(event) => {
-                  if (event.button !== 0 || event.pointerType === "touch" || !isEditable()) {
+                  if (
+                    event.button !== 0 ||
+                    event.pointerType === "touch" ||
+                    !isEditable()
+                  ) {
                     return;
                   }
                   event.stopPropagation();

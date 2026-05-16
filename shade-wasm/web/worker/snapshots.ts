@@ -28,7 +28,9 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-async function withReadStore<T>(run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function withReadStore<T>(
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
   const db = await openDb();
   const tx = db.transaction([STORE], "readonly");
   const store = tx.objectStore(STORE);
@@ -82,9 +84,7 @@ async function getBrowserCurrentSnapshot(
   imagePath: string | null,
 ): Promise<{ id: string; layers: BrowserPresetLayer[] } | null> {
   const all = (await withReadStore((store) => store.getAll())) as BrowserSnapshotRecord[];
-  const current = all.find(
-    (r) => r.is_current && (r.image_path ?? null) === imagePath,
-  );
+  const current = all.find((r) => r.is_current && (r.image_path ?? null) === imagePath);
   return current ? { id: current.id, layers: current.layers } : null;
 }
 
@@ -101,14 +101,29 @@ async function saveBrowserSnapshot(
     const getAllRequest = store.getAll();
     getAllRequest.onsuccess = () => {
       const existing = getAllRequest.result as BrowserSnapshotRecord[];
-      const samePathRecords = existing.filter((r) => (r.image_path ?? null) === imagePath);
-      const maxIndex = samePathRecords.reduce((max, r) => Math.max(max, r.display_index), 0);
+      const samePathRecords = existing.filter(
+        (r) => (r.image_path ?? null) === imagePath,
+      );
+      const maxIndex = samePathRecords.reduce(
+        (max, r) => Math.max(max, r.display_index),
+        0,
+      );
       for (const record of samePathRecords) {
         if (record.is_current) {
           store.put({ ...record, is_current: false }, record.id);
         }
       }
-      store.put({ id, image_path: imagePath, display_index: maxIndex + 1, created_at, is_current: true, layers }, id);
+      store.put(
+        {
+          id,
+          image_path: imagePath,
+          display_index: maxIndex + 1,
+          created_at,
+          is_current: true,
+          layers,
+        },
+        id,
+      );
     };
     getAllRequest.onerror = () => reject(getAllRequest.error);
     tx.oncomplete = () => {

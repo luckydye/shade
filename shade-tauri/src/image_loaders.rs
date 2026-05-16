@@ -1,16 +1,18 @@
-use shade_lib::FloatImage;
-use shade_io::{
-    load_image_bytes,
-    load_image_bytes_f32_with_info, picture_display_name, SourceImageInfo,
+use crate::media_libraries::{
+    collect_images_in_directory, resolve_s3_library_config,
+    resolve_s3_library_for_media_path, s3_library_id,
 };
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use tauri::Manager;
-use crate::media_libraries::{collect_images_in_directory, resolve_s3_library_config, resolve_s3_library_for_media_path, s3_library_id};
 use crate::media_metadata::import_xmp_rating;
 use crate::paths::{default_pictures_dir, library_sync_dir};
 use crate::render::render_snapshot_thumbnail_bytes;
 use crate::snapshots::{latest_snapshot_created_at, register_image_source};
-
+use shade_io::{
+    load_image_bytes, load_image_bytes_f32_with_info, picture_display_name,
+    SourceImageInfo,
+};
+use shade_lib::FloatImage;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use tauri::Manager;
 
 #[cfg(target_os = "ios")]
 extern "C" {
@@ -57,8 +59,8 @@ pub(crate) fn decode_image_bytes_with_info(
 }
 pub(crate) fn open_local_image_sync(path: &str) -> Result<shade_io::OpenedImage, String> {
     let source = std::path::Path::new(path);
-    let (image, info) = shade_io::load_image_f32_with_info(source)
-        .map_err(|e| e.to_string())?;
+    let (image, info) =
+        shade_io::load_image_f32_with_info(source).map_err(|e| e.to_string())?;
     Ok(shade_io::OpenedImage {
         fingerprint: shade_io::fingerprint_local(source)
             .map_err(|error| error.to_string())?
@@ -85,7 +87,9 @@ pub(crate) async fn load_camera_thumbnail_from_tauri<R: tauri::Runtime>(
         .map(|bytes| bytes.to_vec())
         .map_err(|error| error.to_string())
 }
-pub(crate) async fn load_s3_thumbnail_from_tauri(picture_id: &str) -> Result<Vec<u8>, String> {
+pub(crate) async fn load_s3_thumbnail_from_tauri(
+    picture_id: &str,
+) -> Result<Vec<u8>, String> {
     let (config, key) = resolve_s3_library_for_media_path(picture_id)?;
     let library_id = s3_library_id(&config.id);
     let sync_dir = library_sync_dir(&library_id)?;
@@ -102,12 +106,12 @@ pub(crate) async fn load_s3_thumbnail_from_tauri(picture_id: &str) -> Result<Vec
     let key_display = picture_display_name(&key);
     let picture_id_owned = picture_id.to_string();
     let jpeg = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
-        let (pixels, width, height) =
-            load_image_bytes(&bytes, Some(&key_display))
-                .map_err(|error| error.to_string())?;
-        let image = image::RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
-            format!("failed to decode S3 image for thumbnail: {picture_id_owned}")
-        })?;
+        let (pixels, width, height) = load_image_bytes(&bytes, Some(&key_display))
+            .map_err(|error| error.to_string())?;
+        let image =
+            image::RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
+                format!("failed to decode S3 image for thumbnail: {picture_id_owned}")
+            })?;
         let thumbnail = image::DynamicImage::ImageRgba8(image).thumbnail(320, 320);
         let mut jpeg = Vec::new();
         thumbnail
@@ -173,7 +177,8 @@ pub(crate) async fn load_camera_image_from_tauri(
         .map_err(|error| error.to_string())
 }
 pub(crate) async fn load_s3_image_from_tauri(path: &str) -> Result<Vec<u8>, String> {
-    let (source_id, key) = shade_io::parse_s3_media_path(path).map_err(|e| e.to_string())?;
+    let (source_id, key) =
+        shade_io::parse_s3_media_path(path).map_err(|e| e.to_string())?;
     let library_id = s3_library_id(source_id);
     let sync_dir = library_sync_dir(&library_id)?;
     let file_name = std::path::Path::new(key)
@@ -238,7 +243,10 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     let cache_key = if is_snapshot {
         // Include edit version created_at so in-place edits invalidate the cache.
         match latest_snapshot_created_at(load_path).await {
-            Some(created_at) => format!("{}#ev_{created_at}", shade_io::thumbnail_cache_key(picture_id)),
+            Some(created_at) => format!(
+                "{}#ev_{created_at}",
+                shade_io::thumbnail_cache_key(picture_id)
+            ),
             None => shade_io::thumbnail_cache_key(picture_id),
         }
     } else {
@@ -255,7 +263,9 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
             return Ok(cached_bytes);
         }
     }
-    if let Some((bytes, fingerprint)) = render_snapshot_thumbnail_bytes(&app, load_path).await? {
+    if let Some((bytes, fingerprint)) =
+        render_snapshot_thumbnail_bytes(&app, load_path).await?
+    {
         register_image_source(&fingerprint, Some(load_path)).await?;
         cache.0.put(&cache_key, Some(&fingerprint), &bytes).await?;
         return Ok(bytes);
@@ -286,7 +296,11 @@ pub async fn load_thumbnail_bytes<R: tauri::Runtime>(
     }
     cache
         .0
-        .put(&cache_key, thumbnail.fingerprint.as_deref(), &thumbnail.bytes)
+        .put(
+            &cache_key,
+            thumbnail.fingerprint.as_deref(),
+            &thumbnail.bytes,
+        )
         .await?;
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     if let Some(fingerprint) = thumbnail.fingerprint.clone() {

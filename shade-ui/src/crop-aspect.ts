@@ -1,5 +1,5 @@
-import { clamp } from "./store/editor-store";
 import type { CropRect } from "./store/editor-store";
+import { clamp } from "./store/editor-store";
 
 export type CropAspectRatioPreset =
   | "free"
@@ -317,14 +317,11 @@ export function constrainCropDragToAspectRatio(
       const dragTop = handle === "top-left" || handle === "top-right";
       const anchorX = dragLeft ? halfWidth : -halfWidth;
       const anchorY = dragTop ? halfHeight : -halfHeight;
-      const draggedX =
-        (dragLeft ? -halfWidth : halfWidth) + deltaX;
-      const draggedY =
-        (dragTop ? -halfHeight : halfHeight) + deltaY;
+      const draggedX = (dragLeft ? -halfWidth : halfWidth) + deltaX;
+      const draggedY = (dragTop ? -halfHeight : halfHeight) + deltaY;
       const numeratorX = dragLeft ? anchorX - draggedX : draggedX - anchorX;
       const numeratorY = dragTop ? anchorY - draggedY : draggedY - anchorY;
-      const projectedHeight =
-        (ratio * numeratorX + numeratorY) / (ratio * ratio + 1);
+      const projectedHeight = (ratio * numeratorX + numeratorY) / (ratio * ratio + 1);
       const { width, height } = clampAspectSize(
         projectedHeight * ratio,
         projectedHeight,

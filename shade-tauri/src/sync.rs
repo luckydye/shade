@@ -1,12 +1,12 @@
-use shade_io::{
-    is_supported_library_image, scan_directory_images,
-};
-use std::path::Path;
 use crate::config::load_app_config;
-use crate::media_libraries::{list_s3_remote_names, require_local_library_path, resolve_desktop_library_path, resolve_s3_library_config, s3_upload_object_key};
+use crate::media_libraries::{
+    list_s3_remote_names, require_local_library_path, resolve_desktop_library_path,
+    resolve_s3_library_config, s3_upload_object_key,
+};
 use crate::paths::library_sync_dir;
 use crate::peers::require_p2p;
-
+use shade_io::{is_supported_library_image, scan_directory_images};
+use std::path::Path;
 
 #[tauri::command]
 pub async fn sync_library<R: tauri::Runtime>(
@@ -43,13 +43,7 @@ pub(crate) async fn sync_download_s3<R: tauri::Runtime>(
         if dest.exists() {
             continue;
         }
-        broadcast_sync_progress(
-            app,
-            library_id,
-            total,
-            i,
-            Some(file_name.clone()),
-        );
+        broadcast_sync_progress(app, library_id, total, i, Some(file_name.clone()));
         let bytes = shade_io::get_s3_object_bytes(&config, &entry.key).await?;
         std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
     }
@@ -76,13 +70,7 @@ pub(crate) async fn sync_download_peer<R: tauri::Runtime>(
         if dest.exists() {
             continue;
         }
-        broadcast_sync_progress(
-            app,
-            library_id,
-            total,
-            i,
-            Some(picture.name.clone()),
-        );
+        broadcast_sync_progress(app, library_id, total, i, Some(picture.name.clone()));
         let bytes = p2p_handle
             .get_peer_image_bytes(peer_endpoint_id, &picture.id)
             .await
@@ -132,7 +120,13 @@ pub(crate) async fn sync_upload_local<R: tauri::Runtime>(
         );
         let bytes = std::fs::read(local_path).map_err(|e| e.to_string())?;
         let key = s3_upload_object_key(&target, file_name);
-        shade_io::put_s3_object_bytes_with_atime(&target, &key, &bytes, local_file.modified_at).await?;
+        shade_io::put_s3_object_bytes_with_atime(
+            &target,
+            &key,
+            &bytes,
+            local_file.modified_at,
+        )
+        .await?;
         completed += 1;
     }
     emit_sync_complete(app, library_id, total);

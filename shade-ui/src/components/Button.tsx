@@ -1,4 +1,4 @@
-import { createSignal, JSX, mergeProps, splitProps } from "solid-js";
+import { createSignal, type JSX, mergeProps, splitProps } from "solid-js";
 
 function callHandler<T extends Event>(
   handler: JSX.EventHandlerUnion<HTMLButtonElement, T> | undefined,
@@ -37,13 +37,11 @@ export function Button(props: ButtonProps) {
   ]);
   const [pressed, setPressed] = createSignal(false);
   let buttonRef!: HTMLButtonElement;
-  let activeTouch:
-    | {
-        identifier: number;
-        startX: number;
-        startY: number;
-      }
-    | null = null;
+  let activeTouch: {
+    identifier: number;
+    startX: number;
+    startY: number;
+  } | null = null;
   let dispatchingSyntheticClick = false;
   let suppressNativeClickUntil = 0;
 
@@ -124,8 +122,7 @@ export function Button(props: ButtonProps) {
         if (!shouldTrigger) {
           return;
         }
-        suppressNativeClickUntil =
-          performance.now() + SYNTHETIC_CLICK_SUPPRESSION_MS;
+        suppressNativeClickUntil = performance.now() + SYNTHETIC_CLICK_SUPPRESSION_MS;
         dispatchingSyntheticClick = true;
         buttonRef.click();
         dispatchingSyntheticClick = false;

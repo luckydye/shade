@@ -10,14 +10,20 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { Slider } from "./Slider";
-import { TextLayerEditor } from "./TextLayerEditor";
+import {
+  CROP_ASPECT_RATIO_OPTIONS,
+  type CropAspectRatioPreset,
+  clampAspectSize,
+  fitCropRectToAspectRatio,
+  resolveCropAspectRatio,
+} from "../crop-aspect";
 import type { LayerInfo } from "../store/editor";
 import {
   addLayer,
   addTextLayer,
   applyEdit,
   applyGradientMask,
+  backdropTile,
   createBrushMask,
   cropAspectRatioPreset,
   deleteLayer,
@@ -41,7 +47,6 @@ import {
   setIsDrawerOpen,
   setLayerVisible,
   state,
-  backdropTile,
 } from "../store/editor";
 import { selectMaskLayer } from "../store/editor-layers";
 import {
@@ -51,20 +56,17 @@ import {
   getSelectedArtboard,
 } from "../store/editor-store";
 import { Button } from "./Button";
-import {
-  clampAspectSize,
-  CROP_ASPECT_RATIO_OPTIONS,
-  fitCropRectToAspectRatio,
-  resolveCropAspectRatio,
-  type CropAspectRatioPreset,
-} from "../crop-aspect";
-import {
-  buildVectorScope,
-  type WheelPoint,
-  VectorScope,
-} from "./ColorWheel";
+import { buildVectorScope, VectorScope, type WheelPoint } from "./ColorWheel";
 import { CurvesEditor } from "./inspector/CurvesEditor";
-import { LsCurveEditor } from "./inspector/LsCurveEditor";
+import {
+  type ControlPoint,
+  CURVE_SAMPLE_INDICES,
+  IDENTITY_LUT,
+  LS_CURVE_IDENTITY,
+  normalizeLsPoints,
+  normalizePoints,
+  valueLabel,
+} from "./inspector/curve-utils";
 import {
   ADD_LAYER_FOCI,
   DEFAULT_COLOR,
@@ -93,15 +95,9 @@ import {
   toneSvg,
   trashSvg,
 } from "./inspector/inspector-icons";
-import {
-  CURVE_SAMPLE_INDICES,
-  IDENTITY_LUT,
-  LS_CURVE_IDENTITY,
-  normalizeLsPoints,
-  normalizePoints,
-  type ControlPoint,
-  valueLabel,
-} from "./inspector/curve-utils";
+import { LsCurveEditor } from "./inspector/LsCurveEditor";
+import { Slider } from "./Slider";
+import { TextLayerEditor } from "./TextLayerEditor";
 
 type InspectorTab = "edit" | "presets";
 type LayerDropTarget = { layerIdx: number; position: "before" | "after" };
@@ -181,7 +177,9 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
   );
 };
 
-const SectionHeader: Component<{ title: string; detail?: string | (() => string) }> = (props) => (
+const SectionHeader: Component<{ title: string; detail?: string | (() => string) }> = (
+  props,
+) => (
   <div
     data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
     class="mobile-slider-fade mb-2 flex items-center justify-between gap-3 bg-surface-input px-3 py-1.5 transition-opacity duration-150"
@@ -204,12 +202,12 @@ const SectionHeader: Component<{ title: string; detail?: string | (() => string)
 );
 
 const EmptyState: Component<{ children: JSX.Element }> = (props) => (
-  <div class="rounded-sm border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]">{props.children}</div>
+  <div class="rounded-sm border border-dashed border-[var(--border-medium)] bg-[var(--surface-subtle)] px-3 py-4 text-sm text-[var(--text-faint)]">
+    {props.children}
+  </div>
 );
 
-const Separator: Component = () => (
-  <div class="h-px bg-[var(--border-subtle)]" />
-);
+const Separator: Component = () => <div class="h-px bg-[var(--border-subtle)]" />;
 
 const Toggle: Component<{ checked: boolean; onChange: () => void }> = (props) => (
   <button
@@ -563,8 +561,7 @@ export const Inspector: Component = () => {
         color: HSL_TAB_STYLES.blue.accentColor,
       },
     ]);
-    const activePointId = () =>
-      hslTab() === "red" ? 0 : hslTab() === "green" ? 1 : 2;
+    const activePointId = () => (hslTab() === "red" ? 0 : hslTab() === "green" ? 1 : 2);
     const applyHueWheel = (points: WheelPoint[]) => {
       const findPoint = (id: number) => {
         const point = points.find((candidate) => candidate.id === id);
@@ -636,14 +633,19 @@ export const Inspector: Component = () => {
                 setHslControlMode((mode) => (mode === "scope" ? "sliders" : "scope"))
               }
               aria-pressed={hslControlMode() === "scope"}
-              title={hslControlMode() === "scope" ? "Show HSL sliders" : "Show vectorscope"}
+              title={
+                hslControlMode() === "scope" ? "Show HSL sliders" : "Show vectorscope"
+              }
               class={`flex h-8 w-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
                 hslControlMode() === "scope"
                   ? "bg-[var(--surface-active)] text-[var(--text-strong)]"
                   : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text-strong)]"
               }`}
             >
-              <span class="flex h-4 w-4 items-center justify-center [&>svg]:h-4 [&>svg]:w-4" innerHTML={VECTORSCOPE_TOGGLE_SVG} />
+              <span
+                class="flex h-4 w-4 items-center justify-center [&>svg]:h-4 [&>svg]:w-4"
+                innerHTML={VECTORSCOPE_TOGGLE_SVG}
+              />
             </Button>
           </div>
           <div
@@ -1021,7 +1023,11 @@ export const Inspector: Component = () => {
       rotation: 0,
     };
   const selectedCropAspectRatio = () =>
-    resolveCropAspectRatio(cropAspectRatioPreset(), state.canvasWidth, state.canvasHeight);
+    resolveCropAspectRatio(
+      cropAspectRatioPreset(),
+      state.canvasWidth,
+      state.canvasHeight,
+    );
   const imageDetails = () => {
     const artboard = selectedArtboard();
     if (!artboard) {
@@ -1084,10 +1090,8 @@ export const Inspector: Component = () => {
       op: "crop",
       crop_x: field === "x" ? value : crop.x,
       crop_y: field === "y" ? value : crop.y,
-      crop_width:
-        field === "width" || field === "height" ? nextWidth : crop.width,
-      crop_height:
-        field === "width" || field === "height" ? nextHeight : crop.height,
+      crop_width: field === "width" || field === "height" ? nextWidth : crop.width,
+      crop_height: field === "width" || field === "height" ? nextHeight : crop.height,
       crop_rotation: field === "rotation" ? value : crop.rotation,
     });
   };
@@ -1097,11 +1101,7 @@ export const Inspector: Component = () => {
     if (!cropLayer?.crop) {
       return;
     }
-    const ratio = resolveCropAspectRatio(
-      preset,
-      state.canvasWidth,
-      state.canvasHeight,
-    );
+    const ratio = resolveCropAspectRatio(preset, state.canvasWidth, state.canvasHeight);
     if (!ratio) {
       return;
     }
@@ -1403,7 +1403,10 @@ export const Inspector: Component = () => {
     return (
       <div class="flex flex-col gap-3 px-2">
         <div class="grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0">
-          <span class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4" innerHTML={cropSvg} />
+          <span
+            class="flex h-4 w-4 items-center justify-center text-[var(--text-icon)] [&>svg]:h-4 [&>svg]:w-4"
+            innerHTML={cropSvg}
+          />
           <span class="self-center text-[12px] font-medium text-[var(--text-strong)]">
             Crop
           </span>
@@ -1585,11 +1588,18 @@ export const Inspector: Component = () => {
                     }
                   >
                     <input
-                      ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
+                      ref={(el) =>
+                        requestAnimationFrame(() => {
+                          el.focus();
+                          el.select();
+                        })
+                      }
                       type="text"
                       value={editingPresetValue()}
                       onInput={(e) => setEditingPresetValue(e.currentTarget.value)}
-                      onBlur={() => void handleRenamePreset(preset.name, editingPresetValue())}
+                      onBlur={() =>
+                        void handleRenamePreset(preset.name, editingPresetValue())
+                      }
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.currentTarget.blur();
@@ -1616,7 +1626,10 @@ export const Inspector: Component = () => {
                   class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-dim)] transition-colors hover:border-[var(--danger-border,var(--border-active))] hover:text-[var(--danger-text,var(--text))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
                   title="Delete preset"
                 >
-                  <span class="flex h-3 w-3 items-center justify-center [&>svg]:h-3 [&>svg]:w-3" innerHTML={trashSvg} />
+                  <span
+                    class="flex h-3 w-3 items-center justify-center [&>svg]:h-3 [&>svg]:w-3"
+                    innerHTML={trashSvg}
+                  />
                 </Button>
               </div>
             ))}
@@ -1704,7 +1717,10 @@ export const Inspector: Component = () => {
       data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class="mobile-slider-fade flex flex-col gap-1 transition-opacity duration-150"
     >
-      <div ref={desktopLayerListRef} class="relative flex flex-col gap-1 rounded-sm px-2 pt-2">
+      <div
+        ref={desktopLayerListRef}
+        class="relative flex flex-col gap-1 rounded-sm px-2 pt-2"
+      >
         <div
           class="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 -translate-y-1/2 rounded-full bg-[var(--text)]"
           style={getDesktopDropCursorStyle()}
@@ -1768,10 +1784,7 @@ export const Inspector: Component = () => {
                     : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                 } ${draggedLayerIdx() === realIdx ? "opacity-45" : ""}`}
               >
-                <Show
-                  when={layer.kind !== "image"}
-                  fallback={<span />}
-                >
+                <Show when={layer.kind !== "image"} fallback={<span />}>
                   <Button
                     type="button"
                     onPointerDown={(event) => startDesktopLayerDrag(event, realIdx)}
@@ -1788,10 +1801,7 @@ export const Inspector: Component = () => {
                     </span>
                   </Button>
                 </Show>
-                <Show
-                  when={layer.kind !== "image"}
-                  fallback={<span />}
-                >
+                <Show when={layer.kind !== "image"} fallback={<span />}>
                   <button
                     type="button"
                     class={`inline-flex h-4 w-4 items-center justify-center text-xs leading-none transition-colors ${
@@ -1857,10 +1867,7 @@ export const Inspector: Component = () => {
                     }}
                   />
                 </Show>
-                <Show
-                  when={layer.kind !== "crop"}
-                  fallback={<span />}
-                >
+                <Show when={layer.kind !== "crop"} fallback={<span />}>
                   {layer.has_mask ? (
                     <span />
                   ) : (
@@ -1981,9 +1988,7 @@ export const Inspector: Component = () => {
   );
 
   const DesktopSelectedLayerPanel: Component = () => (
-    <Show
-      when={state.selectedLayerIdx >= 0}
-    >
+    <Show when={state.selectedLayerIdx >= 0}>
       <Show
         when={selectedCropLayer()}
         fallback={
@@ -2030,10 +2035,7 @@ export const Inspector: Component = () => {
           >
             {(layer) => (
               <ControlSection title="Text">
-                <TextLayerEditor
-                  layer={layer()}
-                  layerIdx={state.selectedLayerIdx}
-                />
+                <TextLayerEditor layer={layer()} layerIdx={state.selectedLayerIdx} />
               </ControlSection>
             )}
           </Show>
@@ -2066,10 +2068,7 @@ export const Inspector: Component = () => {
               }
             >
               {(layer) => (
-                <TextLayerEditor
-                  layer={layer()}
-                  layerIdx={state.selectedLayerIdx}
-                />
+                <TextLayerEditor layer={layer()} layerIdx={state.selectedLayerIdx} />
               )}
             </Show>
           }
@@ -2116,7 +2115,10 @@ export const Inspector: Component = () => {
                         isActive() ? "text-[var(--text)]" : "text-[var(--text-muted)]"
                       }`}
                     >
-                      <span class="[&>svg]:h-5 [&>svg]:w-5" innerHTML={focusGlyphs[focus()]} />
+                      <span
+                        class="[&>svg]:h-5 [&>svg]:w-5"
+                        innerHTML={focusGlyphs[focus()]}
+                      />
                       <span>{focusLabels[focus()]}</span>
                     </Button>
                   );
@@ -2169,11 +2171,22 @@ export const Inspector: Component = () => {
         type="button"
         onClick={() => setInspectorTab("edit")}
         class={`flex h-[30px] w-[30px] items-center justify-center text-[11px] text-[var(--text)] transition-colors ${
-          inspectorTab() === "edit" ? "bg-surface-header" : "bg-[var(--panel-bg)] opacity-50 hover:opacity-80"
+          inspectorTab() === "edit"
+            ? "bg-surface-header"
+            : "bg-[var(--panel-bg)] opacity-50 hover:opacity-80"
         }`}
         title="Edit"
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M7 2v10M2 7h10" />
         </svg>
       </button>
@@ -2181,11 +2194,22 @@ export const Inspector: Component = () => {
         type="button"
         onClick={() => setInspectorTab("presets")}
         class={`flex h-[30px] w-[30px] items-center justify-center text-[11px] text-[var(--text)] transition-colors ${
-          inspectorTab() === "presets" ? "bg-surface-header" : "bg-[var(--panel-bg)] opacity-50 hover:opacity-80"
+          inspectorTab() === "presets"
+            ? "bg-surface-header"
+            : "bg-[var(--panel-bg)] opacity-50 hover:opacity-80"
         }`}
         title="Presets"
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M2 3.5h10M2 7h10M2 10.5h10" />
         </svg>
       </button>
@@ -2195,9 +2219,7 @@ export const Inspector: Component = () => {
   return (
     <aside class="flex w-[350px] flex-none touch-compact:w-auto mt-4 mr-2">
       <DesktopTabBar />
-      <div
-        class="flex w-full h-[calc(100%-1rem)] flex-col touch-compact:hidden gap-2 rounded-sm bg-[var(--panel-bg)]"
-      >
+      <div class="flex w-full h-[calc(100%-1rem)] flex-col touch-compact:hidden gap-2 rounded-sm bg-[var(--panel-bg)]">
         <div class="media-scroll flex-1 overflow-y-auto">
           <Show when={inspectorTab() === "edit"} fallback={<PresetsPanel />}>
             <div class="flex flex-col gap-2 px-2">

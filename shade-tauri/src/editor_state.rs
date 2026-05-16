@@ -1,13 +1,17 @@
-use serde::{Deserialize, Serialize};
-use shade_lib::{
-    to_acescct_f32, AdjustmentOp, FloatImage, LayerStack,
+use crate::layers::{
+    AdjustmentValues, ColorValues, CropValues, CurvesValues, DenoiseValues, GlowValues,
+    GrainValues, HslValues, LayerEntryInfo, LayerStackInfo, LsCurveValues,
+    MaskParamsInfo, SharpenValues, ToneValues, VignetteValues,
 };
+use crate::snapshots::persist_current_edit_version;
+use crate::text_layers::{
+    text_align_str, text_anchor_str, TextBoundsValues, TextLayerValues, TextStyleValues,
+    TextTransformValues,
+};
+use serde::{Deserialize, Serialize};
+use shade_lib::{to_acescct_f32, AdjustmentOp, FloatImage, LayerStack};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use crate::layers::{AdjustmentValues, ColorValues, CropValues, CurvesValues, DenoiseValues, GlowValues, GrainValues, HslValues, LayerEntryInfo, LayerStackInfo, LsCurveValues, MaskParamsInfo, SharpenValues, ToneValues, VignetteValues};
-use crate::snapshots::persist_current_edit_version;
-use crate::text_layers::{TextBoundsValues, TextLayerValues, TextStyleValues, TextTransformValues, text_align_str, text_anchor_str};
-
 
 pub struct EditorState {
     pub stack: LayerStack,
@@ -29,7 +33,9 @@ pub(crate) fn lock_editor_state<'a>(
         .lock()
         .map_err(|_| "editor state lock poisoned".to_string())
 }
-pub(crate) fn texture_id_for_fingerprint(fingerprint: &str) -> Result<shade_lib::TextureId, String> {
+pub(crate) fn texture_id_for_fingerprint(
+    fingerprint: &str,
+) -> Result<shade_lib::TextureId, String> {
     let prefix = fingerprint
         .get(..16)
         .ok_or_else(|| format!("invalid file hash: {fingerprint}"))?;
@@ -67,7 +73,9 @@ pub(crate) fn non_image_layer_data(stack: &LayerStack) -> PersistedLayerData {
         mask_params,
     }
 }
-pub(crate) fn ensure_non_image_layers(layers: &[shade_lib::LayerEntry]) -> Result<(), String> {
+pub(crate) fn ensure_non_image_layers(
+    layers: &[shade_lib::LayerEntry],
+) -> Result<(), String> {
     if layers
         .iter()
         .any(|entry| matches!(entry.layer, shade_lib::Layer::Image { .. }))
@@ -388,7 +396,11 @@ pub(crate) fn build_layer_stack_info(st: &EditorState) -> LayerStackInfo {
                 _ => None,
             },
             text: match &l.layer {
-                shade_lib::Layer::Text { content, style, transform } => {
+                shade_lib::Layer::Text {
+                    content,
+                    style,
+                    transform,
+                } => {
                     let bounds = layout_engine
                         .as_mut()
                         .and_then(|e| e.layout(content, style).ok())

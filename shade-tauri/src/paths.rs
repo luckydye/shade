@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tauri::Manager;
 
-
 pub(crate) static APP_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub fn init_app_paths<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,

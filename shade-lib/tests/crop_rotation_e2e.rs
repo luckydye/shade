@@ -170,7 +170,8 @@ fn load_fixture() -> Option<(FloatImage, u32, u32)> {
         eprintln!("fixture not found: {}", path.display());
         return None;
     }
-    let (img, _) = shade_io::load_image_f32_with_info(&path).expect("failed to load fixture");
+    let (img, _) =
+        shade_io::load_image_f32_with_info(&path).expect("failed to load fixture");
     let (w, h) = (img.width, img.height);
     Some((img, w, h))
 }

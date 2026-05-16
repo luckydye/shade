@@ -1,19 +1,49 @@
-use std::sync::Mutex;
-use crate::batch::{BatchExportItem, batch_clear_edits, batch_export_images};
-use crate::collections::{add_to_collection, create_collection, delete_collection, list_collection_items, list_collections, remove_from_collection, rename_collection, reorder_collection};
-use crate::edit_apply::{EditParams, apply_edit};
-use crate::editor_state::{EditorState, lock_editor_state};
+use crate::batch::{batch_clear_edits, batch_export_images, BatchExportItem};
+use crate::collections::{
+    add_to_collection, create_collection, delete_collection, list_collection_items,
+    list_collections, remove_from_collection, rename_collection, reorder_collection,
+};
+use crate::edit_apply::{apply_edit, EditParams};
+use crate::editor_state::{lock_editor_state, EditorState};
 use crate::image_loaders::list_pictures;
-use crate::layers::{DeleteLayerParams, LayerOpacityParams, LayerVisibility, MoveLayerParams, RenameLayerParams, add_layer, delete_layer, get_stack_snapshot, move_layer, rename_layer, replace_stack, set_layer_opacity, set_layer_visible};
-use crate::masks::{CreateBrushMaskParams, GradientMaskParams, RemoveMaskParams, StampBrushMaskParams, apply_gradient_mask, create_brush_mask, remove_mask, stamp_brush_mask};
-use crate::media_libraries::{add_media_library, add_s3_media_library, build_library_listing, delete_media_library_item, enrich_listing_metadata, get_s3_media_library, list_media_libraries, refresh_library_index, remove_media_library, set_library_mode, set_media_library_order, update_s3_media_library, upload_media_library_file, upload_media_library_path, upload_media_library_url};
-use crate::media_metadata::{list_media_ratings, persist_media_rating, persist_media_tags};
-use crate::peers::{apply_peer_metadata, get_local_peer_discovery_snapshot, get_peer_awareness, list_peer_pictures, pair_peer_device, set_local_awareness, sync_peer_snapshots};
-use crate::presets::{BatchPresetItem, apply_preset_snapshot, batch_apply_preset_snapshot, delete_preset, get_preset_json, get_snapshot_preset_json, list_presets, load_preset, rename_preset, save_preset, save_preset_from_json};
-use crate::snapshots::{LoadSnapshotParams, list_snapshots, load_snapshot, save_snapshot};
+use crate::layers::{
+    add_layer, delete_layer, get_stack_snapshot, move_layer, rename_layer, replace_stack,
+    set_layer_opacity, set_layer_visible, DeleteLayerParams, LayerOpacityParams,
+    LayerVisibility, MoveLayerParams, RenameLayerParams,
+};
+use crate::masks::{
+    apply_gradient_mask, create_brush_mask, remove_mask, stamp_brush_mask,
+    CreateBrushMaskParams, GradientMaskParams, RemoveMaskParams, StampBrushMaskParams,
+};
+use crate::media_libraries::{
+    add_media_library, add_s3_media_library, build_library_listing,
+    delete_media_library_item, enrich_listing_metadata, get_s3_media_library,
+    list_media_libraries, refresh_library_index, remove_media_library, set_library_mode,
+    set_media_library_order, update_s3_media_library, upload_media_library_file,
+    upload_media_library_path, upload_media_library_url,
+};
+use crate::media_metadata::{
+    list_media_ratings, persist_media_rating, persist_media_tags,
+};
+use crate::peers::{
+    apply_peer_metadata, get_local_peer_discovery_snapshot, get_peer_awareness,
+    list_peer_pictures, pair_peer_device, set_local_awareness, sync_peer_snapshots,
+};
+use crate::presets::{
+    apply_preset_snapshot, batch_apply_preset_snapshot, delete_preset, get_preset_json,
+    get_snapshot_preset_json, list_presets, load_preset, rename_preset, save_preset,
+    save_preset_from_json, BatchPresetItem,
+};
+use crate::snapshots::{
+    list_snapshots, load_snapshot, save_snapshot, LoadSnapshotParams,
+};
 use crate::sync::sync_library;
-use crate::text_layers::{AddFontParams, AddTextLayerParams, SetTextTransformParams, UpdateTextContentParams, UpdateTextStyleParams, add_font, add_text_layer, list_fonts, prune_unused_fonts, set_text_transform, update_text_content, update_text_style};
-
+use crate::text_layers::{
+    add_font, add_text_layer, list_fonts, prune_unused_fonts, set_text_transform,
+    update_text_content, update_text_style, AddFontParams, AddTextLayerParams,
+    SetTextTransformParams, UpdateTextContentParams, UpdateTextStyleParams,
+};
+use std::sync::Mutex;
 
 /// Single JS → Rust read dispatcher. Each variant of
 /// [`ReadRequest`](crate::channel_protocol::ReadRequest) is routed to the
@@ -257,7 +287,8 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
             remove_mask(RemoveMaskParams { layer_idx: idx }, state, app).await?;
         }
         M::CreateBrushMask { idx } => {
-            create_brush_mask(CreateBrushMaskParams { layer_idx: idx }, state, app).await?;
+            create_brush_mask(CreateBrushMaskParams { layer_idx: idx }, state, app)
+                .await?;
         }
         M::StampBrushMask(value) => {
             let params: StampBrushMaskParams = serde_json::from_value(value)
@@ -333,7 +364,10 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
         M::PruneUnusedFonts => {
             let _removed = prune_unused_fonts(state, app).await?;
         }
-        M::SetMediaRating { fingerprint, rating } => {
+        M::SetMediaRating {
+            fingerprint,
+            rating,
+        } => {
             if fingerprint.trim().is_empty() {
                 return Err("file hash cannot be empty".to_string());
             }
@@ -403,7 +437,10 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                 .send(crate::ChannelMessage::CollectionListChanged)
                 .await;
         }
-        M::RenameCollection { collection_id, name } => {
+        M::RenameCollection {
+            collection_id,
+            name,
+        } => {
             rename_collection(collection_id.clone(), name).await?;
             crate::channel_server::channel_from_app(&app)
                 .send(crate::ChannelMessage::CollectionChanged { collection_id })
@@ -443,8 +480,10 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
                 .await;
         }
         M::BatchApplyPresetSnapshot { items, name } => {
-            let items: Vec<BatchPresetItem> = serde_json::from_value(items)
-                .map_err(|e| format!("batch_apply_preset_snapshot: invalid items: {e}"))?;
+            let items: Vec<BatchPresetItem> =
+                serde_json::from_value(items).map_err(|e| {
+                    format!("batch_apply_preset_snapshot: invalid items: {e}")
+                })?;
             let count = batch_apply_preset_snapshot(items, name, app.clone()).await?;
             crate::channel_server::channel_from_app(&app)
                 .send(crate::ChannelMessage::BatchCompleted {
@@ -466,7 +505,8 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
             let items: Vec<BatchExportItem> = serde_json::from_value(items)
                 .map_err(|e| format!("batch_export_images: invalid items: {e}"))?;
             let count =
-                batch_export_images(items, target_dir, app.clone(), render_service).await?;
+                batch_export_images(items, target_dir, app.clone(), render_service)
+                    .await?;
             crate::channel_server::channel_from_app(&app)
                 .send(crate::ChannelMessage::BatchCompleted {
                     kind: "export_images".to_string(),
@@ -501,7 +541,8 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
         M::UpdateS3MediaLibrary { library_id, params } => {
             let params: shade_io::AddS3LibraryParams = serde_json::from_value(params)
                 .map_err(|e| format!("update_s3_media_library: invalid params: {e}"))?;
-            let library = update_s3_media_library(app.clone(), library_id, params).await?;
+            let library =
+                update_s3_media_library(app.clone(), library_id, params).await?;
             let value = serde_json::to_value(&library).map_err(|e| e.to_string())?;
             let coord = crate::channel_server::channel_from_app(&app);
             coord
@@ -618,7 +659,8 @@ pub async fn dispatch_mutation<R: tauri::Runtime>(
             fingerprint,
             snapshot_id,
         } => {
-            set_local_awareness(display_name, fingerprint, snapshot_id, awareness).await?;
+            set_local_awareness(display_name, fingerprint, snapshot_id, awareness)
+                .await?;
             // No notification — local awareness is owned by the frontend's
             // view; remote awareness changes ride `PeerAwarenessUpdate`.
         }

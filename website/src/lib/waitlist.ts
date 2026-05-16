@@ -1,63 +1,68 @@
 import { db, initSchema } from "./db";
 
 export const WAITLIST_OPT_IN_LABEL =
-    "Ich möchte per E-Mail über den Produktstart informiert werden.";
+  "Ich möchte per E-Mail über den Produktstart informiert werden.";
 
 type WaitlistConfirmationResult = "confirmed" | "already-confirmed" | "invalid";
 type WaitlistUnsubscribeResult = "unsubscribed" | "already-unsubscribed" | "invalid";
 type WaitlistRequestMeta = {
-    clientIp: string;
+  clientIp: string;
 };
 
 function invariant(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-        throw new Error(message);
-    }
+  if (!condition) {
+    throw new Error(message);
+  }
 }
 
 function getRequiredEnv(name: string, value: string | undefined): string {
-    invariant(value && value.trim().length > 0, `${name} is required`);
-    return value.trim();
+  invariant(value && value.trim().length > 0, `${name} is required`);
+  return value.trim();
 }
 
 function normalizeEmail(email: string): string {
-    const normalized = email.trim().toLowerCase();
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    invariant(emailPattern.test(normalized), "Invalid email address");
-    return normalized;
+  const normalized = email.trim().toLowerCase();
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  invariant(emailPattern.test(normalized), "Invalid email address");
+  return normalized;
 }
 
 function createOpaqueToken(): string {
-    const bytes = crypto.getRandomValues(new Uint8Array(32));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function hashToken(token: string): Promise<string> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 async function sendWaitlistConfirmationEmail(options: {
-    email: string;
-    confirmationToken: string;
-    unsubscribeToken: string;
-    requestMeta: WaitlistRequestMeta;
+  email: string;
+  confirmationToken: string;
+  unsubscribeToken: string;
+  requestMeta: WaitlistRequestMeta;
 }): Promise<void> {
-    const resendApiKey = getRequiredEnv("RESEND_API_KEY", import.meta.env.RESEND_API_KEY);
-    const resendFromEmail = getRequiredEnv("RESEND_FROM_EMAIL", import.meta.env.RESEND_FROM_EMAIL);
-    const siteUrl = getRequiredEnv("import.meta.env.SITE", import.meta.env.SITE);
-    const confirmationUrl = new URL(
-        `/api/waitlist/confirm?token=${options.confirmationToken}`,
-        siteUrl,
-    ).toString();
-    const unsubscribeUrl = new URL(
-        `/api/waitlist/unsubscribe?token=${options.unsubscribeToken}`,
-        siteUrl,
-    ).toString();
-    const impressumUrl = new URL("/datenschutz", siteUrl).toString();
-    const subject = "Bitte bestätige deine Shade-Warteliste-Anmeldung";
+  const resendApiKey = getRequiredEnv("RESEND_API_KEY", import.meta.env.RESEND_API_KEY);
+  const resendFromEmail = getRequiredEnv(
+    "RESEND_FROM_EMAIL",
+    import.meta.env.RESEND_FROM_EMAIL,
+  );
+  const siteUrl = getRequiredEnv("import.meta.env.SITE", import.meta.env.SITE);
+  const confirmationUrl = new URL(
+    `/api/waitlist/confirm?token=${options.confirmationToken}`,
+    siteUrl,
+  ).toString();
+  const unsubscribeUrl = new URL(
+    `/api/waitlist/unsubscribe?token=${options.unsubscribeToken}`,
+    siteUrl,
+  ).toString();
+  const impressumUrl = new URL("/datenschutz", siteUrl).toString();
+  const subject = "Bitte bestätige deine Shade-Warteliste-Anmeldung";
 
-    const html = `
+  const html = `
         <div style="font-family: Inter, system-ui, sans-serif; background:#050505; color:#f5f5f4; padding:24px;">
             <div style="max-width:560px; margin:0 auto; background:#0c0c0c; border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:32px;">
                 <p style="margin:0 0 12px; font-size:12px; letter-spacing:0.18em; text-transform:uppercase; color:rgba(255,255,255,0.5);">
@@ -87,48 +92,53 @@ async function sendWaitlistConfirmationEmail(options: {
         </div>
     `.trim();
 
-    const text = [
-        "Shade Waitlist",
-        "",
-        "Bitte bestaetige deine Anmeldung.",
-        "",
-        `Double Opt-In bestaetigen: ${confirmationUrl}`,
-        `Abmelden: ${unsubscribeUrl}`,
-        `Impressum: ${impressumUrl}`,
-    ].join("\n");
+  const text = [
+    "Shade Waitlist",
+    "",
+    "Bitte bestaetige deine Anmeldung.",
+    "",
+    `Double Opt-In bestaetigen: ${confirmationUrl}`,
+    `Abmelden: ${unsubscribeUrl}`,
+    `Impressum: ${impressumUrl}`,
+  ].join("\n");
 
-    const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${resendApiKey}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            from: resendFromEmail,
-            to: [options.email],
-            subject,
-            html,
-            text,
-        }),
-    });
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: resendFromEmail,
+      to: [options.email],
+      subject,
+      html,
+      text,
+    }),
+  });
 
-    if (!response.ok) {
-        throw new Error(`Resend email request failed: ${response.status} ${await response.text()}`);
-    }
+  if (!response.ok) {
+    throw new Error(
+      `Resend email request failed: ${response.status} ${await response.text()}`,
+    );
+  }
 }
 
-export async function submitWaitlistSignup(email: string, requestMeta: WaitlistRequestMeta): Promise<void> {
-    await initSchema();
+export async function submitWaitlistSignup(
+  email: string,
+  requestMeta: WaitlistRequestMeta,
+): Promise<void> {
+  await initSchema();
 
-    const normalizedEmail = normalizeEmail(email);
-    const now = new Date().toISOString();
-    const confirmationToken = createOpaqueToken();
-    const unsubscribeToken = createOpaqueToken();
-    const confirmationTokenHash = await hashToken(confirmationToken);
-    const unsubscribeTokenHash = await hashToken(unsubscribeToken);
+  const normalizedEmail = normalizeEmail(email);
+  const now = new Date().toISOString();
+  const confirmationToken = createOpaqueToken();
+  const unsubscribeToken = createOpaqueToken();
+  const confirmationTokenHash = await hashToken(confirmationToken);
+  const unsubscribeTokenHash = await hashToken(unsubscribeToken);
 
-    const result = await db.execute({
-        sql: `
+  const result = await db.execute({
+    sql: `
             INSERT INTO waitlist_signups (
                 email,
                 status,
@@ -159,38 +169,38 @@ export async function submitWaitlistSignup(email: string, requestMeta: WaitlistR
             WHERE waitlist_signups.status <> 'confirmed'
             RETURNING email
         `,
-        args: [
-            normalizedEmail,
-            WAITLIST_OPT_IN_LABEL,
-            requestMeta.clientIp,
-            now,
-            confirmationTokenHash,
-            now,
-            unsubscribeTokenHash,
-        ],
-    });
+    args: [
+      normalizedEmail,
+      WAITLIST_OPT_IN_LABEL,
+      requestMeta.clientIp,
+      now,
+      confirmationTokenHash,
+      now,
+      unsubscribeTokenHash,
+    ],
+  });
 
-    if (result.rows.length === 0) {
-        return;
-    }
+  if (result.rows.length === 0) {
+    return;
+  }
 
-    await sendWaitlistConfirmationEmail({
-        email: normalizedEmail,
-        confirmationToken,
-        unsubscribeToken,
-        requestMeta,
-    });
+  await sendWaitlistConfirmationEmail({
+    email: normalizedEmail,
+    confirmationToken,
+    unsubscribeToken,
+    requestMeta,
+  });
 }
 
 export async function confirmWaitlistSignup(
-    token: string,
-    requestMeta: WaitlistRequestMeta,
+  token: string,
+  requestMeta: WaitlistRequestMeta,
 ): Promise<WaitlistConfirmationResult> {
-    await initSchema();
+  await initSchema();
 
-    const tokenHash = await hashToken(token);
-    const confirmationResult = await db.execute({
-        sql: `
+  const tokenHash = await hashToken(token);
+  const confirmationResult = await db.execute({
+    sql: `
             UPDATE waitlist_signups
             SET status = 'confirmed',
                 confirmed_at = CASE WHEN confirmed_at IS NULL THEN ? ELSE confirmed_at END,
@@ -199,35 +209,38 @@ export async function confirmWaitlistSignup(
               AND status = 'pending'
             RETURNING email
         `,
-        args: [new Date().toISOString(), requestMeta.clientIp, tokenHash],
-    });
+    args: [new Date().toISOString(), requestMeta.clientIp, tokenHash],
+  });
 
-    if (confirmationResult.rows.length > 0) {
-        return "confirmed";
-    }
+  if (confirmationResult.rows.length > 0) {
+    return "confirmed";
+  }
 
-    const existing = await db.execute({
-        sql: "SELECT status FROM waitlist_signups WHERE confirmation_token_hash = ?",
-        args: [tokenHash],
-    });
+  const existing = await db.execute({
+    sql: "SELECT status FROM waitlist_signups WHERE confirmation_token_hash = ?",
+    args: [tokenHash],
+  });
 
-    if (existing.rows.length === 0) {
-        return "invalid";
-    }
+  if (existing.rows.length === 0) {
+    return "invalid";
+  }
 
-    invariant(existing.rows.length === 1, "Expected one waitlist row per confirmation token");
-    return existing.rows[0].status === "confirmed" ? "already-confirmed" : "invalid";
+  invariant(
+    existing.rows.length === 1,
+    "Expected one waitlist row per confirmation token",
+  );
+  return existing.rows[0].status === "confirmed" ? "already-confirmed" : "invalid";
 }
 
 export async function unsubscribeWaitlistSignup(
-    token: string,
-    requestMeta: WaitlistRequestMeta,
+  token: string,
+  requestMeta: WaitlistRequestMeta,
 ): Promise<WaitlistUnsubscribeResult> {
-    await initSchema();
+  await initSchema();
 
-    const tokenHash = await hashToken(token);
-    const unsubscribeResult = await db.execute({
-        sql: `
+  const tokenHash = await hashToken(token);
+  const unsubscribeResult = await db.execute({
+    sql: `
             UPDATE waitlist_signups
             SET status = 'unsubscribed',
                 unsubscribed_at = CASE WHEN unsubscribed_at IS NULL THEN ? ELSE unsubscribed_at END,
@@ -236,22 +249,25 @@ export async function unsubscribeWaitlistSignup(
               AND status <> 'unsubscribed'
             RETURNING email
         `,
-        args: [new Date().toISOString(), requestMeta.clientIp, tokenHash],
-    });
+    args: [new Date().toISOString(), requestMeta.clientIp, tokenHash],
+  });
 
-    if (unsubscribeResult.rows.length > 0) {
-        return "unsubscribed";
-    }
+  if (unsubscribeResult.rows.length > 0) {
+    return "unsubscribed";
+  }
 
-    const existing = await db.execute({
-        sql: "SELECT status FROM waitlist_signups WHERE unsubscribe_token_hash = ?",
-        args: [tokenHash],
-    });
+  const existing = await db.execute({
+    sql: "SELECT status FROM waitlist_signups WHERE unsubscribe_token_hash = ?",
+    args: [tokenHash],
+  });
 
-    if (existing.rows.length === 0) {
-        return "invalid";
-    }
+  if (existing.rows.length === 0) {
+    return "invalid";
+  }
 
-    invariant(existing.rows.length === 1, "Expected one waitlist row per unsubscribe token");
-    return existing.rows[0].status === "unsubscribed" ? "already-unsubscribed" : "invalid";
+  invariant(
+    existing.rows.length === 1,
+    "Expected one waitlist row per unsubscribe token",
+  );
+  return existing.rows[0].status === "unsubscribed" ? "already-unsubscribed" : "invalid";
 }

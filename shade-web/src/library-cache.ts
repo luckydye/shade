@@ -20,13 +20,14 @@ type LibraryCacheHooks = Pick<
   | "resetLocalThumbnailFailure"
   | "resetCameraThumbnailFailure"
 >;
+
 import {
   normalizeModifiedAt,
   normalizeRating,
   normalizeTags,
 } from "shade-ui/src/cache-utils";
-import { browserMediaPlatform } from "./media";
 import { requestToPromise, withStores } from "shade-wasm/indexed-db";
+import { browserMediaPlatform } from "./media";
 
 const DB_NAME = "shade-local-library-cache";
 const DB_VERSION = 2;
@@ -85,9 +86,7 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
         : null,
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
-      latest_snapshot_id: normalizeSnapshotVersion(
-        image.metadata?.latest_snapshot_id,
-      ),
+      latest_snapshot_id: normalizeSnapshotVersion(image.metadata?.latest_snapshot_id),
       latest_snapshot_created_at: image.metadata?.latest_snapshot_created_at ?? null,
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
@@ -106,9 +105,7 @@ function toCachedLocalItem(libraryId: string, image: LibraryImage): CachedLocalI
         ? image.fingerprint
         : null,
     has_snapshots: image.metadata?.has_snapshots ?? false,
-    latest_snapshot_id: normalizeSnapshotVersion(
-      image.metadata?.latest_snapshot_id,
-    ),
+    latest_snapshot_id: normalizeSnapshotVersion(image.metadata?.latest_snapshot_id),
     latest_snapshot_created_at: image.metadata?.latest_snapshot_created_at ?? null,
     rating: normalizeRating(image.metadata?.rating),
     tags: normalizeTags(image.metadata?.tags),

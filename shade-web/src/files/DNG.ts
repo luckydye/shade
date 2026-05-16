@@ -1,13 +1,10 @@
+import { CFAColor, Compression, PhotometricInterp, PlanarConfig } from "./TagTypes";
 import TIFFFile from "./TIFF";
-import {
-  Compression,
-  PhotometricInterp,
-  PlanarConfig,
-  CFAColor,
-} from "./TagTypes";
 
 export default class DNGFile extends TIFFFile {
-  get type() { return "DNG"; }
+  get type() {
+    return "DNG";
+  }
 
   static handleLosslessJPEGImage(tags, image) {
     // lossless Huffman JPEG
@@ -21,7 +18,7 @@ export default class DNGFile extends TIFFFile {
       case PhotometricInterp.RGB:
       case PhotometricInterp.YCBCR:
         break;
-      case PhotometricInterp.CFA:
+      case PhotometricInterp.CFA: {
         const imageData = [];
 
         for (let i = 0; i < image.tiles.length; i++) {
@@ -35,6 +32,7 @@ export default class DNGFile extends TIFFFile {
 
         // this.decodeCFALayout(tags, image);
         break;
+      }
       case PhotometricInterp.LINEAR_RAW:
       case PhotometricInterp.DEPTH:
         break;
@@ -52,10 +50,7 @@ export default class DNGFile extends TIFFFile {
     const cfaLayout = tags["CFALayout"];
 
     const pattern0 = cfaPattern.slice(0, cfaRepPttrn[0]);
-    const pattern1 = cfaPattern.slice(
-      cfaRepPttrn[0],
-      cfaRepPttrn[0] + cfaRepPttrn[1]
-    );
+    const pattern1 = cfaPattern.slice(cfaRepPttrn[0], cfaRepPttrn[0] + cfaRepPttrn[1]);
     void pattern0;
     void pattern1;
 
@@ -63,7 +58,7 @@ export default class DNGFile extends TIFFFile {
 
     for (let x = 0; x < image.width; x++) {
       for (let y = 0; y < image.height; y++) {
-        let r = 0,
+        const r = 0,
           g = 0,
           b = 0;
 

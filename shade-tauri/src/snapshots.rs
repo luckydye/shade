@@ -1,12 +1,16 @@
+use crate::db::library_db_conn;
+use crate::editor_state::{
+    broadcast_layer_stack, ensure_non_image_layers, lock_editor_state,
+    non_image_layer_data, parse_layer_data, restore_masks_from_params, EditorState,
+    PersistedEditVersion, PersistedLayerData,
+};
+use crate::media_metadata::unix_timestamp_millis;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::db::library_db_conn;
-use crate::editor_state::{EditorState, PersistedEditVersion, PersistedLayerData, broadcast_layer_stack, ensure_non_image_layers, lock_editor_state, non_image_layer_data, parse_layer_data, restore_masks_from_params};
-use crate::media_metadata::unix_timestamp_millis;
 
-
-pub(crate) async fn snapshot_ids_by_source_name() -> Result<HashMap<String, String>, String> {
+pub(crate) async fn snapshot_ids_by_source_name(
+) -> Result<HashMap<String, String>, String> {
     let conn = library_db_conn().await;
     let mut rows = conn
         .query(

@@ -1,10 +1,9 @@
-use serde::{Deserialize, Serialize};
-use shade_lib::{
-    CropRect, MaskData, MaskParams,
+use crate::editor_state::{
+    finalize_layer_stack_mutation, lock_editor_state, EditorState,
 };
+use serde::{Deserialize, Serialize};
+use shade_lib::{CropRect, MaskData, MaskParams};
 use std::sync::Mutex;
-use crate::editor_state::{EditorState, finalize_layer_stack_mutation, lock_editor_state};
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GradientMaskParams {

@@ -45,9 +45,7 @@ export interface HostHooks {
 
   // ── Library listing cache ───────────────────────────────────────────
   getCachedLocalLibraryItems(libraryId: string): Promise<LibraryImage[]>;
-  loadLocalLibraryItemsCachedOrRemote(
-    libraryId: string,
-  ): Promise<LibraryImageListing>;
+  loadLocalLibraryItemsCachedOrRemote(libraryId: string): Promise<LibraryImageListing>;
   getCachedCameraLibraryItems(host: string): Promise<LibraryImage[]>;
   loadCameraLibraryItemsCachedOrRemote(host: string): Promise<LibraryImage[]>;
   getCachedPeerLibraryItems(peerId: string): Promise<SharedPicture[]>;
@@ -78,19 +76,12 @@ export interface HostHooks {
   // pipeline backed by OPFS files + wasm decode.
   openImage(path: string): Promise<OpenImageInfo>;
   openImageFile(file: File): Promise<OpenImageInfo>;
-  openPeerImage(
-    peerEndpointId: string,
-    picture: SharedPicture,
-  ): Promise<OpenImageInfo>;
+  openPeerImage(peerEndpointId: string, picture: SharedPicture): Promise<OpenImageInfo>;
   prepareImageOpen(path: string): Promise<void>;
   exportImage(path: string): Promise<void>;
   renderPreview(request?: PreviewRequest): Promise<PreviewFrame>;
   getLayerStack(): Promise<StackInfo>;
-  getMaskThumbnail(
-    layerIdx: number,
-    maxW: number,
-    maxH: number,
-  ): Promise<MaskThumbnail>;
+  getMaskThumbnail(layerIdx: number, maxW: number, maxH: number): Promise<MaskThumbnail>;
   restoreCurrentBrowserSnapshot(imagePath: string): Promise<boolean>;
 }
 

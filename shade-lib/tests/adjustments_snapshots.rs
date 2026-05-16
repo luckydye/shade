@@ -1,7 +1,7 @@
 use shade_lib::{
-    build_curve_lut_from_points, AdjustmentOp, ColorParams, CurveControlPoint, DenoiseParams,
-    ColorSpace, FloatImage, GlowParams, GrainParams, HslParams, LayerStack, Renderer,
-    SharpenParams, VignetteParams,
+    build_curve_lut_from_points, AdjustmentOp, ColorParams, ColorSpace,
+    CurveControlPoint, DenoiseParams, FloatImage, GlowParams, GrainParams, HslParams,
+    LayerStack, Renderer, SharpenParams, VignetteParams,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -30,7 +30,8 @@ async fn renderer_or_skip() -> Option<Renderer> {
 fn fixture_paths() -> Vec<PathBuf> {
     let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let mut fixtures = Vec::new();
-    for entry in fs::read_dir(&fixtures_dir).expect("fixtures directory must be readable") {
+    for entry in fs::read_dir(&fixtures_dir).expect("fixtures directory must be readable")
+    {
         let path = entry.expect("fixture entry must be readable").path();
         let ext = path
             .extension()
@@ -217,8 +218,8 @@ fn load_fixture(path: &Path) -> (FloatImage, ColorSpace) {
     shade_io::load_image_f32_with_info(path)
         .map(|(image, info)| (image, info.color_space))
         .unwrap_or_else(|error| {
-        panic!("failed to load fixture {}: {error}", path.display());
-    })
+            panic!("failed to load fixture {}: {error}", path.display());
+        })
 }
 
 async fn render_case(
@@ -231,7 +232,8 @@ async fn render_case(
     let (target_width, target_height) = if keep_native_size {
         (image.width, image.height)
     } else {
-        let target_height = ((TARGET_WIDTH as f32 / image.width as f32) * image.height as f32)
+        let target_height = ((TARGET_WIDTH as f32 / image.width as f32)
+            * image.height as f32)
             .round()
             .max(1.0) as u32;
         (TARGET_WIDTH, target_height)
@@ -274,8 +276,9 @@ fn texture_id_for_fixture(path: &Path) -> u64 {
 }
 
 fn read_rgba(path: &Path) -> (Vec<u8>, u32, u32) {
-    let image = image::open(path)
-        .unwrap_or_else(|error| panic!("failed to read snapshot {}: {error}", path.display()));
+    let image = image::open(path).unwrap_or_else(|error| {
+        panic!("failed to read snapshot {}: {error}", path.display())
+    });
     let rgba = image.to_rgba8();
     (rgba.into_raw(), image.width(), image.height())
 }
@@ -318,7 +321,11 @@ fn assert_image_match(
     height: u32,
     snapshot_path: &Path,
 ) {
-    assert_eq!(actual.len(), expected.len(), "snapshot byte length mismatch");
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "snapshot byte length mismatch"
+    );
     let mut max_diff = 0u8;
     let mut changed = 0usize;
     for (left, right) in actual.iter().zip(expected.iter()) {
@@ -376,8 +383,8 @@ async fn adjustments_match_snapshots() {
         return;
     };
 
-    let update_snapshots =
-        std::env::var("UPDATE_SNAPSHOTS").is_ok_and(|value| value == "1" || value == "true");
+    let update_snapshots = std::env::var("UPDATE_SNAPSHOTS")
+        .is_ok_and(|value| value == "1" || value == "true");
     let snapshots_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_DIR);
 
     for fixture_path in fixture_paths() {
@@ -397,7 +404,8 @@ async fn adjustments_match_snapshots() {
                 case.compare_to_original,
             )
             .await;
-            let snapshot_path = snapshots_dir.join(format!("{fixture_stem}__{}.png", case.name));
+            let snapshot_path =
+                snapshots_dir.join(format!("{fixture_stem}__{}.png", case.name));
 
             if case.compare_to_original && !update_snapshots {
                 let (original, original_width, original_height) = if matches!(

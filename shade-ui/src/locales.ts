@@ -1,39 +1,35 @@
-import i18next from "i18next";
-
 import de from "../locales/de.json";
 import en from "../locales/en.json";
 import kr from "../locales/kr.json";
 
-export const AVAILABLE_LANGS = ["en", "de", "kr"];
+export const AVAILABLE_LANGS = ["en", "de", "kr"] as const;
 export const DEFAULT_LANGUAGE = "en";
 
-export type LocaleKey = keyof typeof de;
+export type LocaleKey = keyof typeof en;
 
-const log = console;
+const bundles: Record<string, Record<string, string>> = { en, de, kr };
 
-// https://www.i18next.com/overview/api
+function interpolate(template: string, args: Array<number | string | undefined>): string {
+  return template.replace(/\{\{(\d+)\}\}/g, (match, idx) => {
+    const value = args[Number(idx)];
+    return value === undefined ? match : String(value);
+  });
+}
 
-i18next.init(
-  {
-    // partialBundledLanguages: true, /* partialy from backend */
-    fallbackLng: "en",
-    defaultNS: "global",
-    resources: {},
-  },
-  (err) => {
-    if (err) return log.error("something went wrong loading", err);
-    log.info("i18next loaded");
-  }
-);
-
-i18next.addResourceBundle("de", "global", de);
-i18next.addResourceBundle("en", "global", en);
-i18next.addResourceBundle("kr", "global", kr);
+function lookup(lang: string, key: string): string | undefined {
+  return bundles[lang]?.[key] ?? bundles[DEFAULT_LANGUAGE]?.[key];
+}
 
 export function t(
   id: LocaleKey | LocaleKey[],
   args: Array<number | string | undefined> = [],
-  lang?: string
+  lang?: string,
 ): string | undefined {
-  return i18next.t(id, { lng: lang ?? DEFAULT_LANGUAGE, ...args });
+  const language = lang ?? DEFAULT_LANGUAGE;
+  const keys = Array.isArray(id) ? id : [id];
+  for (const key of keys) {
+    const hit = lookup(language, key);
+    if (hit !== undefined) return interpolate(hit, args);
+  }
+  return undefined;
 }

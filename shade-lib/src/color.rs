@@ -54,7 +54,8 @@ pub fn to_acescct_f32(pixels: &mut [f32], color_space: &ColorSpace) {
         ColorSpace::AcesCct => {}
         ColorSpace::LinearSrgb => {
             for chunk in pixels.chunks_exact_mut(4) {
-                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(chunk[0], chunk[1], chunk[2]);
+                let (r, g, b) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1
+                    .apply(chunk[0], chunk[1], chunk[2]);
                 chunk[0] = linear_to_acescct_channel(r);
                 chunk[1] = linear_to_acescct_channel(g);
                 chunk[2] = linear_to_acescct_channel(b);

@@ -244,7 +244,10 @@ mod tests {
     fn text_content_omits_empty_spans_in_json() {
         let c = TextContent::new("hello");
         let json = serde_json::to_string(&c).unwrap();
-        assert!(!json.contains("spans"), "empty spans should be skipped: {json}");
+        assert!(
+            !json.contains("spans"),
+            "empty spans should be skipped: {json}"
+        );
     }
 
     #[test]

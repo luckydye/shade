@@ -2,7 +2,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tauri::Manager;
 
-
 pub(crate) async fn ccapi_host_is_online(host: &str) -> bool {
     let api = shade_io::ccapi::CCAPI::new(host);
     tokio::time::timeout(std::time::Duration::from_millis(1200), api.probe())

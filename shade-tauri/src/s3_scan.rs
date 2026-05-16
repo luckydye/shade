@@ -1,16 +1,17 @@
+use crate::config::load_app_config;
+use crate::db::library_index_db;
+use crate::media_libraries::{
+    desktop_local_library_roots, local_library_is_available, s3_library_id,
+};
 use shade_io::{
-    has_persisted_library_index,
-    has_persisted_library_index_by_root, is_supported_library_image, picture_display_name,
+    has_persisted_library_index, has_persisted_library_index_by_root,
+    is_supported_library_image, picture_display_name,
     replace_persisted_library_index_by_root,
 };
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
-use crate::config::load_app_config;
-use crate::db::library_index_db;
-use crate::media_libraries::{desktop_local_library_roots, local_library_is_available, s3_library_id};
-
 
 pub struct S3LibraryScanState {
     pub scans: Mutex<HashMap<String, Arc<Mutex<shade_io::LibraryScanSnapshot>>>>,
@@ -71,8 +72,7 @@ impl S3LibraryScanState {
         app: tauri::AppHandle<R>,
         config: &shade_io::S3LibraryConfig,
     ) -> Result<shade_io::LibraryScanSnapshot, String> {
-        let (snapshot, should_scan) =
-            self.ensure_snapshot_for_library(config).await?;
+        let (snapshot, should_scan) = self.ensure_snapshot_for_library(config).await?;
         if should_scan {
             start_s3_library_scan(
                 app,
@@ -105,12 +105,7 @@ impl S3LibraryScanState {
                 return Ok(false);
             }
         }
-        start_s3_library_scan(
-            app,
-            snapshot,
-            self.index_db.clone(),
-            config.clone(),
-        )?;
+        start_s3_library_scan(app, snapshot, self.index_db.clone(), config.clone())?;
         Ok(true)
     }
 
@@ -129,7 +124,8 @@ impl S3LibraryScanState {
     }
 
     pub async fn remove_item(&self, library_id: &str, path: &str) -> Result<(), String> {
-        shade_io::delete_persisted_library_index_item(&self.index_db, library_id, path).await?;
+        shade_io::delete_persisted_library_index_item(&self.index_db, library_id, path)
+            .await?;
         if let Ok(scans) = self.scans.lock() {
             if let Some(snapshot) = scans.get(library_id) {
                 if let Ok(mut guard) = snapshot.lock() {
@@ -213,9 +209,8 @@ pub(crate) fn start_s3_library_scan<R: tauri::Runtime>(
             guard.is_scanning = false;
             guard.is_complete = true;
             drop(guard);
-            crate::channel_server::channel_from_app(&app).send_blocking(
-                crate::ChannelMessage::LibraryScanComplete { library_id },
-            );
+            crate::channel_server::channel_from_app(&app)
+                .send_blocking(crate::ChannelMessage::LibraryScanComplete { library_id });
         })
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -330,10 +325,9 @@ pub fn prime_missing_library_indexes<R: tauri::Runtime>(
             ))? {
                 continue;
             }
-            tauri::async_runtime::block_on(library_scan_service.refresh_library(
-                &library_id,
-                root,
-            ))?;
+            tauri::async_runtime::block_on(
+                library_scan_service.refresh_library(&library_id, root),
+            )?;
         }
         for library in load_app_config()?.libraries {
             let shade_io::LibraryConfig::S3(config) = library else {

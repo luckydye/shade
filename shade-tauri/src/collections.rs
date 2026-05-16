@@ -1,6 +1,5 @@
 use crate::db::library_db_conn;
 
-
 #[tauri::command]
 pub async fn list_collections(
     library_id: String,

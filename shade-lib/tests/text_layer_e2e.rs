@@ -8,9 +8,7 @@
 //! Skips gracefully when no GPU adapter or no system font is available,
 //! mirroring the pattern in `crop_rotation_e2e.rs`.
 
-use shade_lib::{
-    FloatImage, LayerStack, PreviewCrop, Renderer, TextContent, TextStyle,
-};
+use shade_lib::{FloatImage, LayerStack, PreviewCrop, Renderer, TextContent, TextStyle};
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -21,9 +21,7 @@ export const ActionButton: Component<{
     onClick={props.onClick}
     disabled={props.disabled}
     class={`${props.class} ${TOOLBAR_BUTTON_BASE_CLASS} ${
-      props.primary
-        ? TOOLBAR_BUTTON_PRIMARY_CLASS
-        : TOOLBAR_BUTTON_SECONDARY_CLASS
+      props.primary ? TOOLBAR_BUTTON_PRIMARY_CLASS : TOOLBAR_BUTTON_SECONDARY_CLASS
     }`}
   >
     <span class="inline-flex items-center justify-center">{props.icon}</span>

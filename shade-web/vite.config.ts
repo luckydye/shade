@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
-import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
@@ -28,7 +28,7 @@ export default defineConfig({
   build: {
     outDir: "dist/shade",
     target: ["es2021", "chrome100", "safari13"],
-    minify: false
+    minify: false,
   },
   optimizeDeps: {
     exclude: ["shade-ui", "shade-wasm"],

@@ -206,12 +206,8 @@ impl CropPipeline {
         output_height: u32,
         params: CropUniform,
     ) -> Result<Texture> {
-        let output_tex = create_output_texture(
-            ctx,
-            output_width,
-            output_height,
-            "crop output",
-        );
+        let output_tex =
+            create_output_texture(ctx, output_width, output_height, "crop output");
         let uniform_buf = create_upload_buffer(
             &ctx.device,
             &ctx.queue,
@@ -1058,8 +1054,7 @@ impl GlowPipeline {
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
 
-        let output_tex =
-            create_output_texture(ctx, width, height, "glow output texture");
+        let output_tex = create_output_texture(ctx, width, height, "glow output texture");
         let uniform = GlowUniform::new(params, effect_space);
 
         let uniform_buf = create_upload_buffer(
@@ -1151,8 +1146,7 @@ impl HslPipeline {
         let device = &ctx.device;
         let size = input_tex.size();
         let (width, height) = (size.width, size.height);
-        let output_tex =
-            create_output_texture(ctx, width, height, "hsl output texture");
+        let output_tex = create_output_texture(ctx, width, height, "hsl output texture");
         let gpu = HslParamsGpu::from(params);
         let uniform_buf = create_upload_buffer(
             device,

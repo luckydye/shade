@@ -135,7 +135,6 @@ pub fn sort_indexed_library_items(items: &mut [IndexedLibraryImage]) {
     });
 }
 
-
 pub fn picture_display_name(picture_id: &str) -> String {
     if let Some(name) = Path::new(picture_id)
         .file_name()
@@ -649,7 +648,6 @@ pub async fn delete_persisted_library_index(
         }
     }
 }
-
 
 pub fn library_index_db_path(config_dir: &Path) -> PathBuf {
     config_dir.join("library-index.db")

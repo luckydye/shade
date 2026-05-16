@@ -46,17 +46,17 @@
 }
 
 @media (prefers-color-scheme: dark) {
-    /* Dark mode overrides */
-    :root {
-        --text-label: #ffffff;
-        --text-unit: #cccccc;
-        --color-surface-backdrop: #252527;
-        --color-surface-background: #000000;
-        --color-surface-header: #1b1b1b;
-        --color-surface-active: #2f2f32;
-        --color-surface-inactive: #808080;
-        --color-surface-input: #1b1b1b;
-        --color-surface-handle: #ffffff;
-        --color-surface-item: #262626;
-    }
+  /* Dark mode overrides */
+  :root {
+    --text-label: #ffffff;
+    --text-unit: #cccccc;
+    --color-surface-backdrop: #252527;
+    --color-surface-background: #000000;
+    --color-surface-header: #1b1b1b;
+    --color-surface-active: #2f2f32;
+    --color-surface-inactive: #808080;
+    --color-surface-input: #1b1b1b;
+    --color-surface-handle: #ffffff;
+    --color-surface-item: #262626;
+  }
 }

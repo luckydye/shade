@@ -79,8 +79,7 @@ impl tauri::ipc::IpcResponse for PreviewFrame {
         let header_json = serde_json::to_vec(&header)
             .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
         let header_len = (header_json.len() as u32).to_le_bytes();
-        let mut packed =
-            Vec::with_capacity(4 + header_json.len() + self.pixels.len());
+        let mut packed = Vec::with_capacity(4 + header_json.len() + self.pixels.len());
         packed.extend_from_slice(&header_len);
         packed.extend_from_slice(&header_json);
         packed.extend_from_slice(&self.pixels);

@@ -1,5 +1,9 @@
 // Two-pass separable Gaussian unsharp mask pipeline
-use crate::{context::{create_upload_buffer, GpuContext}, pipelines::EffectSpace, INTERNAL_TEXTURE_FORMAT};
+use crate::{
+    context::{create_upload_buffer, GpuContext},
+    pipelines::EffectSpace,
+    INTERNAL_TEXTURE_FORMAT,
+};
 use bytemuck::{Pod, Zeroable};
 use shade_lib::SharpenParams;
 use wgpu::*;

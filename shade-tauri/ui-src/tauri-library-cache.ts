@@ -20,14 +20,9 @@ type LibraryCacheHooks = Pick<
   | "resetLocalThumbnailFailure"
   | "resetCameraThumbnailFailure"
 >;
-import {
-  listLibraryImages,
-  listPeerPictures,
-} from "shade-ui/src/bridge/index";
-import {
-  shadePeerThumbnailUrl,
-  shadeThumbnailUrl,
-} from "shade-ui/src/bridge/channel";
+
+import { shadePeerThumbnailUrl, shadeThumbnailUrl } from "shade-ui/src/bridge/channel";
+import { listLibraryImages, listPeerPictures } from "shade-ui/src/bridge/index";
 import {
   normalizeModifiedAt,
   normalizeRating,
@@ -55,9 +50,7 @@ function normalizeLibraryImage(image: LibraryImage): LibraryImage {
         : null,
     metadata: {
       has_snapshots: image.metadata?.has_snapshots ?? false,
-      latest_snapshot_id: normalizeSnapshotVersion(
-        image.metadata?.latest_snapshot_id,
-      ),
+      latest_snapshot_id: normalizeSnapshotVersion(image.metadata?.latest_snapshot_id),
       latest_snapshot_created_at: image.metadata?.latest_snapshot_created_at ?? null,
       rating: normalizeRating(image.metadata?.rating),
       tags: normalizeTags(image.metadata?.tags),
@@ -119,15 +112,11 @@ export const tauriLibraryCache: LibraryCacheHooks = {
     tauriPeerLibraryItems.delete(peerId);
   },
   async resolveLocalThumbnailSrc(path, latestSnapshotId) {
-    const thumbPath = latestSnapshotId
-      ? `${path}#snapshot:${latestSnapshotId}`
-      : path;
+    const thumbPath = latestSnapshotId ? `${path}#snapshot:${latestSnapshotId}` : path;
     return shadeThumbnailUrl(thumbPath, latestSnapshotId);
   },
   async resolveCameraThumbnailSrc(path, latestSnapshotId) {
-    const thumbPath = latestSnapshotId
-      ? `${path}#snapshot:${latestSnapshotId}`
-      : path;
+    const thumbPath = latestSnapshotId ? `${path}#snapshot:${latestSnapshotId}` : path;
     return shadeThumbnailUrl(thumbPath, latestSnapshotId);
   },
   async resolvePeerThumbnailSrc(peerId, pictureId) {

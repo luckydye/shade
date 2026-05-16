@@ -9,21 +9,21 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import { backdropTile } from "../../viewport/preview";
+import type { AdjustmentValues } from "../../bridge";
 import { isAdjustmentSliderActive, state, viewportToneSample } from "../../store/editor";
-import { curveSvg } from "./inspector-icons";
+import { backdropTile } from "../../viewport/preview";
 import {
   buildLuminanceHistogram,
+  type ControlPoint,
   clamp,
+  type EditableControlPoint,
   histogramPath,
   isEndpointPoint,
   remapPath,
   sampleCurveValue,
   TONE_THRESHOLD_BOUNDARIES,
-  type ControlPoint,
-  type EditableControlPoint,
 } from "./curve-utils";
-import type { AdjustmentValues } from "../../bridge";
+import { curveSvg } from "./inspector-icons";
 
 export type CurveEditorBaseProps = {
   label: string;
@@ -31,7 +31,9 @@ export type CurveEditorBaseProps = {
   parameterRowClass: string;
   curvePointCache: Accessor<Map<number, ControlPoint[]>>;
   defaultCurvePoints: Accessor<ControlPoint[]>;
-  getStoredPoints: (adjustments: AdjustmentValues | null | undefined) => ControlPoint[] | undefined | null;
+  getStoredPoints: (
+    adjustments: AdjustmentValues | null | undefined,
+  ) => ControlPoint[] | undefined | null;
   onApplyCurve: (points: readonly ControlPoint[]) => Promise<unknown>;
   buildLut: (pts: readonly ControlPoint[]) => number[];
   normalizePoints: (pts: readonly ControlPoint[]) => ControlPoint[];
@@ -97,7 +99,12 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
     graphPadding + ((props.yMax - value) / props.yMax) * innerHeight();
   const chartThresholdX = (value: number) => graphPadding + value * innerWidth();
   const curveSvgPath = () =>
-    remapPath(props.buildSvgCurvePath(lut()), svgSize().width, svgSize().height, graphPadding);
+    remapPath(
+      props.buildSvgCurvePath(lut()),
+      svgSize().width,
+      svgSize().height,
+      graphPadding,
+    );
   const histogramSvgPath = () =>
     remapPath(
       histogramPath(luminanceHistogram()?.bins ?? []),
@@ -239,7 +246,9 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
       if (isEndpointPoint(point)) {
         const resetY = props.endpointResetY(point);
         const next = pts()
-          .map((candidate) => (candidate.id === id ? { ...candidate, y: resetY } : candidate))
+          .map((candidate) =>
+            candidate.id === id ? { ...candidate, y: resetY } : candidate,
+          )
           .sort((left, right) => left.x - right.x);
         setPts(next);
         void props.onApplyCurve(next);
@@ -301,7 +310,11 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
             "touch-action": "none",
           }}
           onPointerDown={(event) => {
-            if (event.button !== 0 || event.pointerType === "touch" || event.target !== svgRef) {
+            if (
+              event.button !== 0 ||
+              event.pointerType === "touch" ||
+              event.target !== svgRef
+            ) {
               return;
             }
             event.preventDefault();

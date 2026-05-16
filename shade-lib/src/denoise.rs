@@ -8,7 +8,10 @@ use bytemuck::{Pod, Zeroable};
 use shade_lib::DenoiseParams;
 use wgpu::*;
 
-use crate::{context::create_upload_buffer, pipelines::EffectSpace, GpuContext, INTERNAL_TEXTURE_FORMAT};
+use crate::{
+    context::create_upload_buffer, pipelines::EffectSpace, GpuContext,
+    INTERNAL_TEXTURE_FORMAT,
+};
 
 const GUIDE_H_WGSL: &str = include_str!("../shaders/denoise_guide_h.wgsl");
 const GUIDE_V_WGSL: &str = include_str!("../shaders/denoise_guide_v.wgsl");

@@ -78,10 +78,7 @@ const ASSET_RULES: Record<Os, Record<Arch, AssetRule[]>> = {
   },
 };
 
-function normalizeArch(
-  architecture: string | undefined,
-  bitness?: string,
-): Arch | null {
+function normalizeArch(architecture: string | undefined, bitness?: string): Arch | null {
   if (!architecture) {
     return null;
   }
@@ -240,8 +237,7 @@ class DownloadCtaElement extends HTMLElement {
     this.fallback = document.createElement("a");
     this.fallback.className = `${BUTTON_CLASS} border-white/12 bg-white/[0.08] text-white/72 hover:bg-white/[0.12]`;
     this.fallback.href = "#waitlist";
-    this.fallback.textContent =
-      this.getAttribute("unavailable-label") ?? "Coming soon";
+    this.fallback.textContent = this.getAttribute("unavailable-label") ?? "Coming soon";
 
     this.append(this.link, this.fallback);
   }
@@ -271,8 +267,7 @@ class DownloadCtaElement extends HTMLElement {
       this.link.style.display = "";
       this.fallback.style.display = "none";
     } catch (error) {
-      this.fallback.textContent =
-        this.getAttribute("unavailable-label") ?? "Coming soon";
+      this.fallback.textContent = this.getAttribute("unavailable-label") ?? "Coming soon";
       throw error;
     }
   }

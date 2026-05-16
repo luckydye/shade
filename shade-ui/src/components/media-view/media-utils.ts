@@ -1,13 +1,13 @@
 import {
+  type LibraryImage,
+  listMediaRatings,
   loadCameraLibraryItemsCachedOrRemote,
   loadLocalLibraryItemsCachedOrRemote,
   loadPeerLibraryItemsCachedOrRemote,
-  listMediaRatings,
+  type MediaLibrary,
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
-  type LibraryImage,
-  type MediaLibrary,
   type SharedPicture,
 } from "../../bridge/index";
 import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../cache-utils";
@@ -78,7 +78,9 @@ function toPeerLibraryItem(peerId: string, picture: SharedPicture): PeerLibraryI
   };
 }
 
-export function isPeerLibrary(library: LibraryEntry | null): library is VisiblePeerLibrary {
+export function isPeerLibrary(
+  library: LibraryEntry | null,
+): library is VisiblePeerLibrary {
   return library?.kind === "peer";
 }
 
@@ -307,7 +309,9 @@ function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem 
 export async function applyStoredRatings(items: MediaItem[]) {
   const ratingIds = items
     .map((item) => ({ item, ratingId: mediaRatingId(item) }))
-    .filter((entry): entry is { item: MediaItem; ratingId: string } => entry.ratingId !== null);
+    .filter(
+      (entry): entry is { item: MediaItem; ratingId: string } => entry.ratingId !== null,
+    );
   const ratings = await listMediaRatings(ratingIds.map((entry) => entry.ratingId));
   return items.map((item) => {
     const ratingId = mediaRatingId(item);
@@ -445,10 +449,7 @@ export async function loadLibraryData(libraryId: string | null): Promise<Library
   }
 }
 
-export async function loadItemSrc(
-  item: MediaItem,
-  signal: AbortSignal,
-): Promise<string> {
+export async function loadItemSrc(item: MediaItem, signal: AbortSignal): Promise<string> {
   if (item.kind === "peer") {
     return resolvePeerThumbnailSrc(item.peerId, item.id, signal);
   }

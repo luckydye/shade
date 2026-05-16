@@ -121,12 +121,9 @@ impl ThumbnailCacheDb {
 
     pub async fn delete(&self, picture_id: &str) -> Result<(), String> {
         let conn = self.conn.lock().await;
-        conn.execute(
-            "DELETE FROM thumbnails WHERE picture_id = ?1",
-            [picture_id],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM thumbnails WHERE picture_id = ?1", [picture_id])
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -147,7 +144,8 @@ async fn has_column(
     table: &str,
     column: &str,
 ) -> Result<bool, String> {
-    let stmt = format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1");
+    let stmt =
+        format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1");
     let mut rows = conn
         .query(stmt.as_str(), libsql::params![column])
         .await

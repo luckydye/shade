@@ -150,7 +150,8 @@ impl CompositePipeline {
         let (width, height) = (size.width, size.height);
 
         // Output texture.
-        let output_tex = ctx.acquire_work_texture(width, height, "composite output texture");
+        let output_tex =
+            ctx.acquire_work_texture(width, height, "composite output texture");
 
         // Dummy 1×1 white texture for when mask_tex is None.
         let effective_mask_tex: &Texture = if let Some(m) = mask_tex {

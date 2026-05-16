@@ -146,7 +146,10 @@ pub trait SampleSource {
 /// - `0 < size <= 4 * SAMPLE_SIZE`: single offset at `0` (whole-file path).
 /// - Otherwise: `[0, size/3, 2*size/3, size - SAMPLE_SIZE]`.
 pub fn sample_offsets(size: u64) -> Vec<u64> {
-    sample_plan(size).into_iter().map(|(offset, _)| offset).collect()
+    sample_plan(size)
+        .into_iter()
+        .map(|(offset, _)| offset)
+        .collect()
 }
 
 /// Deterministic `(offset, length)` plan per §3.2 / §3.4.
@@ -234,7 +237,8 @@ pub fn fingerprint_with_source<S: SampleSource>(
         }
         chunks.push((offset, chunk));
     }
-    let refs: Vec<(u64, &[u8])> = chunks.iter().map(|(o, c)| (*o, c.as_slice())).collect();
+    let refs: Vec<(u64, &[u8])> =
+        chunks.iter().map(|(o, c)| (*o, c.as_slice())).collect();
     Ok(fingerprint_from_samples(size, &refs))
 }
 
@@ -484,7 +488,11 @@ mod tests {
 
     struct ShortSource;
     impl SampleSource for ShortSource {
-        fn read_range(&mut self, _offset: u64, len: u32) -> Result<Vec<u8>, FingerprintError> {
+        fn read_range(
+            &mut self,
+            _offset: u64,
+            len: u32,
+        ) -> Result<Vec<u8>, FingerprintError> {
             Ok(vec![0u8; len.saturating_sub(1) as usize])
         }
     }
@@ -493,7 +501,10 @@ mod tests {
     fn truncated_source_returns_truncated_read_error() {
         let mut src = ShortSource;
         let result = fingerprint_with_source(WHOLE_FILE_THRESHOLD * 2, &mut src);
-        assert!(matches!(result, Err(FingerprintError::TruncatedRead { .. })));
+        assert!(matches!(
+            result,
+            Err(FingerprintError::TruncatedRead { .. })
+        ));
     }
 
     #[test]
@@ -510,7 +521,10 @@ mod tests {
         assert_eq!(fingerprint_from_bytes(&small), small_local.fingerprint);
 
         // And for empty input.
-        assert_eq!(fingerprint_from_bytes(&[]), fingerprint_from_samples(0, &[]));
+        assert_eq!(
+            fingerprint_from_bytes(&[]),
+            fingerprint_from_samples(0, &[])
+        );
     }
 
     #[test]

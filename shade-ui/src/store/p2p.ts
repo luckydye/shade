@@ -1,8 +1,8 @@
 import { createStore } from "solid-js/store";
 import {
-  loadPeerLibraryItemsCachedOrRemote,
   getLocalPeerDiscoverySnapshot,
   type LocalPeerDiscoverySnapshot,
+  loadPeerLibraryItemsCachedOrRemote,
   type SharedPicture,
 } from "../bridge/index";
 

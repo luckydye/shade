@@ -9,11 +9,7 @@
  * update and frames with a stale generation are discarded.
  */
 
-import type {
-  ArtboardViewport,
-  PreviewCropMessage,
-  PreviewQuality,
-} from "./channel";
+import type { ArtboardViewport, PreviewCropMessage, PreviewQuality } from "./channel";
 
 export type PreviewFrameKind = "rgba" | "rgba-float16";
 export type PreviewColorSpace = "srgb" | "display-p3";
@@ -88,22 +84,22 @@ function parseFrameHeader(buffer: ArrayBuffer): {
 } {
   const view = new DataView(buffer);
   const headerLen = view.getUint32(0, true);
-  const headerJson = new TextDecoder().decode(
-    new Uint8Array(buffer, 4, headerLen),
-  );
+  const headerJson = new TextDecoder().decode(new Uint8Array(buffer, 4, headerLen));
   const header = JSON.parse(headerJson) as Omit<PreviewFramePush, "pixels">;
   return { header, pixelOffset: 4 + headerLen };
 }
 
 function frameToImageData(frame: PreviewFramePush): ImageData {
   if (frame.kind === "rgba-float16") {
-    const Float16 = (globalThis as unknown as {
-      Float16Array?: new (
-        buf: ArrayBufferLike,
-        byteOffset?: number,
-        length?: number,
-      ) => unknown;
-    }).Float16Array;
+    const Float16 = (
+      globalThis as unknown as {
+        Float16Array?: new (
+          buf: ArrayBufferLike,
+          byteOffset?: number,
+          length?: number,
+        ) => unknown;
+      }
+    ).Float16Array;
     if (!Float16) {
       throw new Error("Float16Array not available for rgba-float16 preview");
     }
@@ -161,11 +157,7 @@ export async function installPreviewChannel(
   previewInstalled = true;
   await register((buffer) => {
     const { header, pixelOffset } = parseFrameHeader(buffer);
-    const pixels = new Uint8Array(
-      buffer,
-      pixelOffset,
-      buffer.byteLength - pixelOffset,
-    );
+    const pixels = new Uint8Array(buffer, pixelOffset, buffer.byteLength - pixelOffset);
     applyFrame({ ...header, pixels });
   });
 }

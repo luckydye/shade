@@ -1,20 +1,14 @@
 import { BinaryFile } from "../BinaryFile";
 import RawImageData from "./RawImageData";
-import {
-  Compression, 
-  FIELDS, 
-  FIELD_TYPE,
-  PhotometricInterp,
-  Subfile
-} from "./TagTypes";
+import { Compression, FIELD_TYPE, FIELDS, PhotometricInterp, Subfile } from "./TagTypes";
 
 class Canvas {
   constructor() {
-    return document.createElement('canvas');
+    return document.createElement("canvas");
   }
 }
 
-const ImageCanvas = 'OffscreenCanvas' in globalThis ? OffscreenCanvas : Canvas;
+const ImageCanvas = "OffscreenCanvas" in globalThis ? OffscreenCanvas : Canvas;
 
 export default class TIFFFile extends BinaryFile {
   static get FileHeader() {
@@ -61,21 +55,18 @@ export default class TIFFFile extends BinaryFile {
   }
 
   static verifyFileHeader(file) {
-    const byteOrder = String.fromCharCode(
-      file.view.getUint8(0),
-      file.view.getUint8(1),
-    );
+    const byteOrder = String.fromCharCode(file.view.getUint8(0), file.view.getUint8(1));
     const littleEndian =
-      byteOrder === this.LITTLE_ENDIAN
+      byteOrder === TIFFFile.LITTLE_ENDIAN
         ? true
-        : byteOrder === this.BIG_ENDIAN
+        : byteOrder === TIFFFile.BIG_ENDIAN
           ? false
           : null;
     if (littleEndian === null) {
       throw new Error("File not compatible");
     }
-    const header = this.unserialize(file, 0, this.FileHeader, littleEndian);
-    const n = this.getValue(header, "number");
+    const header = TIFFFile.unserialize(file, 0, TIFFFile.FileHeader, littleEndian);
+    const n = TIFFFile.getValue(header, "number");
     if (n === 43) {
       throw new Error("BigTIFF is not supported");
     }
@@ -89,11 +80,11 @@ export default class TIFFFile extends BinaryFile {
 
   static parseFile(file) {
     // read file header
-    const header = this.verifyFileHeader(file);
+    const header = TIFFFile.verifyFileHeader(file);
 
-    this.parseIFDs(file, this.getValue(header, "ifdOffset"));
-    this.parseMetaData(file);
-    this.parseImages(file);
+    TIFFFile.parseIFDs(file, TIFFFile.getValue(header, "ifdOffset"));
+    TIFFFile.parseMetaData(file);
+    TIFFFile.parseImages(file);
   }
 
   static parseIFDs(file, offset) {
@@ -103,10 +94,10 @@ export default class TIFFFile extends BinaryFile {
 
     file._ifds = [];
 
-    while (nextIfdOffset > 0 && counter < this.MAX_IFD_COUNT) {
+    while (nextIfdOffset > 0 && counter < TIFFFile.MAX_IFD_COUNT) {
       counter++;
 
-      const ifd = this.parseIFD(file, nextIfdOffset);
+      const ifd = TIFFFile.parseIFD(file, nextIfdOffset);
       file._ifds.push(ifd.tags);
 
       nextIfdOffset = ifd.next;
@@ -115,8 +106,8 @@ export default class TIFFFile extends BinaryFile {
     if (file.getTag("SubIFDs")) {
       const subIFDs = file.getTag("SubIFDs");
 
-      for (let offset of subIFDs) {
-        const subIfd = this.parseIFD(file, offset);
+      for (const offset of subIFDs) {
+        const subIfd = TIFFFile.parseIFD(file, offset);
         file._ifds.push(subIfd.tags);
       }
     }
@@ -126,12 +117,12 @@ export default class TIFFFile extends BinaryFile {
     // EXIF Data
     if (file.getTag("EXIF")) {
       const pointer = file.getTag("EXIF")[0];
-      const exifSub = this.parseIFD(file, pointer);
+      const exifSub = TIFFFile.parseIFD(file, pointer);
       file._exif = exifSub.tags;
 
       if (file._exif["Makernote"]) {
         const pointer = file._exif["Makernote"][0];
-        const makernote = this.parseIFD(file, pointer);
+        const makernote = TIFFFile.parseIFD(file, pointer);
         file._exif["Makernote"] = makernote.tags;
       }
     }
@@ -139,7 +130,7 @@ export default class TIFFFile extends BinaryFile {
     // GPS Data
     if (file.getTag("GPS")) {
       const pointer = file.getTag("GPS")[0];
-      const data = this.parseIFD(file, pointer);
+      const data = TIFFFile.parseIFD(file, pointer);
       file._gps = data.tags;
     }
 
@@ -148,8 +139,8 @@ export default class TIFFFile extends BinaryFile {
 
   static parseImages(file) {
     file._images = [];
-    for (let ifd of file._ifds) {
-      const image = this.parseIFDImage(file, ifd);
+    for (const ifd of file._ifds) {
+      const image = TIFFFile.parseIFDImage(file, ifd);
       image.orientation = ifd["Orientation"]?.[0] ?? file.getTag("Orientation")?.[0] ?? 1;
       file._images.push(image);
     }
@@ -219,9 +210,9 @@ export default class TIFFFile extends BinaryFile {
       const compression = tags["Compression"][0];
       image.compression = compression;
 
-      for (let key in Compression) {
+      for (const key in Compression) {
         if (Compression[key] == compression) {
-          const handler = this.compressionHandlers[key];
+          const handler = TIFFFile.compressionHandlers[key];
           handler(tags, image);
         }
       }
@@ -232,11 +223,11 @@ export default class TIFFFile extends BinaryFile {
 
   static get compressionHandlers() {
     return {
-      UNCOMPRESSED: this.handleUncompressedImage.bind(this),
-      TIFF_JPEG: this.handleJPEGImage.bind(this),
-      JPEG: this.handleJPEGImage.bind(this),
-      ZIP: this.handleZIPImage.bind(this),
-      LOSSY_JPEG: this.handleLossyJPEGImage.bind(this),
+      UNCOMPRESSED: TIFFFile.handleUncompressedImage.bind(TIFFFile),
+      TIFF_JPEG: TIFFFile.handleJPEGImage.bind(TIFFFile),
+      JPEG: TIFFFile.handleJPEGImage.bind(TIFFFile),
+      ZIP: TIFFFile.handleZIPImage.bind(TIFFFile),
+      LOSSY_JPEG: TIFFFile.handleLossyJPEGImage.bind(TIFFFile),
     };
   }
 
@@ -275,32 +266,29 @@ export default class TIFFFile extends BinaryFile {
     }
   }
 
-  static handleZIPImage(tags, image) {
-  }
+  static handleZIPImage(tags, image) {}
 
-  static handleLossyJPEGImage(tags, image) {
-  }
+  static handleLossyJPEGImage(tags, image) {}
 
   static parseIFD(file, byteOffset) {
     const littleEndian = file._littleEndian ?? true;
-    const directoryHeader = this.unserialize(
+    const directoryHeader = TIFFFile.unserialize(
       file,
       byteOffset,
-      this.DirectoryHeader
-      ,
-      littleEndian
+      TIFFFile.DirectoryHeader,
+      littleEndian,
     );
 
-    const fieldCount = this.getValue(directoryHeader, "entryCount");
-    const tags = this.parseTags(file, byteOffset + 2, fieldCount, littleEndian);
+    const fieldCount = TIFFFile.getValue(directoryHeader, "entryCount");
+    const tags = TIFFFile.parseTags(file, byteOffset + 2, fieldCount, littleEndian);
 
     return {
       tags: tags,
-      next: this.parseBytes(
+      next: TIFFFile.parseBytes(
         file.view,
         byteOffset + 2 + fieldCount * 12,
         "unsigned int",
-        littleEndian
+        littleEndian,
       ).valueOf(),
     };
   }
@@ -308,22 +296,18 @@ export default class TIFFFile extends BinaryFile {
   static parseTags(file, ifdOffset, count, littleEndian = true) {
     const tags = {};
 
-    for (
-      let offset = ifdOffset;
-      offset < ifdOffset + count * 12;
-      offset += 12
-    ) {
-      const entry = this.unserialize(file, offset, this.Entry, littleEndian);
+    for (let offset = ifdOffset; offset < ifdOffset + count * 12; offset += 12) {
+      const entry = TIFFFile.unserialize(file, offset, TIFFFile.Entry, littleEndian);
 
-      let tag = this.getValue(entry, "tag");
-      let typeIndex = this.getValue(entry, "type") - 1;
-      let type = this.FIELD_TYPE[Object.keys(this.FIELD_TYPE)[typeIndex]];
-      let count = this.getValue(entry, "count");
-      let valueOffset = this.getValue(entry, "valueOffset");
+      const tag = TIFFFile.getValue(entry, "tag");
+      const typeIndex = TIFFFile.getValue(entry, "type") - 1;
+      const type = TIFFFile.FIELD_TYPE[Object.keys(TIFFFile.FIELD_TYPE)[typeIndex]];
+      const count = TIFFFile.getValue(entry, "count");
+      let valueOffset = TIFFFile.getValue(entry, "valueOffset");
       let data = null;
       let field = null;
 
-      for (let fieldType of this.FIELDS) {
+      for (const fieldType of TIFFFile.FIELDS) {
         if (fieldType.tag === tag) {
           field = fieldType;
         }
@@ -342,49 +326,52 @@ export default class TIFFFile extends BinaryFile {
       }
 
       switch (type) {
-        case this.FIELD_TYPE.ASCII:
-          const asciiValue = this.unserializeArray(
+        case TIFFFile.FIELD_TYPE.ASCII: {
+          const asciiValue = TIFFFile.unserializeArray(
             file,
             valueOffset,
             { value: "char" },
             count,
-            littleEndian
+            littleEndian,
           );
           const stringArray = asciiValue
             .map((v) => v.valueOf().value)
             .map((v) => v.valueOf());
           data = stringArray.slice(0, stringArray.length - 1).join("");
           break;
+        }
 
-        case this.FIELD_TYPE.SRATIONAL:
-        case this.FIELD_TYPE.RATIONAL:
-          const rationalValue = this.unserializeArray(
+        case TIFFFile.FIELD_TYPE.SRATIONAL:
+        case TIFFFile.FIELD_TYPE.RATIONAL: {
+          const rationalValue = TIFFFile.unserializeArray(
             file,
             valueOffset,
             { value1: dataType, value2: dataType },
             count,
-            littleEndian
+            littleEndian,
           );
 
           data = rationalValue.map((v) => {
             return [v.valueOf().value1.valueOf(), v.valueOf().value2.valueOf()];
           });
           break;
+        }
 
-        case this.FIELD_TYPE.UNDEFINED:
+        case TIFFFile.FIELD_TYPE.UNDEFINED:
           // wont handle undefined tags
           data = undefined;
           break;
 
-        default:
-          const valueNumber = this.unserializeArray(
+        default: {
+          const valueNumber = TIFFFile.unserializeArray(
             file,
             valueOffset,
             { value: dataType },
             count,
-            littleEndian
+            littleEndian,
           );
           data = valueNumber.map((v) => v.valueOf().value.valueOf());
+        }
       }
 
       tags[field.name] = data;
@@ -393,8 +380,12 @@ export default class TIFFFile extends BinaryFile {
     return tags;
   }
 
-  get type() { return "TIFF"; }
-  get MAX_RES_IMAGE_INDEX() { return 0; }
+  get type() {
+    return "TIFF";
+  }
+  get MAX_RES_IMAGE_INDEX() {
+    return 0;
+  }
 
   getTag(fieldId, subifd = 0) {
     return this._ifds[subifd][fieldId];
@@ -414,7 +405,7 @@ export default class TIFFFile extends BinaryFile {
   getXMPEntry(nodeName) {
     const xmp = this.getXMPData();
 
-    for (let child of xmp.all) {
+    for (const child of xmp.all) {
       if (child.localName.toLocaleLowerCase() == nodeName) {
         return child.innerHTML;
       }
@@ -434,7 +425,9 @@ export default class TIFFFile extends BinaryFile {
   }
 
   getRenderableImage() {
-    const decodableImages = this._images.filter((image) => image.type === "jpeg" || image.type === "rgb");
+    const decodableImages = this._images.filter(
+      (image) => image.type === "jpeg" || image.type === "rgb",
+    );
     if (decodableImages.length === 0) {
       throw new Error("no decodable TIFF image found");
     }

@@ -60,16 +60,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(photos::init())
         .plugin(tauri_plugin_dialog::init())
-        .register_asynchronous_uri_scheme_protocol(
-            "shade",
-            |ctx, request, responder| {
-                let app = ctx.app_handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let response = shade_uri::serve_shade_uri(&app, request).await;
-                    responder.respond(response);
-                });
-            },
-        )
+        .register_asynchronous_uri_scheme_protocol("shade", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let response = shade_uri::serve_shade_uri(&app, request).await;
+                responder.respond(response);
+            });
+        })
         .manage(CoordinationChannelService(CoordinationChannel::new()))
         .manage(PreviewChannelService(PreviewChannel::new()))
         .manage(P2pState(tokio::sync::RwLock::new(None)))

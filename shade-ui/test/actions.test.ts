@@ -1,11 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ActionsRegistry, buildActionContext, type ActionContext } from "../src/store/actions";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  type ActionContext,
+  ActionsRegistry,
+  buildActionContext,
+} from "../src/store/actions";
+import { setState } from "../src/store/editor-store";
 import {
   setMediaViewFocusedItemId,
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
 } from "../src/store/media-view-context";
-import { setState } from "../src/store/editor-store";
 
 function makeCtx(overrides: Partial<ActionContext> = {}): ActionContext {
   return {
@@ -61,7 +65,9 @@ describe("ActionsRegistry", () => {
       registry.mapShortcut("mod+a", "test.a");
       registry.unregister("test.a");
       expect(registry.get("test.a")).toBeUndefined();
-      expect(registry.handleKey(keyboardEvent({ key: "a", metaKey: true }), makeCtx())).toBe(false);
+      expect(
+        registry.handleKey(keyboardEvent({ key: "a", metaKey: true }), makeCtx()),
+      ).toBe(false);
     });
   });
 
@@ -82,7 +88,12 @@ describe("ActionsRegistry", () => {
 
     it("filters actions by when predicate", () => {
       registry.register({ id: "a", title: "A", when: () => false, run: () => {} });
-      registry.register({ id: "b", title: "B", when: (ctx) => ctx.hasImage, run: () => {} });
+      registry.register({
+        id: "b",
+        title: "B",
+        when: (ctx) => ctx.hasImage,
+        run: () => {},
+      });
       registry.register({ id: "c", title: "C", run: () => {} });
       const available = registry.available(makeCtx({ hasImage: true }));
       expect(available.map((a) => a.id)).toEqual(["b", "c"]);
@@ -108,7 +119,9 @@ describe("ActionsRegistry", () => {
     });
 
     it("throws when action is missing", () => {
-      expect(() => registry.run("missing", makeCtx())).toThrow("Action 'missing' not found");
+      expect(() => registry.run("missing", makeCtx())).toThrow(
+        "Action 'missing' not found",
+      );
     });
 
     it("catches async rejection silently", async () => {
@@ -116,7 +129,9 @@ describe("ActionsRegistry", () => {
       registry.register({
         id: "test.fail",
         title: "Fail",
-        run: async () => { throw err; },
+        run: async () => {
+          throw err;
+        },
       });
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       registry.run("test.fail", makeCtx());
@@ -197,7 +212,12 @@ describe("ActionsRegistry", () => {
     });
 
     it("returns 1 for description match", () => {
-      registry.register({ id: "a", title: "Foo", description: "Export the image", run: () => {} });
+      registry.register({
+        id: "a",
+        title: "Foo",
+        description: "Export the image",
+        run: () => {},
+      });
       expect(registry.rank("a", "export")).toBe(1);
     });
 
@@ -293,7 +313,9 @@ describe("MediaView actions integration", () => {
       title: "Select All Images",
       group: "Media",
       when: mediaWhen,
-      run: () => { runLog.push("select-all"); },
+      run: () => {
+        runLog.push("select-all");
+      },
     });
 
     registry.register({
@@ -301,7 +323,9 @@ describe("MediaView actions integration", () => {
       title: "Toggle Image Selection",
       group: "Media",
       when: (ctx) => ctx.currentView === "media" && ctx.mediaViewFocusedItemId !== null,
-      run: () => { runLog.push("toggle-selection"); },
+      run: () => {
+        runLog.push("toggle-selection");
+      },
     });
 
     registry.register({
@@ -309,7 +333,9 @@ describe("MediaView actions integration", () => {
       title: "Navigate Up",
       group: "Media",
       when: mediaWhen,
-      run: () => { runLog.push("navigate-up"); },
+      run: () => {
+        runLog.push("navigate-up");
+      },
     });
 
     registry.register({
@@ -317,7 +343,9 @@ describe("MediaView actions integration", () => {
       title: "Previous Library",
       group: "Media",
       when: mediaWhen,
-      run: () => { runLog.push("prev-library"); },
+      run: () => {
+        runLog.push("prev-library");
+      },
     });
 
     registry.register({
@@ -325,7 +353,9 @@ describe("MediaView actions integration", () => {
       title: "Next Library",
       group: "Media",
       when: mediaWhen,
-      run: () => { runLog.push("next-library"); },
+      run: () => {
+        runLog.push("next-library");
+      },
     });
 
     // Mirror actual shortcut strings from MediaView
@@ -438,7 +468,9 @@ describe("App actions integration", () => {
       title: "Undo",
       group: "Editor",
       when: (ctx) => ctx.hasImage,
-      run: () => { runLog.push("undo"); },
+      run: () => {
+        runLog.push("undo");
+      },
     });
 
     registry.register({
@@ -446,7 +478,9 @@ describe("App actions integration", () => {
       title: "Redo",
       group: "Editor",
       when: (ctx) => ctx.hasImage,
-      run: () => { runLog.push("redo"); },
+      run: () => {
+        runLog.push("redo");
+      },
     });
 
     registry.mapShortcut("mod+z", "editor.undo");

@@ -1,21 +1,26 @@
-import { Component, createEffect, onCleanup, onMount } from "solid-js";
-import { Toolbar } from "./components/Toolbar";
-import { Inspector } from "./components/Inspector";
-import { Viewport } from "./components/Viewport";
-import { MediaView } from "./components/MediaView";
+import { type Component, createEffect, onCleanup, onMount } from "solid-js";
+import {
+  deletePreset,
+  getSnapshotPresetJson,
+  savePresetFromJson,
+  serializeCurrentPreset,
+} from "./bridge/index";
 import { checkWebGPU } from "./bridge/webgpu-check";
-import { showEditorView, showMediaView } from "./store/editor";
-import { setState, state } from "./store/editor-store";
-import { undo, redo } from "./store/history";
-import { loadPreset } from "./store/editor-layers";
-import { serializeCurrentPreset, savePresetFromJson, deletePreset, getSnapshotPresetJson } from "./bridge/index";
+import { Inspector } from "./components/Inspector";
+import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
+import { Toast } from "./components/Toast";
+import { Toolbar } from "./components/Toolbar";
+import { Viewport } from "./components/Viewport";
 import { actions, buildActionContext } from "./store/actions";
 import { CLIPBOARD_PRESET_NAME } from "./store/edit-clipboard";
+import { showEditorView, showMediaView } from "./store/editor";
+import { loadPreset } from "./store/editor-layers";
+import { setState, state } from "./store/editor-store";
+import { redo, undo } from "./store/history";
 import { getMediaBrowserController } from "./store/media-browser-control";
 import { mediaViewFocusedItem } from "./store/media-view-context";
 import { showToast } from "./store/toast";
-import { Toast } from "./components/Toast";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };
@@ -82,7 +87,10 @@ const App: Component = () => {
           const item = mediaViewFocusedItem();
           if (!item) return;
           json = await getSnapshotPresetJson(item.fingerprint, item.path);
-          if (!json) { showToast("No edits to copy"); return; }
+          if (!json) {
+            showToast("No edits to copy");
+            return;
+          }
         } else {
           json = await serializeCurrentPreset();
         }
@@ -116,7 +124,9 @@ const App: Component = () => {
             showToast("Edits pasted");
           } else {
             await getMediaBrowserController().pasteEdits(CLIPBOARD_PRESET_NAME);
-            showToast(`Edits pasted to ${ctx.mediaViewSelectedItemIds.length} image${ctx.mediaViewSelectedItemIds.length > 1 ? "s" : ""}`);
+            showToast(
+              `Edits pasted to ${ctx.mediaViewSelectedItemIds.length} image${ctx.mediaViewSelectedItemIds.length > 1 ? "s" : ""}`,
+            );
           }
         } finally {
           await deletePreset(CLIPBOARD_PRESET_NAME).catch(() => undefined);

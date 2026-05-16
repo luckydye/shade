@@ -6,13 +6,13 @@ import type {
   LibraryImageListing,
   MediaLibrary,
 } from "shade-ui/src/bridge/index";
+import { requestToPromise, withStores } from "shade-wasm/indexed-db";
+import { browserSnapshotsPlatform } from "shade-wasm/worker/snapshots";
 import {
   fileNameFromPath,
   loadBrowserEncodedBytes,
   loadBrowserThumbnailBytes,
 } from "./image-preview";
-import { requestToPromise, withStores } from "shade-wasm/indexed-db";
-import { browserSnapshotsPlatform } from "shade-wasm/worker/snapshots";
 
 const DB_NAME = "shade-browser-media-library";
 const DB_VERSION = 1;
@@ -225,9 +225,7 @@ async function listLibraryRecords(): Promise<BrowserMediaLibraryRecord[]> {
   });
 }
 
-async function getLibraryRecord(
-  id: string,
-): Promise<BrowserMediaLibraryRecord | null> {
+async function getLibraryRecord(id: string): Promise<BrowserMediaLibraryRecord | null> {
   const cached = libraryRecordCache.get(id);
   if (cached) {
     return cached;
@@ -301,20 +299,27 @@ async function replaceLibraryItems(
   library: BrowserMediaLibraryRecord,
   items: BrowserMediaItemRecord[],
 ) {
-  await withStores(openDb, [LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
-    await requestToPromise(stores[LIBRARIES_STORE].put(library, library.id));
-    const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
-    await Promise.all(
-      keys
-        .filter((key) => typeof key === "string" && key.startsWith(itemPath(library.id, "")))
-        .map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))),
-    );
-    await Promise.all(
-      items.map((item) =>
-        requestToPromise(stores[ITEMS_STORE].put(item, itemKey(item.path))),
-      ),
-    );
-  });
+  await withStores(
+    openDb,
+    [LIBRARIES_STORE, ITEMS_STORE],
+    "readwrite",
+    async (stores) => {
+      await requestToPromise(stores[LIBRARIES_STORE].put(library, library.id));
+      const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
+      await Promise.all(
+        keys
+          .filter(
+            (key) => typeof key === "string" && key.startsWith(itemPath(library.id, "")),
+          )
+          .map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))),
+      );
+      await Promise.all(
+        items.map((item) =>
+          requestToPromise(stores[ITEMS_STORE].put(item, itemKey(item.path))),
+        ),
+      );
+    },
+  );
   cacheLibraryRecord(library);
 }
 
@@ -397,21 +402,24 @@ async function addBrowserMediaLibrary(
 }
 
 async function removeBrowserMediaLibrary(id: string): Promise<void> {
-  await withStores(openDb, [LIBRARIES_STORE, ITEMS_STORE], "readwrite", async (stores) => {
-    await requestToPromise(stores[LIBRARIES_STORE].delete(id));
-    const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
-    await Promise.all(
-      keys
-        .filter((key) => typeof key === "string" && key.startsWith(itemPath(id, "")))
-        .map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))),
-    );
-  });
+  await withStores(
+    openDb,
+    [LIBRARIES_STORE, ITEMS_STORE],
+    "readwrite",
+    async (stores) => {
+      await requestToPromise(stores[LIBRARIES_STORE].delete(id));
+      const keys = await requestToPromise(stores[ITEMS_STORE].getAllKeys());
+      await Promise.all(
+        keys
+          .filter((key) => typeof key === "string" && key.startsWith(itemPath(id, "")))
+          .map((key) => requestToPromise(stores[ITEMS_STORE].delete(key))),
+      );
+    },
+  );
   clearCachedLibraryRecord(id);
 }
 
-async function listBrowserLibraryImages(
-  libraryId: string,
-): Promise<LibraryImageListing> {
+async function listBrowserLibraryImages(libraryId: string): Promise<LibraryImageListing> {
   const library = await getLibraryRecord(libraryId);
   if (!library) {
     throw new Error(`mounted library not found: ${libraryId}`);

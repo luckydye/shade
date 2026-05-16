@@ -225,7 +225,8 @@ export function buildLuminanceHistogram(
         continue;
       }
       const lum = clamp(
-        (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) / channelScale,
+        (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) /
+          channelScale,
         0,
         1,
       );
@@ -243,11 +244,15 @@ export function buildLuminanceHistogram(
       highlightsClipping: false,
     };
   }
-  const nonZeroBins = bins.filter((value) => value > 0).sort((left, right) => left - right);
+  const nonZeroBins = bins
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right);
   const clipPeak =
     nonZeroBins.length < HISTOGRAM_SCALE_CLIP_MIN_BINS
       ? peak
-      : nonZeroBins[Math.floor((nonZeroBins.length - 1) * HISTOGRAM_SCALE_CLIP_PERCENTILE)];
+      : nonZeroBins[
+          Math.floor((nonZeroBins.length - 1) * HISTOGRAM_SCALE_CLIP_PERCENTILE)
+        ];
   return {
     bins: bins.map((value) => Math.min(value / clipPeak, 1)),
     shadowsClipping,
@@ -260,9 +265,7 @@ export function histogramPath(bins: readonly number[]) {
     return "";
   }
   const step = bins.length === 1 ? 0 : 100 / (bins.length - 1);
-  const top = bins
-    .map((value, idx) => `L ${idx * step} ${(1 - value) * 100}`)
-    .join(" ");
+  const top = bins.map((value, idx) => `L ${idx * step} ${(1 - value) * 100}`).join(" ");
   return `M 0 100 ${top} L 100 100 Z`;
 }
 

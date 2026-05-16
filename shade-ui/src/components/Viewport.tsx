@@ -1,17 +1,37 @@
-import { Component, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
+import { getMaskThumbnail, type MaskParamsInfo, setMediaRating } from "../bridge/index";
+import {
+  CROP_ASPECT_RATIO_OPTIONS,
+  type CropAspectRatioPreset,
+  type CropResizeHandle,
+  clampAspectSize,
+  constrainCropDragToAspectRatio,
+  fitCropRectToAspectRatio,
+  resizeCropFromHandle,
+  resolveCropAspectRatio,
+} from "../crop-aspect";
 import {
   applyEdit,
   applyGradientMask,
+  backdropTile,
   closeArtboard,
   cropAspectRatioPreset,
-  getSelectedArtboard,
   getCommittedCropRect,
+  getSelectedArtboard,
   getViewportZoomPercent,
   moveArtboardBy,
-  openImageFile,
   offsetViewportCenter,
+  openImageFile,
   panViewport,
-  backdropTile,
   previewTile,
   refreshFinalPreview,
   refreshPreview,
@@ -25,23 +45,12 @@ import {
   state,
   zoomViewport,
 } from "../store/editor";
-import { getMaskThumbnail, setMediaRating, type MaskParamsInfo } from "../bridge/index";
-import { compositeArtboard } from "../viewport/compositor";
-import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
-import { getViewportFitRef } from "../viewport/preview";
+import { type ArtboardState, clamp, setState } from "../store/editor-store";
 import { makeBrushCursor } from "../viewport/brush-cursor";
+import { compositeArtboard } from "../viewport/compositor";
+import { getViewportFitRef } from "../viewport/preview";
 import type { WorldTransform } from "../viewport/transform";
-import { clamp, setState, type ArtboardState } from "../store/editor-store";
-import {
-  clampAspectSize,
-  constrainCropDragToAspectRatio,
-  CROP_ASPECT_RATIO_OPTIONS,
-  fitCropRectToAspectRatio,
-  resizeCropFromHandle,
-  resolveCropAspectRatio,
-  type CropAspectRatioPreset,
-  type CropResizeHandle,
-} from "../crop-aspect";
+import { buildTransform, screenToWorld, worldToScreen } from "../viewport/transform";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import { Slider } from "./Slider";
@@ -90,7 +99,13 @@ function mediaRatingIdForArtboard(artboard: ArtboardState | null) {
   }
 }
 
-function rotatePoint(x: number, y: number, centerX: number, centerY: number, angle: number) {
+function rotatePoint(
+  x: number,
+  y: number,
+  centerX: number,
+  centerY: number,
+  angle: number,
+) {
   const deltaX = x - centerX;
   const deltaY = y - centerY;
   const cos = Math.cos(angle);
@@ -195,9 +210,11 @@ export const Viewport: Component = () => {
   // glyphs stay where they are until commit on pointer-up; the selection
   // rectangle alone tracks the pointer for smooth feedback without per-frame
   // Rust roundtrips.
-  const [draftTextOffset, setDraftTextOffset] = createSignal<
-    { layerIdx: number; dx: number; dy: number } | null
-  >(null);
+  const [draftTextOffset, setDraftTextOffset] = createSignal<{
+    layerIdx: number;
+    dx: number;
+    dy: number;
+  } | null>(null);
 
   const TEXT_HANDLE_PADDING = 4;
 
@@ -208,7 +225,11 @@ export const Viewport: Component = () => {
 
   const activeCrop = () => draftCrop() ?? selectedCropLayer()?.crop ?? null;
   const selectedCropAspectRatio = () =>
-    resolveCropAspectRatio(cropAspectRatioPreset(), state.canvasWidth, state.canvasHeight);
+    resolveCropAspectRatio(
+      cropAspectRatioPreset(),
+      state.canvasWidth,
+      state.canvasHeight,
+    );
 
   const selectedMaskParams = (): MaskParamsInfo | null => {
     if (state.selectedLayerPart !== "mask") return null;
@@ -281,7 +302,11 @@ export const Viewport: Component = () => {
     const layerIdx = state.selectedLayerIdx;
     if (state.layers[layerIdx]?.has_mask) {
       try {
-        const thumb = await getMaskThumbnail(layerIdx, BRUSH_OVERLAY_MAX, BRUSH_OVERLAY_MAX);
+        const thumb = await getMaskThumbnail(
+          layerIdx,
+          BRUSH_OVERLAY_MAX,
+          BRUSH_OVERLAY_MAX,
+        );
         brushOverlayPixels = new Uint8Array(thumb.pixels);
         redrawOverlayCanvas();
       } catch {
@@ -307,7 +332,13 @@ export const Viewport: Component = () => {
     ctx.putImageData(imgData, 0, 0);
   }
 
-  function stampBrushOverlay(imageX: number, imageY: number, radius: number, softness: number, erase: boolean) {
+  function stampBrushOverlay(
+    imageX: number,
+    imageY: number,
+    radius: number,
+    softness: number,
+    erase: boolean,
+  ) {
     if (!brushOverlayCanvas || !brushOverlayPixels) return;
     const tw = brushOverlayCanvas.width;
     const th = brushOverlayCanvas.height;
@@ -334,7 +365,10 @@ export const Viewport: Component = () => {
           const floor = Math.round((1 - alpha) * 255);
           brushOverlayPixels[idx] = Math.min(brushOverlayPixels[idx], floor);
         } else {
-          brushOverlayPixels[idx] = Math.max(brushOverlayPixels[idx], Math.round(alpha * 255));
+          brushOverlayPixels[idx] = Math.max(
+            brushOverlayPixels[idx],
+            Math.round(alpha * 255),
+          );
         }
       }
     }
@@ -500,11 +534,26 @@ export const Viewport: Component = () => {
     toneSmoothingFrame = requestAnimationFrame(tick);
   }
 
-  function sampleTileTone(tile: { image: ImageData; x: number; y: number; width: number; height: number } | null, x: number, y: number) {
+  function sampleTileTone(
+    tile: {
+      image: ImageData;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null,
+    x: number,
+    y: number,
+  ) {
     if (!tile) {
       return null;
     }
-    if (x < tile.x || y < tile.y || x >= tile.x + tile.width || y >= tile.y + tile.height) {
+    if (
+      x < tile.x ||
+      y < tile.y ||
+      x >= tile.x + tile.width ||
+      y >= tile.y + tile.height
+    ) {
       return null;
     }
     const imageX = clamp(
@@ -539,13 +588,13 @@ export const Viewport: Component = () => {
       throw new Error("tile tone sampling requires at least one sample");
     }
     const normalize = tile.image.data instanceof Uint8ClampedArray ? 255 : 1;
-    const averageAlpha = (alpha / count) / normalize;
+    const averageAlpha = alpha / count / normalize;
     if (averageAlpha <= 0) {
       return null;
     }
-    const averageRed = (red / count) / normalize;
-    const averageGreen = (green / count) / normalize;
-    const averageBlue = (blue / count) / normalize;
+    const averageRed = red / count / normalize;
+    const averageGreen = green / count / normalize;
+    const averageBlue = blue / count / normalize;
     return (
       (averageRed * 0.2126 + averageGreen * 0.7152 + averageBlue * 0.0722) * averageAlpha
     );
@@ -579,14 +628,25 @@ export const Viewport: Component = () => {
         toWorldY(committedCrop.y + committedCrop.height * 0.5),
         transform,
       );
-      const unrotated = rotatePoint(sampleX, sampleY, cropCenter.x, cropCenter.y, committedCrop.rotation);
+      const unrotated = rotatePoint(
+        sampleX,
+        sampleY,
+        cropCenter.x,
+        cropCenter.y,
+        committedCrop.rotation,
+      );
       sampleX = unrotated.x;
       sampleY = unrotated.y;
     }
     const world = screenToWorld(sampleX, sampleY, transform);
     const localX = world.x - artboard.worldX;
     const localY = world.y - artboard.worldY;
-    if (localX < 0 || localY < 0 || localX >= artboard.width || localY >= artboard.height) {
+    if (
+      localX < 0 ||
+      localY < 0 ||
+      localX >= artboard.width ||
+      localY >= artboard.height
+    ) {
       updateSmoothedToneSample(null);
       return;
     }
@@ -600,7 +660,7 @@ export const Viewport: Component = () => {
       updateSmoothedToneSample(null);
       return;
     }
-    const visiblePreview = cropLayer ? null : previewTile() ?? artboard.previewTile;
+    const visiblePreview = cropLayer ? null : (previewTile() ?? artboard.previewTile);
     const visibleBackdrop = backdropTile() ?? artboard.backdropTile;
     const tone =
       sampleTileTone(visiblePreview, localX, localY) ??
@@ -616,7 +676,8 @@ export const Viewport: Component = () => {
     const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
     if (t.scale <= 0) return null;
 
-    const toScreen = (ax: number, ay: number) => worldToScreen(toWorldX(ax), toWorldY(ay), t);
+    const toScreen = (ax: number, ay: number) =>
+      worldToScreen(toWorldX(ax), toWorldY(ay), t);
     const GRAB_R = 14;
 
     if (mp.kind === "linear") {
@@ -645,7 +706,8 @@ export const Viewport: Component = () => {
     const t = getViewTransform(cssWidth, cssHeight);
     if (t.scale <= 0) return;
 
-    const toScreen = (ax: number, ay: number) => worldToScreen(toWorldX(ax), toWorldY(ay), t);
+    const toScreen = (ax: number, ay: number) =>
+      worldToScreen(toWorldX(ax), toWorldY(ay), t);
 
     ctx.save();
 
@@ -670,7 +732,11 @@ export const Viewport: Component = () => {
     if (mp.kind === "brush") {
       if (brushOverlayCanvas) {
         const tl = worldToScreen(toWorldX(0), toWorldY(0), t);
-        const br = worldToScreen(toWorldX(state.canvasWidth), toWorldY(state.canvasHeight), t);
+        const br = worldToScreen(
+          toWorldX(state.canvasWidth),
+          toWorldY(state.canvasHeight),
+          t,
+        );
         ctx.drawImage(brushOverlayCanvas, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
       }
       ctx.restore();
@@ -745,12 +811,15 @@ export const Viewport: Component = () => {
     const lx = dx * cos - dy * sin + cx;
     const ly = dx * sin + dy * cos + cy;
     // Rotation handle: 30px above top-center in screen space
-    const rotHandleScreenY = cy - (draft.height * 0.5) * t.scale - 30;
+    const rotHandleScreenY = cy - draft.height * 0.5 * t.scale - 30;
     const rhDx = 0;
     const rhDy = rotHandleScreenY - cy;
-    const rhScreenX = cx + rhDx * Math.cos(draft.rotation) - rhDy * Math.sin(draft.rotation);
-    const rhScreenY = cy + rhDx * Math.sin(draft.rotation) + rhDy * Math.cos(draft.rotation);
-    if (Math.hypot(x - rhScreenX, y - rhScreenY) <= HANDLE_SIZE + 4) return "rotate" as CropHandle;
+    const rhScreenX =
+      cx + rhDx * Math.cos(draft.rotation) - rhDy * Math.sin(draft.rotation);
+    const rhScreenY =
+      cy + rhDx * Math.sin(draft.rotation) + rhDy * Math.cos(draft.rotation);
+    if (Math.hypot(x - rhScreenX, y - rhScreenY) <= HANDLE_SIZE + 4)
+      return "rotate" as CropHandle;
     const { x: left, y: top } = worldToScreen(toWorldX(draft.x), toWorldY(draft.y), t);
     const { x: right, y: bottom } = worldToScreen(
       toWorldX(draft.x + draft.width),
@@ -857,7 +926,9 @@ export const Viewport: Component = () => {
     const fill = styles
       .getPropertyValue(isLoading ? "--surface-active" : "--surface")
       .trim();
-    return fill || (isLoading ? "rgba(128, 128, 128, 0.32)" : "rgba(128, 128, 128, 0.18)");
+    return (
+      fill || (isLoading ? "rgba(128, 128, 128, 0.32)" : "rgba(128, 128, 128, 0.18)")
+    );
   }
 
   function drawLoadingImageOnArtboard(
@@ -876,7 +947,10 @@ export const Viewport: Component = () => {
     if (screenWidth <= 0 || screenHeight <= 0) {
       return;
     }
-    const scale = Math.min(screenWidth / image.naturalWidth, screenHeight / image.naturalHeight);
+    const scale = Math.min(
+      screenWidth / image.naturalWidth,
+      screenHeight / image.naturalHeight,
+    );
     const drawWidth = image.naturalWidth * scale;
     const drawHeight = image.naturalHeight * scale;
     const drawX = screenX + (screenWidth - drawWidth) * 0.5;
@@ -1003,9 +1077,11 @@ export const Viewport: Component = () => {
         const cropLayer = isSelected ? selectedCropLayer() : null;
         const committedCrop = isSelected ? getCommittedCropRect() : null;
         const clip = cropLayer || !committedCrop ? undefined : committedCrop;
-        const visibleBackdrop = isSelected ? backdropTile() ?? artboard.backdropTile : artboard.backdropTile;
+        const visibleBackdrop = isSelected
+          ? (backdropTile() ?? artboard.backdropTile)
+          : artboard.backdropTile;
         const visiblePreview =
-          isSelected && !cropLayer ? previewTile() ?? artboard.previewTile : null;
+          isSelected && !cropLayer ? (previewTile() ?? artboard.previewTile) : null;
         const sx = worldArtboard.worldX * t.scale + t.dx;
         const sy = worldArtboard.worldY * t.scale + t.dy;
         const sw = worldArtboard.width * t.scale;
@@ -1017,14 +1093,7 @@ export const Viewport: Component = () => {
             drawLoadingImageOnArtboard(ctx, artboard, t);
           }
         }
-        compositeArtboard(
-          ctx,
-          worldArtboard,
-          visibleBackdrop,
-          visiblePreview,
-          t,
-          clip,
-        );
+        compositeArtboard(ctx, worldArtboard, visibleBackdrop, visiblePreview, t, clip);
         ctx.save();
         ctx.globalAlpha = shouldFadeChrome ? ARTBOARD_CHROME_FADE : 1;
         ctx.strokeStyle = "rgba(148, 148, 148, 0.7)";
@@ -1049,7 +1118,9 @@ export const Viewport: Component = () => {
             ? "rgba(255, 255, 255, 0.95)"
             : "rgba(148, 148, 148, 0.78)";
         ctx.fillRect(labelX, labelY, labelWidth, ARTBOARD_TITLE_HEIGHT);
-        ctx.fillStyle = titlePressed ? "rgba(12, 12, 12, 0.98)" : "rgba(32, 32, 32, 0.95)";
+        ctx.fillStyle = titlePressed
+          ? "rgba(12, 12, 12, 0.98)"
+          : "rgba(32, 32, 32, 0.95)";
         ctx.textBaseline = "middle";
         ctx.fillText(
           artboard.title,
@@ -1063,7 +1134,9 @@ export const Viewport: Component = () => {
           ? "rgba(214, 214, 214, 0.98)"
           : "rgba(148, 148, 148, 0.82)";
         ctx.fillRect(closeX, closeY, ARTBOARD_CLOSE_SIZE, ARTBOARD_CLOSE_SIZE);
-        ctx.strokeStyle = closePressed ? "rgba(12, 12, 12, 0.98)" : "rgba(32, 32, 32, 0.95)";
+        ctx.strokeStyle = closePressed
+          ? "rgba(12, 12, 12, 0.98)"
+          : "rgba(32, 32, 32, 0.95)";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(closeX + 5, closeY + 5);
@@ -1242,7 +1315,12 @@ export const Viewport: Component = () => {
         ctx.measureText(artboard.title).width + ARTBOARD_TITLE_PADDING_X * 2,
       );
       const titleY = y - ARTBOARD_TITLE_HEIGHT - 6;
-      if (sx >= x && sx <= x + width && sy >= titleY && sy <= titleY + ARTBOARD_TITLE_HEIGHT) {
+      if (
+        sx >= x &&
+        sx <= x + width &&
+        sy >= titleY &&
+        sy <= titleY + ARTBOARD_TITLE_HEIGHT
+      ) {
         return artboard;
       }
     }
@@ -1254,7 +1332,8 @@ export const Viewport: Component = () => {
     const t = getViewTransform(stageRef.clientWidth, stageRef.clientHeight);
     for (let idx = state.artboards.length - 1; idx >= 0; idx -= 1) {
       const artboard = state.artboards[idx];
-      const x = artboard.worldX * t.scale + t.dx + artboard.width * t.scale - ARTBOARD_CLOSE_SIZE;
+      const x =
+        artboard.worldX * t.scale + t.dx + artboard.width * t.scale - ARTBOARD_CLOSE_SIZE;
       const y = artboard.worldY * t.scale + t.dy - ARTBOARD_TITLE_HEIGHT - 6;
       if (
         sx >= x &&
@@ -1339,8 +1418,21 @@ export const Viewport: Component = () => {
         const imgY = world.y - getViewWorldOffset().y;
         const erase = e.altKey;
         stampBrushOverlay(imgX, imgY, brushSize(), brushSoftness(), erase);
-        void stampBrushMask(state.selectedLayerIdx, imgX, imgY, brushSize(), brushSoftness(), erase);
-        gesture = { kind: "brush_paint", pointerId: e.pointerId, lastImgX: imgX, lastImgY: imgY, erase };
+        void stampBrushMask(
+          state.selectedLayerIdx,
+          imgX,
+          imgY,
+          brushSize(),
+          brushSoftness(),
+          erase,
+        );
+        gesture = {
+          kind: "brush_paint",
+          pointerId: e.pointerId,
+          lastImgX: imgX,
+          lastImgY: imgY,
+          erase,
+        };
         stageRef.setPointerCapture(e.pointerId);
         drawFrame();
         return;
@@ -1365,10 +1457,7 @@ export const Viewport: Component = () => {
       }
     }
     if (activePointers.size === 2) {
-      if (
-        gesture?.kind === "artboard" &&
-        stageRef.hasPointerCapture(gesture.pointerId)
-      ) {
+      if (gesture?.kind === "artboard" && stageRef.hasPointerCapture(gesture.pointerId)) {
         stageRef.releasePointerCapture(gesture.pointerId);
       }
       const [p1, p2] = [...activePointers.values()];
@@ -1490,9 +1579,22 @@ export const Viewport: Component = () => {
           const ix = gesture.lastImgX + (imgX - gesture.lastImgX) * f;
           const iy = gesture.lastImgY + (imgY - gesture.lastImgY) * f;
           stampBrushOverlay(ix, iy, brushSize(), brushSoftness(), erase);
-          void stampBrushMask(state.selectedLayerIdx, ix, iy, brushSize(), brushSoftness(), erase);
+          void stampBrushMask(
+            state.selectedLayerIdx,
+            ix,
+            iy,
+            brushSize(),
+            brushSoftness(),
+            erase,
+          );
         }
-        gesture = { kind: "brush_paint", pointerId: gesture.pointerId, lastImgX: imgX, lastImgY: imgY, erase };
+        gesture = {
+          kind: "brush_paint",
+          pointerId: gesture.pointerId,
+          lastImgX: imgX,
+          lastImgY: imgY,
+          erase,
+        };
       }
       drawFrame();
       return;
@@ -1500,8 +1602,7 @@ export const Viewport: Component = () => {
     if (gesture.kind === "pan") {
       const movedX = e.clientX - gesture.startX;
       const movedY = e.clientY - gesture.startY;
-      const didCrossThreshold =
-        Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
+      const didCrossThreshold = Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
       if (gesture.tapArtboardId && !gesture.moved && !didCrossThreshold) {
         return;
       }
@@ -1526,8 +1627,7 @@ export const Viewport: Component = () => {
       }
       const movedX = e.clientX - gesture.startX;
       const movedY = e.clientY - gesture.startY;
-      const didCrossThreshold =
-        Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
+      const didCrossThreshold = Math.hypot(movedX, movedY) >= ARTBOARD_DRAG_THRESHOLD;
       if (!gesture.moved && !didCrossThreshold) {
         return;
       }
@@ -1704,7 +1804,8 @@ export const Viewport: Component = () => {
       return;
     }
     if (gesture?.kind === "artboard") {
-      const shouldSelect = !gesture.moved && gesture.artboardId !== state.selectedArtboardId;
+      const shouldSelect =
+        !gesture.moved && gesture.artboardId !== state.selectedArtboardId;
       const artboardId = gesture.artboardId;
       const artboardPointerId = gesture.pointerId;
       setPressedArtboardChrome(null);
@@ -1712,11 +1813,7 @@ export const Viewport: Component = () => {
       if (shouldSelect) {
         requestArtboardSelection(artboardId);
       }
-      if (
-        stageRef &&
-        e &&
-        stageRef.hasPointerCapture(artboardPointerId)
-      ) {
+      if (stageRef && e && stageRef.hasPointerCapture(artboardPointerId)) {
         stageRef.releasePointerCapture(artboardPointerId);
       }
       return;
@@ -1758,8 +1855,7 @@ export const Viewport: Component = () => {
       return;
     }
     if (
-      (gesture?.kind === "crop" ||
-        gesture?.kind === "mask") &&
+      (gesture?.kind === "crop" || gesture?.kind === "mask") &&
       stageRef &&
       e &&
       stageRef.hasPointerCapture(e.pointerId)
@@ -1895,7 +1991,9 @@ export const Viewport: Component = () => {
               height: "100%",
             }}
             class={`${
-              state.artboards.length === 0 && !state.isLoading ? "opacity-0" : "opacity-100"
+              state.artboards.length === 0 && !state.isLoading
+                ? "opacity-0"
+                : "opacity-100"
             }`}
           />
 
@@ -1920,7 +2018,9 @@ export const Viewport: Component = () => {
           {activeMask() && (
             <div
               class="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur"
-              style={{ "pointer-events": activeMask()?.kind === "brush" ? "auto" : "none" }}
+              style={{
+                "pointer-events": activeMask()?.kind === "brush" ? "auto" : "none",
+              }}
             >
               <span>Mask</span>
               <span class="text-white/35">

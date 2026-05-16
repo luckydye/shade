@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use crate::media_libraries::MediaLibrary;
 use crate::paths::app_config_dir;
-
+use std::collections::HashMap;
 
 pub(crate) fn load_app_config() -> Result<shade_io::AppConfig, String> {
     shade_io::load_app_config(&app_config_dir()?)
@@ -25,7 +24,10 @@ pub(crate) fn is_peer_paired(peer_endpoint_id: &str) -> Result<bool, String> {
         peer_endpoint_id,
     ))
 }
-pub(crate) fn pair_peer(peer_endpoint_id: &str, peer_name: Option<&str>) -> Result<(), String> {
+pub(crate) fn pair_peer(
+    peer_endpoint_id: &str,
+    peer_name: Option<&str>,
+) -> Result<(), String> {
     let mut config = load_app_config()?;
     if !shade_io::pair_peer(&mut config, peer_endpoint_id, peer_name) {
         return Ok(());

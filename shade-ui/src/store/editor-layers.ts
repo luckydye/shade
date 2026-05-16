@@ -1,5 +1,5 @@
-import * as bridge from "../bridge/index";
 import { onChannelMessage } from "../bridge/channel";
+import * as bridge from "../bridge/index";
 import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
 import {
   fullCanvasCrop,
@@ -7,8 +7,8 @@ import {
   isAdjustmentSliderActive,
   type LayerInfo,
   normalizeCropRect,
-  resolveSelectedLayerPart,
   resolveSelectedLayerIdx,
+  resolveSelectedLayerPart,
   setState,
   state,
 } from "./editor-store";
@@ -617,10 +617,7 @@ export async function updateTextContent(layerIdx: number, content: string) {
   await runLayerMutation(() => bridge.updateTextContent(layerIdx, content));
 }
 
-export async function updateTextStyle(
-  layerIdx: number,
-  patch: bridge.TextStylePatch,
-) {
+export async function updateTextStyle(layerIdx: number, patch: bridge.TextStylePatch) {
   await runLayerMutation(() => bridge.updateTextStyle(layerIdx, patch));
 }
 

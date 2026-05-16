@@ -423,19 +423,40 @@ pub enum MutationRequest {
 pub enum ReadRequest {
     ListPictures,
     ListMediaLibraries,
-    ListLibraryImages { library_id: String },
-    ListMediaRatings { fingerprints: Vec<String> },
+    ListLibraryImages {
+        library_id: String,
+    },
+    ListMediaRatings {
+        fingerprints: Vec<String>,
+    },
     ListPresets,
     ListSnapshots,
-    ListCollections { library_id: String },
-    ListCollectionItems { collection_id: String },
-    ListPeerPictures { peer_endpoint_id: String },
+    ListCollections {
+        library_id: String,
+    },
+    ListCollectionItems {
+        collection_id: String,
+    },
+    ListPeerPictures {
+        peer_endpoint_id: String,
+    },
     GetLocalPeerDiscoverySnapshot,
-    GetS3MediaLibrary { library_id: String },
-    GetPresetJson { name: String },
-    GetSnapshotPresetJson { fingerprint: String },
-    GetPeerAwareness { peer_endpoint_id: String },
+    GetS3MediaLibrary {
+        library_id: String,
+    },
+    GetPresetJson {
+        name: String,
+    },
+    GetSnapshotPresetJson {
+        fingerprint: String,
+    },
+    GetPeerAwareness {
+        peer_endpoint_id: String,
+    },
     GetStackSnapshot,
-    SyncPeerSnapshots { peer_endpoint_id: String, fingerprint: String },
+    SyncPeerSnapshots {
+        peer_endpoint_id: String,
+        fingerprint: String,
+    },
     ListFonts,
 }

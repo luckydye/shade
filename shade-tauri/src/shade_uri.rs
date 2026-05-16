@@ -1,6 +1,5 @@
-use tauri::Manager;
 use crate::image_loaders::{load_camera_thumbnail_from_tauri, load_thumbnail_bytes};
-
+use tauri::Manager;
 
 pub(crate) fn shade_uri_not_found() -> tauri::http::Response<Vec<u8>> {
     tauri::http::Response::builder()
@@ -9,7 +8,9 @@ pub(crate) fn shade_uri_not_found() -> tauri::http::Response<Vec<u8>> {
         .body(Vec::new())
         .unwrap()
 }
-pub(crate) fn shade_uri_error(message: impl AsRef<str>) -> tauri::http::Response<Vec<u8>> {
+pub(crate) fn shade_uri_error(
+    message: impl AsRef<str>,
+) -> tauri::http::Response<Vec<u8>> {
     tauri::http::Response::builder()
         .status(500)
         .header("Access-Control-Allow-Origin", "*")
@@ -106,7 +107,9 @@ pub async fn serve_shade_uri<R: tauri::Runtime>(
     }
     shade_uri_not_found()
 }
-pub(crate) fn urlencoding_decode(input: &str) -> Result<String, std::string::FromUtf8Error> {
+pub(crate) fn urlencoding_decode(
+    input: &str,
+) -> Result<String, std::string::FromUtf8Error> {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

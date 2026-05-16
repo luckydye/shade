@@ -1,7 +1,8 @@
+use crate::editor_state::{
+    finalize_layer_stack_mutation, lock_editor_state, EditorState,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use crate::editor_state::{EditorState, finalize_layer_stack_mutation, lock_editor_state};
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AddTextLayerParams {
@@ -84,7 +85,9 @@ pub struct UpdateTextStyleParams {
     #[serde(default)]
     pub color: Option<[f32; 4]>,
 }
-pub(crate) fn deser_double_option_f32<'de, D>(d: D) -> Result<Option<Option<f32>>, D::Error>
+pub(crate) fn deser_double_option_f32<'de, D>(
+    d: D,
+) -> Result<Option<Option<f32>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

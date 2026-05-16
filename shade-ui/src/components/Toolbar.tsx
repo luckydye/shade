@@ -1,16 +1,16 @@
-import { Show, type Component } from "solid-js";
+import { type Component, Show } from "solid-js";
 import { MEDIA_FILE_ACCEPT } from "../media-file-accept";
 import {
   exportImage,
   isAdjustmentSliderActive,
-  pickExportTarget,
   openImageFile,
+  pickExportTarget,
   showEditorView,
   showMediaView,
   state,
 } from "../store/editor";
-import { Button } from "./Button";
 import { ActionButton } from "./ActionButton";
+import { Button } from "./Button";
 
 const STATUS_TRIGGER_CLASS =
   "min-w-0 rounded-md px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
@@ -64,7 +64,8 @@ const BackIcon = () => (
 export const Toolbar: Component = () => {
   let fileInputRef: HTMLInputElement | undefined;
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
-  const canResumeEditor = () => state.artboards.length > 0 && state.currentView === "media";
+  const canResumeEditor = () =>
+    state.artboards.length > 0 && state.currentView === "media";
   const canExport = () => state.canvasWidth > 0 && state.canvasHeight > 0;
   const showMobileLibraryButton = () => state.currentView === "editor";
 
@@ -147,9 +148,7 @@ export const Toolbar: Component = () => {
         >
           <span class="block max-w-full truncate text-[11px] font-medium text-[var(--text-value)]">
             {(state.isLoading && (
-              <span>
-                {state.isDownloading ? "Downloading" : "Processing"}
-              </span>
+              <span>{state.isDownloading ? "Downloading" : "Processing"}</span>
             )) ||
               statusText()}
           </span>

@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::file_fingerprint::{Fingerprint, FingerprintError, ALGO_V1_SAMPLES, ALGO_V_S3_ETAG};
+use crate::file_fingerprint::{
+    Fingerprint, FingerprintError, ALGO_V1_SAMPLES, ALGO_V_S3_ETAG,
+};
 use crate::file_fingerprint_io::{coalesce, FingerprintHints, FingerprintResult};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,7 +228,10 @@ impl FileFingerprintDb {
     }
 
     /// Export rows touched at or after `since_ms` for peer sync (§6.4).
-    pub async fn export_rows(&self, since_ms: i64) -> Result<Vec<FingerprintRow>, String> {
+    pub async fn export_rows(
+        &self,
+        since_ms: i64,
+    ) -> Result<Vec<FingerprintRow>, String> {
         let conn = self.conn.lock().await;
         let mut rows = conn
             .query(
@@ -255,9 +260,7 @@ impl FileFingerprintDb {
 }
 
 fn row_to_fingerprint(row: &libsql::Row) -> Result<FingerprintRow, String> {
-    let bytes = row
-        .get::<Vec<u8>>(0)
-        .map_err(|error| error.to_string())?;
+    let bytes = row.get::<Vec<u8>>(0).map_err(|error| error.to_string())?;
     let array: [u8; 32] = bytes
         .as_slice()
         .try_into()
@@ -267,7 +270,9 @@ fn row_to_fingerprint(row: &libsql::Row) -> Result<FingerprintRow, String> {
     let locator_kind_raw = row.get::<String>(3).map_err(|error| error.to_string())?;
     let locator_kind = LocatorKind::parse(&locator_kind_raw)
         .ok_or_else(|| format!("unknown locator_kind: {locator_kind_raw}"))?;
-    let mtime_ms = row.get::<Option<i64>>(4).map_err(|error| error.to_string())?;
+    let mtime_ms = row
+        .get::<Option<i64>>(4)
+        .map_err(|error| error.to_string())?;
     let etag = row
         .get::<Option<String>>(5)
         .map_err(|error| error.to_string())?;
@@ -516,21 +521,16 @@ mod tests {
 
         // Second call must hit the cache.
         let counter_b = counter.clone();
-        let result = get_or_compute(
-            &db,
-            "/cache/me",
-            LocatorKind::Local,
-            hints,
-            move |_| {
+        let result =
+            get_or_compute(&db, "/cache/me", LocatorKind::Local, hints, move |_| {
                 let counter = counter_b.clone();
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
                     panic!("compute must not run on cache hit");
                 }
-            },
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
         assert_eq!(counter.load(Ordering::SeqCst), 1);
         assert_eq!(result.fingerprint, fp);
     }

@@ -1,9 +1,9 @@
 extern crate self as shade_lib;
 
+pub mod color;
 pub mod color_transform;
 pub mod composite;
 mod context;
-pub mod color;
 pub mod denoise;
 mod pipeline;
 pub mod pipelines;
@@ -29,16 +29,16 @@ pub const WORK_TEXTURE_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::TEXTURE
     .union(wgpu::TextureUsages::COPY_DST)
     .union(wgpu::TextureUsages::RENDER_ATTACHMENT);
 
+pub use color::{
+    from_acescct_f32, from_linear_srgb_f32, quantize_rgba_f32, to_acescct_f32,
+    to_linear_srgb_f32,
+};
 pub use color_transform::{ColorTransformPipeline, ColorTransformUniform};
 pub use composite::{
     create_rw_mask_texture, upload_mask_texture, BrushStampPipeline, BrushStampUniform,
     CompositePipeline, CompositeUniform,
 };
 pub use context::GpuContext;
-pub use color::{
-    from_acescct_f32, from_linear_srgb_f32, quantize_rgba_f32, to_acescct_f32,
-    to_linear_srgb_f32,
-};
 pub use denoise::DenoisePipeline;
 pub use pipeline::TonePipeline;
 pub use pipelines::{
@@ -49,11 +49,12 @@ pub use profiler::{GpuProfiler, PassTiming};
 pub use renderer::{PreviewCrop, Renderer, RendererMemoryStats};
 pub use sharpen2::SharpenTwoPassPipeline;
 pub use text::{
-    FontBlobHash, FontEntry, FontId, TextAlign, TextAnchor, TextContent, TextSpan, TextStyle,
-    DEFAULT_FONT_BYTES, DEFAULT_FONT_FAMILY,
+    FontBlobHash, FontEntry, FontId, TextAlign, TextAnchor, TextContent, TextSpan,
+    TextStyle, DEFAULT_FONT_BYTES, DEFAULT_FONT_FAMILY,
 };
 pub use text_buffer::{
-    GlyphBufferLayout, GpuBandHeader, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph, FLOATS_PER_CURVE,
+    GlyphBufferLayout, GpuBandHeader, GpuGlyphMeta, GpuPlacedGlyph, PlacedGlyph,
+    FLOATS_PER_CURVE,
 };
 pub use text_layout::{compute_text_aabb, layout_text, TextBounds, TextLayoutEngine};
 pub use text_outline::{
@@ -960,9 +961,9 @@ impl ColorMatrix3x3 {
     /// ACES AP1 → linear sRGB (inverse of LINEAR_SRGB_TO_AP1).
     pub const AP1_TO_LINEAR_SRGB: Self = Self {
         m: [
-            [ 1.7049908, -0.6217721, -0.0832185],
-            [-0.1301592,  1.1407727, -0.0106135],
-            [-0.0239210, -0.1289920,  1.1529130],
+            [1.7049908, -0.6217721, -0.0832185],
+            [-0.1301592, 1.1407727, -0.0106135],
+            [-0.0239210, -0.1289920, 1.1529130],
         ],
     };
 
@@ -989,19 +990,19 @@ impl ColorMatrix3x3 {
         Self {
             m: [
                 [
-                    a[0][0]*b[0][0] + a[0][1]*b[1][0] + a[0][2]*b[2][0],
-                    a[0][0]*b[0][1] + a[0][1]*b[1][1] + a[0][2]*b[2][1],
-                    a[0][0]*b[0][2] + a[0][1]*b[1][2] + a[0][2]*b[2][2],
+                    a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0],
+                    a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1],
+                    a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2],
                 ],
                 [
-                    a[1][0]*b[0][0] + a[1][1]*b[1][0] + a[1][2]*b[2][0],
-                    a[1][0]*b[0][1] + a[1][1]*b[1][1] + a[1][2]*b[2][1],
-                    a[1][0]*b[0][2] + a[1][1]*b[1][2] + a[1][2]*b[2][2],
+                    a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0],
+                    a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1],
+                    a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2],
                 ],
                 [
-                    a[2][0]*b[0][0] + a[2][1]*b[1][0] + a[2][2]*b[2][0],
-                    a[2][0]*b[0][1] + a[2][1]*b[1][1] + a[2][2]*b[2][1],
-                    a[2][0]*b[0][2] + a[2][1]*b[1][2] + a[2][2]*b[2][2],
+                    a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0],
+                    a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1],
+                    a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2],
                 ],
             ],
         }
@@ -1445,7 +1446,11 @@ mod tests {
         let id = ColorMatrix3x3::IDENTITY;
         for i in 0..3 {
             for j in 0..3 {
-                assert_approx_eq(product.m[i][j], id.m[i][j], &format!("{label} [{i}][{j}]"));
+                assert_approx_eq(
+                    product.m[i][j],
+                    id.m[i][j],
+                    &format!("{label} [{i}][{j}]"),
+                );
             }
         }
     }
@@ -1497,7 +1502,9 @@ mod tests {
 
     #[test]
     fn acescct_transfer_function_round_trips() {
-        for &lin in &[0.0, 0.001, 0.007, 0.0078125, 0.01, 0.18, 0.5, 1.0, 2.0, 10.0] {
+        for &lin in &[
+            0.0, 0.001, 0.007, 0.0078125, 0.01, 0.18, 0.5, 1.0, 2.0, 10.0,
+        ] {
             let encoded = linear_to_acescct(lin);
             let decoded = acescct_to_linear(encoded);
             assert_approx_eq(decoded, lin, &format!("ACEScct round-trip @ {lin}"));
@@ -1529,7 +1536,11 @@ mod tests {
         for &(r, g, b) in test_colors {
             let ap1 = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
             let back = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(ap1.0, ap1.1, ap1.2);
-            assert_triple_approx_eq(back, (r, g, b), &format!("sRGB→AP1→sRGB ({r},{g},{b})"));
+            assert_triple_approx_eq(
+                back,
+                (r, g, b),
+                &format!("sRGB→AP1→sRGB ({r},{g},{b})"),
+            );
         }
     }
 
@@ -1613,13 +1624,25 @@ mod tests {
         for &(r, g, b) in test_colors {
             // Forward: linear sRGB → AP1 → ACEScct
             let (ar, ag, ab) = ColorMatrix3x3::LINEAR_SRGB_TO_AP1.apply(r, g, b);
-            let enc = (linear_to_acescct(ar), linear_to_acescct(ag), linear_to_acescct(ab));
+            let enc = (
+                linear_to_acescct(ar),
+                linear_to_acescct(ag),
+                linear_to_acescct(ab),
+            );
 
             // Reverse: ACEScct → AP1 → linear sRGB
-            let dec = (acescct_to_linear(enc.0), acescct_to_linear(enc.1), acescct_to_linear(enc.2));
+            let dec = (
+                acescct_to_linear(enc.0),
+                acescct_to_linear(enc.1),
+                acescct_to_linear(enc.2),
+            );
             let back = ColorMatrix3x3::AP1_TO_LINEAR_SRGB.apply(dec.0, dec.1, dec.2);
 
-            assert_triple_approx_eq(back, (r, g, b), &format!("sRGB→ACEScct→sRGB ({r},{g},{b})"));
+            assert_triple_approx_eq(
+                back,
+                (r, g, b),
+                &format!("sRGB→ACEScct→sRGB ({r},{g},{b})"),
+            );
         }
     }
 }

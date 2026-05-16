@@ -4,43 +4,43 @@ import { db, initSchema } from "../../../lib/db";
 export const prerender = false;
 
 export const GET: APIRoute = async ({ url }) => {
-    await initSchema();
+  await initSchema();
 
-    const includePrerelease = url.searchParams.get("prerelease") === "1";
-    const whereClause = includePrerelease ? "" : "WHERE prerelease = 0";
+  const includePrerelease = url.searchParams.get("prerelease") === "1";
+  const whereClause = includePrerelease ? "" : "WHERE prerelease = 0";
 
-    const releaseResult = await db.execute(
-        `SELECT id, tag_name, name, published_at, html_url FROM releases ${whereClause} ORDER BY published_at DESC LIMIT 1`,
-    );
+  const releaseResult = await db.execute(
+    `SELECT id, tag_name, name, published_at, html_url FROM releases ${whereClause} ORDER BY published_at DESC LIMIT 1`,
+  );
 
-    if (releaseResult.rows.length === 0) {
-        return new Response(JSON.stringify({ error: "No releases found" }), {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
-        });
-    }
-
-    const row = releaseResult.rows[0];
-
-    const assetsResult = await db.execute({
-        sql: "SELECT id, name FROM assets WHERE release_id = ?",
-        args: [row.id as string],
+  if (releaseResult.rows.length === 0) {
+    return new Response(JSON.stringify({ error: "No releases found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
     });
+  }
 
-    const release = {
-        tag_name: row.tag_name,
-        name: row.name,
-        assets: assetsResult.rows.map((a) => ({
-            name: a.name,
-            browser_download_url: `/api/releases/assets/${a.id}`,
-        })),
-    };
+  const row = releaseResult.rows[0];
 
-    return new Response(JSON.stringify(release), {
-        status: 200,
-        headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "s-maxage=60, stale-while-revalidate=300",
-        },
-    });
+  const assetsResult = await db.execute({
+    sql: "SELECT id, name FROM assets WHERE release_id = ?",
+    args: [row.id as string],
+  });
+
+  const release = {
+    tag_name: row.tag_name,
+    name: row.name,
+    assets: assetsResult.rows.map((a) => ({
+      name: a.name,
+      browser_download_url: `/api/releases/assets/${a.id}`,
+    })),
+  };
+
+  return new Response(JSON.stringify(release), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "s-maxage=60, stale-while-revalidate=300",
+    },
+  });
 };

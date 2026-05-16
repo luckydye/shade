@@ -57,7 +57,8 @@ pub trait PeerProvider: Send + Sync + 'static {
     async fn get_awareness(&self) -> Result<AwarenessState>;
     async fn list_snapshots(&self, fingerprint: &str) -> Result<Vec<SyncSnapshotInfo>>;
     async fn get_snapshot_data(&self, id: &str) -> Result<Vec<u8>>;
-    async fn get_metadata(&self, fingerprints: &[String]) -> Result<Vec<PictureMetadata>>;
+    async fn get_metadata(&self, fingerprints: &[String])
+        -> Result<Vec<PictureMetadata>>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

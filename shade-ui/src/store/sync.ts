@@ -1,14 +1,14 @@
 import { createStore } from "solid-js/store";
-import { p2pState } from "./p2p";
 import {
-  isTauriRuntime,
+  type AwarenessState,
+  applyPeerMetadata as bridgeApplyPeerMetadata,
   getPeerAwareness as bridgeGetPeerAwareness,
   setLocalAwareness as bridgeSetLocalAwareness,
   syncPeerSnapshots as bridgeSyncPeerSnapshots,
-  applyPeerMetadata as bridgeApplyPeerMetadata,
-  type AwarenessState,
+  isTauriRuntime,
   type SyncPeerSnapshotsResult,
 } from "../bridge";
+import { p2pState } from "./p2p";
 
 export interface PeerAwareness {
   endpoint_id: string;
@@ -84,9 +84,7 @@ export async function syncPeerSnapshots(
 }
 
 /** Sync snapshots for a fingerprint from all currently connected peers. */
-export async function syncSnapshotsFromAllPeers(
-  fingerprint: string,
-): Promise<string[]> {
+export async function syncSnapshotsFromAllPeers(fingerprint: string): Promise<string[]> {
   const peers = p2pState.peers;
   if (peers.length === 0) return [];
   setSyncState("is_syncing", true);
@@ -123,9 +121,7 @@ export async function applyPeerMetadata(
 }
 
 /** Apply metadata from all connected peers for the given file hashes. */
-export async function applyMetadataFromAllPeers(
-  fingerprints: string[],
-): Promise<void> {
+export async function applyMetadataFromAllPeers(fingerprints: string[]): Promise<void> {
   const peers = p2pState.peers;
   if (peers.length === 0 || fingerprints.length === 0) return;
   await Promise.allSettled(

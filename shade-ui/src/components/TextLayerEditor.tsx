@@ -1,5 +1,6 @@
 import { type Component, createMemo, For, onMount, Show } from "solid-js";
-import { Slider } from "./Slider";
+import type { FontInfo, TextAlignName, TextStyleValues } from "../bridge";
+import type { LayerInfo } from "../store/editor";
 import {
   addFont,
   pruneUnusedFonts,
@@ -9,12 +10,7 @@ import {
   updateTextContent,
   updateTextStyle,
 } from "../store/editor";
-import type { LayerInfo } from "../store/editor";
-import type {
-  FontInfo,
-  TextAlignName,
-  TextStyleValues,
-} from "../bridge";
+import { Slider } from "./Slider";
 
 const ALIGN_OPTIONS: { value: TextAlignName; label: string }[] = [
   { value: "left", label: "Left" },
@@ -30,12 +26,12 @@ const FIELD_INPUT_CLASS =
 
 /** sRGB → linear (used when reading from a color input). Per IEC 61966-2-1. */
 function srgbToLinear(c: number): number {
-  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
 /** Linear → sRGB for display in a color input. */
 function linearToSrgb(c: number): number {
-  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1.0 / 2.4) - 0.055;
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1.0 / 2.4) - 0.055;
 }
 
 /** `[r, g, b, a]` linear-sRGB → "#rrggbb" for `<input type="color">`. */
@@ -47,10 +43,7 @@ function colorArrayToHex(color: [number, number, number, number]): string {
 }
 
 /** "#rrggbb" → `[r, g, b, a]` linear sRGB; existing alpha is preserved. */
-function hexToColorArray(
-  hex: string,
-  alpha: number,
-): [number, number, number, number] {
+function hexToColorArray(hex: string, alpha: number): [number, number, number, number] {
   const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return [1, 1, 1, alpha];
   const r = parseInt(m[1].substring(0, 2), 16) / 255;
@@ -206,9 +199,7 @@ export const TextLayerEditor: Component<{
               max={256}
               step={1}
               valueLabel={`${Math.round(t().style.size_px)} px`}
-              onChange={(v) =>
-                void updateTextStyle(props.layerIdx, { size_px: v })
-              }
+              onChange={(v) => void updateTextStyle(props.layerIdx, { size_px: v })}
             />
 
             <Slider
@@ -218,9 +209,7 @@ export const TextLayerEditor: Component<{
               min={0.5}
               max={3}
               step={0.05}
-              onChange={(v) =>
-                void updateTextStyle(props.layerIdx, { line_height: v })
-              }
+              onChange={(v) => void updateTextStyle(props.layerIdx, { line_height: v })}
             />
 
             <Slider
@@ -252,9 +241,7 @@ export const TextLayerEditor: Component<{
                 value={String(t().style.weight)}
                 onChange={onWeightInput}
               >
-                <For
-                  each={[100, 200, 300, 400, 500, 600, 700, 800, 900]}
-                >
+                <For each={[100, 200, 300, 400, 500, 600, 700, 800, 900]}>
                   {(w) => <option value={String(w)}>{w}</option>}
                 </For>
               </select>
@@ -314,9 +301,7 @@ export const TextLayerEditor: Component<{
                     class={FIELD_INPUT_CLASS}
                     value={t().transform.tx}
                     onInput={(e) => {
-                      const value = Number(
-                        (e.currentTarget as HTMLInputElement).value,
-                      );
+                      const value = Number((e.currentTarget as HTMLInputElement).value);
                       if (!Number.isFinite(value)) return;
                       void setTextTransform(props.layerIdx, {
                         ...t().transform,
@@ -333,9 +318,7 @@ export const TextLayerEditor: Component<{
                     class={FIELD_INPUT_CLASS}
                     value={t().transform.ty}
                     onInput={(e) => {
-                      const value = Number(
-                        (e.currentTarget as HTMLInputElement).value,
-                      );
+                      const value = Number((e.currentTarget as HTMLInputElement).value);
                       if (!Number.isFinite(value)) return;
                       void setTextTransform(props.layerIdx, {
                         ...t().transform,

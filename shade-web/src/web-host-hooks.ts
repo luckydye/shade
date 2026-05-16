@@ -1,12 +1,9 @@
+import type { HostHooks, NativeDragDropPayload } from "shade-ui/src/bridge/host";
 import type { PreviewFrame, PreviewRequest } from "shade-ui/src/bridge/index";
-import type {
-  HostHooks,
-  NativeDragDropPayload,
-} from "shade-ui/src/bridge/host";
-import { browserLibraryCache } from "./library-cache";
-import { browserMediaPlatform } from "./media";
 import { browserSnapshotsPlatform } from "shade-wasm/worker/snapshots";
 import { applyBrowserPresetLayer } from "./browser-preset-apply";
+import { browserLibraryCache } from "./library-cache";
+import { browserMediaPlatform } from "./media";
 import { getSharedWorker } from "./worker-transport";
 
 // ── Legacy workerCall infrastructure ─────────────────────────────────────────
@@ -159,9 +156,7 @@ export const webHostHooks: HostHooks = {
   },
   async pickExportTarget() {
     const win = window as unknown as {
-      showSaveFilePicker?: (
-        opts: Record<string, unknown>,
-      ) => Promise<{ name: string }>;
+      showSaveFilePicker?: (opts: Record<string, unknown>) => Promise<{ name: string }>;
     };
     if (!win.showSaveFilePicker) {
       throw new Error("save dialog is unavailable in this browser");
@@ -251,10 +246,7 @@ export const webHostHooks: HostHooks = {
   },
   async getLayerStack() {
     await ensureWorkerReady();
-    const result = await workerCall<{ data: string }>(
-      { type: "get_stack" },
-      "stack",
-    );
+    const result = await workerCall<{ data: string }>({ type: "get_stack" }, "stack");
     return JSON.parse(result.data);
   },
   async getMaskThumbnail() {

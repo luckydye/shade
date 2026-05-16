@@ -498,7 +498,8 @@ pub async fn get_s3_object_range(
         .ok_or_else(|| format!("S3 range overflow for s3://{}/{}", config.bucket, key))?;
     let range_value = format!("bytes={offset}-{end}");
     let extra = vec![("range".to_string(), range_value.clone())];
-    let request = signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX, &extra)?;
+    let request =
+        signed_request("GET", config, Some(key), &[], EMPTY_SHA256_HEX, &extra)?;
     let mut builder = client
         .get(&request.url)
         .header("authorization", request.authorization)
@@ -510,9 +511,7 @@ pub async fn get_s3_object_range(
     let response = builder
         .send()
         .await
-        .map_err(|error| {
-            format!("S3 request failed for {}: {}", config.endpoint, error)
-        })?
+        .map_err(|error| format!("S3 request failed for {}: {}", config.endpoint, error))?
         .error_for_status()
         .map_err(|error| {
             format!(
@@ -570,7 +569,8 @@ pub async fn head_s3_object_modified_at(
 
 pub async fn delete_s3_object(config: &S3LibraryConfig, key: &str) -> Result<(), String> {
     let client = http_client()?;
-    let request = signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
+    let request =
+        signed_request("DELETE", config, Some(key), &[], EMPTY_SHA256_HEX, &[])?;
     client
         .delete(&request.url)
         .header("authorization", request.authorization)
@@ -729,7 +729,10 @@ fn signed_request(
     let date_stamp = now.format("%Y%m%d").to_string();
     let mut header_entries = vec![
         ("host".to_string(), authority.clone()),
-        ("x-amz-content-sha256".to_string(), content_sha256.to_string()),
+        (
+            "x-amz-content-sha256".to_string(),
+            content_sha256.to_string(),
+        ),
         ("x-amz-date".to_string(), amz_date.clone()),
     ];
     for (name, value) in extra_headers {
@@ -951,10 +954,7 @@ pub async fn fetch_url_bytes(url: &str) -> Result<(Vec<u8>, String), String> {
             return Err(format!("no og:image found in HTML response from {url}"));
         }
         let index = parse_img_index(url).unwrap_or(1).max(1) as usize;
-        let og_url = og_images
-            .get(index - 1)
-            .or(og_images.last())
-            .unwrap();
+        let og_url = og_images.get(index - 1).or(og_images.last()).unwrap();
         return fetch_url_bytes_direct(&client, og_url).await;
     }
 
