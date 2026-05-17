@@ -17,7 +17,7 @@ import {
 import { onRestore, recordSnapshot } from "../store/history";
 import { onChannelMessage } from "./events";
 import { useOpenImage } from "./use-open-image";
-import { isTauriRuntime } from "./runtime";
+import { isTauriRuntime } from "../utils";
 
 // ── Reactive stack sync ─────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ function applyLayerStackInfo(info: LayerStackInfoLike) {
 }
 
 async function refresh(): Promise<void> {
-  if (await isTauriRuntime()) {
+  if (isTauriRuntime()) {
     // Rust broadcasts on every mutation and on initial channel registration —
     // store is already kept in sync by the subscriber.
     return;

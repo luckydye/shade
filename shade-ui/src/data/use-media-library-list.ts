@@ -7,6 +7,7 @@ import {
   type MediaLibrary,
   type S3MediaLibraryInput,
 } from "../bridge/index";
+import { isTauriRuntime } from "../utils";
 
 const { libraries, refetch } = createRoot(() => {
   const [resource, { refetch }] = createResource(bridge.listMediaLibraries, {
@@ -19,7 +20,7 @@ const { libraries, refetch } = createRoot(() => {
     void refetch();
   });
   // Pairing with a new peer adds their library; auto-refresh.
-  if (bridge.isTauriRuntime()) {
+  if (isTauriRuntime()) {
     bridge.listenPeerPaired(() => {
       void refetch();
     });

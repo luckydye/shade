@@ -25,9 +25,9 @@ import { resetHistory } from "../store/history";
 import { releaseTileSurface } from "../viewport/compositor";
 import { computeFitScale } from "../viewport/transform";
 import type { FitReference, RenderedTile } from "../viewport/types";
-import { isTauriRuntime } from "./runtime";
 import { useLayerStack } from "./use-layer-stack";
 import { onImageOpenPhase } from "./use-image-open-phase";
+import { isTauriRuntime } from "../utils";
 
 // ── Module state ────────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ interface ViewportSpec {
 
 async function ensurePlatformDetected(): Promise<boolean> {
   if (isTauriPlatform === null) {
-    isTauriPlatform = await isTauriRuntime();
+    isTauriPlatform = isTauriRuntime();
   }
   return isTauriPlatform;
 }

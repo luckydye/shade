@@ -19,7 +19,6 @@ import { useLayerStack } from "../data/use-layer-stack";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
 import { pairPeerDevice, pickDirectory } from "../data/image-actions";
 import { useOpenImage } from "../data/use-open-image";
-import { isTauriRuntime } from "../data/runtime";
 import {
   addToCollection,
   removeFromCollection,
@@ -97,6 +96,7 @@ import {
   type UploadProgress,
 } from "./media-view/media-utils";
 import { filenameFromUrl, transformImageUrl } from "./media-view/url-transformers";
+import { isTauriRuntime } from "../utils";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
