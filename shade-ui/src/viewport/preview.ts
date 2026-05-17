@@ -1,13 +1,15 @@
 import { createSignal } from "solid-js";
 import type { ArtboardViewport, PreviewQuality } from "../bridge/channel";
-import * as bridge from "../bridge/index";
+import type { PreviewFrame } from "../bridge/index";
+import type { RenderedTile as PushedRenderedTile } from "../bridge/preview";
 import {
   getArtboardTiles,
   getCurrentGeneration,
   nextGeneration,
-  type RenderedTile as PushedRenderedTile,
+  renderPreview,
   subscribeTiles,
-} from "../bridge/preview";
+} from "../data/preview-render";
+import { isTauriRuntime } from "../data/runtime";
 import {
   fullCanvasCrop,
   getCommittedCropRect,
@@ -45,7 +47,7 @@ interface ViewportSpec {
 
 async function ensurePlatformDetected(): Promise<boolean> {
   if (isTauriPlatform === null) {
-    isTauriPlatform = await bridge.isTauriRuntime();
+    isTauriPlatform = await isTauriRuntime();
   }
   return isTauriPlatform;
 }
@@ -313,7 +315,7 @@ function specToViewport(
   };
 }
 
-function previewFrameToImageData(frame: bridge.PreviewFrame): ImageData {
+function previewFrameToImageData(frame: PreviewFrame): ImageData {
   if (frame.kind === "rgba-float16") {
     return new ImageData(frame.pixels as never, frame.width, frame.height, {
       pixelFormat: "rgba-float16",
@@ -332,7 +334,7 @@ async function browserRefresh(quality: PreviewQuality) {
   const previewSpec = buildPreviewSpec(quality);
   const backdropSpec = buildBackdropSpec(quality);
   if (!previewSpec) return;
-  const previewFrame = await bridge.renderPreview({
+  const previewFrame = await renderPreview({
     target_width: previewSpec.target_width,
     target_height: previewSpec.target_height,
     crop: previewSpec.crop,
@@ -358,7 +360,7 @@ async function browserRefresh(quality: PreviewQuality) {
   ) {
     return;
   }
-  const backdropFrame = await bridge.renderPreview({
+  const backdropFrame = await renderPreview({
     target_width: backdropSpec.target_width,
     target_height: backdropSpec.target_height,
     crop: backdropSpec.crop,

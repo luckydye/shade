@@ -1,0 +1,21 @@
+/** Layer-stack mutations and reads (current open image). */
+export {
+  addLayer,
+  addTextLayer,
+  applyEdit,
+  applyGradientMask,
+  createBrushMask,
+  deleteLayer,
+  getLayerStack,
+  getStackSnapshot,
+  moveLayer,
+  removeMask,
+  renameLayer,
+  replaceStack,
+  setLayerOpacity,
+  setLayerVisible,
+  setTextTransform,
+  stampBrushMask,
+  updateTextContent,
+  updateTextStyle,
+} from "../bridge/index";

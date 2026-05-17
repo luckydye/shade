@@ -1,13 +1,12 @@
 import { createStore } from "solid-js/store";
+import type { AwarenessState, SyncPeerSnapshotsResult } from "../bridge/index";
 import {
-  type AwarenessState,
   applyPeerMetadata as bridgeApplyPeerMetadata,
   getPeerAwareness as bridgeGetPeerAwareness,
   setLocalAwareness as bridgeSetLocalAwareness,
   syncPeerSnapshots as bridgeSyncPeerSnapshots,
-  isTauriRuntime,
-  type SyncPeerSnapshotsResult,
-} from "../bridge";
+} from "../data/awareness";
+import { isTauriRuntime } from "../data/runtime";
 import { usePeerDiscovery } from "../data/use-peer-discovery";
 
 export interface PeerAwareness {

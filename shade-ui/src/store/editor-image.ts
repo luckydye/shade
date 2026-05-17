@@ -1,4 +1,13 @@
-import * as bridge from "../bridge/index";
+import type { SharedPicture } from "../bridge/index";
+import {
+  exportImage as bridgeExportImage,
+  openImage as bridgeOpenImage,
+  openImageFile as bridgeOpenImageFile,
+  openPeerImage as bridgeOpenPeerImage,
+  pickExportTarget as bridgePickExportTarget,
+  prepareImageOpen,
+  restoreCurrentBrowserSnapshot,
+} from "../data/image-actions";
 import { onImageOpenPhase } from "../data/use-image-open-phase";
 import {
   clearPreviewTiles,
@@ -209,7 +218,7 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
     });
     await refreshLayerStack();
     if (artboard.source.kind === "path") {
-      const restored = await bridge.restoreCurrentBrowserSnapshot(artboard.source.path);
+      const restored = await restoreCurrentBrowserSnapshot(artboard.source.path);
       if (restored) {
         await refreshLayerStack();
       }
@@ -412,7 +421,7 @@ async function openImageFrom(
   );
   try {
     if (source.kind === "path") {
-      await bridge.prepareImageOpen(source.path);
+      await prepareImageOpen(source.path);
     }
     const info = await load();
     if (!isActiveLoadToken(loadToken)) {
@@ -441,7 +450,7 @@ async function openImageFrom(
     });
     await refreshLayerStack();
     if (source.kind === "path") {
-      const restored = await bridge.restoreCurrentBrowserSnapshot(source.path);
+      const restored = await restoreCurrentBrowserSnapshot(source.path);
       if (restored) {
         await refreshLayerStack();
       }
@@ -572,7 +581,7 @@ export async function openImage(
   }
   try {
     await openImageFrom(
-      () => bridge.openImage(path),
+      () => bridgeOpenImage(path),
       { kind: "path", path },
       loadingMediaSrc,
       activeMediaSelection,
@@ -586,7 +595,7 @@ export async function openImage(
 
 export async function openImageFile(file: File, mode: OpenImageMode = "replace") {
   await openImageFrom(
-    () => bridge.openImageFile(file),
+    () => bridgeOpenImageFile(file),
     { kind: "file", file },
     null,
     null,
@@ -596,7 +605,7 @@ export async function openImageFile(file: File, mode: OpenImageMode = "replace")
 
 export async function openPeerImage(
   peerEndpointId: string,
-  picture: bridge.SharedPicture,
+  picture: SharedPicture,
   loadingMediaSrc: string | null = null,
   activeMediaSelection: {
     libraryId: string;
@@ -608,7 +617,7 @@ export async function openPeerImage(
   mode: OpenImageMode = "replace",
 ) {
   await openImageFrom(
-    () => bridge.openPeerImage(peerEndpointId, picture),
+    () => bridgeOpenPeerImage(peerEndpointId, picture),
     { kind: "peer", peerEndpointId, picture },
     loadingMediaSrc,
     activeMediaSelection,
@@ -619,11 +628,11 @@ export async function openPeerImage(
 async function loadArtboardSource(source: ArtboardSource) {
   switch (source.kind) {
     case "path":
-      return bridge.openImage(source.path);
+      return bridgeOpenImage(source.path);
     case "file":
-      return bridge.openImageFile(source.file);
+      return bridgeOpenImageFile(source.file);
     case "peer":
-      return bridge.openPeerImage(source.peerEndpointId, source.picture);
+      return bridgeOpenPeerImage(source.peerEndpointId, source.picture);
     default:
       throw new Error("unknown artboard source");
   }
@@ -643,12 +652,12 @@ export async function selectArtboard(artboardId: string) {
 export async function exportImage(path: string) {
   setState("loadError", null);
   try {
-    await bridge.exportImage(path);
+    await bridgeExportImage(path);
   } catch (error) {
     setState("loadError", describeImageLoadError(error));
   }
 }
 
 export async function pickExportTarget() {
-  return bridge.pickExportTarget();
+  return bridgePickExportTarget();
 }
