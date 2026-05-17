@@ -1,12 +1,6 @@
 import { type Component, Show } from "solid-js";
-import {
-  exportImage,
-  openImageFile,
-  pickExportTarget,
-  showEditorView,
-  showMediaView,
-} from "../store/editor-image";
-import { isAdjustmentSliderActive, state } from "../store/editor-store";
+import { useOpenImage } from "../data/use-open-image";
+import { isAdjustmentSliderActive, showEditorView, showMediaView, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 
@@ -60,6 +54,7 @@ const BackIcon = () => (
 );
 
 export const Toolbar: Component = () => {
+  const image = useOpenImage();
   let fileInputRef: HTMLInputElement | undefined;
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   const canResumeEditor = () =>
@@ -93,7 +88,7 @@ export const Toolbar: Component = () => {
     const selectedFiles = Array.from(files);
     try {
       for (const [index, file] of selectedFiles.entries()) {
-        await openImageFile(file, index === 0 ? "replace" : "append");
+        await image.openFile(file, index === 0 ? "replace" : "append");
       }
     } catch {
       return;
@@ -102,11 +97,11 @@ export const Toolbar: Component = () => {
   };
 
   const handleExport = async () => {
-    const path = await pickExportTarget();
+    const path = await image.pickExportTarget();
     if (!path) {
       return;
     }
-    await exportImage(path);
+    await image.exportTo(path);
   };
 
   return (

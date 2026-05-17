@@ -5,17 +5,11 @@ import {
 } from "../components/media-view/media-utils";
 import { loadLibraryData } from "../data/use-library-items";
 import { useMediaLibraryList } from "../data/use-media-library-list";
-import {
-  getViewportDisplaySize,
-  getViewportFitRef,
-  getViewportZoomPercent,
-  offsetViewportCenter,
-  panViewport,
-  refreshPreview,
-  setViewportState,
-} from "../viewport/preview";
-import { openImage, showEditorView, showMediaView } from "./editor-image";
-import {
+import { useOpenImage } from "../data/use-open-image";
+import { useLayerStack } from "../data/use-layer-stack";
+
+const layers = useLayerStack();
+const {
   addLayer,
   applyEdit,
   applyGradientMask,
@@ -24,15 +18,17 @@ import {
   moveLayer,
   removeMask,
   renameLayer,
-  selectLayer,
-  setLayerOpacity,
-  setLayerVisible,
   stampBrushMask,
-} from "./editor-layers";
+} = layers;
+const selectLayer = layers.select;
+const setLayerOpacity = layers.setOpacity;
+const setLayerVisible = layers.setVisible;
 import {
   type ArtboardSource,
   fullCanvasCrop,
   getSelectedArtboard,
+  showEditorView,
+  showMediaView,
   state,
 } from "./editor-store";
 import { getMediaBrowserController } from "./media-browser-control";
@@ -402,7 +398,7 @@ async function handleOpenImagePath(args: unknown) {
   if (mode !== "replace" && mode !== "append") {
     throw new Error("mode must be replace or append");
   }
-  await openImage(path, null, null, mode);
+  await useOpenImage().open(path, null, null, mode);
   return {
     path,
     view: state.currentView,
@@ -643,7 +639,7 @@ async function handlePaintBrushMask(args: unknown) {
     readFiniteNumber(parsed, "softness"),
     readOptionalBoolean(parsed, "erase") ?? false,
   );
-  await refreshPreview();
+  await useOpenImage().refreshPreview();
   return {
     layerIndex,
     mask: state.layers[layerIndex]?.mask_params ?? null,
@@ -652,8 +648,8 @@ async function handlePaintBrushMask(args: unknown) {
 
 function appStateSnapshot() {
   const selectedArtboard = getSelectedArtboard();
-  const viewportDisplay = getViewportDisplaySize();
-  const fitRef = getViewportFitRef();
+  const viewportDisplay = useOpenImage().getViewportDisplaySize();
+  const fitRef = useOpenImage().getViewportFitRef();
   return {
     currentView: state.currentView,
     selectedLibraryId: getMediaBrowserController().getSelectedLibraryId(),
@@ -675,7 +671,7 @@ function appStateSnapshot() {
       screenHeight: state.viewportScreenHeight,
       displayWidth: viewportDisplay.width,
       displayHeight: viewportDisplay.height,
-      zoomPercent: getViewportZoomPercent(),
+      zoomPercent: useOpenImage().getViewportZoomPercent(),
       fitX: fitRef.x,
       fitY: fitRef.y,
       fitWidth: fitRef.width,
@@ -769,7 +765,7 @@ export async function executeRemoteControlTool(
       return handlePaintBrushMask(call.arguments);
     case "set_viewport": {
       const args = assertObject(call.arguments, "set_viewport arguments");
-      setViewportState({
+      useOpenImage().setViewportState({
         centerX: readOptionalFiniteNumber(args, "centerX") ?? undefined,
         centerY: readOptionalFiniteNumber(args, "centerY") ?? undefined,
         zoom: readOptionalFiniteNumber(args, "zoom") ?? undefined,
@@ -782,11 +778,11 @@ export async function executeRemoteControlTool(
       const deltaX = readFiniteNumber(args, "deltaX");
       const deltaY = readFiniteNumber(args, "deltaY");
       if (unit === "image") {
-        offsetViewportCenter(deltaX, deltaY);
+        useOpenImage().offsetViewportCenter(deltaX, deltaY);
         return appStateSnapshot();
       }
       if (unit === "screen") {
-        panViewport(deltaX, deltaY, true);
+        useOpenImage().panViewport(deltaX, deltaY, true);
         return appStateSnapshot();
       }
       throw new Error("unit must be image or screen");

@@ -278,3 +278,15 @@ export function hasActiveCrop() {
 export function findCropLayerIdx() {
   return state.layers.findIndex((layer) => layer.kind === "crop");
 }
+
+
+export function showEditorView() {
+  if (state.selectedArtboardId === null && !state.isLoading) {
+    throw new Error("cannot show editor without a loaded image");
+  }
+  setState("currentView", "editor");
+}
+
+export function showMediaView() {
+  setState("currentView", "media");
+}

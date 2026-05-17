@@ -1,11 +1,7 @@
 import { type Component, createMemo, For, Show } from "solid-js";
 import type { TextAlignName, TextStyleValues } from "../bridge";
 import { addFont, pruneUnusedFonts, useFontList } from "../data/use-font-list";
-import {
-  setTextTransform,
-  updateTextContent,
-  updateTextStyle,
-} from "../store/editor-layers";
+import { useLayerStack } from "../data/use-layer-stack";
 import type { LayerInfo } from "../store/editor-store";
 import { Slider } from "./Slider";
 
@@ -65,52 +61,53 @@ export const TextLayerEditor: Component<{
   const style = createMemo<TextStyleValues | null>(() => text()?.style ?? null);
 
   const { fonts } = useFontList();
+  const layers = useLayerStack();
 
   const onContentInput = (event: InputEvent) => {
     const target = event.currentTarget as HTMLTextAreaElement;
-    void updateTextContent(props.layerIdx, target.value);
+    void layers.updateTextContent(props.layerIdx, target.value);
   };
 
   const onFontPick = (event: Event) => {
     const target = event.currentTarget as HTMLSelectElement;
     const value = Number(target.value);
     if (!Number.isFinite(value)) return;
-    void updateTextStyle(props.layerIdx, { font_id: value });
+    void layers.updateTextStyle(props.layerIdx, { font_id: value });
   };
 
   const onAlignPick = (value: TextAlignName) => {
-    void updateTextStyle(props.layerIdx, { align: value });
+    void layers.updateTextStyle(props.layerIdx, { align: value });
   };
 
   const onColorInput = (event: Event) => {
     const target = event.currentTarget as HTMLInputElement;
     const current = style()?.color ?? [1, 1, 1, 1];
     const next = hexToColorArray(target.value, current[3]);
-    void updateTextStyle(props.layerIdx, { color: next });
+    void layers.updateTextStyle(props.layerIdx, { color: next });
   };
 
   const onItalicToggle = (event: Event) => {
     const target = event.currentTarget as HTMLInputElement;
-    void updateTextStyle(props.layerIdx, { italic: target.checked });
+    void layers.updateTextStyle(props.layerIdx, { italic: target.checked });
   };
 
   const onWeightInput = (event: Event) => {
     const target = event.currentTarget as HTMLSelectElement;
     const value = Number(target.value);
     if (!Number.isFinite(value)) return;
-    void updateTextStyle(props.layerIdx, { weight: value });
+    void layers.updateTextStyle(props.layerIdx, { weight: value });
   };
 
   const onMaxWidthInput = (event: Event) => {
     const target = event.currentTarget as HTMLInputElement;
     const raw = target.value.trim();
     if (raw === "") {
-      void updateTextStyle(props.layerIdx, { max_width: null });
+      void layers.updateTextStyle(props.layerIdx, { max_width: null });
       return;
     }
     const value = Number(raw);
     if (!Number.isFinite(value) || value <= 0) return;
-    void updateTextStyle(props.layerIdx, { max_width: value });
+    void layers.updateTextStyle(props.layerIdx, { max_width: value });
   };
 
   const onAddFont = async (event: Event) => {
@@ -121,7 +118,7 @@ export const TextLayerEditor: Component<{
     const family = deriveFamilyFromFilename(file.name);
     const fontId = await addFont(family, bytes);
     // Auto-select the new font on the active layer.
-    void updateTextStyle(props.layerIdx, { font_id: fontId });
+    void layers.updateTextStyle(props.layerIdx, { font_id: fontId });
     // Reset the input so picking the same file twice still fires `change`.
     input.value = "";
   };
@@ -192,7 +189,7 @@ export const TextLayerEditor: Component<{
               max={256}
               step={1}
               valueLabel={`${Math.round(t().style.size_px)} px`}
-              onChange={(v) => void updateTextStyle(props.layerIdx, { size_px: v })}
+              onChange={(v) => void layers.updateTextStyle(props.layerIdx, { size_px: v })}
             />
 
             <Slider
@@ -202,7 +199,7 @@ export const TextLayerEditor: Component<{
               min={0.5}
               max={3}
               step={0.05}
-              onChange={(v) => void updateTextStyle(props.layerIdx, { line_height: v })}
+              onChange={(v) => void layers.updateTextStyle(props.layerIdx, { line_height: v })}
             />
 
             <Slider
@@ -213,7 +210,7 @@ export const TextLayerEditor: Component<{
               max={40}
               step={0.5}
               onChange={(v) =>
-                void updateTextStyle(props.layerIdx, { letter_spacing: v })
+                void layers.updateTextStyle(props.layerIdx, { letter_spacing: v })
               }
             />
 
@@ -296,7 +293,7 @@ export const TextLayerEditor: Component<{
                     onInput={(e) => {
                       const value = Number((e.currentTarget as HTMLInputElement).value);
                       if (!Number.isFinite(value)) return;
-                      void setTextTransform(props.layerIdx, {
+                      void layers.setTextTransform(props.layerIdx, {
                         ...t().transform,
                         tx: value,
                       });
@@ -313,7 +310,7 @@ export const TextLayerEditor: Component<{
                     onInput={(e) => {
                       const value = Number((e.currentTarget as HTMLInputElement).value);
                       if (!Number.isFinite(value)) return;
-                      void setTextTransform(props.layerIdx, {
+                      void layers.setTextTransform(props.layerIdx, {
                         ...t().transform,
                         ty: value,
                       });

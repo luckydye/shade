@@ -11,31 +11,14 @@ import {
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import type {
-  BatchExportProgress,
-  LibrarySyncProgress,
-  S3MediaLibraryInput,
-} from "../bridge/index";
-import {
-  applyPresetSnapshot,
-  batchApplyPresetSnapshot,
-  batchClearEdits,
-  batchExportImages,
-} from "../data/batch";
-import {
-  listenBatchExportProgress,
-  listenLibraryScanComplete,
-  listenLibraryScanProgress,
-  listenLibrarySyncProgress,
-  listenNativeDragDrop,
-  listenPeerPaired,
-} from "../data/events";
-import {
-  openImage,
-  openPeerImage,
-  pairPeerDevice,
-  pickDirectory,
-} from "../data/image-actions";
+import type { S3MediaLibraryInput } from "../bridge/index";
+import { listenNativeDragDrop } from "../data/events";
+import { useBatchExportProgress } from "../data/use-batch-export-progress";
+import { useBatchOperations } from "../data/use-batch-operations";
+import { useLayerStack } from "../data/use-layer-stack";
+import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
+import { pairPeerDevice, pickDirectory } from "../data/image-actions";
+import { useOpenImage } from "../data/use-open-image";
 import { isTauriRuntime } from "../data/runtime";
 import {
   addToCollection,
@@ -71,8 +54,7 @@ import {
 import { usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
 import { actions, buildActionContext } from "../store/actions";
-import { showMediaView } from "../store/editor-image";
-import { isAdjustmentSliderActive, state } from "../store/editor-store";
+import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor-store";
 import { registerMediaBrowserController } from "../store/media-browser-control";
 import {
   setMediaViewFocusedItem,
@@ -146,6 +128,8 @@ function toErrorMessage(err: unknown): string {
 }
 
 export const MediaView: Component = () => {
+  const layerOps = useLayerStack();
+  const batchOps = useBatchOperations();
   const { libraries, refetch: refetchLibraries } = useMediaLibraryList();
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
   const {
@@ -217,10 +201,8 @@ export const MediaView: Component = () => {
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
-  const [syncProgress, setSyncProgress] = createSignal<LibrarySyncProgress | null>(null);
-  const [exportProgress, setExportProgress] = createSignal<BatchExportProgress | null>(
-    null,
-  );
+  const syncProgress = useLibrarySyncProgress();
+  const exportProgress = useBatchExportProgress();
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
   const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
@@ -935,27 +917,12 @@ export const MediaView: Component = () => {
       },
     });
     setSupportsS3Libraries(isTauriRuntime());
-    let unlistenPeerPaired: (() => void) | null = null;
-    if (isTauriRuntime()) {
-      unlistenPeerPaired = listenPeerPaired(async () => {
-        await refetchLibraries();
-      });
-    }
-    const unlistenSyncProgress = listenLibrarySyncProgress((progress) => {
-      if (progress.completed >= progress.total) {
-        setSyncProgress(null);
-        void refetchItems();
-      } else {
-        setSyncProgress(progress);
-      }
-    });
-    const unlistenExportProgress = listenBatchExportProgress((progress) => {
-      if (progress.completed >= progress.total) {
-        setExportProgress(null);
-      } else {
-        setExportProgress(progress);
-      }
-    });
+    // Refetch library items when an in-flight sync completes.
+    createEffect(
+      on(syncProgress, (current, prev) => {
+        if (prev && !current) void refetchItems();
+      }),
+    );
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
       syncSelectedLibraryIfNeeded();
@@ -964,9 +931,6 @@ export const MediaView: Component = () => {
       isDisposed = true;
       unregisterMediaBrowserController();
       window.clearInterval(libraryRefreshTimer);
-      void unlistenPeerPaired?.();
-      unlistenSyncProgress();
-      unlistenExportProgress();
       for (const src of thumbnailMemoryBuffer.values()) {
         if (src !== state.loadingMediaSrc) {
           URL.revokeObjectURL(src);
@@ -1292,25 +1256,6 @@ export const MediaView: Component = () => {
     const id = focusedItemId();
     if (!id || !keyboardNavActive()) return;
     scrollFocusedItemIntoView();
-  });
-
-  onMount(() => {
-    const unlistenScanComplete = listenLibraryScanComplete((libraryId) => {
-      const library = selectedLibrary();
-      if (library?.id === libraryId) {
-        void refetchItems();
-      }
-    });
-    const unlistenScanProgress = listenLibraryScanProgress((libraryId) => {
-      const library = selectedLibrary();
-      if (library?.id === libraryId) {
-        void refetchItems();
-      }
-    });
-    onCleanup(() => {
-      unlistenScanComplete();
-      unlistenScanProgress();
-    });
   });
 
   async function withSubmitting(fn: () => Promise<void>) {
@@ -1747,7 +1692,7 @@ export const MediaView: Component = () => {
           path: item.path,
           fingerprint: item.fingerprint,
         }));
-        const count = await batchApplyPresetSnapshot(batchItems, name);
+        const count = await batchOps.applyPresetSnapshot(batchItems, name);
         setMediaActionStatus(
           `Applied ${name} and saved ${count} snapshot${count > 1 ? "s" : ""}`,
         );
@@ -1761,11 +1706,11 @@ export const MediaView: Component = () => {
               has_snapshots: item.metadata.hasSnapshots,
               latest_snapshot_id: item.metadata.latestSnapshotId,
             };
-            await openPeerImage(item.peerId, picture);
-            await applyPresetSnapshot(name);
+            await useOpenImage().openPeer(item.peerId, picture);
+            await layerOps.applyPresetSnapshot(name, null);
           } else {
-            await openImage(item.path);
-            await applyPresetSnapshot(name, item.path);
+            await useOpenImage().open(item.path);
+            await layerOps.applyPresetSnapshot(name, item.path);
           }
           setMediaActionStatus(`Applying ${name}... (${index + 1}/${items.length})`);
         }
@@ -1804,7 +1749,7 @@ export const MediaView: Component = () => {
       const isTauri = isTauriRuntime();
       if (isTauri) {
         const paths = items.map((item) => item.path);
-        const count = await batchClearEdits(paths);
+        const count = await batchOps.clearEdits(paths);
         setMediaActionStatus(`Cleared edits for ${count} image${count > 1 ? "s" : ""}`);
       } else {
         setMediaActionStatus("Clear edits is only supported in the native app");
@@ -1885,7 +1830,7 @@ export const MediaView: Component = () => {
         fingerprint: item.fingerprint,
         name: item.name,
       }));
-      const count = await batchExportImages(batchItems, targetDir);
+      const count = await batchOps.exportImages(batchItems, targetDir);
       setMediaActionStatus(
         `Exported ${count} image${count > 1 ? "s" : ""} to ${targetDir}`,
       );

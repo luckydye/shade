@@ -1,3 +1,5 @@
+import { createRoot } from "solid-js";
+import * as bridge from "../bridge/index";
 import type {
   CurveControlPoint,
   GradientMaskParams,
@@ -5,45 +7,19 @@ import type {
   TextTransformValues,
 } from "../bridge/index";
 import {
-  applyPresetSnapshot as bridgeApplyPresetSnapshot,
-  loadPreset as bridgeLoadPreset,
-  loadSnapshot as bridgeLoadSnapshot,
-} from "../data/batch";
-import { onChannelMessage } from "../data/events";
-import {
-  addLayer as bridgeAddLayer,
-  addTextLayer as bridgeAddTextLayer,
-  applyEdit as bridgeApplyEdit,
-  applyGradientMask as bridgeApplyGradientMask,
-  createBrushMask as bridgeCreateBrushMask,
-  deleteLayer as bridgeDeleteLayer,
-  getLayerStack,
-  getStackSnapshot,
-  moveLayer as bridgeMoveLayer,
-  removeMask as bridgeRemoveMask,
-  renameLayer as bridgeRenameLayer,
-  replaceStack,
-  setLayerOpacity as bridgeSetLayerOpacity,
-  setLayerVisible as bridgeSetLayerVisible,
-  setTextTransform as bridgeSetTextTransform,
-  stampBrushMask as bridgeStampBrushMask,
-  updateTextContent as bridgeUpdateTextContent,
-  updateTextStyle as bridgeUpdateTextStyle,
-} from "../data/layer-stack";
-import { isTauriRuntime } from "../data/runtime";
-import { clearPreviewTiles, refreshPreview, resetViewport } from "../viewport/preview";
-import {
-  fullCanvasCrop,
-  getSelectedArtboard,
   isAdjustmentSliderActive,
   type LayerInfo,
-  normalizeCropRect,
   resolveSelectedLayerIdx,
   resolveSelectedLayerPart,
   setState,
   state,
-} from "./editor-store";
-import { onRestore, recordSnapshot } from "./history";
+} from "../store/editor-store";
+import { onRestore, recordSnapshot } from "../store/history";
+import { onChannelMessage } from "./events";
+import { useOpenImage } from "./use-open-image";
+import { isTauriRuntime } from "./runtime";
+
+// ── Reactive stack sync ─────────────────────────────────────────────────────
 
 interface LayerStackInfoLike {
   layers: LayerInfo[];
@@ -71,28 +47,42 @@ function applyLayerStackInfo(info: LayerStackInfoLike) {
   });
 }
 
-// Subscribe to authoritative layer-stack pushes from Rust. The subscriber is
-// installed once at module load; every Rust-side mutation site broadcasts a
-// `LayerStackSnapshot` after persisting, so the store reflects the
-// post-mutation state without callers needing to invoke `get_layer_stack`.
-onChannelMessage("layer_stack_snapshot", (msg) => {
-  applyLayerStackInfo(msg.stack as LayerStackInfoLike);
+async function refresh(): Promise<void> {
+  if (await isTauriRuntime()) {
+    // Rust broadcasts on every mutation and on initial channel registration —
+    // store is already kept in sync by the subscriber.
+    return;
+  }
+  const info = await bridge.getLayerStack();
+  applyLayerStackInfo(info as unknown as LayerStackInfoLike);
+}
+
+createRoot(() => {
+  // Subscribe to authoritative layer-stack pushes from Rust. Every Rust-side
+  // mutation site broadcasts a `LayerStackSnapshot` after persisting, so the
+  // store reflects the post-mutation state without callers needing to invoke
+  // `get_layer_stack`.
+  onChannelMessage("layer_stack_snapshot", (msg) => {
+    applyLayerStackInfo(msg.stack as LayerStackInfoLike);
+  });
+
+  onRestore(async (data) => {
+    await bridge.replaceStack(data);
+    await refresh();
+    await useOpenImage().refreshPreview();
+  });
 });
 
-onRestore(async (data) => {
-  await replaceStack(data);
-  await refreshLayerStack();
-  await refreshPreview();
-});
+// ── History snapshot queue ─────────────────────────────────────────────────
 
 async function captureAndRecordSnapshot() {
-  const data = await getStackSnapshot();
+  const data = await bridge.getStackSnapshot();
   recordSnapshot(data);
 }
 
 let deferredHistorySnapshot = false;
 
-export function queueHistorySnapshot() {
+function queueHistorySnapshot() {
   if (isAdjustmentSliderActive()) {
     deferredHistorySnapshot = true;
     return;
@@ -100,13 +90,13 @@ export function queueHistorySnapshot() {
   void captureAndRecordSnapshot();
 }
 
-export async function flushDeferredHistorySnapshot() {
-  if (!deferredHistorySnapshot) {
-    return;
-  }
+async function flushDeferredHistorySnapshot() {
+  if (!deferredHistorySnapshot) return;
   deferredHistorySnapshot = false;
   await captureAndRecordSnapshot();
 }
+
+// ── Edit batching ──────────────────────────────────────────────────────────
 
 let pendingEdits = new Map<string, Record<string, unknown>>();
 let editFlushPromise: Promise<void> | null = null;
@@ -133,14 +123,12 @@ async function flushPendingEdits() {
   await nextAnimationFrame();
   const batch = [...pendingEdits.values()];
   pendingEdits = new Map();
-  if (batch.length === 0) {
-    return;
-  }
+  if (batch.length === 0) return;
   for (const params of batch) {
-    await bridgeApplyEdit(params);
+    await bridge.applyEdit(params);
   }
   setState("previewContentVersion", (version) => version + 1);
-  await refreshPreview();
+  await useOpenImage().refreshPreview();
   if (pendingEdits.size > 0) {
     await flushPendingEdits();
   } else {
@@ -155,9 +143,7 @@ function queueEdit(params: Record<string, unknown>) {
   const completion = new Promise<void>((resolve, reject) => {
     editFlushWaiters.push({ resolve, reject });
   });
-  if (editFlushPromise) {
-    return completion;
-  }
+  if (editFlushPromise) return completion;
   editFlushPromise = (async () => {
     try {
       await flushPendingEdits();
@@ -174,6 +160,8 @@ function queueEdit(params: Record<string, unknown>) {
   })();
   return completion;
 }
+
+// ── Optimistic store mutations ─────────────────────────────────────────────
 
 function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
   return {
@@ -192,68 +180,8 @@ function getEmptyAdjustments(): NonNullable<LayerInfo["adjustments"]> {
 
 async function runLayerMutation(work: () => Promise<unknown>) {
   await work();
-  await refreshLayerStack();
-  await refreshPreview();
-}
-
-/**
- * In the Tauri runtime the layer stack is pushed reactively via
- * `LayerStackSnapshot` — callers no longer need to refetch after mutations.
- * This function remains as a fallback for the browser worker path (which has
- * no channel) and as a manual sync trigger when starting up before any
- * mutation has fired.
- */
-export async function refreshLayerStack() {
-  if (await isTauriRuntime()) {
-    // Rust broadcasts on every mutation and on initial channel registration —
-    // store is already kept in sync by the subscriber.
-    return;
-  }
-  const info = await getLayerStack();
-  applyLayerStackInfo(info as unknown as LayerStackInfoLike);
-}
-
-export async function setLayerVisible(idx: number, visible: boolean) {
-  await runLayerMutation(() => bridgeSetLayerVisible(idx, visible));
-}
-
-export async function setLayerOpacity(idx: number, opacity: number) {
-  await runLayerMutation(() => bridgeSetLayerOpacity(idx, opacity));
-}
-
-export async function renameLayer(idx: number, name: string | null) {
-  if (idx < 0 || idx >= state.layers.length) {
-    throw new Error("layer index is out of bounds");
-  }
-  await bridgeRenameLayer(idx, name);
-  await refreshLayerStack();
-}
-
-export async function deleteLayer(idx: number) {
-  const deletedSelectedLayer = idx === state.selectedLayerIdx;
-  await bridgeDeleteLayer(idx);
-  await refreshLayerStack();
-  if (deletedSelectedLayer) {
-    setState("selectedLayerPart", "layer");
-  }
-  if (state.layers.length === 0) {
-    clearPreviewTiles();
-  }
-  await refreshPreview();
-  queueHistorySnapshot();
-}
-
-function getMovedLayerIndex(idx: number, fromIdx: number, toIdx: number) {
-  if (idx === fromIdx) {
-    return toIdx > fromIdx ? toIdx - 1 : toIdx;
-  }
-  if (toIdx > fromIdx && idx > fromIdx && idx < toIdx) {
-    return idx - 1;
-  }
-  if (toIdx < fromIdx && idx >= toIdx && idx < fromIdx) {
-    return idx + 1;
-  }
-  return idx;
+  await refresh();
+  await useOpenImage().refreshPreview();
 }
 
 function applyCropLayerEdit(layerIdx: number, params: Record<string, unknown>) {
@@ -380,7 +308,59 @@ function applyAdjustmentLayerEdit(layerIdx: number, params: Record<string, unkno
   }
 }
 
-export async function applyEdit(params: Record<string, unknown>) {
+function getMovedLayerIndex(idx: number, fromIdx: number, toIdx: number) {
+  if (idx === fromIdx) return toIdx > fromIdx ? toIdx - 1 : toIdx;
+  if (toIdx > fromIdx && idx > fromIdx && idx < toIdx) return idx - 1;
+  if (toIdx < fromIdx && idx >= toIdx && idx < fromIdx) return idx + 1;
+  return idx;
+}
+
+// ── Operations ─────────────────────────────────────────────────────────────
+
+function select(idx: number) {
+  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "layer") return;
+  setState({ selectedLayerIdx: idx, selectedLayerPart: "layer" });
+}
+
+function selectMask(idx: number) {
+  if (!state.layers[idx]?.has_mask) {
+    throw new Error("mask selection requires a masked layer");
+  }
+  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "mask") return;
+  setState({ selectedLayerIdx: idx, selectedLayerPart: "mask" });
+}
+
+async function setVisible(idx: number, visible: boolean) {
+  await runLayerMutation(() => bridge.setLayerVisible(idx, visible));
+}
+
+async function setOpacity(idx: number, opacity: number) {
+  await runLayerMutation(() => bridge.setLayerOpacity(idx, opacity));
+}
+
+async function renameLayer(idx: number, name: string | null) {
+  if (idx < 0 || idx >= state.layers.length) {
+    throw new Error("layer index is out of bounds");
+  }
+  await bridge.renameLayer(idx, name);
+  await refresh();
+}
+
+async function deleteLayer(idx: number) {
+  const deletedSelectedLayer = idx === state.selectedLayerIdx;
+  await bridge.deleteLayer(idx);
+  await refresh();
+  if (deletedSelectedLayer) {
+    setState("selectedLayerPart", "layer");
+  }
+  if (state.layers.length === 0) {
+    useOpenImage().clearPreviewTiles();
+  }
+  await useOpenImage().refreshPreview();
+  queueHistorySnapshot();
+}
+
+async function applyEdit(params: Record<string, unknown>) {
   const layerIdx = params.layer_idx;
   if (typeof layerIdx !== "number") {
     throw new Error("applyEdit requires a numeric layer_idx");
@@ -401,104 +381,24 @@ export async function applyEdit(params: Record<string, unknown>) {
   await queueEdit(params);
 }
 
-export function selectLayer(idx: number) {
-  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "layer") return;
-  setState({
-    selectedLayerIdx: idx,
-    selectedLayerPart: "layer",
-  });
+async function applyGradientMask(params: GradientMaskParams) {
+  await runLayerMutation(() => bridge.applyGradientMask(params));
+  selectMask(params.layer_idx);
 }
 
-export function selectMaskLayer(idx: number) {
-  if (!state.layers[idx]?.has_mask) {
-    throw new Error("mask selection requires a masked layer");
-  }
-  if (idx === state.selectedLayerIdx && state.selectedLayerPart === "mask") return;
-  setState({
-    selectedLayerIdx: idx,
-    selectedLayerPart: "mask",
-  });
-}
-
-export function startCropMode() {
-  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {
-    throw new Error("cannot start crop mode without a loaded image");
-  }
-  setState({
-    isCropMode: true,
-    cropDraft: state.crop,
-  });
-  void refreshPreview();
-}
-
-export function cancelCropMode() {
-  if (!state.isCropMode) return;
-  setState({
-    isCropMode: false,
-    cropDraft: null,
-  });
-  void refreshPreview();
-}
-
-export function updateCropDraft(next: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-}) {
-  if (!state.isCropMode) {
-    throw new Error("cannot update crop draft when crop mode is inactive");
-  }
-  setState("cropDraft", normalizeCropRect(next));
-}
-
-export function resetCrop() {
-  if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {
-    throw new Error("cannot reset crop without a loaded image");
-  }
-  const crop = fullCanvasCrop();
-  setState({
-    crop,
-    cropDraft: state.isCropMode ? crop : null,
-  });
-  resetViewport();
-}
-
-export function applyCrop() {
-  if (!state.isCropMode || !state.cropDraft) {
-    throw new Error("cannot apply crop without an active draft");
-  }
-  const crop = normalizeCropRect(state.cropDraft);
-  setState({
-    crop,
-    cropDraft: null,
-    isCropMode: false,
-    viewportZoom: 1,
-    viewportCenterX: crop.x + crop.width * 0.5,
-    viewportCenterY: crop.y + crop.height * 0.5,
-  });
-  void refreshPreview();
-}
-
-export async function applyGradientMask(params: GradientMaskParams) {
-  await runLayerMutation(() => bridgeApplyGradientMask(params));
-  selectMaskLayer(params.layer_idx);
-}
-
-export async function removeMask(idx: number) {
-  await runLayerMutation(() => bridgeRemoveMask(idx));
+async function removeMask(idx: number) {
+  await runLayerMutation(() => bridge.removeMask(idx));
   if (idx === state.selectedLayerIdx && state.selectedLayerPart === "mask") {
-    selectLayer(idx);
+    select(idx);
   }
 }
 
-export async function createBrushMask(idx: number) {
-  await runLayerMutation(() => bridgeCreateBrushMask(idx));
-  selectMaskLayer(idx);
+async function createBrushMask(idx: number) {
+  await runLayerMutation(() => bridge.createBrushMask(idx));
+  selectMask(idx);
 }
 
-export async function stampBrushMask(
+async function stampBrushMask(
   layerIdx: number,
   cx: number,
   cy: number,
@@ -506,15 +406,15 @@ export async function stampBrushMask(
   softness: number,
   erase: boolean,
 ) {
-  await bridgeStampBrushMask(layerIdx, cx, cy, radius, softness, erase);
+  await bridge.stampBrushMask(layerIdx, cx, cy, radius, softness, erase);
 }
 
-export async function addLayer(kind: string, position: number) {
-  await bridgeAddLayer(kind);
-  // The Rust side always appends the new layer, then broadcasts the new
-  // stack via LayerStackSnapshot. The bridge mutation awaits the snapshot
-  // before resolving, so state.layers is up-to-date here.
-  await refreshLayerStack();
+async function addLayer(kind: string, position: number) {
+  await bridge.addLayer(kind);
+  // Rust always appends the new layer, then broadcasts the new stack via
+  // LayerStackSnapshot. The bridge mutation awaits the snapshot before
+  // resolving, so state.layers is up-to-date here.
+  await refresh();
   if (position < 0 || position > state.layers.length) {
     throw new Error("layer insertion position is out of bounds");
   }
@@ -523,21 +423,19 @@ export async function addLayer(kind: string, position: number) {
     throw new Error("new layer could not be resolved after insertion");
   }
   if (idx !== position) {
-    await bridgeMoveLayer(idx, position);
-    await refreshLayerStack();
+    await bridge.moveLayer(idx, position);
+    await refresh();
     idx = getMovedLayerIndex(idx, idx, position);
   }
   setState("selectedLayerIdx", idx);
   setState("selectedLayerPart", "layer");
-  await refreshPreview();
+  await useOpenImage().refreshPreview();
   queueHistorySnapshot();
   return idx;
 }
 
-export async function moveLayer(fromIdx: number, toIdx: number) {
-  if (fromIdx === toIdx || fromIdx + 1 === toIdx) {
-    return;
-  }
+async function moveLayer(fromIdx: number, toIdx: number) {
+  if (fromIdx === toIdx || fromIdx + 1 === toIdx) return;
   if (fromIdx < 0 || fromIdx >= state.layers.length) {
     throw new Error("source layer index is out of bounds");
   }
@@ -549,55 +447,45 @@ export async function moveLayer(fromIdx: number, toIdx: number) {
       ? -1
       : getMovedLayerIndex(state.selectedLayerIdx, fromIdx, toIdx);
   const selectedLayerPart = state.selectedLayerPart;
-  await bridgeMoveLayer(fromIdx, toIdx);
-  await refreshLayerStack();
+  await bridge.moveLayer(fromIdx, toIdx);
+  await refresh();
   if (nextSelectedIdx >= 0) {
-    setState({
-      selectedLayerIdx: nextSelectedIdx,
-      selectedLayerPart,
-    });
+    setState({ selectedLayerIdx: nextSelectedIdx, selectedLayerPart });
   }
-  await refreshPreview();
+  await useOpenImage().refreshPreview();
   queueHistorySnapshot();
 }
 
-export async function loadPreset(name: string) {
-  await bridgeLoadPreset(name);
-  await refreshLayerStack();
-  await refreshPreview();
+async function loadPreset(name: string) {
+  await bridge.loadPreset(name);
+  await refresh();
+  await useOpenImage().refreshPreview();
   queueHistorySnapshot();
 }
 
-export async function applyPresetSnapshot(name: string) {
-  const artboard = getSelectedArtboard();
-  const imagePath = artboard?.source.kind === "path" ? artboard.source.path : null;
-  const snapshot = await bridgeApplyPresetSnapshot(name, imagePath);
-  await refreshLayerStack();
-  await refreshPreview();
+async function applyPresetSnapshot(name: string, imagePath: string | null) {
+  const snapshot = await bridge.applyPresetSnapshot(name, imagePath);
+  await refresh();
+  await useOpenImage().refreshPreview();
   queueHistorySnapshot();
   return snapshot;
 }
 
-export async function loadSnapshot(id: string) {
-  await bridgeLoadSnapshot(id);
-  await refreshLayerStack();
-  await refreshPreview();
+async function loadSnapshot(id: string) {
+  await bridge.loadSnapshot(id);
+  await refresh();
+  await useOpenImage().refreshPreview();
   queueHistorySnapshot();
 }
 
-// ── Text layers & fonts ────────────────────────────────────────────────
-
-export async function addTextLayer(
+async function addTextLayer(
   content: string,
   fontId: number,
   sizePx: number,
   position: number,
 ) {
-  await bridgeAddTextLayer(content, fontId, sizePx);
-  // Rust appends the new text layer and broadcasts the new stack via
-  // LayerStackSnapshot before the mutation resolves; the appended layer is
-  // therefore at `state.layers.length - 1`.
-  await refreshLayerStack();
+  await bridge.addTextLayer(content, fontId, sizePx);
+  await refresh();
   if (position < 0 || position > state.layers.length) {
     throw new Error("layer insertion position is out of bounds");
   }
@@ -606,28 +494,54 @@ export async function addTextLayer(
     throw new Error("new layer could not be resolved after insertion");
   }
   if (idx !== position) {
-    await bridgeMoveLayer(idx, position);
-    await refreshLayerStack();
+    await bridge.moveLayer(idx, position);
+    await refresh();
     idx = getMovedLayerIndex(idx, idx, position);
   }
   setState("selectedLayerIdx", idx);
-  await refreshPreview();
+  await useOpenImage().refreshPreview();
   queueHistorySnapshot();
   return idx;
 }
 
-export async function updateTextContent(layerIdx: number, content: string) {
-  await runLayerMutation(() => bridgeUpdateTextContent(layerIdx, content));
+async function updateTextContent(layerIdx: number, content: string) {
+  await runLayerMutation(() => bridge.updateTextContent(layerIdx, content));
 }
 
-export async function updateTextStyle(layerIdx: number, patch: TextStylePatch) {
-  await runLayerMutation(() => bridgeUpdateTextStyle(layerIdx, patch));
+async function updateTextStyle(layerIdx: number, patch: TextStylePatch) {
+  await runLayerMutation(() => bridge.updateTextStyle(layerIdx, patch));
 }
 
-export async function setTextTransform(
-  layerIdx: number,
-  transform: TextTransformValues,
-) {
-  await runLayerMutation(() => bridgeSetTextTransform(layerIdx, transform));
+async function setTextTransform(layerIdx: number, transform: TextTransformValues) {
+  await runLayerMutation(() => bridge.setTextTransform(layerIdx, transform));
 }
 
+// ── Composable surface ─────────────────────────────────────────────────────
+
+export function useLayerStack() {
+  return {
+    refresh,
+    select,
+    selectMask,
+    addLayer,
+    addTextLayer,
+    renameLayer,
+    deleteLayer,
+    moveLayer,
+    setVisible,
+    setOpacity,
+    applyEdit,
+    applyGradientMask,
+    removeMask,
+    createBrushMask,
+    stampBrushMask,
+    updateTextContent,
+    updateTextStyle,
+    setTextTransform,
+    loadPreset,
+    applyPresetSnapshot,
+    loadSnapshot,
+    queueHistorySnapshot,
+    flushDeferredHistorySnapshot,
+  };
+}

@@ -1,5 +1,5 @@
 import { getSelectedArtboard, state } from "../../store/editor-store";
-import { getViewportFitRef } from "../../viewport/preview";
+import { useOpenImage } from "../../data/use-open-image";
 import { buildTransform, type WorldTransform } from "../../viewport/transform";
 
 export function getViewWorldOffset(): { x: number; y: number } {
@@ -17,7 +17,7 @@ export function toWorldY(localY: number): number {
 
 export function getViewTransform(cssWidth: number, cssHeight: number): WorldTransform {
   const offset = getViewWorldOffset();
-  const fit = getViewportFitRef();
+  const fit = useOpenImage().getViewportFitRef();
   return buildTransform(
     {
       centerX: state.viewportCenterX + offset.x,

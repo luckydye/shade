@@ -25,22 +25,7 @@ import {
   usePresetList,
 } from "../data/use-preset-list";
 import { saveSnapshot, useSnapshotList } from "../data/use-snapshot-list";
-import {
-  addLayer,
-  addTextLayer,
-  applyEdit,
-  applyGradientMask,
-  createBrushMask,
-  deleteLayer,
-  loadPreset,
-  loadSnapshot,
-  moveLayer,
-  removeMask,
-  renameLayer,
-  selectLayer,
-  selectMaskLayer,
-  setLayerVisible,
-} from "../store/editor-layers";
+import { useLayerStack } from "../data/use-layer-stack";
 import {
   type ArtboardSource,
   cropAspectRatioPreset,
@@ -56,7 +41,7 @@ import {
   setIsDrawerOpen,
   state,
 } from "../store/editor-store";
-import { backdropTile } from "../viewport/preview";
+import { useOpenImage } from "../data/use-open-image";
 import { Button } from "./Button";
 import { buildVectorScope, VectorScope, type WheelPoint } from "./ColorWheel";
 import { CurvesEditor } from "./inspector/CurvesEditor";
@@ -267,6 +252,7 @@ function imageSourceDetail(source: ArtboardSource) {
 }
 
 export const Inspector: Component = () => {
+  const layers = useLayerStack();
   const [layerFocusOverrides, setLayerFocusOverrides] = createSignal(
     new Map<number, MobileLayerFocus>(),
   );
@@ -349,7 +335,7 @@ export const Inspector: Component = () => {
   const denoise = () =>
     selectedAdjustmentLayer()?.adjustments?.denoise ?? DEFAULT_DENOISE;
   const vectorScope = createMemo(() => {
-    const tile = backdropTile();
+    const tile = useOpenImage().backdropTile();
     return tile ? buildVectorScope(tile.image, undefined, 80_000) : null;
   });
 
@@ -369,7 +355,7 @@ export const Inspector: Component = () => {
     if (fromIdx === null || target === null) {
       return;
     }
-    await moveLayer(
+    await layers.moveLayer(
       fromIdx,
       target.position === "before" ? target.layerIdx + 1 : target.layerIdx,
     );
@@ -475,7 +461,7 @@ export const Inspector: Component = () => {
     setCurvePointCache((prev) =>
       new Map(prev).set(state.selectedLayerIdx, normalizedPoints),
     );
-    return applyEdit({
+    return layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "curves",
       curve_points: normalizedPoints,
@@ -487,7 +473,7 @@ export const Inspector: Component = () => {
     setLsCurvePointCache((prev) =>
       new Map(prev).set(state.selectedLayerIdx, normalizedPoints),
     );
-    return applyEdit({
+    return layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "ls_curve",
       curve_points: normalizedPoints,
@@ -496,7 +482,7 @@ export const Inspector: Component = () => {
 
   const applyHsl = (next: Partial<ReturnType<typeof hsl>>) => {
     const current = hsl();
-    return applyEdit({
+    return layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "hsl",
       red_hue: next.red_hue ?? current.red_hue,
@@ -514,7 +500,7 @@ export const Inspector: Component = () => {
   const applyTone = (overrides: Partial<ReturnType<typeof tone>>) => {
     selectedAdjustmentLayerOrThrow();
     const t = tone();
-    void applyEdit({
+    void layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "tone",
       exposure: overrides.exposure ?? t.exposure,
@@ -530,7 +516,7 @@ export const Inspector: Component = () => {
   const applyColor = (overrides: Partial<ReturnType<typeof color>>) => {
     selectedAdjustmentLayerOrThrow();
     const c = color();
-    void applyEdit({
+    void layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "color",
       saturation: overrides.saturation ?? c.saturation,
@@ -871,7 +857,7 @@ export const Inspector: Component = () => {
         max={1}
         onChange={(v) => {
           selectedAdjustmentLayerOrThrow();
-          void applyEdit({
+          void layers.applyEdit({
             layer_idx: state.selectedLayerIdx,
             op: "grain",
             grain_amount: v,
@@ -889,7 +875,7 @@ export const Inspector: Component = () => {
         step={0.01}
         onChange={(v) => {
           selectedAdjustmentLayerOrThrow();
-          void applyEdit({
+          void layers.applyEdit({
             layer_idx: state.selectedLayerIdx,
             op: "grain",
             grain_size: v,
@@ -910,7 +896,7 @@ export const Inspector: Component = () => {
       max={1}
       onChange={(v) => {
         selectedAdjustmentLayerOrThrow();
-        void applyEdit({
+        void layers.applyEdit({
           layer_idx: state.selectedLayerIdx,
           op: "vignette",
           vignette_amount: v,
@@ -930,7 +916,7 @@ export const Inspector: Component = () => {
       max={1}
       onChange={(v) => {
         selectedAdjustmentLayerOrThrow();
-        void applyEdit({
+        void layers.applyEdit({
           layer_idx: state.selectedLayerIdx,
           op: "glow",
           glow_amount: v,
@@ -950,7 +936,7 @@ export const Inspector: Component = () => {
       max={1}
       onChange={(v) => {
         selectedAdjustmentLayerOrThrow();
-        void applyEdit({
+        void layers.applyEdit({
           layer_idx: state.selectedLayerIdx,
           op: "sharpen",
           sharpen_amount: v,
@@ -971,7 +957,7 @@ export const Inspector: Component = () => {
         max={1}
         onChange={(v) => {
           selectedAdjustmentLayerOrThrow();
-          void applyEdit({
+          void layers.applyEdit({
             layer_idx: state.selectedLayerIdx,
             op: "denoise",
             denoise_luma_strength: v,
@@ -990,7 +976,7 @@ export const Inspector: Component = () => {
         max={1}
         onChange={(v) => {
           selectedAdjustmentLayerOrThrow();
-          void applyEdit({
+          void layers.applyEdit({
             layer_idx: state.selectedLayerIdx,
             op: "denoise",
             denoise_luma_strength: denoise().luma_strength,
@@ -1086,7 +1072,7 @@ export const Inspector: Component = () => {
         nextHeight = size.height;
       }
     }
-    void applyEdit({
+    void layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "crop",
       crop_x: field === "x" ? value : crop.x,
@@ -1112,7 +1098,7 @@ export const Inspector: Component = () => {
       state.canvasWidth,
       state.canvasHeight,
     );
-    await applyEdit({
+    await layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "crop",
       crop_x: nextCrop.x,
@@ -1129,12 +1115,12 @@ export const Inspector: Component = () => {
     try {
       const newIdx =
         focus === "curves"
-          ? await addLayer("curves", state.layers.length)
+          ? await layers.addLayer("curves", state.layers.length)
           : focus === "ls_curve"
-            ? await addLayer("ls_curve", state.layers.length)
-            : await addLayer("adjustment", state.layers.length);
+            ? await layers.addLayer("ls_curve", state.layers.length)
+            : await layers.addLayer("adjustment", state.layers.length);
       setLayerFocusOverrides((prev) => new Map(prev).set(newIdx, focus));
-      selectLayer(newIdx);
+      layers.select(newIdx);
       setIsDrawerOpen(true);
     } finally {
       setPendingAddedLayerFocus(null);
@@ -1144,7 +1130,7 @@ export const Inspector: Component = () => {
   const handleApplyLinearMask = async (idx: number) => {
     const w = state.canvasWidth;
     const h = state.canvasHeight;
-    await applyGradientMask({
+    await layers.applyGradientMask({
       kind: "linear",
       layer_idx: idx,
       x1: 0,
@@ -1158,7 +1144,7 @@ export const Inspector: Component = () => {
   const handleApplyRadialMask = async (idx: number) => {
     const w = state.canvasWidth;
     const h = state.canvasHeight;
-    await applyGradientMask({
+    await layers.applyGradientMask({
       kind: "radial",
       layer_idx: idx,
       cx: w / 2,
@@ -1169,12 +1155,12 @@ export const Inspector: Component = () => {
   };
 
   const handleApplyBrushMask = async (idx: number) => {
-    await createBrushMask(idx);
+    await layers.createBrushMask(idx);
     setMaskPickerLayer(null);
   };
 
   const handleRemoveMask = async (idx: number) => {
-    await removeMask(idx);
+    await layers.removeMask(idx);
   };
 
   const handleDeleteSelectedLayer = async () => {
@@ -1184,7 +1170,7 @@ export const Inspector: Component = () => {
     if (state.layers[state.selectedLayerIdx]?.kind === "image") {
       throw new Error("cannot delete the image layer");
     }
-    await deleteLayer(state.selectedLayerIdx);
+    await layers.deleteLayer(state.selectedLayerIdx);
   };
 
   const topLayerInsertPosition = () => state.layers.length;
@@ -1203,7 +1189,7 @@ export const Inspector: Component = () => {
   const handleAddTextLayer = async () => {
     const list = fonts();
     const fontId = list.length > 0 ? list[0].font_id : 0;
-    await addTextLayer("Text", fontId, 32, topLayerInsertPosition());
+    await layers.addTextLayer("Text", fontId, 32, topLayerInsertPosition());
   };
 
   const withPresetBusy = async (fn: () => Promise<void>) => {
@@ -1269,7 +1255,7 @@ export const Inspector: Component = () => {
 
   const handleLoadPreset = async (name: string) => {
     await withPresetBusy(async () => {
-      await loadPreset(name);
+      await layers.loadPreset(name);
       setPresetStatus(`Loaded ${name}`);
       await refetchSnapshots();
     });
@@ -1289,7 +1275,7 @@ export const Inspector: Component = () => {
 
   const handleLoadSnapshot = async (id: string) => {
     await withPresetBusy(async () => {
-      await loadSnapshot(id);
+      await layers.loadSnapshot(id);
       setPresetStatus(`Loaded snapshot`);
       await refetchSnapshots();
     });
@@ -1360,7 +1346,7 @@ export const Inspector: Component = () => {
     if (!layer) {
       throw new Error("cannot rename a missing layer");
     }
-    selectLayer(idx);
+    layers.select(idx);
     setEditingLayerIdx(idx);
     setEditingLayerName(layer.name ?? "");
   };
@@ -1385,7 +1371,7 @@ export const Inspector: Component = () => {
     if ((layer.name ?? null) === normalizedName) {
       return;
     }
-    await renameLayer(idx, normalizedName);
+    await layers.renameLayer(idx, normalizedName);
   };
 
   const CropPanel: Component = () => {
@@ -1466,10 +1452,10 @@ export const Inspector: Component = () => {
                 onClick={() => {
                   const cropLayerIdx = findCropLayerIdx();
                   if (cropLayerIdx >= 0) {
-                    selectLayer(cropLayerIdx);
+                    layers.select(cropLayerIdx);
                     return;
                   }
-                  void addLayer("crop", cropLayerInsertPosition());
+                  void layers.addLayer("crop", cropLayerInsertPosition());
                 }}
                 class="h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
               >
@@ -1487,7 +1473,7 @@ export const Inspector: Component = () => {
             <Button
               type="button"
               onClick={() => {
-                void applyEdit({
+                void layers.applyEdit({
                   layer_idx: state.selectedLayerIdx,
                   op: "crop",
                   crop_x: 0,
@@ -1719,7 +1705,7 @@ export const Inspector: Component = () => {
         />
         <Button
           type="button"
-          onClick={() => void addLayer("adjustment", topLayerInsertPosition())}
+          onClick={() => void layers.addLayer("adjustment", topLayerInsertPosition())}
           class="grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-[4px] px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
         >
           <span />
@@ -1754,7 +1740,7 @@ export const Inspector: Component = () => {
               <Show when={layer.kind === "image"}>
                 <Button
                   type="button"
-                  onClick={() => void addLayer("crop", cropLayerInsertPosition())}
+                  onClick={() => void layers.addLayer("crop", cropLayerInsertPosition())}
                   class="grid h-7 grid-cols-[0px_16px_16px_minmax(0,1fr)_24px_20px] items-center gap-2.5 rounded-[4px] px-2 text-left text-[12px] font-medium text-[var(--text-faint)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]"
                 >
                   <span />
@@ -1802,7 +1788,7 @@ export const Inspector: Component = () => {
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      void setLayerVisible(realIdx, !layer.visible);
+                      void layers.setVisible(realIdx, !layer.visible);
                     }}
                   >
                     {layer.visible ? "●" : "○"}
@@ -1815,7 +1801,7 @@ export const Inspector: Component = () => {
                     <Button
                       type="button"
                       onPointerDown={(event) => event.stopPropagation()}
-                      onClick={() => selectLayer(realIdx)}
+                      onClick={() => layers.select(realIdx)}
                       onDblClick={(event) => {
                         event.stopPropagation();
                         startInlineLayerRename(realIdx);
@@ -1885,7 +1871,7 @@ export const Inspector: Component = () => {
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      void deleteLayer(realIdx);
+                      void layers.deleteLayer(realIdx);
                     }}
                     class="inline-flex h-4 w-4 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                     title="Delete layer"
@@ -1905,7 +1891,7 @@ export const Inspector: Component = () => {
                       ? "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
                       : ""
                   }`}
-                  onClick={() => selectMaskLayer(realIdx)}
+                  onClick={() => layers.selectMask(realIdx)}
                 >
                   <span class="relative h-full w-4">
                     <svg
@@ -1927,7 +1913,7 @@ export const Inspector: Component = () => {
                   </span>
                   <Button
                     type="button"
-                    onClick={() => selectMaskLayer(realIdx)}
+                    onClick={() => layers.selectMask(realIdx)}
                     class="min-w-0 truncate py-1 text-left font-medium transition-colors hover:text-[var(--text)] focus-visible:outline-none"
                   >
                     {getLayerMaskDisplayName(layer)}
@@ -2099,7 +2085,7 @@ export const Inspector: Component = () => {
                     <Button
                       type="button"
                       onClick={() => {
-                        selectLayer(idx);
+                        layers.select(idx);
                         setIsDrawerOpen(true);
                         setIsPickerOpen(false);
                       }}

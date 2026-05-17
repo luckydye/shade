@@ -10,7 +10,7 @@ import {
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
 } from "../../data/thumbnail-src";
-import { openImage, openPeerImage } from "../../store/editor-image";
+import { useOpenImage } from "../../data/use-open-image";
 
 export type LibraryEntry = MediaLibrary;
 export type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };
@@ -417,8 +417,8 @@ export async function openMediaItem(
       has_snapshots: item.metadata.hasSnapshots,
       latest_snapshot_id: item.metadata.latestSnapshotId,
     };
-    await openPeerImage(item.peerId, picture, src, activeMediaSelection, mode);
+    await useOpenImage().openPeer(item.peerId, picture, src, activeMediaSelection, mode);
     return;
   }
-  await openImage(item.path, src, activeMediaSelection, mode);
+  await useOpenImage().open(item.path, src, activeMediaSelection, mode);
 }

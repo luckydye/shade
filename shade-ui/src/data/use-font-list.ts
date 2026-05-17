@@ -1,7 +1,7 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import * as bridge from "../bridge/index";
 import { type FontInfo } from "../bridge/index";
-import { queueHistorySnapshot } from "../store/editor-layers";
+import { useLayerStack } from "./use-layer-stack";
 
 const { fonts, refetch } = createRoot(() => {
   const [resource, { refetch }] = createResource(bridge.listFonts, {
@@ -37,5 +37,5 @@ export async function pruneUnusedFonts(): Promise<void> {
   // (cheap) and snapshot history so an undoable point exists if anything
   // actually changed. A no-op prune just costs one extra list_fonts read.
   await refetch();
-  queueHistorySnapshot();
+  useLayerStack().queueHistorySnapshot();
 }

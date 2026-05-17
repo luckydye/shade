@@ -1,5 +1,5 @@
 import { type Component, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
-import { flushDeferredHistorySnapshot } from "../store/editor-layers";
+import { useLayerStack } from "../data/use-layer-stack";
 import {
   activeAdjustmentSliderId,
   clamp,
@@ -7,7 +7,7 @@ import {
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
 } from "../store/editor-store";
-import { refreshFinalPreview } from "../viewport/preview";
+import { useOpenImage } from "../data/use-open-image";
 
 const PARAMETER_ROW_CLASS =
   "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";
@@ -139,21 +139,21 @@ export const Slider: Component<{
           }}
           onPointerUp={(event) => {
             setSliderDragging(false);
-            void flushDeferredHistorySnapshot();
-            void refreshFinalPreview();
+            void useLayerStack().flushDeferredHistorySnapshot();
+            void useOpenImage().refreshFinalPreview();
             maybeResetToDefault(event);
           }}
           onPointerCancel={() => {
             activePointer = null;
             setSliderDragging(false);
-            void flushDeferredHistorySnapshot();
-            void refreshFinalPreview();
+            void useLayerStack().flushDeferredHistorySnapshot();
+            void useOpenImage().refreshFinalPreview();
           }}
           onBlur={() => {
             activePointer = null;
             setSliderDragging(false);
-            void flushDeferredHistorySnapshot();
-            void refreshFinalPreview();
+            void useLayerStack().flushDeferredHistorySnapshot();
+            void useOpenImage().refreshFinalPreview();
           }}
         />
         <div class="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--slider-track)]" />

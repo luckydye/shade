@@ -12,9 +12,8 @@ import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
 import { actions, buildActionContext } from "./store/actions";
-import { showEditorView, showMediaView } from "./store/editor-image";
-import { loadPreset } from "./store/editor-layers";
-import { setState, state } from "./store/editor-store";
+import { useLayerStack } from "./data/use-layer-stack";
+import { setState, showEditorView, showMediaView, state } from "./store/editor-store";
 import { redo, undo } from "./store/history";
 import { getMediaBrowserController } from "./store/media-browser-control";
 import { mediaViewFocusedItem } from "./store/media-view-context";
@@ -121,7 +120,7 @@ const App: Component = () => {
         try {
           await savePresetFromJson(CLIPBOARD_PRESET_NAME, json);
           if (ctx.currentView === "editor") {
-            await loadPreset(CLIPBOARD_PRESET_NAME);
+            await useLayerStack().loadPreset(CLIPBOARD_PRESET_NAME);
             showToast("Edits pasted");
           } else {
             await getMediaBrowserController().pasteEdits(CLIPBOARD_PRESET_NAME);

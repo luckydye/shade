@@ -19,13 +19,8 @@ import {
   resizeCropFromHandle,
   resolveCropAspectRatio,
 } from "../crop-aspect";
-import { closeArtboard, selectArtboard } from "../store/editor-image";
-import {
-  applyEdit,
-  applyGradientMask,
-  setTextTransform,
-  stampBrushMask,
-} from "../store/editor-layers";
+import { useLayerStack } from "../data/use-layer-stack";
+import { useOpenImage } from "../data/use-open-image";
 import {
   type ArtboardState,
   clamp,
@@ -39,18 +34,6 @@ import {
 } from "../store/editor-store";
 import { makeBrushCursor } from "../viewport/brush-cursor";
 import { compositeArtboard } from "../viewport/compositor";
-import {
-  backdropTile,
-  getViewportZoomPercent,
-  offsetViewportCenter,
-  panViewport,
-  previewTile,
-  refreshFinalPreview,
-  refreshPreview,
-  resetViewport,
-  setViewportScreenSize,
-  zoomViewport,
-} from "../viewport/preview";
 import { screenToWorld, type WorldTransform, worldToScreen } from "../viewport/transform";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
@@ -107,10 +90,12 @@ function isMissingArtboardError(error: unknown) {
 }
 
 export const Viewport: Component = () => {
+  const image = useOpenImage();
   let canvasRef: HTMLCanvasElement | undefined;
   let stageRef: HTMLDivElement | undefined;
   const [containerRef, setContainerRef] = createSignal<HTMLDivElement | null>(null);
   const fileDrop = useFileDrop();
+  const layers = useLayerStack();
   const [pressedArtboardChrome, setPressedArtboardChrome] =
     createSignal<PressedArtboardChrome>(null);
   const [draftCrop, setDraftCrop] = createSignal<CropRectWithRotation | null>(null);
@@ -160,7 +145,7 @@ export const Viewport: Component = () => {
 
   const shouldShowZoomIndicator = () =>
     state.viewportZoom > 1.001 || state.viewportZoom < 0.999;
-  const viewportZoomPercent = () => getViewportZoomPercent();
+  const viewportZoomPercent = () => image.getViewportZoomPercent();
   const zoomIndicatorPositionClass = () => "right-4 top-4";
 
   const activeMask = (): MaskParamsInfo | null => draftMask() ?? selectedMaskParams();
@@ -184,7 +169,7 @@ export const Viewport: Component = () => {
       state.canvasHeight,
     );
     setDraftCrop(nextCrop);
-    await applyEdit({
+    await layers.applyEdit({
       layer_idx: state.selectedLayerIdx,
       op: "crop",
       crop_x: nextCrop.x,
@@ -214,11 +199,11 @@ export const Viewport: Component = () => {
   }
 
   function requestArtboardSelection(artboardId: string) {
-    void selectArtboard(artboardId).catch(handleViewportArtboardActionError);
+    void image.selectArtboard(artboardId).catch(handleViewportArtboardActionError);
   }
 
   function requestArtboardClose(artboardId: string) {
-    void closeArtboard(artboardId).catch(handleViewportArtboardActionError);
+    void image.closeArtboard(artboardId).catch(handleViewportArtboardActionError);
   }
 
   // Build the camera for the current viewport state
@@ -348,8 +333,8 @@ export const Viewport: Component = () => {
       setToneTarget(null);
       return;
     }
-    const visiblePreview = cropLayer ? null : (previewTile() ?? artboard.previewTile);
-    const visibleBackdrop = backdropTile() ?? artboard.backdropTile;
+    const visiblePreview = cropLayer ? null : (image.previewTile() ?? artboard.previewTile);
+    const visibleBackdrop = image.backdropTile() ?? artboard.backdropTile;
     const tone =
       sampleTileTone(visiblePreview, localX, localY) ??
       sampleTileTone(visibleBackdrop, localX, localY);
@@ -767,10 +752,10 @@ export const Viewport: Component = () => {
         const committedCrop = isSelected ? getCommittedCropRect() : null;
         const clip = cropLayer || !committedCrop ? undefined : committedCrop;
         const visibleBackdrop = isSelected
-          ? (backdropTile() ?? artboard.backdropTile)
+          ? (image.backdropTile() ?? artboard.backdropTile)
           : artboard.backdropTile;
         const visiblePreview =
-          isSelected && !cropLayer ? (previewTile() ?? artboard.previewTile) : null;
+          isSelected && !cropLayer ? (image.previewTile() ?? artboard.previewTile) : null;
         const sx = worldArtboard.worldX * t.scale + t.dx;
         const sy = worldArtboard.worldY * t.scale + t.dy;
         const sw = worldArtboard.width * t.scale;
@@ -855,8 +840,8 @@ export const Viewport: Component = () => {
     state.artboards;
     state.loadingMediaSrc;
     pressedArtboardChrome();
-    backdropTile();
-    previewTile();
+    image.backdropTile();
+    image.previewTile();
     loadingArtboardImage();
     draftTextOffset();
     drawFrame();
@@ -892,7 +877,7 @@ export const Viewport: Component = () => {
     setDraftCrop(cropLayer?.crop ?? null);
   });
 
-  useElementSize(containerRef, setViewportScreenSize);
+  useElementSize(containerRef, image.setViewportScreenSize);
 
   function artboardAtPoint(sx: number, sy: number): ArtboardState | null {
     if (!stageRef) return null;
@@ -973,7 +958,7 @@ export const Viewport: Component = () => {
           : 1;
     const delta = e.deltaY * deltaModeScale;
     const rect = stageRef.getBoundingClientRect();
-    zoomViewport(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
+    image.zoomViewport(delta, e.ctrlKey, e.clientX - rect.left, e.clientY - rect.top);
     lastStagePointer = { x: e.clientX, y: e.clientY };
     updateViewportToneFromPointer(e.clientX, e.clientY);
   };
@@ -1031,7 +1016,7 @@ export const Viewport: Component = () => {
         const imgY = world.y - getViewWorldOffset().y;
         const erase = e.altKey;
         brushOverlay.stamp(imgX, imgY, brushSize(), brushSoftness(), erase);
-        void stampBrushMask(
+        void layers.stampBrushMask(
           state.selectedLayerIdx,
           imgX,
           imgY,
@@ -1192,7 +1177,7 @@ export const Viewport: Component = () => {
           const ix = gesture.lastImgX + (imgX - gesture.lastImgX) * f;
           const iy = gesture.lastImgY + (imgY - gesture.lastImgY) * f;
           brushOverlay.stamp(ix, iy, brushSize(), brushSoftness(), erase);
-          void stampBrushMask(
+          void layers.stampBrushMask(
             state.selectedLayerIdx,
             ix,
             iy,
@@ -1221,7 +1206,7 @@ export const Viewport: Component = () => {
       }
       const dx = e.clientX - gesture.x;
       const dy = e.clientY - gesture.y;
-      panViewport(dx, dy, false);
+      image.panViewport(dx, dy, false);
       drawFrame();
       gesture = {
         kind: "pan",
@@ -1253,7 +1238,7 @@ export const Viewport: Component = () => {
       const deltaY = (e.clientY - gesture.y) / t.scale;
       moveArtboardBy(gesture.artboardId, deltaX, deltaY);
       if (gesture.artboardId === state.selectedArtboardId) {
-        offsetViewportCenter(-deltaX, -deltaY);
+        image.offsetViewportCenter(-deltaX, -deltaY);
       }
       drawFrame();
       gesture = {
@@ -1277,8 +1262,8 @@ export const Viewport: Component = () => {
         const newMidY = (p1.y + p2.y) / 2;
         const rect = stageRef.getBoundingClientRect();
         const delta = -Math.log(newDist / gesture.dist) / 0.0005;
-        zoomViewport(delta, true, newMidX - rect.left, newMidY - rect.top);
-        panViewport(newMidX - gesture.midX, newMidY - gesture.midY, false);
+        image.zoomViewport(delta, true, newMidX - rect.left, newMidY - rect.top);
+        image.panViewport(newMidX - gesture.midX, newMidY - gesture.midY, false);
         gesture = { kind: "pinch", dist: newDist, midX: newMidX, midY: newMidY };
         drawFrame();
       }
@@ -1446,7 +1431,7 @@ export const Viewport: Component = () => {
         const layer = state.layers[g.layerIdx];
         const tr = layer?.text?.transform;
         if (tr) {
-          void setTextTransform(g.layerIdx, {
+          void layers.setTextTransform(g.layerIdx, {
             tx: g.originTx + draft.dx,
             ty: g.originTy + draft.dy,
             scale_x: tr.scale_x,
@@ -1464,7 +1449,7 @@ export const Viewport: Component = () => {
       }
       gesture = null;
       // Refresh GPU preview after stroke is committed
-      void refreshPreview();
+      void image.refreshPreview();
       return;
     }
     if (
@@ -1480,7 +1465,7 @@ export const Viewport: Component = () => {
       if (mp) {
         const idx = state.selectedLayerIdx;
         if (mp.kind === "linear") {
-          void applyGradientMask({
+          void layers.applyGradientMask({
             kind: "linear",
             layer_idx: idx,
             x1: mp.x1 ?? 0,
@@ -1489,7 +1474,7 @@ export const Viewport: Component = () => {
             y2: mp.y2 ?? 0,
           });
         } else {
-          void applyGradientMask({
+          void layers.applyGradientMask({
             kind: "radial",
             layer_idx: idx,
             cx: mp.cx ?? 0,
@@ -1505,7 +1490,7 @@ export const Viewport: Component = () => {
     if (gesture?.kind === "crop") {
       const crop = draftCrop();
       if (crop && selectedCropLayer()) {
-        void applyEdit({
+        void layers.applyEdit({
           layer_idx: state.selectedLayerIdx,
           op: "crop",
           crop_x: crop.x,
@@ -1519,7 +1504,7 @@ export const Viewport: Component = () => {
       return;
     }
     if (gesture?.kind === "pinch") {
-      void refreshFinalPreview();
+      void image.refreshFinalPreview();
       if (activePointers.size === 1) {
         const [p] = [...activePointers.values()];
         gesture = {
@@ -1538,7 +1523,7 @@ export const Viewport: Component = () => {
     }
     if (gesture?.kind === "pan") {
       const tappedArtboardId = !gesture.moved ? gesture.tapArtboardId : null;
-      void refreshFinalPreview();
+      void image.refreshFinalPreview();
       gesture = null;
       if (tappedArtboardId && tappedArtboardId !== state.selectedArtboardId) {
         requestArtboardSelection(tappedArtboardId);
@@ -1549,8 +1534,8 @@ export const Viewport: Component = () => {
   };
 
   createEffect(() => {
-    previewTile();
-    backdropTile();
+    image.previewTile();
+    image.backdropTile();
     state.selectedArtboardId;
     state.selectedLayerIdx;
     state.selectedLayerPart;
@@ -1594,7 +1579,7 @@ export const Viewport: Component = () => {
             ref={canvasRef}
             width="800"
             height="600"
-            onDblClick={() => resetViewport()}
+            onDblClick={() => image.resetViewport()}
             style={{
               width: "100%",
               height: "100%",
@@ -1679,7 +1664,7 @@ export const Viewport: Component = () => {
             <Button
               type="button"
               class={`absolute ${zoomIndicatorPositionClass()} flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75 backdrop-blur transition hover:border-white/20 hover:bg-black/60`}
-              onClick={() => resetViewport()}
+              onClick={() => image.resetViewport()}
             >
               <span>Zoom</span>
               <span class="text-white/35">{viewportZoomPercent()}%</span>

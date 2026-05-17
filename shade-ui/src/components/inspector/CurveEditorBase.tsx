@@ -15,7 +15,7 @@ import {
   state,
   viewportToneSample,
 } from "../../store/editor-store";
-import { backdropTile } from "../../viewport/preview";
+import { useOpenImage } from "../../data/use-open-image";
 import {
   buildLuminanceHistogram,
   type ControlPoint,
@@ -56,7 +56,7 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
   const [pts, setPts] = createSignal<EditableControlPoint[]>([]);
   const [svgSize, setSvgSize] = createSignal({ width: 100, height: 160 });
   const luminanceHistogram = createMemo(() => {
-    const frame = backdropTile();
+    const frame = useOpenImage().backdropTile();
     return frame ? buildLuminanceHistogram(frame.image) : null;
   });
   let svgRef!: SVGSVGElement;

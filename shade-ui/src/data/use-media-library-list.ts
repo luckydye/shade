@@ -18,6 +18,12 @@ const { libraries, refetch } = createRoot(() => {
   onChannelMessage("media_library_upserted", () => {
     void refetch();
   });
+  // Pairing with a new peer adds their library; auto-refresh.
+  if (bridge.isTauriRuntime()) {
+    bridge.listenPeerPaired(() => {
+      void refetch();
+    });
+  }
   return { libraries: resource, refetch };
 });
 

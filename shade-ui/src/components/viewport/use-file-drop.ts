@@ -1,5 +1,5 @@
 import { type Accessor, createSignal } from "solid-js";
-import { openImageFile } from "../../store/editor-image";
+import { useOpenImage } from "../../data/use-open-image";
 import { state } from "../../store/editor-store";
 
 export function useFileDrop(): {
@@ -31,7 +31,7 @@ export function useFileDrop(): {
     );
     try {
       for (const [index, file] of files.entries()) {
-        await openImageFile(file, index === 0 ? "replace" : "append");
+        await useOpenImage().openFile(file, index === 0 ? "replace" : "append");
       }
     } catch {
       // openImageFile reports errors via the store
