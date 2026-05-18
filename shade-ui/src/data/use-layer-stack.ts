@@ -1,4 +1,5 @@
 import { createRoot } from "solid-js";
+import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
 import type {
   CurveControlPoint,
@@ -15,8 +16,7 @@ import {
   state,
 } from "../store/editor-store";
 import { onRestore, recordSnapshot } from "../store/history";
-import { onChannelMessage } from "../bridge/channel";
-import { useOpenImage } from "./use-open-image";
+import { useOpenImage } from "../store/use-open-image";
 import { isTauriRuntime } from "../utils";
 
 // ── Reactive stack sync ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { getSelectedArtboard, state } from "../../store/editor-store";
-import { useOpenImage } from "../../data/use-open-image";
+import { useOpenImage } from "../../store/use-open-image";
 import { buildTransform, type WorldTransform } from "../../viewport/transform";
 
 export function getViewWorldOffset(): { x: number; y: number } {

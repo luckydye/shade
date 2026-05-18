@@ -1,6 +1,11 @@
 import { type Component, Show } from "solid-js";
-import { useOpenImage } from "../data/use-open-image";
-import { isAdjustmentSliderActive, showEditorView, showMediaView, state } from "../store/editor-store";
+import {
+  isAdjustmentSliderActive,
+  showEditorView,
+  showMediaView,
+  state,
+} from "../store/editor-store";
+import { useOpenImage } from "../store/use-open-image";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 

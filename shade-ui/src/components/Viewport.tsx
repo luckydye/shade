@@ -9,18 +9,7 @@ import {
   Show,
 } from "solid-js";
 import type { MaskParamsInfo } from "../bridge/types";
-import {
-  CROP_ASPECT_RATIO_OPTIONS,
-  type CropAspectRatioPreset,
-  type CropResizeHandle,
-  clampAspectSize,
-  constrainCropDragToAspectRatio,
-  fitCropRectToAspectRatio,
-  resizeCropFromHandle,
-  resolveCropAspectRatio,
-} from "../utils/crop-aspect";
 import { useLayerStack } from "../data/use-layer-stack";
-import { useOpenImage } from "../data/use-open-image";
 import {
   type ArtboardState,
   clamp,
@@ -32,6 +21,17 @@ import {
   setState,
   state,
 } from "../store/editor-store";
+import { useOpenImage } from "../store/use-open-image";
+import {
+  CROP_ASPECT_RATIO_OPTIONS,
+  type CropAspectRatioPreset,
+  type CropResizeHandle,
+  clampAspectSize,
+  constrainCropDragToAspectRatio,
+  fitCropRectToAspectRatio,
+  resizeCropFromHandle,
+  resolveCropAspectRatio,
+} from "../utils/crop-aspect";
 import { makeBrushCursor } from "../viewport/brush-cursor";
 import { compositeArtboard } from "../viewport/compositor";
 import { screenToWorld, type WorldTransform, worldToScreen } from "../viewport/transform";
@@ -333,7 +333,9 @@ export const Viewport: Component = () => {
       setToneTarget(null);
       return;
     }
-    const visiblePreview = cropLayer ? null : (image.previewTile() ?? artboard.previewTile);
+    const visiblePreview = cropLayer
+      ? null
+      : (image.previewTile() ?? artboard.previewTile);
     const visibleBackdrop = image.backdropTile() ?? artboard.backdropTile;
     const tone =
       sampleTileTone(visiblePreview, localX, localY) ??

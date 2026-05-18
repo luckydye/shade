@@ -1,11 +1,11 @@
 import type { MediaLibrary, SharedPicture } from "../../bridge/types";
 import type { MediaItem } from "../../data/use-library-items";
-import { useOpenImage } from "../../data/use-open-image";
 import {
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
 } from "../../data/use-thumbnail-src";
+import { useOpenImage } from "../../store/use-open-image";
 import { normalizeModifiedAt } from "../../utils";
 
 export type LibraryEntry = MediaLibrary;

@@ -1,14 +1,17 @@
 import { type Accessor, createSignal } from "solid-js";
-import type { ArtboardViewport, PreviewQuality } from "../bridge/types";
-import * as bridge from "../bridge/index";
-import type { PreviewFrame, SharedPicture } from "../bridge/types";
 import {
-  getArtboardTiles,
-  nextGeneration,
-  type RenderedTile as PushedRenderedTile,
-  subscribeTiles,
-} from "../bridge/preview";
-import { getTransport } from "../bridge/transport";
+  type ArtboardViewport,
+  type PreviewFrame,
+  type PreviewQuality,
+  type PushedRenderedTile,
+  type SharedPicture,
+  useImageBridge,
+} from "../data/use-image-bridge";
+import { useLayerStack } from "../data/use-layer-stack";
+import { isTauriRuntime } from "../utils";
+import { releaseTileSurface } from "../viewport/compositor";
+import { computeFitScale } from "../viewport/transform";
+import type { FitReference, RenderedTile } from "../viewport/types";
 import {
   type ArtboardSource,
   type ArtboardState,
@@ -20,14 +23,8 @@ import {
   setSelectedArtboardPreviewTile,
   setState,
   state,
-} from "../store/editor-store";
-import { resetHistory } from "../store/history";
-import { releaseTileSurface } from "../viewport/compositor";
-import { computeFitScale } from "../viewport/transform";
-import type { FitReference, RenderedTile } from "../viewport/types";
-import { useLayerStack } from "./use-layer-stack";
-import { onImageOpenPhase } from "./use-image-open-phase";
-import { isTauriRuntime } from "../utils";
+} from "./editor-store";
+import { resetHistory } from "./history";
 
 // ── Module state ────────────────────────────────────────────────────────────
 
@@ -49,6 +46,7 @@ let finalPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let tileSubscriberInstalled = false;
 let isTauriPlatform: boolean | null = null;
 let activeLoadToken = 0;
+const imageBridge = useImageBridge();
 
 type OpenImageMode = "append" | "replace";
 
@@ -71,9 +69,9 @@ async function ensurePlatformDetected(): Promise<boolean> {
 function installTileSubscriber() {
   if (tileSubscriberInstalled) return;
   tileSubscriberInstalled = true;
-  subscribeTiles((artboardId) => {
+  imageBridge.subscribeTiles((artboardId) => {
     if (previewSuspended) return;
-    const tiles = getArtboardTiles(artboardId);
+    const tiles = imageBridge.getArtboardTiles(artboardId);
     if (!tiles) return;
     const pick = tiles.final ?? tiles.interactive;
     if (!pick) return;
@@ -132,7 +130,7 @@ function clearPreviewTiles() {
   setPreviewTile(null);
   setBackdropTile(null);
   // Bump generation so any in-flight pushed frames are discarded.
-  nextGeneration();
+  imageBridge.nextGeneration();
 }
 
 function suspendPreview() {
@@ -348,7 +346,7 @@ async function browserRefresh(quality: PreviewQuality) {
   const previewSpec = buildPreviewSpec(quality);
   const backdropSpec = buildBackdropSpec(quality);
   if (!previewSpec) return;
-  const previewFrame = await bridge.renderPreview({
+  const previewFrame = await imageBridge.renderPreview({
     target_width: previewSpec.target_width,
     target_height: previewSpec.target_height,
     crop: previewSpec.crop,
@@ -373,7 +371,7 @@ async function browserRefresh(quality: PreviewQuality) {
   ) {
     return;
   }
-  const backdropFrame = await bridge.renderPreview({
+  const backdropFrame = await imageBridge.renderPreview({
     target_width: backdropSpec.target_width,
     target_height: backdropSpec.target_height,
     crop: backdropSpec.crop,
@@ -402,8 +400,8 @@ async function tauriRefresh(quality: PreviewQuality) {
     viewports.push(specToViewport(BACKDROP_ARTBOARD_ID, backdropSpec, 1));
   }
   if (viewports.length === 0) return;
-  const generation = nextGeneration();
-  getTransport().sendPreviewViewports({
+  const generation = imageBridge.nextGeneration();
+  imageBridge.sendPreviewViewports({
     generation,
     quality,
     viewports,
@@ -777,11 +775,11 @@ function setPendingEditorState(
 async function loadArtboardSource(source: ArtboardSource) {
   switch (source.kind) {
     case "path":
-      return bridge.openImage(source.path);
+      return imageBridge.openImage(source.path);
     case "file":
-      return bridge.openImageFile(source.file);
+      return imageBridge.openImageFile(source.file);
     case "peer":
-      return bridge.openPeerImage(source.peerEndpointId, source.picture);
+      return imageBridge.openPeerImage(source.peerEndpointId, source.picture);
     default:
       throw new Error("unknown artboard source");
   }
@@ -834,11 +832,17 @@ async function loadArtboardIntoEditor(artboard: ArtboardState) {
       previewTile: null,
       backdropTile: null,
     });
-    resetViewportStateForArtboard(info.canvas_width, info.canvas_height, preserveViewport);
+    resetViewportStateForArtboard(
+      info.canvas_width,
+      info.canvas_height,
+      preserveViewport,
+    );
     setState({ sourceBitDepth: info.source_bit_depth });
     await useLayerStack().refresh();
     if (artboard.source.kind === "path") {
-      const restored = await bridge.restoreCurrentBrowserSnapshot(artboard.source.path);
+      const restored = await imageBridge.restoreCurrentBrowserSnapshot(
+        artboard.source.path,
+      );
       if (restored) {
         await useLayerStack().refresh();
       }
@@ -947,7 +951,7 @@ async function openImageFrom(
   );
   try {
     if (source.kind === "path") {
-      await bridge.prepareImageOpen(source.path);
+      await imageBridge.prepareImageOpen(source.path);
     }
     const info = await load();
     if (!isActiveLoadToken(loadToken)) return;
@@ -972,7 +976,7 @@ async function openImageFrom(
     setState({ sourceBitDepth: info.source_bit_depth });
     await useLayerStack().refresh();
     if (source.kind === "path") {
-      const restored = await bridge.restoreCurrentBrowserSnapshot(source.path);
+      const restored = await imageBridge.restoreCurrentBrowserSnapshot(source.path);
       if (restored) {
         await useLayerStack().refresh();
       }
@@ -1079,7 +1083,7 @@ async function openImage(
   }
   let unlistenPhase: (() => void) | null = null;
   if (isS3) {
-    unlistenPhase = onImageOpenPhase((phase) => {
+    unlistenPhase = imageBridge.onImageOpenPhase((phase) => {
       if (phase === "processing") {
         setState("isDownloading", false);
       }
@@ -1087,7 +1091,7 @@ async function openImage(
   }
   try {
     await openImageFrom(
-      () => bridge.openImage(path),
+      () => imageBridge.openImage(path),
       { kind: "path", path },
       loadingMediaSrc,
       activeMediaSelection,
@@ -1101,7 +1105,7 @@ async function openImage(
 
 async function openImageFile(file: File, mode: OpenImageMode = "replace") {
   await openImageFrom(
-    () => bridge.openImageFile(file),
+    () => imageBridge.openImageFile(file),
     { kind: "file", file },
     null,
     null,
@@ -1123,7 +1127,7 @@ async function openPeerImage(
   mode: OpenImageMode = "replace",
 ) {
   await openImageFrom(
-    () => bridge.openPeerImage(peerEndpointId, picture),
+    () => imageBridge.openPeerImage(peerEndpointId, picture),
     { kind: "peer", peerEndpointId, picture },
     loadingMediaSrc,
     activeMediaSelection,
@@ -1143,14 +1147,14 @@ async function selectArtboard(artboardId: string) {
 async function exportImage(path: string) {
   setState("loadError", null);
   try {
-    await bridge.exportImage(path);
+    await imageBridge.exportImage(path);
   } catch (error) {
     setState("loadError", describeImageLoadError(error));
   }
 }
 
 function pickExportTarget() {
-  return bridge.pickExportTarget();
+  return imageBridge.pickExportTarget();
 }
 
 // ── Composable surface ─────────────────────────────────────────────────────

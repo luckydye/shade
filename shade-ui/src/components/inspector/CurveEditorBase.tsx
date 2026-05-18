@@ -15,7 +15,7 @@ import {
   state,
   viewportToneSample,
 } from "../../store/editor-store";
-import { useOpenImage } from "../../data/use-open-image";
+import { useOpenImage } from "../../store/use-open-image";
 import {
   buildLuminanceHistogram,
   type ControlPoint,

@@ -20,7 +20,6 @@ import { type MediaItem, useLibraryItems } from "../data/use-library-items";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
 import { useMediaLibraryList } from "../data/use-media-library-list";
 import { listenNativeDragDrop } from "../data/use-native-drag-drop";
-import { useOpenImage } from "../data/use-open-image";
 import { usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
 import { actions, buildActionContext } from "../store/actions";
@@ -33,6 +32,7 @@ import {
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
 } from "../store/media-view-context";
+import { useOpenImage } from "../store/use-open-image";
 import { isTauriRuntime } from "../utils";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";

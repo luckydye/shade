@@ -7,7 +7,7 @@ import {
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
 } from "../store/editor-store";
-import { useOpenImage } from "../data/use-open-image";
+import { useOpenImage } from "../store/use-open-image";
 
 const PARAMETER_ROW_CLASS =
   "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";

@@ -12,7 +12,6 @@ import {
 } from "solid-js";
 import { useFontList } from "../data/use-font-list";
 import { useLayerStack } from "../data/use-layer-stack";
-import { useOpenImage } from "../data/use-open-image";
 import { usePresetList } from "../data/use-preset-list";
 import { useSnapshotList } from "../data/use-snapshot-list";
 import {
@@ -30,6 +29,7 @@ import {
   setIsDrawerOpen,
   state,
 } from "../store/editor-store";
+import { useOpenImage } from "../store/use-open-image";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,
