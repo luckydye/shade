@@ -3,7 +3,7 @@ import {
   getLocalPeerDiscoverySnapshot,
   pairPeerDevice as pairPeerDeviceBridge,
 } from "../bridge/index";
-import type { LocalPeer, LocalPeerDiscoverySnapshot } from "../bridge/types";
+import type { LocalPeer, LocalPeerDiscoverySnapshot } from "../types";
 
 const POLL_INTERVAL_MS = 1500;
 

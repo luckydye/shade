@@ -4,7 +4,7 @@ import type {
   MutationRequest,
   ReadRequest,
   Transport,
-} from "shade-ui/src/bridge/types";
+} from "shade-ui/src/types";
 
 /**
  * Tauri-side transport implementation. Wraps invoke for outbound

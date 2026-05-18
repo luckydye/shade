@@ -11,7 +11,7 @@ import type {
   PreviewFrame,
   PreviewQuality,
   SharedPicture,
-} from "../bridge/types";
+} from "../types";
 import { onImageOpenPhase } from "./use-image-open-phase";
 
 export type {

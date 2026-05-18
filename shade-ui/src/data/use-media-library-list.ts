@@ -6,7 +6,7 @@ import type {
   LibraryMode,
   MediaLibrary,
   S3MediaLibraryInput,
-} from "../bridge/types";
+} from "../types";
 import { isTauriRuntime } from "../utils";
 
 const { libraries, refetch } = createRoot(() => {

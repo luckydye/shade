@@ -3,7 +3,7 @@ import type {
   LibraryImage,
   LibraryImageListing,
   SharedPicture,
-} from "shade-ui/src/bridge/types";
+} from "shade-ui/src/types";
 
 type LibraryCacheHooks = Pick<
   HostHooks,

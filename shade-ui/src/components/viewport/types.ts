@@ -1,4 +1,4 @@
-import type { MaskParamsInfo } from "../../bridge/types";
+import type { MaskParamsInfo } from "../../types";
 
 export type CropHandle =
   | "move"

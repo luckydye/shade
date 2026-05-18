@@ -9,7 +9,7 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import type { AdjustmentValues } from "../../bridge/types";
+import type { AdjustmentValues } from "../../types";
 import {
   isAdjustmentSliderActive,
   state,

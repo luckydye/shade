@@ -1,4 +1,4 @@
-import type { Collection, CollectionItem } from "shade-ui/src/bridge/types";
+import type { Collection, CollectionItem } from "shade-ui/src/types";
 import { requestToPromise, withStores } from "../indexed-db";
 
 interface CollectionsHandlers {

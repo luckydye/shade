@@ -1,7 +1,7 @@
 import { type Accessor, createResource, onCleanup, type Resource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import type { Collection } from "../bridge/types";
+import type { Collection } from "../types";
 
 export function useCollectionList(libraryId: Accessor<string | null>): {
   collections: Resource<Collection[] | undefined>;

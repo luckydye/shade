@@ -1,5 +1,5 @@
 import * as bridge from "../bridge/index";
-import type { MaskThumbnail } from "../bridge/types";
+import type { MaskThumbnail } from "../types";
 
 export function getMaskThumbnail(
   layerIdx: number,

@@ -6,7 +6,7 @@ import type {
   GradientMaskParams,
   TextStylePatch,
   TextTransformValues,
-} from "../bridge/types";
+} from "../types";
 import {
   isAdjustmentSliderActive,
   type LayerInfo,

@@ -11,7 +11,7 @@ import {
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import type { S3MediaLibraryInput } from "../bridge/types";
+import type { S3MediaLibraryInput } from "../types";
 import { useBatchOperations } from "../data/use-batch-operations";
 import { useCollectionItems } from "../data/use-collection-items";
 import { useCollectionList } from "../data/use-collection-list";

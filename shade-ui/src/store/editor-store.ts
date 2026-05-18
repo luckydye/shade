@@ -6,7 +6,7 @@ import type {
   MaskParamsInfo,
   SharedPicture,
   TextLayerValues,
-} from "../bridge/types";
+} from "../types";
 import type { CropAspectRatioPreset } from "../utils/crop-aspect";
 import type { RenderedTile } from "../viewport/types";
 

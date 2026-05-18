@@ -8,7 +8,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import type { MaskParamsInfo } from "../bridge/types";
+import type { MaskParamsInfo } from "../types";
 import { useLayerStack } from "../data/use-layer-stack";
 import {
   type ArtboardState,

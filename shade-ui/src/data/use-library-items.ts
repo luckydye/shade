@@ -9,7 +9,7 @@ import {
   loadLocalLibraryItemsCachedOrRemote,
   loadPeerLibraryItemsCachedOrRemote,
 } from "../bridge/index";
-import type { LibraryImage, SharedPicture } from "../bridge/types";
+import type { LibraryImage, SharedPicture } from "../types";
 import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../utils";
 
 export type MediaItemMetadata = {

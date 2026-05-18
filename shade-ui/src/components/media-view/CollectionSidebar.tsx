@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
-import type { Collection } from "../../bridge/types";
+import type { Collection } from "../../types";
 import { Button } from "../Button";
 
 function formatCount(n: number): string {

@@ -1,5 +1,5 @@
 import * as bridge from "../bridge/index";
-import type { NativeDragDropPayload } from "../bridge/types";
+import type { NativeDragDropPayload } from "../types";
 
 export function listenNativeDragDrop(
   listener: (payload: NativeDragDropPayload) => void,

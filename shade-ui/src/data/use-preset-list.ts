@@ -1,7 +1,7 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import type { PresetInfo } from "../bridge/types";
+import type { PresetInfo } from "../types";
 
 const { presets, refetch } = createRoot(() => {
   const [resource, { refetch }] = createResource(bridge.listPresets, {

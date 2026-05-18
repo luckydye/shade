@@ -1,4 +1,4 @@
-import type { MediaLibrary, SharedPicture } from "../../bridge/types";
+import type { MediaLibrary, SharedPicture } from "../../types";
 import type { MediaItem } from "../../data/use-library-items";
 import {
   resolveCameraThumbnailSrc,
