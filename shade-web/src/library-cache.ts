@@ -25,7 +25,7 @@ import {
   normalizeModifiedAt,
   normalizeRating,
   normalizeTags,
-} from "shade-ui/src/cache-utils";
+} from "shade-ui/src/utils";
 import { requestToPromise, withStores } from "shade-wasm/indexed-db";
 import { browserMediaPlatform } from "./media";
 

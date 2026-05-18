@@ -18,7 +18,7 @@ import { redo, undo } from "./store/history";
 import { getMediaBrowserController } from "./store/media-browser-control";
 import { mediaViewFocusedItem } from "./store/media-view-context";
 import { showToast } from "./store/toast";
-import { checkWebGPU } from "./webgpu-check";
+import { checkWebGPU } from "./utils/webgpu-check";
 
 const CLIPBOARD_PRESET_NAME = "__clipboard__";
 

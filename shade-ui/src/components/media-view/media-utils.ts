@@ -3,7 +3,7 @@ import type {
   MediaLibrary,
   SharedPicture,
 } from "../../bridge/types";
-import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../cache-utils";
+import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../utils";
 import { listMediaRatings } from "../../data/use-media-ratings";
 import {
   resolveCameraThumbnailSrc,

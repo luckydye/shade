@@ -13,7 +13,6 @@ import {
 import { Portal } from "solid-js/web";
 import type { S3MediaLibraryInput } from "../bridge/types";
 import { listenNativeDragDrop } from "../data/use-native-drag-drop";
-import { useBatchExportProgress } from "../data/use-batch-export-progress";
 import { useBatchOperations } from "../data/use-batch-operations";
 import { useLayerStack } from "../data/use-layer-stack";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
@@ -202,7 +201,7 @@ export const MediaView: Component = () => {
     createSignal<UploadDragFeedback | null>(null);
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const syncProgress = useLibrarySyncProgress();
-  const exportProgress = useBatchExportProgress();
+  const exportProgress = batchOps.exportProgress;
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
   const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
   const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);

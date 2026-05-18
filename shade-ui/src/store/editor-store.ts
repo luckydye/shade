@@ -7,7 +7,7 @@ import type {
   SharedPicture,
   TextLayerValues,
 } from "../bridge/types";
-import type { CropAspectRatioPreset } from "../crop-aspect";
+import type { CropAspectRatioPreset } from "../utils/crop-aspect";
 import type { RenderedTile } from "../viewport/types";
 
 export interface LayerInfo {

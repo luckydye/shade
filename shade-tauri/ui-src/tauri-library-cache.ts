@@ -31,7 +31,7 @@ import {
   normalizeModifiedAt,
   normalizeRating,
   normalizeTags,
-} from "shade-ui/src/cache-utils";
+} from "shade-ui/src/utils";
 
 const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
 const tauriCameraLibraryItems = new Map<string, LibraryImage[]>();

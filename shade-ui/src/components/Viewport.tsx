@@ -18,7 +18,7 @@ import {
   fitCropRectToAspectRatio,
   resizeCropFromHandle,
   resolveCropAspectRatio,
-} from "../crop-aspect";
+} from "../utils/crop-aspect";
 import { useLayerStack } from "../data/use-layer-stack";
 import { useOpenImage } from "../data/use-open-image";
 import {

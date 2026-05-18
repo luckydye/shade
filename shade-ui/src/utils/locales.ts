@@ -1,6 +1,6 @@
-import de from "../locales/de.json";
-import en from "../locales/en.json";
-import kr from "../locales/kr.json";
+import de from "../../locales/de.json";
+import en from "../../locales/en.json";
+import kr from "../../locales/kr.json";
 
 export const AVAILABLE_LANGS = ["en", "de", "kr"] as const;
 export const DEFAULT_LANGUAGE = "en";

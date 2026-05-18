@@ -16,7 +16,7 @@ import {
   clampAspectSize,
   fitCropRectToAspectRatio,
   resolveCropAspectRatio,
-} from "../crop-aspect";
+} from "../utils/crop-aspect";
 import { useFontList } from "../data/use-font-list";
 import {
   deletePreset,
