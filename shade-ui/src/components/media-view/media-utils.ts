@@ -1,55 +1,19 @@
-import type { LibraryImage, MediaLibrary, SharedPicture } from "../../bridge/types";
-import { useMediaRatings } from "../../data/use-media-ratings";
+import type { MediaLibrary, SharedPicture } from "../../bridge/types";
+import type { MediaItem } from "../../data/use-library-items";
 import { useOpenImage } from "../../data/use-open-image";
 import {
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
 } from "../../data/use-thumbnail-src";
-import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../utils";
+import { normalizeModifiedAt } from "../../utils";
 
 export type LibraryEntry = MediaLibrary;
 export type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };
 
-export type MediaItemMetadata = {
-  hasSnapshots: boolean;
-  latestSnapshotId: string | null;
-  latestSnapshotCreatedAt: number | null;
-  baseRating: number | null;
-  rating: number | null;
-  tags: string[];
-};
-
-export type MediaItem =
-  | {
-      kind: "local";
-      id: string;
-      name: string;
-      path: string;
-      fingerprint: string | null;
-      modifiedAt: number | null;
-      metadata: MediaItemMetadata;
-    }
-  | {
-      kind: "peer";
-      id: string;
-      name: string;
-      peerId: string;
-      fingerprint: string | null;
-      modifiedAt: number | null;
-      metadata: MediaItemMetadata;
-    };
-
 export type MediaGridRow =
   | { kind: "date"; modifiedAt: number | null }
   | { kind: "items"; ids: string[] };
-
-export type LibraryData = {
-  libraryId: string | null;
-  items: MediaItem[];
-  isComplete: boolean;
-  error: string | null;
-};
 
 export type OpenMediaMode = "append" | "replace";
 
@@ -63,8 +27,6 @@ export type UploadProgress = {
 export type UploadDragFeedback = {
   itemCount: number | null;
 };
-
-export type PeerLibraryItem = SharedPicture & { peerId: string };
 
 export function isPeerLibrary(
   library: LibraryEntry | null,
@@ -245,17 +207,6 @@ export function targetUsesOwnFocus(target: EventTarget | null) {
   );
 }
 
-export function cameraLibraryHost(libraryId: string) {
-  if (!libraryId.startsWith("ccapi:")) {
-    throw new Error(`invalid camera library id: ${libraryId}`);
-  }
-  return libraryId.slice("ccapi:".length);
-}
-
-function pictureName(path: string) {
-  return path.split("/").pop() ?? path;
-}
-
 export function normalizeFilenameFilter(value: string): string[] {
   return value
     .split(",")
@@ -275,44 +226,6 @@ export function filterMediaItemsByFilename(items: MediaItem[], filters: string[]
         item.metadata.tags.some((tag) => tag.toLocaleLowerCase().includes(filter)),
     ),
   );
-}
-
-function mediaRatingId(item: MediaItem) {
-  if (item.kind === "peer") {
-    return `peer:${item.peerId}:${item.id}`;
-  }
-  return item.fingerprint ?? item.path;
-}
-
-function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem {
-  return {
-    ...item,
-    metadata: {
-      ...item.metadata,
-      rating,
-    },
-  };
-}
-
-export async function applyStoredRatings(items: MediaItem[]) {
-  const { listMediaRatings } = useMediaRatings();
-  const ratingIds = items
-    .map((item) => ({ item, ratingId: mediaRatingId(item) }))
-    .filter(
-      (entry): entry is { item: MediaItem; ratingId: string } => entry.ratingId !== null,
-    );
-  const ratings = await listMediaRatings(ratingIds.map((entry) => entry.ratingId));
-  return items.map((item) => {
-    const ratingId = mediaRatingId(item);
-    if (!ratingId) {
-      return item;
-    }
-    const storedRating = ratings[ratingId];
-    if (storedRating === undefined) {
-      return item;
-    }
-    return withMediaItemRating(item, normalizeRating(storedRating));
-  });
 }
 
 export function modificationMonthKey(modifiedAt: number | null | undefined) {
@@ -335,44 +248,6 @@ export function formatModificationMonth(modifiedAt: number | null | undefined) {
     year: "numeric",
     month: "long",
   }).format(new Date(normalized));
-}
-
-export function localMediaItem(image: LibraryImage): MediaItem {
-  return {
-    kind: "local",
-    id: image.path,
-    name: image.name || pictureName(image.path),
-    path: image.path,
-    fingerprint: image.fingerprint,
-    modifiedAt: normalizeModifiedAt(image.modified_at),
-    metadata: {
-      hasSnapshots: image.metadata?.has_snapshots ?? false,
-      latestSnapshotId: image.metadata?.latest_snapshot_id ?? null,
-      latestSnapshotCreatedAt: image.metadata?.latest_snapshot_created_at ?? null,
-      baseRating: normalizeRating(image.metadata?.rating),
-      rating: normalizeRating(image.metadata?.rating),
-      tags: normalizeTags(image.metadata?.tags),
-    },
-  };
-}
-
-export function peerMediaItem(image: PeerLibraryItem): MediaItem {
-  return {
-    kind: "peer",
-    id: image.id,
-    name: image.name,
-    peerId: image.peerId,
-    fingerprint: null,
-    modifiedAt: normalizeModifiedAt(image.modified_at),
-    metadata: {
-      hasSnapshots: image.has_snapshots,
-      latestSnapshotId: image.latest_snapshot_id,
-      latestSnapshotCreatedAt: null,
-      baseRating: null,
-      rating: null,
-      tags: [],
-    },
-  };
 }
 
 export function mediaItemKey(item: MediaItem) {

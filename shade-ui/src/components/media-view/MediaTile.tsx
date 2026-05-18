@@ -1,12 +1,13 @@
 import type { Component } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import type { MediaItem } from "../../data/use-library-items";
 import {
   resetCameraThumbnailFailure,
   resetLocalThumbnailFailure,
 } from "../../data/use-thumbnail-src";
 import { Button } from "../Button";
 import { MediaRating } from "../MediaRating";
-import { loadItemSrc, type MediaItem } from "./media-utils";
+import { loadItemSrc } from "./media-utils";
 
 type MediaTileProps = {
   item: MediaItem;

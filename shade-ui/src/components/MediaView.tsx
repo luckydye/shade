@@ -16,7 +16,7 @@ import { useBatchOperations } from "../data/use-batch-operations";
 import { useCollectionItems } from "../data/use-collection-items";
 import { useCollectionList } from "../data/use-collection-list";
 import { useLayerStack } from "../data/use-layer-stack";
-import { useLibraryItems } from "../data/use-library-items";
+import { type MediaItem, useLibraryItems } from "../data/use-library-items";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
 import { useMediaLibraryList } from "../data/use-media-library-list";
 import { listenNativeDragDrop } from "../data/use-native-drag-drop";
@@ -54,7 +54,6 @@ import {
   type LibraryEntry,
   libraryIsWritable,
   type MediaGridRow,
-  type MediaItem,
   mediaItemKey,
   mergeLibraryOrder,
   modificationMonthKey,

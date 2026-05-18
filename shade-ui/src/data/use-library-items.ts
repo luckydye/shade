@@ -9,14 +9,134 @@ import {
   loadLocalLibraryItemsCachedOrRemote,
   loadPeerLibraryItemsCachedOrRemote,
 } from "../bridge/index";
-import {
-  applyStoredRatings,
-  cameraLibraryHost,
-  type LibraryData,
-  localMediaItem,
-  type MediaItem,
-  peerMediaItem,
-} from "../components/media-view/media-utils";
+import type { LibraryImage, SharedPicture } from "../bridge/types";
+import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../utils";
+import { useMediaRatings } from "./use-media-ratings";
+
+export type MediaItemMetadata = {
+  hasSnapshots: boolean;
+  latestSnapshotId: string | null;
+  latestSnapshotCreatedAt: number | null;
+  baseRating: number | null;
+  rating: number | null;
+  tags: string[];
+};
+
+export type MediaItem =
+  | {
+      kind: "local";
+      id: string;
+      name: string;
+      path: string;
+      fingerprint: string | null;
+      modifiedAt: number | null;
+      metadata: MediaItemMetadata;
+    }
+  | {
+      kind: "peer";
+      id: string;
+      name: string;
+      peerId: string;
+      fingerprint: string | null;
+      modifiedAt: number | null;
+      metadata: MediaItemMetadata;
+    };
+
+export type LibraryData = {
+  libraryId: string | null;
+  items: MediaItem[];
+  isComplete: boolean;
+  error: string | null;
+};
+
+type PeerLibraryItem = SharedPicture & { peerId: string };
+
+function cameraLibraryHost(libraryId: string) {
+  if (!libraryId.startsWith("ccapi:")) {
+    throw new Error(`invalid camera library id: ${libraryId}`);
+  }
+  return libraryId.slice("ccapi:".length);
+}
+
+function pictureName(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
+function localMediaItem(image: LibraryImage): MediaItem {
+  return {
+    kind: "local",
+    id: image.path,
+    name: image.name || pictureName(image.path),
+    path: image.path,
+    fingerprint: image.fingerprint,
+    modifiedAt: normalizeModifiedAt(image.modified_at),
+    metadata: {
+      hasSnapshots: image.metadata?.has_snapshots ?? false,
+      latestSnapshotId: image.metadata?.latest_snapshot_id ?? null,
+      latestSnapshotCreatedAt: image.metadata?.latest_snapshot_created_at ?? null,
+      baseRating: normalizeRating(image.metadata?.rating),
+      rating: normalizeRating(image.metadata?.rating),
+      tags: normalizeTags(image.metadata?.tags),
+    },
+  };
+}
+
+function peerMediaItem(image: PeerLibraryItem): MediaItem {
+  return {
+    kind: "peer",
+    id: image.id,
+    name: image.name,
+    peerId: image.peerId,
+    fingerprint: null,
+    modifiedAt: normalizeModifiedAt(image.modified_at),
+    metadata: {
+      hasSnapshots: image.has_snapshots,
+      latestSnapshotId: image.latest_snapshot_id,
+      latestSnapshotCreatedAt: null,
+      baseRating: null,
+      rating: null,
+      tags: [],
+    },
+  };
+}
+
+function mediaRatingId(item: MediaItem) {
+  if (item.kind === "peer") {
+    return `peer:${item.peerId}:${item.id}`;
+  }
+  return item.fingerprint ?? item.path;
+}
+
+function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem {
+  return {
+    ...item,
+    metadata: {
+      ...item.metadata,
+      rating,
+    },
+  };
+}
+
+async function applyStoredRatings(items: MediaItem[]) {
+  const { listMediaRatings } = useMediaRatings();
+  const ratingIds = items
+    .map((item) => ({ item, ratingId: mediaRatingId(item) }))
+    .filter(
+      (entry): entry is { item: MediaItem; ratingId: string } => entry.ratingId !== null,
+    );
+  const ratings = await listMediaRatings(ratingIds.map((entry) => entry.ratingId));
+  return items.map((item) => {
+    const ratingId = mediaRatingId(item);
+    if (!ratingId) {
+      return item;
+    }
+    const storedRating = ratings[ratingId];
+    if (storedRating === undefined) {
+      return item;
+    }
+    return withMediaItemRating(item, normalizeRating(storedRating));
+  });
+}
 
 async function loadFreshItems(libraryId: string | null): Promise<MediaItem[]> {
   if (!libraryId) return [];

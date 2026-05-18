@@ -1,12 +1,8 @@
-import {
-  type MediaItem,
-  mediaItemKey,
-  openMediaItem,
-} from "../components/media-view/media-utils";
-import { loadLibraryData } from "../data/use-library-items";
+import { mediaItemKey, openMediaItem } from "../components/media-view/media-utils";
+import { useLayerStack } from "../data/use-layer-stack";
+import { loadLibraryData, type MediaItem } from "../data/use-library-items";
 import { useMediaLibraryList } from "../data/use-media-library-list";
 import { useOpenImage } from "../data/use-open-image";
-import { useLayerStack } from "../data/use-layer-stack";
 
 const layers = useLayerStack();
 const {
@@ -23,6 +19,7 @@ const {
 const selectLayer = layers.select;
 const setLayerOpacity = layers.setOpacity;
 const setLayerVisible = layers.setVisible;
+
 import {
   type ArtboardSource,
   fullCanvasCrop,
