@@ -1,5 +1,9 @@
-import type { HostHooks, NativeDragDropPayload } from "shade-ui/src/bridge/host";
-import type { PreviewFrame, PreviewRequest } from "shade-ui/src/bridge/index";
+import type {
+  HostHooks,
+  NativeDragDropPayload,
+  PreviewFrame,
+  PreviewRequest,
+} from "shade-ui/src/types";
 import { browserSnapshotsPlatform } from "shade-wasm/worker/snapshots";
 import { applyBrowserPresetLayer } from "./browser-preset-apply";
 import { browserLibraryCache } from "./library-cache";

@@ -4,7 +4,6 @@
  * Used by `webHostHooks.restoreCurrentBrowserSnapshot`.
  */
 
-import type { AdjustmentValues, BrowserPresetLayer } from "shade-ui/src/bridge/index";
 import {
   addLayer,
   applyEdit,
@@ -13,6 +12,7 @@ import {
   setLayerOpacity,
   setLayerVisible,
 } from "shade-ui/src/bridge/index";
+import type { AdjustmentValues, BrowserPresetLayer } from "shade-ui/src/types";
 
 function requiredNumber(value: number | null | undefined, label: string) {
   if (typeof value !== "number" || !Number.isFinite(value)) {

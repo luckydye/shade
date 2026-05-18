@@ -17,8 +17,7 @@
  * consumer.
  */
 
-import type { HostHooks } from "./types";
-export type { HostHooks, NativeDragDropPayload } from "./types";
+import type { HostHooks } from "../types";
 
 let _host: HostHooks | null = null;
 

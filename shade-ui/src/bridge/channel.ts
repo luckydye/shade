@@ -9,8 +9,7 @@
  * `@tauri-apps/api/core` Channel; the browser runtime is a no-op).
  */
 
-import type { ChannelMessage, MutationRequest, ReadRequest } from "./types";
-export type { ChannelMessage, MutationRequest, ReadRequest } from "./types";
+import type { ChannelMessage, MutationRequest, ReadRequest } from "../types";
 
 type MessageType = ChannelMessage["type"];
 

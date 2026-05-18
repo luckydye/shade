@@ -3,122 +3,40 @@
  * falls back to a browser worker when running on the web.
  */
 
+import type {
+  AwarenessState,
+  BatchExportItem,
+  BatchExportProgress,
+  BrowserDirectoryHandle,
+  Collection,
+  CollectionItem,
+  EditSnapshotInfo,
+  FontInfo,
+  GradientMaskParams,
+  LibraryImage,
+  LibraryImageListing,
+  LibraryMode,
+  LibrarySyncProgress,
+  LocalPeerDiscoverySnapshot,
+  MaskThumbnail,
+  MediaLibrary,
+  MediaRatingParams,
+  NativeDragDropPayload,
+  OpenImageInfo,
+  PresetInfo,
+  PreviewFrame,
+  PreviewRequest,
+  S3MediaLibraryInput,
+  SharedPicture,
+  SnapshotInfo,
+  StackInfo,
+  SyncPeerSnapshotsResult,
+  TextStylePatch,
+  TextTransformValues,
+} from "../types";
 import { isTauriRuntime } from "../utils";
 import { onChannelMessage, sendChunkedRead, sendMutation, sendRead } from "./channel";
 import { getHostHooks } from "./host";
-import type {
-  AdjustmentValues,
-  AwarenessState,
-  BatchExportItem,
-  BatchExportProgress,
-  BrowserDirectoryHandle,
-  BrowserMediaPlatform,
-  BrowserPresetFile,
-  BrowserPresetLayer,
-  BrowserPresetsPlatform,
-  BrowserSnapshotRecord,
-  BrowserSnapshotsPlatform,
-  Collection,
-  CollectionItem,
-  CropValues,
-  EditSnapshotInfo,
-  FontInfo,
-  GradientMaskParams,
-  LayerInfo,
-  LibraryImage,
-  LibraryImageListing,
-  LibraryMode,
-  LibrarySyncProgress,
-  LocalPeerDiscoverySnapshot,
-  MaskThumbnail,
-  MediaLibrary,
-  MediaRatingParams,
-  NativeDragDropPayload,
-  OpenImageInfo,
-  PresetInfo,
-  PreviewFrame,
-  PreviewRequest,
-  S3MediaLibraryInput,
-  SharedPicture,
-  SnapshotInfo,
-  StackInfo,
-  SyncPeerSnapshotsResult,
-  TextStylePatch,
-  TextTransformValues,
-} from "./types";
-export type {
-  AdjustmentValues,
-  ApplyPeerMetadataResult,
-  ApplyEditPayload,
-  ApplyGradientMaskPayload,
-  ArtboardViewport,
-  AwarenessState,
-  AwarenessStateMessage,
-  BatchExportItem,
-  BatchExportProgress,
-  BrowserDirectoryHandle,
-  BrowserFileHandle,
-  BrowserFileSystemHandle,
-  BrowserMediaPlatform,
-  BrowserPresetFile,
-  BrowserPresetLayer,
-  BrowserPresetsPlatform,
-  BrowserSnapshotRecord,
-  BrowserSnapshotsPlatform,
-  Collection,
-  CollectionItem,
-  ChannelMessage,
-  ColorValues,
-  CropValues,
-  CurveControlPoint,
-  CurvesValues,
-  EditSnapshotInfo,
-  FileSystemPermissionMode,
-  FileSystemPermissionState,
-  FontInfo,
-  GradientMaskParams,
-  HslValues,
-  LayerInfo,
-  LibraryImage,
-  LibraryImageListing,
-  LibraryImageMetadata,
-  LibraryMode,
-  LibrarySyncProgress,
-  LinearGradientMask,
-  LocalPeer,
-  LocalPeerDiscoverySnapshot,
-  LsCurveValues,
-  MaskParamsInfo,
-  MaskThumbnail,
-  MediaLibrary,
-  MediaRatingParams,
-  NativeDragDropPayload,
-  OpenImageInfo,
-  PresetInfo,
-  PreviewCrop,
-  PreviewCropMessage,
-  PreviewFrame,
-  PreviewQuality,
-  PreviewRequest,
-  RadialGradientMask,
-  ReadRequest,
-  S3MediaLibraryInput,
-  SharedPicture,
-  SnapshotInfo,
-  StackInfo,
-  StampBrushMaskPayload,
-  SyncPeerSnapshotsResult,
-  TextAlignName,
-  TextAnchorName,
-  TextBoundsValues,
-  TextLayerValues,
-  TextStylePatch,
-  TextStyleValues,
-  TextTransformValues,
-  ToneValues,
-  MutationRequest,
-} from "./types";
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -564,31 +482,6 @@ export async function refreshLibraryIndex(libraryId: string): Promise<void> {
     type: "refresh_library_index",
     library_id: libraryId,
   });
-}
-
-function serializeBrowserPresetLayers(layers: LayerInfo[]): BrowserPresetLayer[] {
-  return layers
-    .filter((layer) => layer.kind !== "image")
-    .map((layer) => {
-      if (layer.kind !== "adjustment" && layer.kind !== "crop") {
-        throw new Error(`unsupported preset layer kind: ${layer.kind}`);
-      }
-      if (layer.has_mask && !layer.mask_params) {
-        throw new Error("browser presets only support gradient masks");
-      }
-      if (layer.kind === "crop" && !layer.crop) {
-        throw new Error("crop layer is missing crop values");
-      }
-      return {
-        kind: layer.kind,
-        name: layer.name ?? null,
-        visible: layer.visible,
-        opacity: layer.opacity,
-        adjustments: layer.adjustments ?? null,
-        crop: layer.crop ?? null,
-        mask_params: layer.mask_params ?? null,
-      };
-    });
 }
 
 export async function listPresets(): Promise<PresetInfo[]> {

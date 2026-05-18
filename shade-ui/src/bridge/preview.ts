@@ -9,17 +9,12 @@
  * update and frames with a stale generation are discarded.
  */
 
-import type {
-  ArtboardViewport,
-  PreviewCropMessage,
-  PreviewQuality,
-  UpdatePreviewViewportsArgs,
-} from "./types";
+import type { PreviewQuality } from "../types";
 
-export type PreviewFrameKind = "rgba" | "rgba-float16";
-export type PreviewColorSpace = "srgb" | "display-p3";
+type PreviewFrameKind = "rgba" | "rgba-float16";
+type PreviewColorSpace = "srgb" | "display-p3";
 
-export interface PreviewFramePush {
+interface PreviewFramePush {
   artboard_id: string;
   generation: number;
   quality: PreviewQuality;
@@ -166,5 +161,3 @@ export async function installPreviewChannel(
     applyFrame({ ...header, pixels });
   });
 }
-
-export type { PreviewCropMessage };

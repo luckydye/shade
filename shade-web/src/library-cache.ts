@@ -1,9 +1,4 @@
-import type { HostHooks } from "shade-ui/src/bridge/host";
-import type {
-  LibraryImage,
-  LibraryImageListing,
-  SharedPicture,
-} from "shade-ui/src/bridge/index";
+import type { HostHooks, LibraryImage, LibraryImageListing } from "shade-ui/src/types";
 
 type LibraryCacheHooks = Pick<
   HostHooks,
@@ -21,11 +16,7 @@ type LibraryCacheHooks = Pick<
   | "resetCameraThumbnailFailure"
 >;
 
-import {
-  normalizeModifiedAt,
-  normalizeRating,
-  normalizeTags,
-} from "shade-ui/src/utils";
+import { normalizeModifiedAt, normalizeRating, normalizeTags } from "shade-ui/src/utils";
 import { requestToPromise, withStores } from "shade-wasm/indexed-db";
 import { browserMediaPlatform } from "./media";
 

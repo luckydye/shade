@@ -2,8 +2,8 @@ import type {
   ChannelMessage,
   MutationRequest,
   ReadRequest,
-} from "shade-ui/src/bridge/channel";
-import type { Transport } from "shade-ui/src/bridge/transport";
+  Transport,
+} from "shade-ui/src/types";
 
 // Singleton Worker instance. Both the unified Transport (this file) and the
 // legacy `workerCall` path in shade-ui/bridge/index.ts (via

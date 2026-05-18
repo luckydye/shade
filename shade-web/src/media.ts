@@ -5,7 +5,7 @@ import type {
   LibraryImage,
   LibraryImageListing,
   MediaLibrary,
-} from "shade-ui/src/bridge/index";
+} from "shade-ui/src/types";
 import { requestToPromise, withStores } from "shade-wasm/indexed-db";
 import { browserSnapshotsPlatform } from "shade-wasm/worker/snapshots";
 import {

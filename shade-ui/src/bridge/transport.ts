@@ -12,8 +12,7 @@
  * shade-ui itself never knows which one is in use.
  */
 
-import type { Transport } from "./types";
-export type { Transport } from "./types";
+import type { Transport } from "../types";
 
 let _transport: Transport | null = null;
 
