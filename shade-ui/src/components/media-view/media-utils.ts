@@ -2,14 +2,14 @@ import type {
   LibraryImage,
   MediaLibrary,
   SharedPicture,
-} from "../../bridge/index";
+} from "../../bridge/types";
 import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../cache-utils";
-import { listMediaRatings } from "../../data/media-ratings";
+import { listMediaRatings } from "../../data/use-media-ratings";
 import {
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
-} from "../../data/thumbnail-src";
+} from "../../data/use-thumbnail-src";
 import { useOpenImage } from "../../data/use-open-image";
 
 export type LibraryEntry = MediaLibrary;

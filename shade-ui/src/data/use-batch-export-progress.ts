@@ -1,5 +1,5 @@
 import { type Accessor, createRoot, createSignal } from "solid-js";
-import type { BatchExportProgress } from "../bridge/index";
+import type { BatchExportProgress } from "../bridge/types";
 import { listenBatchExportProgress } from "../bridge/index";
 
 /** Reactive view of the most recent batch-export progress event, or `null`

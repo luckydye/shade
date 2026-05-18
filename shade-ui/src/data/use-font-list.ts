@@ -1,6 +1,6 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import * as bridge from "../bridge/index";
-import { type FontInfo } from "../bridge/index";
+import { type FontInfo } from "../bridge/types";
 import { useLayerStack } from "./use-layer-stack";
 
 const { fonts, refetch } = createRoot(() => {

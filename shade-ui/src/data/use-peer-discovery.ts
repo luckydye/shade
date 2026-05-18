@@ -1,9 +1,9 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import {
   getLocalPeerDiscoverySnapshot,
-  type LocalPeer,
-  type LocalPeerDiscoverySnapshot,
+  pairPeerDevice as pairPeerDeviceBridge,
 } from "../bridge/index";
+import type { LocalPeer, LocalPeerDiscoverySnapshot } from "../bridge/types";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -35,4 +35,8 @@ export function usePeerDiscovery(): {
       await refetch();
     },
   };
+}
+
+export function pairPeerDevice(peerEndpointId: string): Promise<void> {
+  return pairPeerDeviceBridge(peerEndpointId);
 }

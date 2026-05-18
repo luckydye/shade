@@ -1,7 +1,7 @@
 import { type Accessor, createSignal } from "solid-js";
-import type { ArtboardViewport, PreviewQuality } from "../bridge/channel";
+import type { ArtboardViewport, PreviewQuality } from "../bridge/types";
 import * as bridge from "../bridge/index";
-import type { PreviewFrame, SharedPicture } from "../bridge/index";
+import type { PreviewFrame, SharedPicture } from "../bridge/types";
 import {
   getArtboardTiles,
   nextGeneration,

@@ -8,7 +8,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import type { MaskParamsInfo } from "../bridge/index";
+import type { MaskParamsInfo } from "../bridge/types";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,

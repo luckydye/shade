@@ -6,290 +6,120 @@
 import { isTauriRuntime } from "../utils";
 import { onChannelMessage, sendChunkedRead, sendMutation, sendRead } from "./channel";
 import { getHostHooks } from "./host";
-
-export type FileSystemPermissionMode = "read" | "readwrite";
-export type FileSystemPermissionState = "granted" | "denied" | "prompt";
-
-export interface BrowserFileSystemHandle {
-  kind: "file" | "directory";
-  name: string;
-  queryPermission(descriptor?: {
-    mode?: FileSystemPermissionMode;
-  }): Promise<FileSystemPermissionState>;
-  requestPermission(descriptor?: {
-    mode?: FileSystemPermissionMode;
-  }): Promise<FileSystemPermissionState>;
-  isSameEntry(other: BrowserFileSystemHandle): Promise<boolean>;
-}
-
-export interface BrowserFileHandle extends BrowserFileSystemHandle {
-  kind: "file";
-  getFile(): Promise<File>;
-}
-
-export interface BrowserDirectoryHandle extends BrowserFileSystemHandle {
-  kind: "directory";
-  values(): AsyncIterable<BrowserFileHandle | BrowserDirectoryHandle>;
-}
-
-export interface NativeDragDropPayload {
-  type: "enter" | "over" | "drop" | "leave";
-  paths: string[];
-}
+import type {
+  AdjustmentValues,
+  AwarenessState,
+  BatchExportItem,
+  BatchExportProgress,
+  BrowserDirectoryHandle,
+  BrowserMediaPlatform,
+  BrowserPresetFile,
+  BrowserPresetLayer,
+  BrowserPresetsPlatform,
+  BrowserSnapshotRecord,
+  BrowserSnapshotsPlatform,
+  Collection,
+  CollectionItem,
+  CropValues,
+  EditSnapshotInfo,
+  FontInfo,
+  GradientMaskParams,
+  LayerInfo,
+  LibraryImage,
+  LibraryImageListing,
+  LibraryMode,
+  LibrarySyncProgress,
+  LocalPeerDiscoverySnapshot,
+  MaskThumbnail,
+  MediaLibrary,
+  MediaRatingParams,
+  NativeDragDropPayload,
+  OpenImageInfo,
+  PresetInfo,
+  PreviewFrame,
+  PreviewRequest,
+  S3MediaLibraryInput,
+  SharedPicture,
+  SnapshotInfo,
+  StackInfo,
+  SyncPeerSnapshotsResult,
+  TextStylePatch,
+  TextTransformValues,
+} from "./types";
+export type {
+  AdjustmentValues,
+  ApplyPeerMetadataResult,
+  ApplyEditPayload,
+  ApplyGradientMaskPayload,
+  ArtboardViewport,
+  AwarenessState,
+  AwarenessStateMessage,
+  BatchExportItem,
+  BatchExportProgress,
+  BrowserDirectoryHandle,
+  BrowserFileHandle,
+  BrowserFileSystemHandle,
+  BrowserMediaPlatform,
+  BrowserPresetFile,
+  BrowserPresetLayer,
+  BrowserPresetsPlatform,
+  BrowserSnapshotRecord,
+  BrowserSnapshotsPlatform,
+  Collection,
+  CollectionItem,
+  ChannelMessage,
+  ColorValues,
+  CropValues,
+  CurveControlPoint,
+  CurvesValues,
+  EditSnapshotInfo,
+  FileSystemPermissionMode,
+  FileSystemPermissionState,
+  FontInfo,
+  GradientMaskParams,
+  HslValues,
+  LayerInfo,
+  LibraryImage,
+  LibraryImageListing,
+  LibraryImageMetadata,
+  LibraryMode,
+  LibrarySyncProgress,
+  LinearGradientMask,
+  LocalPeer,
+  LocalPeerDiscoverySnapshot,
+  LsCurveValues,
+  MaskParamsInfo,
+  MaskThumbnail,
+  MediaLibrary,
+  MediaRatingParams,
+  NativeDragDropPayload,
+  OpenImageInfo,
+  PresetInfo,
+  PreviewCrop,
+  PreviewCropMessage,
+  PreviewFrame,
+  PreviewQuality,
+  PreviewRequest,
+  RadialGradientMask,
+  ReadRequest,
+  S3MediaLibraryInput,
+  SharedPicture,
+  SnapshotInfo,
+  StackInfo,
+  StampBrushMaskPayload,
+  SyncPeerSnapshotsResult,
+  TextAlignName,
+  TextAnchorName,
+  TextBoundsValues,
+  TextLayerValues,
+  TextStylePatch,
+  TextStyleValues,
+  TextTransformValues,
+  ToneValues,
+  MutationRequest,
+} from "./types";
 
 // ── Public API ───────────────────────────────────────────────────────────────
-
-export interface StackInfo {
-  layers: LayerInfo[];
-  canvas_width: number;
-  canvas_height: number;
-  generation: number;
-}
-
-export interface OpenImageInfo {
-  layer_count: number;
-  canvas_width: number;
-  canvas_height: number;
-  source_bit_depth: string;
-  fingerprint: string | null;
-}
-
-export interface LocalPeer {
-  endpoint_id: string;
-  name: string;
-  direct_addresses: string[];
-  last_updated: number | null;
-}
-
-export interface LocalPeerDiscoverySnapshot {
-  local_endpoint_id: string;
-  local_direct_addresses: string[];
-  peers: LocalPeer[];
-}
-
-export interface SharedPicture {
-  id: string;
-  name: string;
-  modified_at: number | null;
-  has_snapshots: boolean;
-  latest_snapshot_id: string | null;
-}
-
-export interface LibraryImageMetadata {
-  has_snapshots: boolean;
-  latest_snapshot_id: string | null;
-  latest_snapshot_created_at?: number | null;
-  rating: number | null;
-  tags: string[];
-}
-
-export interface LibraryImage {
-  path: string;
-  name: string;
-  modified_at: number | null;
-  fingerprint: string | null;
-  metadata: LibraryImageMetadata;
-}
-
-export interface LibraryImageListing {
-  items: LibraryImage[];
-  is_complete: boolean;
-}
-
-export interface ToneValues {
-  exposure: number;
-  contrast: number;
-  blacks: number;
-  whites: number;
-  highlights: number;
-  shadows: number;
-  gamma: number;
-}
-
-export interface ColorValues {
-  saturation: number;
-  vibrancy: number;
-  temperature: number;
-  tint: number;
-}
-
-export interface HslValues {
-  red_hue: number;
-  red_sat: number;
-  red_lum: number;
-  green_hue: number;
-  green_sat: number;
-  green_lum: number;
-  blue_hue: number;
-  blue_sat: number;
-  blue_lum: number;
-}
-
-export interface CurveControlPoint {
-  x: number;
-  y: number;
-}
-
-export interface AdjustmentValues {
-  tone: ToneValues | null;
-  curves: CurvesValues | null;
-  ls_curve: LsCurveValues | null;
-  color: ColorValues | null;
-  vignette: { amount: number } | null;
-  sharpen: { amount: number } | null;
-  grain: { amount: number; size: number } | null;
-  glow: { amount: number } | null;
-  hsl: HslValues | null;
-  denoise: { luma_strength: number; chroma_strength: number; mode: number } | null;
-}
-
-export interface CurvesValues {
-  lut_r: number[];
-  lut_g: number[];
-  lut_b: number[];
-  lut_master: number[];
-  per_channel: boolean;
-  control_points?: CurveControlPoint[] | null;
-}
-
-export interface LsCurveValues {
-  lut: number[];
-  control_points?: CurveControlPoint[] | null;
-}
-
-export interface MaskParamsInfo {
-  kind: "linear" | "radial" | "brush";
-  x1?: number | null;
-  y1?: number | null;
-  x2?: number | null;
-  y2?: number | null;
-  cx?: number | null;
-  cy?: number | null;
-  radius?: number | null;
-}
-
-export interface LayerInfo {
-  kind: string;
-  name?: string | null;
-  visible: boolean;
-  opacity: number;
-  blend_mode?: string;
-  has_mask?: boolean;
-  mask_params?: MaskParamsInfo | null;
-  adjustments?: AdjustmentValues | null;
-  crop?: CropValues | null;
-  text?: TextLayerValues | null;
-}
-
-export interface CropValues {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-}
-
-export type TextAlignName = "left" | "center" | "right" | "justify";
-export type TextAnchorName =
-  | "top-left"
-  | "top-center"
-  | "top-right"
-  | "center-left"
-  | "center"
-  | "center-right"
-  | "bottom-left"
-  | "bottom-center"
-  | "bottom-right"
-  | "baseline-left"
-  | "baseline-center"
-  | "baseline-right";
-
-export interface TextStyleValues {
-  /** Font ID into the LayerStack font registry (decoded `u64` as JS number). */
-  font_id: number;
-  size_px: number;
-  line_height: number;
-  letter_spacing: number;
-  /** `null` disables wrapping. */
-  max_width: number | null;
-  align: TextAlignName;
-  anchor: TextAnchorName;
-  /** OpenType weight (100..=900). */
-  weight: number;
-  italic: boolean;
-  /** Linear sRGB straight alpha — `[r, g, b, a]`. */
-  color: [number, number, number, number];
-}
-
-export interface TextTransformValues {
-  tx: number;
-  ty: number;
-  scale_x: number;
-  scale_y: number;
-  rotation: number;
-}
-
-export interface TextLayerValues {
-  content: string;
-  style: TextStyleValues;
-  transform: TextTransformValues;
-  /** Layout-derived AABB in canvas pixels (translation applied). `null` when
-   *  the layer is empty or no font is registered. */
-  bounds?: TextBoundsValues | null;
-}
-
-export interface TextBoundsValues {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface FontInfo {
-  font_id: number;
-  family: string;
-  /** Decimal-encoded `u64` content hash (FNV-1a over the blob). */
-  blob_hash: string;
-}
-
-/** Partial style update — undefined fields leave the corresponding style
- * field unchanged. To clear `max_width`, set it to `null` explicitly. */
-export interface TextStylePatch {
-  font_id?: number;
-  size_px?: number;
-  line_height?: number;
-  letter_spacing?: number;
-  max_width?: number | null;
-  align?: TextAlignName;
-  anchor?: TextAnchorName;
-  weight?: number;
-  italic?: boolean;
-  color?: [number, number, number, number];
-}
-
-export type PreviewFrame =
-  | { kind: "rgba"; pixels: Uint8Array; width: number; height: number }
-  | {
-      kind: "rgba-float16";
-      pixels: unknown;
-      width: number;
-      height: number;
-      colorSpace: "display-p3";
-    };
-
-export interface PreviewCrop {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface PreviewRequest {
-  target_width: number;
-  target_height: number;
-  crop?: PreviewCrop;
-  ignore_crop_layers?: boolean;
-}
 
 /**
  * Browser-only synchronous preview render. The Tauri runtime uses the
@@ -466,126 +296,6 @@ export async function moveLayer(fromIdx: number, toIdx: number): Promise<number>
 
 export async function listPictures(): Promise<string[]> {
   return sendRead<string[]>({ type: "list_pictures" }, "pictures");
-}
-
-export type LibraryMode = "browse" | "sync";
-
-export type LibrarySyncProgress = {
-  library_id: string;
-  total: number;
-  completed: number;
-  current_name: string | null;
-};
-
-export type BatchExportProgress = {
-  total: number;
-  completed: number;
-  current_name: string | null;
-};
-
-export interface MediaLibrary {
-  id: string;
-  name: string;
-  kind: "directory" | "camera" | "s3" | "peer";
-  mode: LibraryMode;
-  sync_target?: string | null;
-  path?: string | null;
-  removable: boolean;
-  readonly: boolean;
-  is_online?: boolean | null;
-  is_refreshing?: boolean | null;
-}
-
-export interface BrowserPresetLayer {
-  kind: "adjustment" | "crop";
-  name: string | null;
-  visible: boolean;
-  opacity: number;
-  adjustments: AdjustmentValues | null;
-  crop: CropValues | null;
-  mask_params: MaskParamsInfo | null;
-}
-
-export interface BrowserPresetFile {
-  version: number;
-  layers: BrowserPresetLayer[];
-}
-
-export interface BrowserMediaPlatform {
-  pickDirectory(): Promise<BrowserDirectoryHandle | null>;
-  listMediaLibraries(): Promise<MediaLibrary[]>;
-  listLibraryImages(libraryId: string): Promise<LibraryImageListing>;
-  addMediaLibrary(handle: BrowserDirectoryHandle): Promise<MediaLibrary>;
-  removeMediaLibrary(id: string): Promise<void>;
-  prepareImageOpen(path: string): Promise<void>;
-  getImageSource(path: string): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
-  getImageFileSource(
-    file: Blob,
-    fileName: string,
-  ): Promise<{ bytes: ArrayBuffer; fileName: string | null }>;
-}
-
-export interface BrowserPresetsPlatform {
-  listPresets(): Promise<PresetInfo[]>;
-  savePreset(name: string, file: BrowserPresetFile): Promise<PresetInfo>;
-  renamePreset(oldName: string, newName: string): Promise<PresetInfo>;
-  deletePreset(name: string): Promise<void>;
-  loadPreset(name: string): Promise<BrowserPresetFile>;
-}
-
-export interface BrowserSnapshotRecord {
-  id: string;
-  image_path: string | null;
-  display_index: number;
-  created_at: number;
-  is_current: boolean;
-  layers: BrowserPresetLayer[];
-}
-
-export interface BrowserSnapshotsPlatform {
-  listSnapshots(imagePath: string | null): Promise<SnapshotInfo[]>;
-  getSnapshotPathMap(): Promise<Map<string, string>>;
-  getSnapshot(id: string): Promise<BrowserSnapshotRecord>;
-  getCurrentSnapshot(
-    imagePath: string | null,
-  ): Promise<{ id: string; layers: BrowserPresetLayer[] } | null>;
-  saveSnapshot(
-    layers: BrowserPresetLayer[],
-    imagePath: string | null,
-  ): Promise<EditSnapshotInfo>;
-  markSnapshotCurrent(id: string): Promise<void>;
-}
-
-export interface S3MediaLibraryInput {
-  name?: string | null;
-  endpoint: string;
-  bucket: string;
-  region: string;
-  access_key_id: string;
-  secret_access_key: string;
-  prefix?: string | null;
-}
-
-export interface PresetInfo {
-  name: string;
-  created_at: number;
-}
-
-export interface EditSnapshotInfo {
-  id: string;
-}
-
-export interface SnapshotInfo {
-  id: string;
-  display_index: number;
-  created_at: number;
-  is_current: boolean;
-  peer_origin: string | null;
-}
-
-export interface MediaRatingParams {
-  fingerprint: string;
-  rating: number | null;
 }
 
 export async function listMediaLibraries(): Promise<MediaLibrary[]> {
@@ -975,13 +685,6 @@ export async function batchClearEdits(paths: string[]): Promise<number> {
   await sendMutation({ type: "batch_clear_edits", paths });
   return completed;
 }
-
-export interface BatchExportItem {
-  path: string;
-  fingerprint: string | null;
-  name: string;
-}
-
 export async function batchExportImages(
   items: BatchExportItem[],
   targetDir: string,
@@ -1160,46 +863,12 @@ export async function pruneUnusedFonts(): Promise<void> {
   await sendMutation({ type: "prune_unused_fonts" });
 }
 
-export interface LinearGradientMask {
-  kind: "linear";
-  layer_idx: number;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}
-
-export interface RadialGradientMask {
-  kind: "radial";
-  layer_idx: number;
-  cx: number;
-  cy: number;
-  radius: number;
-}
-
-export type GradientMaskParams = LinearGradientMask | RadialGradientMask;
-
 export async function applyGradientMask(params: GradientMaskParams): Promise<void> {
   await sendMutation({ type: "apply_gradient_mask", ...params });
   return;
 }
 
 // ── P2P Awareness & Sync ──────────────────────────────────────────────────────
-
-export interface AwarenessState {
-  display_name: string | null;
-  active_fingerprint: string | null;
-  active_snapshot_id: string | null;
-}
-
-export interface SyncPeerSnapshotsResult {
-  synced_ids: string[];
-}
-
-export interface ApplyPeerMetadataResult {
-  ratings_updated: number;
-  tags_added: number;
-}
 
 export async function setLocalAwareness(
   displayName: string | null,
@@ -1277,13 +946,6 @@ export async function stampBrushMask(
   });
   return;
 }
-
-export interface MaskThumbnail {
-  pixels: number[];
-  width: number;
-  height: number;
-}
-
 export async function getMaskThumbnail(
   layerIdx: number,
   maxW: number,
@@ -1294,21 +956,6 @@ export async function getMaskThumbnail(
 }
 
 // ── Collections ──────────────────────────────────────────────────────────────
-
-export interface Collection {
-  id: string;
-  library_id: string;
-  name: string;
-  position: number;
-  created_at: number;
-  item_count: number;
-}
-
-export interface CollectionItem {
-  fingerprint: string;
-  position: number;
-  added_at: number;
-}
 
 export function listCollections(libraryId: string): Promise<Collection[]> {
   return sendRead<Collection[]>(

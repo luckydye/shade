@@ -1,5 +1,5 @@
 import * as bridge from "../bridge/index";
-import type { BatchExportItem } from "../bridge/index";
+import type { BatchExportItem } from "../bridge/types";
 
 function applyPresetSnapshot(
   items: { path: string; fingerprint: string | null }[],

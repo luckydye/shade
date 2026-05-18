@@ -1,6 +1,6 @@
 import { type Accessor, createRoot, createSignal } from "solid-js";
 import { listenLibrarySyncProgress } from "../bridge/index";
-import type { LibrarySyncProgress } from "../bridge/index";
+import type { LibrarySyncProgress } from "../bridge/types";
 
 /** Reactive view of the most recent library-sync progress event, or `null`
  * when no sync is in flight. */

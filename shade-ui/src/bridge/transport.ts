@@ -12,24 +12,8 @@
  * shade-ui itself never knows which one is in use.
  */
 
-import type { ChannelMessage, MutationRequest, ReadRequest } from "./channel";
-import type { UpdatePreviewViewportsArgs } from "./preview";
-
-export interface Transport {
-  /** Send a fire-and-forget mutation. Results flow back via `onMessage`. */
-  sendMutation(request: MutationRequest): Promise<void>;
-  /** Send a read request. Results flow back via `onMessage` as ReadResponse. */
-  sendRead(readId: number, request: ReadRequest): Promise<void>;
-  /** Subscribe to incoming ChannelMessages. Returns an unsubscribe fn. */
-  onMessage(handler: (msg: ChannelMessage) => void): () => void;
-  /**
-   * Send a viewport-state update for the preview scheduler. Fire-and-forget;
-   * resulting frames are pushed back via the preview channel. The web
-   * implementation may no-op — its preview pipeline doesn't route through
-   * `update_preview_viewports`.
-   */
-  sendPreviewViewports(args: UpdatePreviewViewportsArgs): void;
-}
+import type { Transport } from "./types";
+export type { Transport } from "./types";
 
 let _transport: Transport | null = null;
 

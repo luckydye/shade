@@ -5,7 +5,7 @@ import type {
   GradientMaskParams,
   TextStylePatch,
   TextTransformValues,
-} from "../bridge/index";
+} from "../bridge/types";
 import {
   isAdjustmentSliderActive,
   type LayerInfo,
@@ -15,7 +15,7 @@ import {
   state,
 } from "../store/editor-store";
 import { onRestore, recordSnapshot } from "../store/history";
-import { onChannelMessage } from "./events";
+import { onChannelMessage } from "../bridge/channel";
 import { useOpenImage } from "./use-open-image";
 import { isTauriRuntime } from "../utils";
 

@@ -1,5 +1,5 @@
 import { type Accessor, createEffect, createSignal } from "solid-js";
-import { getMaskThumbnail } from "../../data/mask-thumbnail";
+import { getMaskThumbnail } from "../../data/use-mask-thumbnail";
 import { state } from "../../store/editor-store";
 
 const MAX_SIZE = 512;

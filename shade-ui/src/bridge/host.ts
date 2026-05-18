@@ -17,73 +17,8 @@
  * consumer.
  */
 
-import type {
-  LibraryImage,
-  LibraryImageListing,
-  MaskThumbnail,
-  OpenImageInfo,
-  PreviewFrame,
-  PreviewRequest,
-  SharedPicture,
-  StackInfo,
-} from "./index";
-
-export type DragDropPayloadType = "enter" | "over" | "drop" | "leave";
-
-export interface NativeDragDropPayload {
-  type: DragDropPayloadType;
-  paths: string[];
-}
-
-export interface HostHooks {
-  // ── DOM-gated host APIs ─────────────────────────────────────────────
-  pickDirectory(): Promise<string | null>;
-  pickExportTarget(): Promise<string | null>;
-  listenNativeDragDrop(
-    listener: (payload: NativeDragDropPayload) => void,
-  ): Promise<() => void>;
-
-  // ── Library listing cache ───────────────────────────────────────────
-  getCachedLocalLibraryItems(libraryId: string): Promise<LibraryImage[]>;
-  loadLocalLibraryItemsCachedOrRemote(libraryId: string): Promise<LibraryImageListing>;
-  getCachedCameraLibraryItems(host: string): Promise<LibraryImage[]>;
-  loadCameraLibraryItemsCachedOrRemote(host: string): Promise<LibraryImage[]>;
-  getCachedPeerLibraryItems(peerId: string): Promise<SharedPicture[]>;
-  loadPeerLibraryItemsCachedOrRemote(peerId: string): Promise<SharedPicture[]>;
-  removePeerLibrary(peerId: string): Promise<void>;
-
-  // ── Thumbnail-src resolution ────────────────────────────────────────
-  resolveLocalThumbnailSrc(
-    path: string,
-    latestSnapshotId: string | null,
-    signal: AbortSignal,
-  ): Promise<string>;
-  resolveCameraThumbnailSrc(
-    path: string,
-    latestSnapshotId: string | null,
-    signal: AbortSignal,
-  ): Promise<string>;
-  resolvePeerThumbnailSrc(
-    peerId: string,
-    pictureId: string,
-    signal: AbortSignal,
-  ): Promise<string>;
-  resetLocalThumbnailFailure(path: string): void;
-  resetCameraThumbnailFailure(path: string): void;
-
-  // ── Image lifecycle (open/export/preview/mask thumbnail) ────────────
-  // Truly platform-specific: Tauri uses direct invoke, web uses a worker
-  // pipeline backed by OPFS files + wasm decode.
-  openImage(path: string): Promise<OpenImageInfo>;
-  openImageFile(file: File): Promise<OpenImageInfo>;
-  openPeerImage(peerEndpointId: string, picture: SharedPicture): Promise<OpenImageInfo>;
-  prepareImageOpen(path: string): Promise<void>;
-  exportImage(path: string): Promise<void>;
-  renderPreview(request?: PreviewRequest): Promise<PreviewFrame>;
-  getLayerStack(): Promise<StackInfo>;
-  getMaskThumbnail(layerIdx: number, maxW: number, maxH: number): Promise<MaskThumbnail>;
-  restoreCurrentBrowserSnapshot(imagePath: string): Promise<boolean>;
-}
+import type { HostHooks } from "./types";
+export type { HostHooks, NativeDragDropPayload } from "./types";
 
 let _host: HostHooks | null = null;
 

@@ -4,7 +4,7 @@ import type {
   BrowserSnapshotsPlatform,
   EditSnapshotInfo,
   SnapshotInfo,
-} from "shade-ui/src/bridge/index";
+} from "shade-ui/src/bridge/types";
 import { requestToPromise } from "../indexed-db";
 
 const DB_NAME = "shade-browser-snapshots";

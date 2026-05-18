@@ -11,13 +11,12 @@ import {
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import type { S3MediaLibraryInput } from "../bridge/index";
-import { listenNativeDragDrop } from "../data/events";
+import type { S3MediaLibraryInput } from "../bridge/types";
+import { listenNativeDragDrop } from "../data/use-native-drag-drop";
 import { useBatchExportProgress } from "../data/use-batch-export-progress";
 import { useBatchOperations } from "../data/use-batch-operations";
 import { useLayerStack } from "../data/use-layer-stack";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
-import { pairPeerDevice, pickDirectory } from "../data/image-actions";
 import { useOpenImage } from "../data/use-open-image";
 import {
   addToCollection,
@@ -48,9 +47,10 @@ import {
   setMediaLibraryOrder,
   syncLibrary,
   updateS3MediaLibrary,
+  pickDirectory,
   useMediaLibraryList,
 } from "../data/use-media-library-list";
-import { usePeerDiscovery } from "../data/use-peer-discovery";
+import { pairPeerDevice, usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
 import { actions, buildActionContext } from "../store/actions";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor-store";

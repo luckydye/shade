@@ -3,8 +3,8 @@ import type {
   ChannelMessage,
   MutationRequest,
   ReadRequest,
-} from "shade-ui/src/bridge/channel";
-import type { Transport } from "shade-ui/src/bridge/transport";
+  Transport,
+} from "shade-ui/src/bridge/types";
 
 /**
  * Tauri-side transport implementation. Wraps invoke for outbound

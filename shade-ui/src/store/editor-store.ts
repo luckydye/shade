@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
-import type * as bridge from "../bridge/index";
+import type * as bridge from "../bridge/types";
 import type { CropAspectRatioPreset } from "../crop-aspect";
 import type { RenderedTile } from "../viewport/types";
 

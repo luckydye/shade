@@ -6,7 +6,7 @@ import type {
   CropValues,
   MaskParamsInfo,
   PresetInfo,
-} from "shade-ui/src/bridge/index";
+} from "shade-ui/src/bridge/types";
 import { requestToPromise } from "../indexed-db";
 
 const DB_NAME = "shade-browser-presets";

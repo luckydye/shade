@@ -20,7 +20,7 @@ import type {
   ChannelMessage,
   MutationRequest,
   ReadRequest,
-} from "shade-ui/src/bridge/channel";
+} from "shade-ui/src/bridge/types";
 import init, * as wasm from "shade-wasm";
 import { browserCollectionsPlatform } from "./collections";
 import { browserPresetsPlatform } from "./presets";

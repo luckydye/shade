@@ -6,7 +6,7 @@ import {
   type LibraryMode,
   type MediaLibrary,
   type S3MediaLibraryInput,
-} from "../bridge/index";
+} from "../bridge/types";
 import { isTauriRuntime } from "../utils";
 
 const { libraries, refetch } = createRoot(() => {
@@ -92,4 +92,8 @@ export function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
 
 export function refreshLibraryIndex(libraryId: string): Promise<void> {
   return bridge.refreshLibraryIndex(libraryId);
+}
+
+export function pickDirectory(): Promise<string | null> {
+  return bridge.pickDirectory();
 }

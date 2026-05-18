@@ -3,7 +3,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import {
   resetCameraThumbnailFailure,
   resetLocalThumbnailFailure,
-} from "../../data/thumbnail-src";
+} from "../../data/use-thumbnail-src";
 import { Button } from "../Button";
 import { MediaRating } from "../MediaRating";
 import { loadItemSrc, type MediaItem } from "./media-utils";

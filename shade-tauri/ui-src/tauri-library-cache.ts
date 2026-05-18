@@ -1,9 +1,9 @@
-import type { HostHooks } from "shade-ui/src/bridge/host";
 import type {
+  HostHooks,
   LibraryImage,
   LibraryImageListing,
   SharedPicture,
-} from "shade-ui/src/bridge/index";
+} from "shade-ui/src/bridge/types";
 
 type LibraryCacheHooks = Pick<
   HostHooks,
@@ -21,8 +21,12 @@ type LibraryCacheHooks = Pick<
   | "resetCameraThumbnailFailure"
 >;
 
-import { shadePeerThumbnailUrl, shadeThumbnailUrl } from "shade-ui/src/bridge/channel";
-import { listLibraryImages, listPeerPictures } from "shade-ui/src/bridge/index";
+import {
+  sendChunkedRead,
+  sendRead,
+  shadePeerThumbnailUrl,
+  shadeThumbnailUrl,
+} from "shade-ui/src/bridge/channel";
 import {
   normalizeModifiedAt,
   normalizeRating,
@@ -32,6 +36,21 @@ import {
 const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
 const tauriCameraLibraryItems = new Map<string, LibraryImage[]>();
 const tauriPeerLibraryItems = new Map<string, SharedPicture[]>();
+
+async function listLibraryImages(libraryId: string): Promise<LibraryImageListing> {
+  const items = await sendChunkedRead<LibraryImage>(
+    { type: "list_library_images", library_id: libraryId },
+    "library_images_chunk",
+  );
+  return { items, is_complete: true };
+}
+
+function listPeerPictures(peerEndpointId: string): Promise<SharedPicture[]> {
+  return sendRead<SharedPicture[]>(
+    { type: "list_peer_pictures", peer_endpoint_id: peerEndpointId },
+    "peer_pictures",
+  );
+}
 
 function normalizeSnapshotVersion(version: unknown) {
   return typeof version === "string" && version.length > 0 ? version : null;
