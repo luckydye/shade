@@ -15,7 +15,9 @@ function createTileSurface(image: ImageData): TileSurface {
   surface.width = image.width;
   surface.height = image.height;
   const surfaceCtx = surface.getContext("2d");
-  if (!surfaceCtx) throw new Error("tile surface 2d context required");
+  if (!surfaceCtx || !("putImageData" in surfaceCtx)) {
+    throw new Error("tile surface 2d context required");
+  }
   surfaceCtx.putImageData(image, 0, 0);
   tileSurfaceCache.set(image, surface);
   return surface;

@@ -68,6 +68,8 @@ import {
 } from "./media-view/media-utils";
 import { filenameFromUrl, transformImageUrl } from "./media-view/url-transformers";
 
+type LocalMediaItem = Extract<MediaItem, { kind: "local" }>;
+
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
 const HEADER_ROW_HEIGHT = 32;
@@ -1685,7 +1687,10 @@ export const MediaView: Component = () => {
       const hasPeer = items.some((item) => item.kind === "peer");
       const isTauri = isTauriRuntime();
       if (isTauri && !hasPeer) {
-        const batchItems = items.map((item) => ({
+        const localItems = items.filter(
+          (item): item is LocalMediaItem => item.kind === "local",
+        );
+        const batchItems = localItems.map((item) => ({
           path: item.path,
           fingerprint: item.fingerprint,
         }));
@@ -1745,7 +1750,7 @@ export const MediaView: Component = () => {
         .filter(Boolean) as MediaItem[];
       const isTauri = isTauriRuntime();
       if (isTauri) {
-        const paths = items.map((item) => item.path);
+        const paths = items.flatMap((item) => (item.kind === "local" ? [item.path] : []));
         const count = await batchOps.clearEdits(paths);
         setMediaActionStatus(`Cleared edits for ${count} image${count > 1 ? "s" : ""}`);
       } else {
