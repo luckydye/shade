@@ -1,6 +1,12 @@
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
-import type * as bridge from "../bridge/types";
+import type {
+  AdjustmentValues,
+  CropValues,
+  MaskParamsInfo,
+  SharedPicture,
+  TextLayerValues,
+} from "../bridge/types";
 import type { CropAspectRatioPreset } from "../crop-aspect";
 import type { RenderedTile } from "../viewport/types";
 
@@ -11,10 +17,10 @@ export interface LayerInfo {
   opacity: number;
   blend_mode?: string;
   has_mask?: boolean;
-  mask_params?: bridge.MaskParamsInfo | null;
-  adjustments?: bridge.AdjustmentValues | null;
-  crop?: bridge.CropValues | null;
-  text?: bridge.TextLayerValues | null;
+  mask_params?: MaskParamsInfo | null;
+  adjustments?: AdjustmentValues | null;
+  crop?: CropValues | null;
+  text?: TextLayerValues | null;
 }
 
 export interface CropRect {
@@ -31,7 +37,7 @@ export type ArtboardSource =
   | {
       kind: "peer";
       peerEndpointId: string;
-      picture: bridge.SharedPicture;
+      picture: SharedPicture;
     };
 
 export interface ArtboardState {
