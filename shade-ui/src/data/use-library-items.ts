@@ -96,6 +96,18 @@ export function useLibraryItems(libraryId: Accessor<string | null>): {
   items: Resource<LibraryData | undefined>;
   cached: Resource<MediaItem[] | undefined>;
   refetch: () => Promise<void>;
+  uploadMediaLibraryFile: (
+    libraryId: string,
+    file: File,
+    appendTimestampOnConflict?: boolean,
+  ) => Promise<void>;
+  uploadMediaLibraryUrl: (
+    libraryId: string,
+    url: string,
+    fileName: string,
+  ) => Promise<void>;
+  uploadMediaLibraryPath: (libraryId: string, path: string) => Promise<void>;
+  deleteMediaLibraryItem: (path: string) => Promise<void>;
 } {
   const [items, { refetch: refetchItems }] = createResource(libraryId, loadLibraryData);
   const [cached, { refetch: refetchCached }] = createResource(libraryId, loadCachedItems);
@@ -119,6 +131,10 @@ export function useLibraryItems(libraryId: Accessor<string | null>): {
     refetch: async () => {
       await Promise.all([refetchItems(), refetchCached()]);
     },
+    uploadMediaLibraryFile,
+    uploadMediaLibraryUrl,
+    uploadMediaLibraryPath,
+    deleteMediaLibraryItem,
   };
 }
 
@@ -126,7 +142,7 @@ export function useLibraryItems(libraryId: Accessor<string | null>): {
 // Rust emits `library_scan_*` after writes for ongoing scans; uploads are
 // reflected via the next library scan tick.
 
-export function uploadMediaLibraryFile(
+function uploadMediaLibraryFile(
   libraryId: string,
   file: File,
   appendTimestampOnConflict = false,
@@ -134,7 +150,7 @@ export function uploadMediaLibraryFile(
   return bridge.uploadMediaLibraryFile(libraryId, file, appendTimestampOnConflict);
 }
 
-export function uploadMediaLibraryUrl(
+function uploadMediaLibraryUrl(
   libraryId: string,
   url: string,
   fileName: string,
@@ -142,10 +158,10 @@ export function uploadMediaLibraryUrl(
   return bridge.uploadMediaLibraryUrl(libraryId, url, fileName);
 }
 
-export function uploadMediaLibraryPath(libraryId: string, path: string): Promise<void> {
+function uploadMediaLibraryPath(libraryId: string, path: string): Promise<void> {
   return bridge.uploadMediaLibraryPath(libraryId, path);
 }
 
-export function deleteMediaLibraryItem(path: string): Promise<void> {
+function deleteMediaLibraryItem(path: string): Promise<void> {
   return bridge.deleteMediaLibraryItem(path);
 }

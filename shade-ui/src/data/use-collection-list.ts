@@ -1,11 +1,15 @@
 import { type Accessor, createResource, onCleanup, type Resource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import { type Collection } from "../bridge/types";
+import type { Collection } from "../bridge/types";
 
 export function useCollectionList(libraryId: Accessor<string | null>): {
   collections: Resource<Collection[] | undefined>;
   refetch: () => Promise<void>;
+  createCollection: (libraryId: string, name: string) => Promise<Collection>;
+  renameCollection: (collectionId: string, name: string) => Promise<void>;
+  deleteCollection: (collectionId: string) => Promise<void>;
+  reorderCollection: (collectionId: string, newPosition: number) => Promise<void>;
 } {
   const [collections, { refetch }] = createResource(libraryId, (id) =>
     id ? bridge.listCollections(id) : Promise.resolve<Collection[]>([]),
@@ -27,27 +31,28 @@ export function useCollectionList(libraryId: Accessor<string | null>): {
     refetch: async () => {
       await refetch();
     },
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    reorderCollection,
   };
 }
 
 // ── Mutations ───────────────────────────────────────────────────────────────
 // Rust emits `collection_list_changed` / `collection_created` after writes.
 
-export function createCollection(libraryId: string, name: string): Promise<Collection> {
+function createCollection(libraryId: string, name: string): Promise<Collection> {
   return bridge.createCollection(libraryId, name);
 }
 
-export function renameCollection(collectionId: string, name: string): Promise<void> {
+function renameCollection(collectionId: string, name: string): Promise<void> {
   return bridge.renameCollection(collectionId, name);
 }
 
-export function deleteCollection(collectionId: string): Promise<void> {
+function deleteCollection(collectionId: string): Promise<void> {
   return bridge.deleteCollection(collectionId);
 }
 
-export function reorderCollection(
-  collectionId: string,
-  newPosition: number,
-): Promise<void> {
+function reorderCollection(collectionId: string, newPosition: number): Promise<void> {
   return bridge.reorderCollection(collectionId, newPosition);
 }

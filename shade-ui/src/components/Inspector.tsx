@@ -10,22 +10,11 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import {
-  CROP_ASPECT_RATIO_OPTIONS,
-  type CropAspectRatioPreset,
-  clampAspectSize,
-  fitCropRectToAspectRatio,
-  resolveCropAspectRatio,
-} from "../utils/crop-aspect";
 import { useFontList } from "../data/use-font-list";
-import {
-  deletePreset,
-  renamePreset,
-  savePreset,
-  usePresetList,
-} from "../data/use-preset-list";
-import { saveSnapshot, useSnapshotList } from "../data/use-snapshot-list";
 import { useLayerStack } from "../data/use-layer-stack";
+import { useOpenImage } from "../data/use-open-image";
+import { usePresetList } from "../data/use-preset-list";
+import { useSnapshotList } from "../data/use-snapshot-list";
 import {
   type ArtboardSource,
   cropAspectRatioPreset,
@@ -41,7 +30,13 @@ import {
   setIsDrawerOpen,
   state,
 } from "../store/editor-store";
-import { useOpenImage } from "../data/use-open-image";
+import {
+  CROP_ASPECT_RATIO_OPTIONS,
+  type CropAspectRatioPreset,
+  clampAspectSize,
+  fitCropRectToAspectRatio,
+  resolveCropAspectRatio,
+} from "../utils/crop-aspect";
 import { Button } from "./Button";
 import { buildVectorScope, VectorScope, type WheelPoint } from "./ColorWheel";
 import { CurvesEditor } from "./inspector/CurvesEditor";
@@ -282,8 +277,14 @@ export const Inspector: Component = () => {
     "sliders",
   );
   const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("edit");
-  const { presets, refetch: refetchPresets } = usePresetList();
-  const { snapshots, refetch: refetchSnapshots } = useSnapshotList();
+  const {
+    presets,
+    refetch: refetchPresets,
+    savePreset,
+    deletePreset,
+    renamePreset,
+  } = usePresetList();
+  const { snapshots, refetch: refetchSnapshots, saveSnapshot } = useSnapshotList();
   const { fonts } = useFontList();
   const [presetStatus, setPresetStatus] = createSignal<string | null>(null);
   const [isPresetBusy, setIsPresetBusy] = createSignal(false);

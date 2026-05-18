@@ -27,6 +27,7 @@ export function usePeerDiscovery(): {
   snapshot: InitializedResource<LocalPeerDiscoverySnapshot>;
   peers: () => LocalPeer[];
   refetch: () => Promise<void>;
+  pairPeerDevice: (peerEndpointId: string) => Promise<void>;
 } {
   return {
     snapshot,
@@ -34,9 +35,10 @@ export function usePeerDiscovery(): {
     refetch: async () => {
       await refetch();
     },
+    pairPeerDevice,
   };
 }
 
-export function pairPeerDevice(peerEndpointId: string): Promise<void> {
+function pairPeerDevice(peerEndpointId: string): Promise<void> {
   return pairPeerDeviceBridge(peerEndpointId);
 }

@@ -1,16 +1,12 @@
-import type {
-  LibraryImage,
-  MediaLibrary,
-  SharedPicture,
-} from "../../bridge/types";
-import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../utils";
-import { listMediaRatings } from "../../data/use-media-ratings";
+import type { LibraryImage, MediaLibrary, SharedPicture } from "../../bridge/types";
+import { useMediaRatings } from "../../data/use-media-ratings";
+import { useOpenImage } from "../../data/use-open-image";
 import {
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
 } from "../../data/use-thumbnail-src";
-import { useOpenImage } from "../../data/use-open-image";
+import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../../utils";
 
 export type LibraryEntry = MediaLibrary;
 export type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };
@@ -299,6 +295,7 @@ function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem 
 }
 
 export async function applyStoredRatings(items: MediaItem[]) {
+  const { listMediaRatings } = useMediaRatings();
   const ratingIds = items
     .map((item) => ({ item, ratingId: mediaRatingId(item) }))
     .filter(

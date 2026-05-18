@@ -1,6 +1,6 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import * as bridge from "../bridge/index";
-import { type FontInfo } from "../bridge/types";
+import type { FontInfo } from "../bridge/types";
 import { useLayerStack } from "./use-layer-stack";
 
 const { fonts, refetch } = createRoot(() => {
@@ -13,25 +13,29 @@ const { fonts, refetch } = createRoot(() => {
 export function useFontList(): {
   fonts: InitializedResource<FontInfo[]>;
   refetch: () => Promise<void>;
+  addFont: (family: string, bytes: Uint8Array) => Promise<number>;
+  pruneUnusedFonts: () => Promise<void>;
 } {
   return {
     fonts,
     refetch: async () => {
       await refetch();
     },
+    addFont,
+    pruneUnusedFonts,
   };
 }
 
 // ── Mutations ───────────────────────────────────────────────────────────────
 // No Rust channel for font changes — mutations explicitly refetch.
 
-export async function addFont(family: string, bytes: Uint8Array): Promise<number> {
+async function addFont(family: string, bytes: Uint8Array): Promise<number> {
   const id = await bridge.addFont(family, bytes);
   await refetch();
   return id;
 }
 
-export async function pruneUnusedFonts(): Promise<void> {
+async function pruneUnusedFonts(): Promise<void> {
   await bridge.pruneUnusedFonts();
   // The dispatched mutation discards Rust's count; refresh unconditionally
   // (cheap) and snapshot history so an undoable point exists if anything

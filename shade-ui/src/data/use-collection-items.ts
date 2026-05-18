@@ -1,11 +1,13 @@
 import { type Accessor, createResource, onCleanup, type Resource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import { type CollectionItem } from "../bridge/types";
+import type { CollectionItem } from "../bridge/types";
 
 export function useCollectionItems(collectionId: Accessor<string | null>): {
   items: Resource<CollectionItem[] | undefined>;
   refetch: () => Promise<void>;
+  addToCollection: (collectionId: string, fingerprints: string[]) => Promise<void>;
+  removeFromCollection: (collectionId: string, fingerprints: string[]) => Promise<void>;
 } {
   const [items, { refetch }] = createResource(collectionId, (id) =>
     id ? bridge.listCollectionItems(id) : Promise.resolve<CollectionItem[]>([]),
@@ -24,20 +26,19 @@ export function useCollectionItems(collectionId: Accessor<string | null>): {
     refetch: async () => {
       await refetch();
     },
+    addToCollection,
+    removeFromCollection,
   };
 }
 
 // ── Mutations ───────────────────────────────────────────────────────────────
 // Rust emits `collection_changed` after writes.
 
-export function addToCollection(
-  collectionId: string,
-  fingerprints: string[],
-): Promise<void> {
+function addToCollection(collectionId: string, fingerprints: string[]): Promise<void> {
   return bridge.addToCollection(collectionId, fingerprints);
 }
 
-export function removeFromCollection(
+function removeFromCollection(
   collectionId: string,
   fingerprints: string[],
 ): Promise<void> {

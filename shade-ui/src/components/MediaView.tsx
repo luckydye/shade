@@ -12,44 +12,16 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { S3MediaLibraryInput } from "../bridge/types";
-import { listenNativeDragDrop } from "../data/use-native-drag-drop";
 import { useBatchOperations } from "../data/use-batch-operations";
+import { useCollectionItems } from "../data/use-collection-items";
+import { useCollectionList } from "../data/use-collection-list";
 import { useLayerStack } from "../data/use-layer-stack";
+import { useLibraryItems } from "../data/use-library-items";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
+import { useMediaLibraryList } from "../data/use-media-library-list";
+import { listenNativeDragDrop } from "../data/use-native-drag-drop";
 import { useOpenImage } from "../data/use-open-image";
-import {
-  addToCollection,
-  removeFromCollection,
-  useCollectionItems,
-} from "../data/use-collection-items";
-import {
-  createCollection,
-  deleteCollection,
-  renameCollection,
-  useCollectionList,
-} from "../data/use-collection-list";
-import {
-  deleteMediaLibraryItem,
-  uploadMediaLibraryFile,
-  uploadMediaLibraryPath,
-  uploadMediaLibraryUrl,
-  useLibraryItems,
-} from "../data/use-library-items";
-import {
-  addMediaLibrary,
-  addS3MediaLibrary,
-  getS3MediaLibrary,
-  refreshLibraryIndex,
-  removeMediaLibrary,
-  removePeerLibrary,
-  setLibraryMode,
-  setMediaLibraryOrder,
-  syncLibrary,
-  updateS3MediaLibrary,
-  pickDirectory,
-  useMediaLibraryList,
-} from "../data/use-media-library-list";
-import { pairPeerDevice, usePeerDiscovery } from "../data/use-peer-discovery";
+import { usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
 import { actions, buildActionContext } from "../store/actions";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor-store";
@@ -61,6 +33,7 @@ import {
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
 } from "../store/media-view-context";
+import { isTauriRuntime } from "../utils";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
@@ -95,7 +68,6 @@ import {
   type UploadProgress,
 } from "./media-view/media-utils";
 import { filenameFromUrl, transformImageUrl } from "./media-view/url-transformers";
-import { isTauriRuntime } from "../utils";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -129,12 +101,30 @@ function toErrorMessage(err: unknown): string {
 export const MediaView: Component = () => {
   const layerOps = useLayerStack();
   const batchOps = useBatchOperations();
-  const { libraries, refetch: refetchLibraries } = useMediaLibraryList();
+  const {
+    libraries,
+    refetch: refetchLibraries,
+    addMediaLibrary,
+    addS3MediaLibrary,
+    getS3MediaLibrary,
+    refreshLibraryIndex,
+    removeMediaLibrary,
+    removePeerLibrary,
+    setLibraryMode,
+    setMediaLibraryOrder,
+    syncLibrary,
+    updateS3MediaLibrary,
+    pickDirectory,
+  } = useMediaLibraryList();
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
   const {
     items,
     cached: cachedLibraryItems,
     refetch: refetchLibraryItems,
+    deleteMediaLibraryItem,
+    uploadMediaLibraryFile,
+    uploadMediaLibraryPath,
+    uploadMediaLibraryUrl,
   } = useLibraryItems(selectedLibraryId);
   const refetchItems = () => refetchLibraryItems();
   const refetchCachedLibraryItems = () => refetchLibraryItems();
@@ -187,11 +177,20 @@ export const MediaView: Component = () => {
   const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(
     null,
   );
-  const { collections: collectionList, refetch: refetchCollections } =
-    useCollectionList(selectedLibraryId);
+  const {
+    collections: collectionList,
+    refetch: refetchCollections,
+    createCollection,
+    deleteCollection,
+    renameCollection,
+  } = useCollectionList(selectedLibraryId);
   const collections = () => collectionList() ?? [];
-  const { items: collectionItemList, refetch: refetchCollectionItemsRaw } =
-    useCollectionItems(selectedCollectionId);
+  const {
+    items: collectionItemList,
+    refetch: refetchCollectionItemsRaw,
+    addToCollection,
+    removeFromCollection,
+  } = useCollectionItems(selectedCollectionId);
   const collectionItemPaths = createMemo(
     () => new Set((collectionItemList() ?? []).map((i) => i.fingerprint)),
   );
@@ -506,7 +505,7 @@ export const MediaView: Component = () => {
     clearLibraryDragState();
   };
 
-  const { peers: discoveredPeers } = usePeerDiscovery();
+  const { peers: discoveredPeers, pairPeerDevice } = usePeerDiscovery();
   const discoveredPeerIds = createMemo(() =>
     discoveredPeers().map((peer) => peer.endpoint_id),
   );

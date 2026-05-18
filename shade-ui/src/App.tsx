@@ -1,18 +1,13 @@
 import { type Component, createEffect, onCleanup, onMount } from "solid-js";
-import {
-  deletePreset,
-  getSnapshotPresetJson,
-  savePresetFromJson,
-  serializeCurrentPreset,
-} from "./data/use-preset-list";
 import { Inspector } from "./components/Inspector";
 import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
-import { actions, buildActionContext } from "./store/actions";
 import { useLayerStack } from "./data/use-layer-stack";
+import { usePresetList } from "./data/use-preset-list";
+import { actions, buildActionContext } from "./store/actions";
 import { setState, showEditorView, showMediaView, state } from "./store/editor-store";
 import { redo, undo } from "./store/history";
 import { getMediaBrowserController } from "./store/media-browser-control";
@@ -37,6 +32,12 @@ function historyView(value: unknown): AppView | null {
 }
 
 const App: Component = () => {
+  const {
+    deletePreset,
+    getSnapshotPresetJson,
+    savePresetFromJson,
+    serializeCurrentPreset,
+  } = usePresetList();
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   const showEditor = () => hasImage() && state.currentView === "editor";
   let isHandlingHistoryPop = false;

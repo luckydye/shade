@@ -1,6 +1,6 @@
 import { type Component, createMemo, For, Show } from "solid-js";
 import type { TextAlignName, TextStyleValues } from "../bridge/types";
-import { addFont, pruneUnusedFonts, useFontList } from "../data/use-font-list";
+import { useFontList } from "../data/use-font-list";
 import { useLayerStack } from "../data/use-layer-stack";
 import type { LayerInfo } from "../store/editor-store";
 import { Slider } from "./Slider";
@@ -60,7 +60,7 @@ export const TextLayerEditor: Component<{
   const text = createMemo(() => props.layer.text ?? null);
   const style = createMemo<TextStyleValues | null>(() => text()?.style ?? null);
 
-  const { fonts } = useFontList();
+  const { fonts, addFont, pruneUnusedFonts } = useFontList();
   const layers = useLayerStack();
 
   const onContentInput = (event: InputEvent) => {
@@ -189,7 +189,9 @@ export const TextLayerEditor: Component<{
               max={256}
               step={1}
               valueLabel={`${Math.round(t().style.size_px)} px`}
-              onChange={(v) => void layers.updateTextStyle(props.layerIdx, { size_px: v })}
+              onChange={(v) =>
+                void layers.updateTextStyle(props.layerIdx, { size_px: v })
+              }
             />
 
             <Slider
@@ -199,7 +201,9 @@ export const TextLayerEditor: Component<{
               min={0.5}
               max={3}
               step={0.05}
-              onChange={(v) => void layers.updateTextStyle(props.layerIdx, { line_height: v })}
+              onChange={(v) =>
+                void layers.updateTextStyle(props.layerIdx, { line_height: v })
+              }
             />
 
             <Slider

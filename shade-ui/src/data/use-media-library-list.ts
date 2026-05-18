@@ -1,11 +1,11 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import {
-  type BrowserDirectoryHandle,
-  type LibraryMode,
-  type MediaLibrary,
-  type S3MediaLibraryInput,
+import type {
+  BrowserDirectoryHandle,
+  LibraryMode,
+  MediaLibrary,
+  S3MediaLibraryInput,
 } from "../bridge/types";
 import { isTauriRuntime } from "../utils";
 
@@ -31,12 +31,41 @@ const { libraries, refetch } = createRoot(() => {
 export function useMediaLibraryList(): {
   libraries: InitializedResource<MediaLibrary[]>;
   refetch: () => Promise<void>;
+  addMediaLibrary: (path: string | BrowserDirectoryHandle) => Promise<MediaLibrary>;
+  addS3MediaLibrary: (params: S3MediaLibraryInput) => Promise<MediaLibrary>;
+  getS3MediaLibrary: (libraryId: string) => Promise<S3MediaLibraryInput>;
+  updateS3MediaLibrary: (
+    libraryId: string,
+    params: S3MediaLibraryInput,
+  ) => Promise<MediaLibrary>;
+  removeMediaLibrary: (id: string) => Promise<void>;
+  removePeerLibrary: (peerId: string) => Promise<void>;
+  setLibraryMode: (
+    libraryId: string,
+    mode: LibraryMode,
+    syncTarget?: string | null,
+  ) => Promise<void>;
+  syncLibrary: (libraryId: string) => Promise<void>;
+  setMediaLibraryOrder: (libraryOrder: string[]) => Promise<void>;
+  refreshLibraryIndex: (libraryId: string) => Promise<void>;
+  pickDirectory: () => Promise<string | null>;
 } {
   return {
     libraries,
     refetch: async () => {
       await refetch();
     },
+    addMediaLibrary,
+    addS3MediaLibrary,
+    getS3MediaLibrary,
+    updateS3MediaLibrary,
+    removeMediaLibrary,
+    removePeerLibrary,
+    setLibraryMode,
+    syncLibrary,
+    setMediaLibraryOrder,
+    refreshLibraryIndex,
+    pickDirectory,
   };
 }
 
@@ -45,36 +74,34 @@ export function useMediaLibraryList(): {
 // `media_libraries_changed` / `media_library_upserted` after each mutation,
 // which triggers the auto-refetch wired above.
 
-export function addMediaLibrary(
-  path: string | BrowserDirectoryHandle,
-): Promise<MediaLibrary> {
+function addMediaLibrary(path: string | BrowserDirectoryHandle): Promise<MediaLibrary> {
   return bridge.addMediaLibrary(path);
 }
 
-export function addS3MediaLibrary(params: S3MediaLibraryInput): Promise<MediaLibrary> {
+function addS3MediaLibrary(params: S3MediaLibraryInput): Promise<MediaLibrary> {
   return bridge.addS3MediaLibrary(params);
 }
 
-export function getS3MediaLibrary(libraryId: string): Promise<S3MediaLibraryInput> {
+function getS3MediaLibrary(libraryId: string): Promise<S3MediaLibraryInput> {
   return bridge.getS3MediaLibrary(libraryId);
 }
 
-export function updateS3MediaLibrary(
+function updateS3MediaLibrary(
   libraryId: string,
   params: S3MediaLibraryInput,
 ): Promise<MediaLibrary> {
   return bridge.updateS3MediaLibrary(libraryId, params);
 }
 
-export function removeMediaLibrary(id: string): Promise<void> {
+function removeMediaLibrary(id: string): Promise<void> {
   return bridge.removeMediaLibrary(id);
 }
 
-export function removePeerLibrary(peerId: string): Promise<void> {
+function removePeerLibrary(peerId: string): Promise<void> {
   return bridge.removePeerLibrary(peerId);
 }
 
-export function setLibraryMode(
+function setLibraryMode(
   libraryId: string,
   mode: LibraryMode,
   syncTarget?: string | null,
@@ -82,18 +109,18 @@ export function setLibraryMode(
   return bridge.setLibraryMode(libraryId, mode, syncTarget);
 }
 
-export function syncLibrary(libraryId: string): Promise<void> {
+function syncLibrary(libraryId: string): Promise<void> {
   return bridge.syncLibrary(libraryId);
 }
 
-export function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
+function setMediaLibraryOrder(libraryOrder: string[]): Promise<void> {
   return bridge.setMediaLibraryOrder(libraryOrder);
 }
 
-export function refreshLibraryIndex(libraryId: string): Promise<void> {
+function refreshLibraryIndex(libraryId: string): Promise<void> {
   return bridge.refreshLibraryIndex(libraryId);
 }
 
-export function pickDirectory(): Promise<string | null> {
+function pickDirectory(): Promise<string | null> {
   return bridge.pickDirectory();
 }
