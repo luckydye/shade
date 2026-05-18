@@ -41,6 +41,7 @@ export function useImageBridge() {
     restoreCurrentBrowserSnapshot: bridge.restoreCurrentBrowserSnapshot,
     exportImage: bridge.exportImage,
     pickExportTarget: bridge.pickExportTarget,
+    setMediaRating: bridge.setMediaRating,
     onImageOpenPhase,
     getArtboardTiles,
     nextGeneration,

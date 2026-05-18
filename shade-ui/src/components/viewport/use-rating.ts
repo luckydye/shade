@@ -1,5 +1,5 @@
 import { type Accessor, createSignal } from "solid-js";
-import { useMediaRatings } from "../../data/use-media-ratings";
+import { useImageBridge } from "../../data/use-image-bridge";
 import { type ArtboardState, setState } from "../../store/editor-store";
 
 function mediaRatingId(artboard: ArtboardState | null): string | null {
@@ -23,7 +23,7 @@ export function useArtboardRating(selectedArtboard: Accessor<ArtboardState | nul
   setRating: (rating: number | null) => Promise<void>;
 } {
   const [saving, setSaving] = createSignal(false);
-  const { setMediaRating } = useMediaRatings();
+  const { setMediaRating } = useImageBridge();
 
   const ratingId = () => mediaRatingId(selectedArtboard());
   const rating = () => selectedArtboard()?.activeMediaRating ?? null;

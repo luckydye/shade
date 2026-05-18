@@ -11,7 +11,6 @@ import {
 } from "../bridge/index";
 import type { LibraryImage, SharedPicture } from "../bridge/types";
 import { normalizeModifiedAt, normalizeRating, normalizeTags } from "../utils";
-import { useMediaRatings } from "./use-media-ratings";
 
 export type MediaItemMetadata = {
   hasSnapshots: boolean;
@@ -118,13 +117,12 @@ function withMediaItemRating(item: MediaItem, rating: number | null): MediaItem 
 }
 
 async function applyStoredRatings(items: MediaItem[]) {
-  const { listMediaRatings } = useMediaRatings();
   const ratingIds = items
     .map((item) => ({ item, ratingId: mediaRatingId(item) }))
     .filter(
       (entry): entry is { item: MediaItem; ratingId: string } => entry.ratingId !== null,
     );
-  const ratings = await listMediaRatings(ratingIds.map((entry) => entry.ratingId));
+  const ratings = await bridge.listMediaRatings(ratingIds.map((entry) => entry.ratingId));
   return items.map((item) => {
     const ratingId = mediaRatingId(item);
     if (!ratingId) {
