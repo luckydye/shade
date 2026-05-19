@@ -8,7 +8,6 @@ import { MobileMediaSearch } from "./media-view/MobileMediaSearch";
 import { PictureGrid } from "./media-view/PictureGrid";
 import { SelectionBar } from "./media-view/SelectionBar";
 import { UploadDropOverlay } from "./media-view/UploadDropOverlay";
-import { targetUsesOwnFocus } from "./media-view/media-utils";
 import { useMediaViewModel } from "./media-view/use-media-view-model";
 import { useEdgeSwipe } from "../app/use-edge-swipe";
 import backSvg from "../assets/icons/back.svg?raw";
@@ -31,6 +30,7 @@ export const MediaView: Component = () => {
       )}
     >
       <UploadDropOverlay />
+      
       <Show when={!isEditorStrip()}>
         <div
           class="flex border-b border-[var(--border)] px-4 py-4 touch-mobile:px-4"
@@ -38,6 +38,7 @@ export const MediaView: Component = () => {
           <LibrarySelector />
         </div>
       </Show>
+      
       <div
         class="relative flex-1 min-h-0 flex"
         onTouchStart={handleEdgeSwipe}

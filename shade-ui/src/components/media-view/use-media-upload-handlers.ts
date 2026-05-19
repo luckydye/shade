@@ -206,11 +206,10 @@ export function useMediaUploadHandlers() {
   }
 
   function handleUploadDragLeave(event: DragEvent) {
-    if (
-      !store.canWriteSelectedLibrary() ||
-      usesNativeDragDrop() ||
-      (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)
-    ) {
+    if (!store.canWriteSelectedLibrary() || usesNativeDragDrop()) {
+      return;
+    }
+    if (event.relatedTarget !== null) {
       return;
     }
     setUploadDragFeedback(null);

@@ -36,12 +36,11 @@ export const tauriHostHooks: HostHooks = {
   async listenNativeDragDrop(listener) {
     return getCurrentWebview().onDragDropEvent((event) => {
       const { payload } = event;
-      if (!("paths" in payload) || !Array.isArray(payload.paths)) {
-        throw new Error("native drag-drop event is missing paths");
-      }
+      const paths =
+        "paths" in payload && Array.isArray(payload.paths) ? payload.paths : [];
       listener({
         type: payload.type as NativeDragDropPayload["type"],
-        paths: payload.paths,
+        paths,
       });
     });
   },
