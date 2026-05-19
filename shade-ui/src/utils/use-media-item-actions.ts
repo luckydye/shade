@@ -1,8 +1,8 @@
-import type { MediaItem } from "../../data/use-library-items";
-import { useOpenImage } from "../../store/use-open-image";
-import { isTauriRuntime } from "../../utils";
-import { openMediaItem } from "./media-utils";
-import { useMediaViewStore } from "./media-view-store";
+import type { MediaItem } from "./use-library-items";
+import { useOpenImage } from "./use-open-image";
+import { isTauriRuntime } from "../utils";
+import { openMediaItem } from "../components/media-view/media-utils";
+import { useMediaViewStore } from "../components/media-view/media-view-store";
 
 type LocalMediaItem = Extract<MediaItem, { kind: "local" }>;
 

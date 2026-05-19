@@ -1,4 +1,4 @@
-import type { useMediaSelection } from "./use-media-selection";
+import type { useMediaSelection } from "../../utils/use-media-selection";
 
 export type MediaSelectionStore = ReturnType<typeof useMediaSelection>;
 

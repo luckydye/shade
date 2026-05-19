@@ -5,10 +5,9 @@ import {
   createSignal,
   For,
   onCleanup,
-  onMount,
   Show,
 } from "solid-js";
-import { useLayerStack } from "../data/use-layer-stack";
+import { useLayerStack } from "../utils/use-layer-stack";
 import {
   type ArtboardState,
   clamp,
@@ -20,7 +19,7 @@ import {
   setState,
   state,
 } from "../store/editor-store";
-import { useOpenImage } from "../store/use-open-image";
+import { useOpenImage } from "../utils/use-open-image";
 import type { MaskParamsInfo } from "../types";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
@@ -38,25 +37,149 @@ import { screenToWorld, type WorldTransform, worldToScreen } from "../viewport/t
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import { Slider } from "./Slider";
-import {
-  getCropEditTransform,
-  getViewTransform,
-  getViewWorldOffset,
-  toWorldX,
-  toWorldY,
-} from "./viewport/transforms";
-import type {
-  CropHandle,
-  CropRectWithRotation,
-  Gesture,
-  MaskHandle,
-  PressedArtboardChrome,
-} from "./viewport/types";
-import { useBrushOverlay } from "./viewport/use-brush-overlay";
-import { useElementSize } from "./viewport/use-element-size";
-import { useFileDrop } from "./viewport/use-file-drop";
-import { useArtboardRating } from "./viewport/use-rating";
-import { useToneSmoothing } from "./viewport/use-tone-smoothing";
+import { useBrushOverlay } from "../utils/use-brush-overlay";
+import { useElementSize } from "../utils/use-element-size";
+import { useFileDrop } from "../utils/use-file-drop";
+import { useArtboardRating } from "../utils/use-rating";
+import { useToneSmoothing } from "../utils/use-tone-smoothing";
+import { buildTransform } from "../viewport/transform";
+
+type CropHandle =
+  | "move"
+  | "top-left"
+  | "top"
+  | "top-right"
+  | "right"
+  | "bottom-right"
+  | "bottom"
+  | "bottom-left"
+  | "left"
+  | "rotate";
+
+type MaskHandle = "start" | "end" | "center" | "edge";
+
+type PressedArtboardChrome =
+  | { kind: "title"; artboardId: string }
+  | { kind: "close"; artboardId: string }
+  | null;
+
+type CropRectWithRotation = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+};
+
+type Gesture =
+  | {
+      kind: "pan";
+      x: number;
+      y: number;
+      startX: number;
+      startY: number;
+      moved: boolean;
+      tapArtboardId: string | null;
+    }
+  | { kind: "pinch"; dist: number; midX: number; midY: number }
+  | {
+      kind: "crop";
+      pointerId: number;
+      handle: CropHandle;
+      startX: number;
+      startY: number;
+      crop: CropRectWithRotation;
+    }
+  | {
+      kind: "mask";
+      pointerId: number;
+      handle: MaskHandle;
+      startX: number;
+      startY: number;
+      params: MaskParamsInfo;
+    }
+  | {
+      kind: "artboard";
+      pointerId: number;
+      artboardId: string;
+      draggable: boolean;
+      moved: boolean;
+      startX: number;
+      startY: number;
+      x: number;
+      y: number;
+    }
+  | {
+      kind: "brush_paint";
+      pointerId: number;
+      lastImgX: number;
+      lastImgY: number;
+      erase: boolean;
+    }
+  | {
+      kind: "text_move";
+      pointerId: number;
+      layerIdx: number;
+      startImgX: number;
+      startImgY: number;
+      originTx: number;
+      originTy: number;
+    };
+
+
+export function getViewWorldOffset(): { x: number; y: number } {
+  const artboard = getSelectedArtboard();
+  return artboard ? { x: artboard.worldX, y: artboard.worldY } : { x: 0, y: 0 };
+}
+
+export function toWorldX(localX: number): number {
+  return localX + getViewWorldOffset().x;
+}
+
+export function toWorldY(localY: number): number {
+  return localY + getViewWorldOffset().y;
+}
+
+export function getViewTransform(cssWidth: number, cssHeight: number): WorldTransform {
+  const offset = getViewWorldOffset();
+  const fit = useOpenImage().getViewportFitRef();
+  return buildTransform(
+    {
+      centerX: state.viewportCenterX + offset.x,
+      centerY: state.viewportCenterY + offset.y,
+      zoom: state.viewportZoom,
+    },
+    { width: cssWidth, height: cssHeight },
+    {
+      x: fit.x + offset.x,
+      y: fit.y + offset.y,
+      width: fit.width,
+      height: fit.height,
+    },
+  );
+}
+
+export function getCropEditTransform(
+  cssWidth: number,
+  cssHeight: number,
+): WorldTransform {
+  const offset = getViewWorldOffset();
+  return buildTransform(
+    {
+      centerX: state.viewportCenterX + offset.x,
+      centerY: state.viewportCenterY + offset.y,
+      zoom: state.viewportZoom,
+    },
+    { width: cssWidth, height: cssHeight },
+    {
+      x: offset.x,
+      y: offset.y,
+      width: state.canvasWidth,
+      height: state.canvasHeight,
+    },
+  );
+}
+
 
 const HANDLE_SIZE = 10;
 const ARTBOARD_TITLE_HEIGHT = 24;

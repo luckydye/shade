@@ -1,8 +1,8 @@
 import { createEffect, on, onCleanup, onMount } from "solid-js";
-import { actions } from "../../store/actions";
-import { registerMediaBrowserController } from "../../store/media-browser-control";
-import { useMediaViewStore } from "./media-view-store";
-import { zoomPictureGridIn, zoomPictureGridOut } from "./picture-grid-state";
+import { actions } from "../store/actions";
+import { registerMediaBrowserController } from "../store/media-browser-control";
+import { useMediaViewStore } from "../components/media-view/media-view-store";
+import { zoomPictureGridIn, zoomPictureGridOut } from "../components/media-view/picture-grid-state";
 
 export function useMediaViewActions(params: {
   toggleMediaSelection: (itemId: string) => void;

@@ -1,10 +1,10 @@
-import type { MediaItem } from "../../data/use-library-items";
+import type { MediaItem } from "../../utils/use-library-items";
 import {
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
-} from "../../data/use-thumbnail-src";
-import { useOpenImage } from "../../store/use-open-image";
+} from "../../utils/use-thumbnail-src";
+import { useOpenImage } from "../../utils/use-open-image";
 import type { MediaLibrary, SharedPicture } from "../../types";
 import { normalizeModifiedAt } from "../../utils";
 

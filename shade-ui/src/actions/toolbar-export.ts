@@ -1,6 +1,6 @@
 import type { ActionDef } from "../store/actions";
 import { state } from "../store/editor-store";
-import { useOpenImage } from "../store/use-open-image";
+import { useOpenImage } from "../utils/use-open-image";
 
 export const ToolbarExport = {
   id: "toolbar.export",

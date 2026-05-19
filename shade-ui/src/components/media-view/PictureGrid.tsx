@@ -9,7 +9,7 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import type { MediaItem } from "../../data/use-library-items";
+import type { MediaItem } from "../../utils/use-library-items";
 import { actions } from "../../store/actions";
 import { state } from "../../store/editor-store";
 import { mediaViewFocusedItemId } from "../../store/media-view-context";
@@ -29,7 +29,7 @@ import {
   setPictureGridColumns,
   setPictureGridRows,
 } from "./picture-grid-state";
-import { useMediaItemActions } from "./use-media-item-actions";
+import { useMediaItemActions } from "../../utils/use-media-item-actions";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;

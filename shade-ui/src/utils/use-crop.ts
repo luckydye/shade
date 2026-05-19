@@ -3,8 +3,8 @@ import {
   normalizeCropRect,
   setState,
   state,
-} from "../../store/editor-store";
-import { useOpenImage } from "../../store/use-open-image";
+} from "../store/editor-store";
+import { useOpenImage } from "./use-open-image";
 
 function start() {
   if (state.canvasWidth <= 0 || state.canvasHeight <= 0) {

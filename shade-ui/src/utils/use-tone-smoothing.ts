@@ -1,5 +1,5 @@
 import { onCleanup } from "solid-js";
-import { setViewportToneSample } from "../../store/editor-store";
+import { setViewportToneSample } from "../store/editor-store";
 
 const SMOOTHING_TAU_MS = 90;
 const SNAP_THRESHOLD = 0.002;

@@ -1,6 +1,6 @@
 import { type Component, createMemo, For, Show } from "solid-js";
-import { useFontList } from "../data/use-font-list";
-import { useLayerStack } from "../data/use-layer-stack";
+import { useFontList } from "../utils/use-font-list";
+import { useLayerStack } from "../utils/use-layer-stack";
 import type { LayerInfo } from "../store/editor-store";
 import type { TextAlignName, TextStyleValues } from "../types";
 import { Slider } from "./Slider";

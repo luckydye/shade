@@ -1,8 +1,8 @@
 import { type Component, createMemo, Show } from "solid-js";
-import { useBatchOperations } from "../data/use-batch-operations";
-import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
-import { useMediaUploadProgress } from "../data/use-media-upload-progress";
-import { useMediaViewStatus } from "../data/use-media-view-status";
+import { useBatchOperations } from "../utils/use-batch-operations";
+import { useLibrarySyncProgress } from "../utils/use-library-sync-progress";
+import { useMediaUploadProgress } from "../utils/use-media-upload-progress";
+import { useMediaViewStatus } from "../utils/use-media-view-status";
 
 type ProgressPanelProps = {
   title: string;

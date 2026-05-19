@@ -80,10 +80,10 @@ async function importOpenImageWithMockBridge(bridge: MockBridge) {
         ? value.filter((tag): tag is string => typeof tag === "string" && tag !== "")
         : [],
   }));
-  vi.doMock("../src/data/use-layer-stack", () => ({
+  vi.doMock("../src/utils/use-layer-stack", () => ({
     useLayerStack: () => ({ refresh: vi.fn(async () => {}) }),
   }));
-  vi.doMock("../src/data/use-image-bridge", () => ({
+  vi.doMock("../src/utils/use-image-bridge", () => ({
     useImageBridge: () => ({
       renderPreview: vi.fn(),
       openImage: bridge.openImage,
@@ -108,7 +108,7 @@ async function importOpenImageWithMockBridge(bridge: MockBridge) {
     }),
   }));
   const [{ useOpenImage }, { state }] = await Promise.all([
-    import("../src/store/use-open-image"),
+    import("../src/utils/use-open-image"),
     import("../src/store/editor-store"),
   ]);
   return { image: useOpenImage(), state };

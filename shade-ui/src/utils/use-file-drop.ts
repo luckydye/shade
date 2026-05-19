@@ -1,6 +1,6 @@
 import { type Accessor, createSignal } from "solid-js";
-import { state } from "../../store/editor-store";
-import { useOpenImage } from "../../store/use-open-image";
+import { state } from "../store/editor-store";
+import { useOpenImage } from "./use-open-image";
 
 export function useFileDrop(): {
   dragging: Accessor<boolean>;

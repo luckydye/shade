@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { Show } from "solid-js";
-import { useEdgeSwipe } from "../app/use-edge-swipe";
+import { useEdgeSwipe } from "../utils/use-edge-swipe";
 import backSvg from "../assets/icons/back.svg?raw";
 import { showMediaView, state } from "../store/editor-store";
 import { tw } from "../utils";
@@ -11,7 +11,7 @@ import { MobileMediaSearch } from "./media-view/MobileMediaSearch";
 import { PictureGrid } from "./media-view/PictureGrid";
 import { SelectionBar } from "./media-view/SelectionBar";
 import { UploadDropOverlay } from "./media-view/UploadDropOverlay";
-import { useMediaViewModel } from "./media-view/use-media-view-model";
+import { useMediaViewModel } from "../utils/use-media-view-model";
 
 export const MediaView: Component = () => {
   const model = useMediaViewModel();

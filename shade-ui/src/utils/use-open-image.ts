@@ -6,8 +6,8 @@ import {
   type PushedRenderedTile,
   type SharedPicture,
   useImageBridge,
-} from "../data/use-image-bridge";
-import { useLayerStack } from "../data/use-layer-stack";
+} from "./use-image-bridge";
+import { useLayerStack } from "./use-layer-stack";
 import { isTauriRuntime } from "../utils";
 import { releaseTileSurface } from "../viewport/compositor";
 import { computeFitScale } from "../viewport/transform";
@@ -23,8 +23,8 @@ import {
   setSelectedArtboardPreviewTile,
   setState,
   state,
-} from "./editor-store";
-import { resetHistory } from "./history";
+} from "../store/editor-store";
+import { resetHistory } from "../store/history";
 
 // ── Module state ────────────────────────────────────────────────────────────
 

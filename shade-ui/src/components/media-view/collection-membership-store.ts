@@ -1,4 +1,4 @@
-import type { useCollectionMembership } from "./use-collection-membership";
+import type { useCollectionMembership } from "../../utils/use-collection-membership";
 
 export type CollectionMembershipStore = ReturnType<typeof useCollectionMembership>;
 

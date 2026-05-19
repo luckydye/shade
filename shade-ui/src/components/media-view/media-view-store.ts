@@ -1,6 +1,6 @@
 import type { Accessor, Setter } from "solid-js";
 import { createRoot, createSignal } from "solid-js";
-import type { MediaItem } from "../../data/use-library-items";
+import type { MediaItem } from "../../utils/use-library-items";
 import type { PresetInfo } from "../../types";
 import type { LibraryEntry } from "./media-utils";
 

@@ -1,5 +1,5 @@
 import { type Component, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
-import { useLayerStack } from "../data/use-layer-stack";
+import { useLayerStack } from "../utils/use-layer-stack";
 import {
   activeAdjustmentSliderId,
   clamp,
@@ -7,7 +7,7 @@ import {
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
 } from "../store/editor-store";
-import { useOpenImage } from "../store/use-open-image";
+import { useOpenImage } from "../utils/use-open-image";
 
 const PARAMETER_ROW_CLASS =
   "grid grid-cols-[16px_minmax(0,1fr)_56px] gap-x-2 gap-y-0.5 py-0.5";

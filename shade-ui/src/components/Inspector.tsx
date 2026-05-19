@@ -10,10 +10,10 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { useFontList } from "../data/use-font-list";
-import { useLayerStack } from "../data/use-layer-stack";
-import { usePresetList } from "../data/use-preset-list";
-import { useSnapshotList } from "../data/use-snapshot-list";
+import { useFontList } from "../utils/use-font-list";
+import { useLayerStack } from "../utils/use-layer-stack";
+import { usePresetList } from "../utils/use-preset-list";
+import { useSnapshotList } from "../utils/use-snapshot-list";
 import {
   type ArtboardSource,
   cropAspectRatioPreset,
@@ -28,7 +28,7 @@ import {
   setIsDrawerOpen,
   state,
 } from "../store/editor-store";
-import { useOpenImage } from "../store/use-open-image";
+import { useOpenImage } from "../utils/use-open-image";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,

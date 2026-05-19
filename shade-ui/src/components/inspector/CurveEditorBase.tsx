@@ -10,7 +10,7 @@ import {
   untrack,
 } from "solid-js";
 import { state, viewportToneSample } from "../../store/editor-store";
-import { useOpenImage } from "../../store/use-open-image";
+import { useOpenImage } from "../../utils/use-open-image";
 import type { AdjustmentValues } from "../../types";
 import {
   buildLuminanceHistogram,

@@ -10,7 +10,7 @@ import {
   state,
 } from "../store/editor-store";
 import { onRestore, recordSnapshot } from "../store/history";
-import { useOpenImage } from "../store/use-open-image";
+import { useOpenImage } from "./use-open-image";
 import type {
   CurveControlPoint,
   GradientMaskParams,

@@ -1,8 +1,8 @@
 import { mediaItemKey, openMediaItem } from "../components/media-view/media-utils";
-import { useLayerStack } from "../data/use-layer-stack";
-import { loadLibraryData, type MediaItem } from "../data/use-library-items";
-import { useMediaLibraryList } from "../data/use-media-library-list";
-import { useOpenImage } from "./use-open-image";
+import { useLayerStack } from "../utils/use-layer-stack";
+import { loadLibraryData, type MediaItem } from "../utils/use-library-items";
+import { useMediaLibraryList } from "../utils/use-media-library-list";
+import { useOpenImage } from "../utils/use-open-image";
 
 const layers = useLayerStack();
 const {

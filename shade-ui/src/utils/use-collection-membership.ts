@@ -1,7 +1,7 @@
 import type { Accessor } from "solid-js";
 import { createEffect, createMemo, createSignal, on } from "solid-js";
-import { useCollectionItems } from "../../data/use-collection-items";
-import { useCollectionList } from "../../data/use-collection-list";
+import { useCollectionItems } from "./use-collection-items";
+import { useCollectionList } from "./use-collection-list";
 
 export function useCollectionMembership(params: {
   selectedLibraryId: Accessor<string | null>;
