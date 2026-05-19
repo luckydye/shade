@@ -7,9 +7,9 @@ import {
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
 } from "../../store/media-view-context";
-import { mediaItemKey, type MediaGridRow } from "./media-utils";
-import { pictureGridColumns, pictureGridRows } from "./picture-grid-state";
+import { type MediaGridRow, mediaItemKey } from "./media-utils";
 import { useMediaViewStore } from "./media-view-store";
+import { pictureGridColumns, pictureGridRows } from "./picture-grid-state";
 
 function mediaItemToBatchItem(item: MediaItem) {
   return item.kind === "peer"
@@ -29,12 +29,8 @@ export function useMediaSelection() {
     string | null
   >(null);
 
-  const selectedMediaItemIdSet = createMemo(
-    () => new Set(store.selectedMediaItemIds()),
-  );
-  const showSelectionControls = createMemo(
-    () => store.selectedMediaItemIds().length > 0,
-  );
+  const selectedMediaItemIdSet = createMemo(() => new Set(store.selectedMediaItemIds()));
+  const showSelectionControls = createMemo(() => store.selectedMediaItemIds().length > 0);
 
   const clearSelection = () => {
     store.setSelectedMediaItemIds([]);

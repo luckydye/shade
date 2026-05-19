@@ -161,9 +161,7 @@ const LayerTypeIcon: Component<{ layer: LayerInfo }> = (props) => {
 const SectionHeader: Component<{ title: string; detail?: string | (() => string) }> = (
   props,
 ) => (
-  <div
-    class="mobile-slider-fade mb-2 flex items-center justify-between gap-3 bg-surface-input px-3 py-1.5 transition-opacity duration-150"
-  >
+  <div class="mobile-slider-fade mb-2 flex items-center justify-between gap-3 bg-surface-input px-3 py-1.5 transition-opacity duration-150">
     <div class="text-[12px] text-[var(--text)]">{props.title}</div>
     <Show when={props.detail}>
       {(detail) => {
@@ -608,10 +606,8 @@ export const Inspector: Component = () => {
     };
     return (
       <div class="space-y-3">
-          <div class="mobile-slider-fade flex gap-2">
-          <div
-            class="flex justify-end transition-opacity duration-150"
-          >
+        <div class="mobile-slider-fade flex gap-2">
+          <div class="flex justify-end transition-opacity duration-150">
             <Button
               type="button"
               onClick={() =>
@@ -633,9 +629,7 @@ export const Inspector: Component = () => {
               />
             </Button>
           </div>
-          <div
-            class="grid h-8 rounded-lg bg-[var(--surface)] p-0.5 grid-cols-3 transition-opacity duration-150 flex-1"
-          >
+          <div class="grid h-8 rounded-lg bg-[var(--surface)] p-0.5 grid-cols-3 transition-opacity duration-150 flex-1">
             {(["red", "green", "blue"] as const).map((c) => (
               <Button
                 type="button"
@@ -1687,9 +1681,7 @@ export const Inspector: Component = () => {
   );
 
   const DesktopLayerList: Component = () => (
-    <div
-      class="mobile-slider-fade flex flex-col gap-1 transition-opacity duration-150"
-    >
+    <div class="mobile-slider-fade flex flex-col gap-1 transition-opacity duration-150">
       <div
         ref={desktopLayerListRef}
         class="relative flex flex-col gap-1 rounded-sm px-2 pt-2"
@@ -2051,9 +2043,7 @@ export const Inspector: Component = () => {
       </div>
 
       <Show when={selectedAdjustmentLayer()}>
-        <div
-          class="mobile-slider-fade mt-3 flex flex-col gap-3 border-t border-[var(--border)] pt-3 transition-opacity duration-150"
-        >
+        <div class="mobile-slider-fade mt-3 flex flex-col gap-3 border-t border-[var(--border)] pt-3 transition-opacity duration-150">
           <Show when={isPickerOpen()}>
             <div class="flex gap-2 overflow-x-auto">
               {ADD_LAYER_FOCI.map((focus) => (
@@ -2220,9 +2210,7 @@ export const Inspector: Component = () => {
           <MobileSelectedLayerPanel />
         </div>
 
-        <div
-          class="mobile-slider-fade pb-[env(safe-area-inset-bottom)] transition-opacity duration-150"
-        ></div>
+        <div class="mobile-slider-fade pb-[env(safe-area-inset-bottom)] transition-opacity duration-150"></div>
       </div>
     </aside>
   );

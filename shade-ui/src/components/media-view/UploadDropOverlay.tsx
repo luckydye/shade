@@ -8,8 +8,7 @@ export const UploadDropOverlay: Component = () => {
   const uploads = useMediaUploadHandlers();
 
   onMount(() => {
-    const handleDragEnter = (event: DragEvent) =>
-      uploads.handleUploadDragEnter(event);
+    const handleDragEnter = (event: DragEvent) => uploads.handleUploadDragEnter(event);
     const handleDragOver = (event: DragEvent) => uploads.handleUploadDragOver(event);
     const handleDragLeave = (event: DragEvent) => uploads.handleUploadDragLeave(event);
     const handleDrop = (event: DragEvent) => uploads.handleUploadDrop(event);

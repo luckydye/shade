@@ -1,12 +1,6 @@
 import { createRoot } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import type {
-  CurveControlPoint,
-  GradientMaskParams,
-  TextStylePatch,
-  TextTransformValues,
-} from "../types";
 import {
   isAdjustmentSliderActive,
   type LayerInfo,
@@ -17,6 +11,12 @@ import {
 } from "../store/editor-store";
 import { onRestore, recordSnapshot } from "../store/history";
 import { useOpenImage } from "../store/use-open-image";
+import type {
+  CurveControlPoint,
+  GradientMaskParams,
+  TextStylePatch,
+  TextTransformValues,
+} from "../types";
 import { isTauriRuntime } from "../utils";
 
 // ── Reactive stack sync ─────────────────────────────────────────────────────

@@ -27,11 +27,7 @@ import {
   shadePeerThumbnailUrl,
   shadeThumbnailUrl,
 } from "shade-ui/src/bridge/channel";
-import {
-  normalizeModifiedAt,
-  normalizeRating,
-  normalizeTags,
-} from "shade-ui/src/utils";
+import { normalizeModifiedAt, normalizeRating, normalizeTags } from "shade-ui/src/utils";
 
 const tauriLocalLibraryListings = new Map<string, LibraryImageListing>();
 const tauriCameraLibraryItems = new Map<string, LibraryImage[]>();

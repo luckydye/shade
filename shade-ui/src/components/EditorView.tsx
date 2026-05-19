@@ -1,7 +1,7 @@
 import type { Component } from "solid-js";
+import { useEditorActions } from "./editor-view/use-editor-actions";
 import { Inspector } from "./Inspector";
 import { Viewport } from "./Viewport";
-import { useEditorActions } from "./editor-view/use-editor-actions";
 
 export const EditorView: Component = () => {
   useEditorActions();

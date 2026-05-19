@@ -1,20 +1,14 @@
-import {
-  type Component,
-  createEffect,
-  onCleanup,
-  onMount,
-  Show,
-} from "solid-js";
-import actionShortcuts from "./keybinds.json";
+import { type Component, createEffect, onCleanup, onMount, Show } from "solid-js";
+import { useNavigationHistory } from "./app/use-navigation-history";
 import { EditorView } from "./components/EditorView";
 import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
 import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
-import { actions, type ActionShortcutMap, buildActionContext } from "./store/actions";
+import actionShortcuts from "./keybinds.json";
+import { type ActionShortcutMap, actions, buildActionContext } from "./store/actions";
 import { isAdjustmentSliderActive, setState, state } from "./store/editor-store";
-import { useNavigationHistory } from "./app/use-navigation-history";
 import { checkWebGPU } from "./utils/webgpu-check";
 
 let actionShortcutsLoaded = false;
@@ -55,7 +49,7 @@ const App: Component = () => {
       if (handled) return;
     };
     document.addEventListener("keydown", handleKeyDown);
-    
+
     onCleanup(() => {
       document.removeEventListener("keydown", handleKeyDown);
     });

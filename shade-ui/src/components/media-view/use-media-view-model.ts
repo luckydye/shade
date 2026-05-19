@@ -1,10 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  onMount,
-} from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useBatchOperations } from "../../data/use-batch-operations";
 import { useLayerStack } from "../../data/use-layer-stack";
 import { useLibraryItems } from "../../data/use-library-items";
@@ -13,8 +7,8 @@ import { useMediaLibraryList } from "../../data/use-media-library-list";
 import { useMediaViewStatus } from "../../data/use-media-view-status";
 import { usePeerDiscovery } from "../../data/use-peer-discovery";
 import { usePresetList } from "../../data/use-preset-list";
-import { state } from "../../store/editor-store";
 import { actions, buildActionContext } from "../../store/actions";
+import { state } from "../../store/editor-store";
 import { provideCollectionMembershipStore } from "./collection-membership-store";
 import { provideMediaSelectionStore } from "./media-selection-store";
 import {
@@ -78,8 +72,7 @@ export function useMediaViewModel() {
 
   const libraryEntries = createMemo<LibraryEntry[]>(() => libraries() ?? []);
   const selectedLibrary = createMemo(
-    () =>
-      libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null,
+    () => libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null,
   );
   const activeMediaItemId = createMemo(() =>
     state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,

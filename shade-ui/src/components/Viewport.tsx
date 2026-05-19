@@ -8,7 +8,6 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import type { MaskParamsInfo } from "../types";
 import { useLayerStack } from "../data/use-layer-stack";
 import {
   type ArtboardState,
@@ -22,6 +21,7 @@ import {
   state,
 } from "../store/editor-store";
 import { useOpenImage } from "../store/use-open-image";
+import type { MaskParamsInfo } from "../types";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,

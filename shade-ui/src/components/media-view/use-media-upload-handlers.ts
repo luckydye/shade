@@ -1,20 +1,20 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { listenNativeDragDrop } from "../../data/use-native-drag-drop";
 import { useMediaUploadProgress } from "../../data/use-media-upload-progress";
+import { listenNativeDragDrop } from "../../data/use-native-drag-drop";
 import { isTauriRuntime } from "../../utils";
-import { filenameFromUrl, transformImageUrl } from "./url-transformers";
 import {
   clipboardImageFiles,
   draggedItemCount,
   draggedPathCount,
   droppedFiles,
   isS3Library,
+  type LibraryEntry,
   libraryIsWritable,
   targetAcceptsTextInput,
-  type LibraryEntry,
   type UploadDragFeedback,
 } from "./media-utils";
 import { useMediaViewStore } from "./media-view-store";
+import { filenameFromUrl, transformImageUrl } from "./url-transformers";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -87,11 +87,7 @@ export function useMediaUploadHandlers() {
           completedFiles: index,
           currentFileName: file.name,
         });
-        await store.uploadMediaLibraryFile(
-          library.id,
-          file,
-          appendTimestampOnConflict,
-        );
+        await store.uploadMediaLibraryFile(library.id, file, appendTimestampOnConflict);
       }
       setUploadProgress({
         phase: "refreshing",

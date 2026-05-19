@@ -1,12 +1,8 @@
 import { type Component, onCleanup, onMount, Show } from "solid-js";
 import { ToolbarExport } from "../actions/toolbar-export";
 import { ToolbarOpen } from "../actions/toolbar-open";
-import {
-  showEditorView,
-  showMediaView,
-  state,
-} from "../store/editor-store";
 import { actions, buildActionContext } from "../store/actions";
+import { showEditorView, showMediaView, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 

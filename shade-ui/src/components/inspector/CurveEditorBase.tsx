@@ -9,12 +9,9 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import type { AdjustmentValues } from "../../types";
-import {
-  state,
-  viewportToneSample,
-} from "../../store/editor-store";
+import { state, viewportToneSample } from "../../store/editor-store";
 import { useOpenImage } from "../../store/use-open-image";
+import type { AdjustmentValues } from "../../types";
 import {
   buildLuminanceHistogram,
   type ControlPoint,

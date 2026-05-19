@@ -75,19 +75,17 @@ try {
   }).catch(reportFatalError);
   void startRemoteControlBridge().catch(reportFatalError);
   render(
-    () =>
-      fatalError() ? (
-        <FatalErrorView message={fatalError()!} />
-      ) : (
-        <ErrorBoundary
-          fallback={(error) => <FatalErrorView message={reportFatalError(error)} />}
-        >
-          <App />
-        </ErrorBoundary>
-      ),
+    () => (
+      <ErrorBoundary
+        fallback={(error) => <FatalErrorView message={reportFatalError(error)} />}
+      >
+        <App />
+      </ErrorBoundary>
+    ),
     root,
   );
 } catch (error) {
+  console.error(error);
   reportFatalError(error);
   throw error;
 }

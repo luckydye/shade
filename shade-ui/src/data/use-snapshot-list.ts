@@ -1,8 +1,8 @@
 import { createResource, createRoot, type InitializedResource } from "solid-js";
 import { onChannelMessage } from "../bridge/channel";
 import * as bridge from "../bridge/index";
-import type { SnapshotInfo } from "../types";
 import { getSelectedArtboard } from "../store/editor-store";
+import type { SnapshotInfo } from "../types";
 
 function currentImagePath(): string | null {
   const artboard = getSelectedArtboard();

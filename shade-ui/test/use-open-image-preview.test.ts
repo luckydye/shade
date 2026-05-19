@@ -40,7 +40,10 @@ async function waitForAsyncRefresh() {
 
 function makeMockBridge(): MockBridge {
   const callbacks = new Set<(artboardId: string) => void>();
-  const tiles = new Map<string, { interactive: MockTile | null; final: MockTile | null }>();
+  const tiles = new Map<
+    string,
+    { interactive: MockTile | null; final: MockTile | null }
+  >();
   const bridge: MockBridge = {
     callbacks,
     tiles,
@@ -69,10 +72,7 @@ async function importOpenImageWithMockBridge(bridge: MockBridge) {
     normalizeModifiedAt: (value: unknown) =>
       typeof value === "number" && Number.isFinite(value) ? value : null,
     normalizeRating: (value: unknown) =>
-      typeof value === "number" &&
-      Number.isInteger(value) &&
-      value >= 1 &&
-      value <= 5
+      typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5
         ? value
         : null,
     normalizeTags: (value: unknown) =>

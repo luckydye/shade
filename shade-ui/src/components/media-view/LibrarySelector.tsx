@@ -9,10 +9,10 @@ import {
   Show,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import type { S3MediaLibraryInput } from "../../types";
 import { useLibrarySyncProgress } from "../../data/use-library-sync-progress";
 import { useMediaLibraryList } from "../../data/use-media-library-list";
 import { usePeerDiscovery } from "../../data/use-peer-discovery";
+import type { S3MediaLibraryInput } from "../../types";
 import { isTauriRuntime } from "../../utils";
 import { Button } from "../Button";
 import {
@@ -116,8 +116,7 @@ export const LibrarySelector: Component = () => {
     () =>
       orderedLibraryEntries().find(
         (library) => library.id === store.selectedLibraryId(),
-      ) ??
-      null,
+      ) ?? null,
   );
   const suggestedPeers = createMemo(() => {
     const addedPeerIds = new Set(

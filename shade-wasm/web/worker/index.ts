@@ -16,11 +16,7 @@
  * `{ type: "X_applied", requestId }` shape.
  */
 
-import type {
-  ChannelMessage,
-  MutationRequest,
-  ReadRequest,
-} from "shade-ui/src/types";
+import type { ChannelMessage, MutationRequest, ReadRequest } from "shade-ui/src/types";
 import init, * as wasm from "shade-wasm";
 import { browserCollectionsPlatform } from "./collections";
 import { browserPresetsPlatform } from "./presets";

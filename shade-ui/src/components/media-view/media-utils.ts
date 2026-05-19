@@ -1,4 +1,3 @@
-import type { MediaLibrary, SharedPicture } from "../../types";
 import type { MediaItem } from "../../data/use-library-items";
 import {
   resolveCameraThumbnailSrc,
@@ -6,6 +5,7 @@ import {
   resolvePeerThumbnailSrc,
 } from "../../data/use-thumbnail-src";
 import { useOpenImage } from "../../store/use-open-image";
+import type { MediaLibrary, SharedPicture } from "../../types";
 import { normalizeModifiedAt } from "../../utils";
 
 export type LibraryEntry = MediaLibrary;

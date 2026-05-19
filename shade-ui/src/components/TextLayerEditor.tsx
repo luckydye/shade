@@ -1,8 +1,8 @@
 import { type Component, createMemo, For, Show } from "solid-js";
-import type { TextAlignName, TextStyleValues } from "../types";
 import { useFontList } from "../data/use-font-list";
 import { useLayerStack } from "../data/use-layer-stack";
 import type { LayerInfo } from "../store/editor-store";
+import type { TextAlignName, TextStyleValues } from "../types";
 import { Slider } from "./Slider";
 
 const ALIGN_OPTIONS: { value: TextAlignName; label: string }[] = [

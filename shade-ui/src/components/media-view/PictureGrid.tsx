@@ -10,26 +10,26 @@ import {
   untrack,
 } from "solid-js";
 import type { MediaItem } from "../../data/use-library-items";
-import { state } from "../../store/editor-store";
-import { Button } from "../Button";
 import { actions } from "../../store/actions";
+import { state } from "../../store/editor-store";
 import { mediaViewFocusedItemId } from "../../store/media-view-context";
+import { Button } from "../Button";
 import { MediaTile } from "./MediaTile";
-import { useMediaItemActions } from "./use-media-item-actions";
 import { useMediaSelectionStore } from "./media-selection-store";
-import { useMediaViewStore } from "./media-view-store";
 import {
   formatModificationMonth,
-  mediaItemKey,
   type MediaGridRow,
+  mediaItemKey,
   modificationMonthKey,
 } from "./media-utils";
+import { useMediaViewStore } from "./media-view-store";
 import {
   PICTURE_GRID_ZOOM_LEVELS,
   pictureGridZoomIndex,
   setPictureGridColumns,
   setPictureGridRows,
 } from "./picture-grid-state";
+import { useMediaItemActions } from "./use-media-item-actions";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -458,9 +458,7 @@ export const PictureGrid: Component = () => {
                         compact={compact}
                         offline={store.selectedLibraryIsOffline()}
                         disableThumbnailLoad={
-                          compact
-                            ? store.shouldDeferEditorStripThumbnails()
-                            : undefined
+                          compact ? store.shouldDeferEditorStripThumbnails() : undefined
                         }
                         active={store.activeMediaItemId() === id}
                         selected={selection.selectedMediaItemIdSet().has(id)}
