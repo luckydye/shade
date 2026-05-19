@@ -10,10 +10,6 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { useFontList } from "../utils/use-font-list";
-import { useLayerStack } from "../utils/use-layer-stack";
-import { usePresetList } from "../utils/use-preset-list";
-import { useSnapshotList } from "../utils/use-snapshot-list";
 import {
   type ArtboardSource,
   cropAspectRatioPreset,
@@ -28,7 +24,6 @@ import {
   setIsDrawerOpen,
   state,
 } from "../store/editor-store";
-import { useOpenImage } from "../utils/use-open-image";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,
@@ -36,6 +31,11 @@ import {
   fitCropRectToAspectRatio,
   resolveCropAspectRatio,
 } from "../utils/crop-aspect";
+import { useFontList } from "../utils/use-font-list";
+import { useLayerStack } from "../utils/use-layer-stack";
+import { useOpenImage } from "../utils/use-open-image";
+import { usePresetList } from "../utils/use-preset-list";
+import { useSnapshotList } from "../utils/use-snapshot-list";
 import { Button } from "./Button";
 import { buildVectorScope, VectorScope, type WheelPoint } from "./ColorWheel";
 import { CurvesEditor } from "./inspector/CurvesEditor";

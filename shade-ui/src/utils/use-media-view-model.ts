@@ -1,14 +1,4 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { useBatchOperations } from "./use-batch-operations";
-import { useLayerStack } from "./use-layer-stack";
-import { useLibraryItems } from "./use-library-items";
-import { useLibrarySyncProgress } from "./use-library-sync-progress";
-import { useMediaLibraryList } from "./use-media-library-list";
-import { useMediaViewStatus } from "./use-media-view-status";
-import { usePeerDiscovery } from "./use-peer-discovery";
-import { usePresetList } from "./use-preset-list";
-import { actions, buildActionContext } from "../store/actions";
-import { state } from "../store/editor-store";
 import { provideCollectionMembershipStore } from "../components/media-view/collection-membership-store";
 import { provideMediaSelectionStore } from "../components/media-view/media-selection-store";
 import {
@@ -24,10 +14,20 @@ import {
   normalizeFilenameFilter,
 } from "../components/media-view/media-utils";
 import { provideMediaViewStore } from "../components/media-view/media-view-store";
+import { actions, buildActionContext } from "../store/actions";
+import { state } from "../store/editor-store";
+import { useBatchOperations } from "./use-batch-operations";
 import { useCollectionMembership } from "./use-collection-membership";
+import { useLayerStack } from "./use-layer-stack";
+import { useLibraryItems } from "./use-library-items";
+import { useLibrarySyncProgress } from "./use-library-sync-progress";
 import { useMediaItemActions } from "./use-media-item-actions";
+import { useMediaLibraryList } from "./use-media-library-list";
 import { useMediaSelection } from "./use-media-selection";
 import { useMediaViewActions } from "./use-media-view-actions";
+import { useMediaViewStatus } from "./use-media-view-status";
+import { usePeerDiscovery } from "./use-peer-discovery";
+import { usePresetList } from "./use-preset-list";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

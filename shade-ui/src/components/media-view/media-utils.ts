@@ -1,12 +1,12 @@
+import type { MediaLibrary, SharedPicture } from "../../types";
+import { normalizeModifiedAt } from "../../utils";
 import type { MediaItem } from "../../utils/use-library-items";
+import { useOpenImage } from "../../utils/use-open-image";
 import {
   resolveCameraThumbnailSrc,
   resolveLocalThumbnailSrc,
   resolvePeerThumbnailSrc,
 } from "../../utils/use-thumbnail-src";
-import { useOpenImage } from "../../utils/use-open-image";
-import type { MediaLibrary, SharedPicture } from "../../types";
-import { normalizeModifiedAt } from "../../utils";
 
 export type LibraryEntry = MediaLibrary;
 export type VisiblePeerLibrary = MediaLibrary & { kind: "peer" };

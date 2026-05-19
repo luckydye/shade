@@ -51,7 +51,7 @@ function FatalErrorView(props: { message: string }) {
 
 function reportFatalError(error: unknown) {
   console.error(error);
-  
+
   const message = formatError(error);
   setFatalError(message);
   return message;
@@ -75,9 +75,9 @@ try {
     });
     await invoke("register_preview_channel", { channel });
   }).catch(reportFatalError);
-  
+
   void startRemoteControlBridge().catch(reportFatalError);
-  
+
   render(
     () => (
       <ErrorBoundary

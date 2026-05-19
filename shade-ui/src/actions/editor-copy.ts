@@ -1,7 +1,7 @@
-import { usePresetList } from "../utils/use-preset-list";
 import type { ActionDef } from "../store/actions";
 import { mediaViewFocusedItem } from "../store/media-view-context";
 import { showToast } from "../store/toast";
+import { usePresetList } from "../utils/use-preset-list";
 
 export const EditorCopy = {
   id: "editor.copy-edits",

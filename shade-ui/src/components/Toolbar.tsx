@@ -1,14 +1,13 @@
 import { type Component, onCleanup, onMount, Show } from "solid-js";
 import { ToolbarExport } from "../actions/toolbar-export";
 import { ToolbarOpen } from "../actions/toolbar-open";
+import backSvg from "../assets/icons/back.svg?raw";
+import saveSvg from "../assets/icons/save.svg?raw";
+import uploadSvg from "../assets/icons/upload.svg?raw";
 import { actions, buildActionContext } from "../store/actions";
 import { showEditorView, showMediaView, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
-
-import saveSvg from "../assets/icons/save.svg?raw";
-import backSvg from "../assets/icons/back.svg?raw";
-import uploadSvg from "../assets/icons/upload.svg?raw";
 
 export const Toolbar: Component = () => {
   const canResumeEditor = () =>

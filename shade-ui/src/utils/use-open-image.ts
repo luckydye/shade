@@ -1,18 +1,5 @@
 import { type Accessor, createSignal } from "solid-js";
 import {
-  type ArtboardViewport,
-  type PreviewFrame,
-  type PreviewQuality,
-  type PushedRenderedTile,
-  type SharedPicture,
-  useImageBridge,
-} from "./use-image-bridge";
-import { useLayerStack } from "./use-layer-stack";
-import { isTauriRuntime } from "../utils";
-import { releaseTileSurface } from "../viewport/compositor";
-import { computeFitScale } from "../viewport/transform";
-import type { FitReference, RenderedTile } from "../viewport/types";
-import {
   type ArtboardSource,
   type ArtboardState,
   fullCanvasCrop,
@@ -25,6 +12,19 @@ import {
   state,
 } from "../store/editor-store";
 import { resetHistory } from "../store/history";
+import { isTauriRuntime } from "../utils";
+import { releaseTileSurface } from "../components/viewport/compositor";
+import { computeFitScale } from "../components/viewport/transform";
+import type { FitReference, RenderedTile } from "../components/viewport/types";
+import {
+  type ArtboardViewport,
+  type PreviewFrame,
+  type PreviewQuality,
+  type PushedRenderedTile,
+  type SharedPicture,
+  useImageBridge,
+} from "./use-image-bridge";
+import { useLayerStack } from "./use-layer-stack";
 
 // ── Module state ────────────────────────────────────────────────────────────
 

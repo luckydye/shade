@@ -1,5 +1,4 @@
 import { type Component, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
-import { useLayerStack } from "../utils/use-layer-stack";
 import {
   activeAdjustmentSliderId,
   clamp,
@@ -7,6 +6,7 @@ import {
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
 } from "../store/editor-store";
+import { useLayerStack } from "../utils/use-layer-stack";
 import { useOpenImage } from "../utils/use-open-image";
 
 const PARAMETER_ROW_CLASS =

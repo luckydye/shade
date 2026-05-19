@@ -7,7 +7,6 @@ import {
   onCleanup,
   Show,
 } from "solid-js";
-import { useLayerStack } from "../utils/use-layer-stack";
 import {
   type ArtboardState,
   clamp,
@@ -19,30 +18,34 @@ import {
   setState,
   state,
 } from "../store/editor-store";
-import { useOpenImage } from "../utils/use-open-image";
 import type { MaskParamsInfo } from "../types";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,
   type CropResizeHandle,
-  clampAspectSize,
   constrainCropDragToAspectRatio,
   fitCropRectToAspectRatio,
   resizeCropFromHandle,
   resolveCropAspectRatio,
 } from "../utils/crop-aspect";
-import { makeBrushCursor } from "../viewport/brush-cursor";
-import { compositeArtboard } from "../viewport/compositor";
-import { screenToWorld, type WorldTransform, worldToScreen } from "../viewport/transform";
-import { Button } from "./Button";
-import { MediaRating } from "./MediaRating";
-import { Slider } from "./Slider";
 import { useBrushOverlay } from "../utils/use-brush-overlay";
 import { useElementSize } from "../utils/use-element-size";
 import { useFileDrop } from "../utils/use-file-drop";
+import { useLayerStack } from "../utils/use-layer-stack";
+import { useOpenImage } from "../utils/use-open-image";
 import { useArtboardRating } from "../utils/use-rating";
 import { useToneSmoothing } from "../utils/use-tone-smoothing";
-import { buildTransform } from "../viewport/transform";
+import { Button } from "./Button";
+import { MediaRating } from "./MediaRating";
+import { Slider } from "./Slider";
+import { makeBrushCursor } from "./viewport/brush-cursor";
+import { compositeArtboard } from "./viewport/compositor";
+import {
+  buildTransform,
+  screenToWorld,
+  type WorldTransform,
+  worldToScreen,
+} from "./viewport/transform";
 
 type CropHandle =
   | "move"
@@ -126,7 +129,6 @@ type Gesture =
       originTy: number;
     };
 
-
 export function getViewWorldOffset(): { x: number; y: number } {
   const artboard = getSelectedArtboard();
   return artboard ? { x: artboard.worldX, y: artboard.worldY } : { x: 0, y: 0 };
@@ -179,7 +181,6 @@ export function getCropEditTransform(
     },
   );
 }
-
 
 const HANDLE_SIZE = 10;
 const ARTBOARD_TITLE_HEIGHT = 24;

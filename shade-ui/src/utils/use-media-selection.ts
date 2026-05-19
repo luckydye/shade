@@ -1,5 +1,10 @@
 import { createEffect, createMemo, createSignal } from "solid-js";
-import type { MediaItem } from "./use-library-items";
+import { type MediaGridRow, mediaItemKey } from "../components/media-view/media-utils";
+import { useMediaViewStore } from "../components/media-view/media-view-store";
+import {
+  pictureGridColumns,
+  pictureGridRows,
+} from "../components/media-view/picture-grid-state";
 import {
   setMediaViewFocusedItem,
   setMediaViewFocusedItemId,
@@ -7,9 +12,7 @@ import {
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
 } from "../store/media-view-context";
-import { type MediaGridRow, mediaItemKey } from "../components/media-view/media-utils";
-import { useMediaViewStore } from "../components/media-view/media-view-store";
-import { pictureGridColumns, pictureGridRows } from "../components/media-view/picture-grid-state";
+import type { MediaItem } from "./use-library-items";
 
 function mediaItemToBatchItem(item: MediaItem) {
   return item.kind === "peer"

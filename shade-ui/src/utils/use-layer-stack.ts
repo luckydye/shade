@@ -10,7 +10,6 @@ import {
   state,
 } from "../store/editor-store";
 import { onRestore, recordSnapshot } from "../store/history";
-import { useOpenImage } from "./use-open-image";
 import type {
   CurveControlPoint,
   GradientMaskParams,
@@ -18,6 +17,7 @@ import type {
   TextTransformValues,
 } from "../types";
 import { isTauriRuntime } from "../utils";
+import { useOpenImage } from "./use-open-image";
 
 // ── Reactive stack sync ─────────────────────────────────────────────────────
 

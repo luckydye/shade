@@ -1,16 +1,17 @@
 import { type Component, onMount, Show } from "solid-js";
-import { useNavigationHistory } from "./utils/use-navigation-history";
 import { EditorView } from "./components/EditorView";
 import { MediaView } from "./components/MediaView";
 import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { setState, state } from "./store/editor-store";
-import { checkWebGPU } from "./utils/webgpu-check";
 import { useKeybinds } from "./utils/use-keybinds";
+import { useNavigationHistory } from "./utils/use-navigation-history";
+import { checkWebGPU } from "./utils/webgpu-check";
 
 const App: Component = () => {
-  const showEditor = () => (state.canvasWidth > 0 || state.isLoading) && state.currentView === "editor";
+  const showEditor = () =>
+    (state.canvasWidth > 0 || state.isLoading) && state.currentView === "editor";
 
   useNavigationHistory();
   useKeybinds();

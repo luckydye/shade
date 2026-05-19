@@ -1,7 +1,4 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { useMediaUploadProgress } from "./use-media-upload-progress";
-import { listenNativeDragDrop } from "./use-native-drag-drop";
-import { isTauriRuntime } from "../utils";
 import {
   clipboardImageFiles,
   draggedItemCount,
@@ -14,7 +11,13 @@ import {
   type UploadDragFeedback,
 } from "../components/media-view/media-utils";
 import { useMediaViewStore } from "../components/media-view/media-view-store";
-import { filenameFromUrl, transformImageUrl } from "../components/media-view/url-transformers";
+import {
+  filenameFromUrl,
+  transformImageUrl,
+} from "../components/media-view/url-transformers";
+import { isTauriRuntime } from "../utils";
+import { useMediaUploadProgress } from "./use-media-upload-progress";
+import { listenNativeDragDrop } from "./use-native-drag-drop";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
