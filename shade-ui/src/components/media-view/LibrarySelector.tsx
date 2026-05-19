@@ -22,32 +22,18 @@ import {
   isPeerLibrary,
   isPinnedLibrary,
   isS3Library,
-  type LibraryEntry,
   mergeLibraryOrder,
   moveIdInOrder,
   peerLibraryPeerId,
 } from "./media-utils";
-
-export type LibrarySelectorProps = {
-  libraries: LibraryEntry[];
-  selectedLibraryId: string | null;
-  filenameFilter: string;
-  zoomIndex: number;
-  zoomLevelCount: number;
-  onSelectLibrary: (libraryId: string) => void;
-  onFilenameFilterInput: (value: string) => void;
-  onZoomOut: () => void;
-  onZoomIn: () => void;
-  onLibrariesChanged: () => void | Promise<void>;
-  onLibraryItemsChanged: () => void | Promise<void>;
-  onError: (message: string | null) => void;
-};
+import { useMediaViewStore } from "./media-view-store";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
+export const LibrarySelector: Component = () => {
+  const store = useMediaViewStore();
   const {
     addMediaLibrary,
     addS3MediaLibrary,
@@ -64,7 +50,6 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
   const { peers: discoveredPeers, pairPeerDevice } = usePeerDiscovery();
   const syncProgress = useLibrarySyncProgress();
 
-  const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
   const [showS3Form, setShowS3Form] = createSignal(false);
   const [editingS3LibraryId, setEditingS3LibraryId] = createSignal<string | null>(null);
@@ -109,10 +94,10 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
   const orderedLibraryEntries = createMemo(() => {
     const order = mergeLibraryOrder(
       libraryOrder(),
-      props.libraries.map((library) => library.id),
+      store.libraryEntries().map((library) => library.id),
     );
     const positions = new Map(order.map((id, index) => [id, index]));
-    return [...props.libraries].sort((left, right) => {
+    return [...store.libraryEntries()].sort((left, right) => {
       const leftIndex = positions.get(left.id);
       const rightIndex = positions.get(right.id);
       if (leftIndex === undefined || rightIndex === undefined) {
@@ -123,12 +108,17 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
   });
   const selectedLibrary = createMemo(
     () =>
-      orderedLibraryEntries().find((library) => library.id === props.selectedLibraryId) ??
+      orderedLibraryEntries().find(
+        (library) => library.id === store.selectedLibraryId(),
+      ) ??
       null,
   );
   const suggestedPeers = createMemo(() => {
     const addedPeerIds = new Set(
-      props.libraries.filter(isPeerLibrary).map((library) => peerLibraryPeerId(library)),
+      store
+        .libraryEntries()
+        .filter(isPeerLibrary)
+        .map((library) => peerLibraryPeerId(library)),
     );
     return discoveredPeers().filter((peer) => !addedPeerIds.has(peer.endpoint_id));
   });
@@ -149,7 +139,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
   createEffect(() => {
     const nextOrder = mergeLibraryOrder(
       libraryOrder(),
-      props.libraries.map((library) => library.id),
+      store.libraryEntries().map((library) => library.id),
     );
     if (
       nextOrder.length === libraryOrder().length &&
@@ -194,15 +184,15 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
   });
 
   async function withSubmitting(fn: () => Promise<void>) {
-    if (isSubmitting()) return;
-    setIsSubmitting(true);
-    props.onError(null);
+    if (store.isSubmitting()) return;
+    store.setIsSubmitting(true);
+    store.setError(null);
     try {
       await fn();
     } catch (err) {
-      props.onError(toErrorMessage(err));
+      store.setError(toErrorMessage(err));
     } finally {
-      setIsSubmitting(false);
+      store.setIsSubmitting(false);
     }
   }
 
@@ -259,9 +249,9 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
       const selectedPath = await pickDirectory();
       if (selectedPath === null) return;
       const library = await addMediaLibrary(selectedPath);
-      await props.onLibrariesChanged();
-      props.onSelectLibrary(library.id);
-      await props.onLibraryItemsChanged();
+      await store.refetchLibraries();
+      store.setSelectedLibraryId(library.id);
+      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
     });
   }
 
@@ -272,9 +262,9 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
         ? await updateS3MediaLibrary(editingLibraryId, s3Draft())
         : await addS3MediaLibrary(s3Draft());
       closeS3Form();
-      await props.onLibrariesChanged();
-      props.onSelectLibrary(library.id);
-      await props.onLibraryItemsChanged();
+      await store.refetchLibraries();
+      store.setSelectedLibraryId(library.id);
+      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
     });
   }
 
@@ -285,9 +275,9 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
       if (!peer) {
         throw new Error("peer is no longer available");
       }
-      await props.onLibrariesChanged();
-      props.onSelectLibrary(`peer:${peerId}`);
-      await props.onLibraryItemsChanged();
+      await store.refetchLibraries();
+      store.setSelectedLibraryId(`peer:${peerId}`);
+      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
     });
   }
 
@@ -298,12 +288,12 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
       if (isPeerLibrary(library)) {
         await removeMediaLibrary(library.id);
         await removePeerLibrary(peerLibraryPeerId(library));
-        await props.onLibrariesChanged();
-        await props.onLibraryItemsChanged();
+        await store.refetchLibraries();
+        await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
         return;
       }
       await removeMediaLibrary(library.id);
-      await props.onLibrariesChanged();
+      await store.refetchLibraries();
     });
   }
 
@@ -313,7 +303,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
       return;
     }
     void syncLibrary(library.id).catch((err) => {
-      props.onError(toErrorMessage(err));
+      store.setError(toErrorMessage(err));
     });
   }
 
@@ -325,7 +315,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
     }
     await withSubmitting(async () => {
       await refreshLibraryIndex(library.id);
-      await props.onLibraryItemsChanged();
+      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
       syncSelectedLibraryIfNeeded();
     });
   }
@@ -336,9 +326,9 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
     targetId?: string | null,
   ) {
     return setLibraryMode(libraryId, mode, targetId)
-      .then(() => props.onLibrariesChanged())
+      .then(() => store.refetchLibraries())
       .catch((err) => {
-        props.onError(toErrorMessage(err));
+        store.setError(toErrorMessage(err));
         throw err;
       });
   }
@@ -516,14 +506,14 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
                     event.stopPropagation();
                     return;
                   }
-                  props.onSelectLibrary(library.id);
+                  store.setSelectedLibraryId(library.id);
                 }}
                 onPointerDown={(event) => startLibraryDrag(event, libraryIdx())}
                 onPointerMove={pinned ? undefined : handleLibraryPointerMove}
                 onPointerUp={pinned ? undefined : handleLibraryPointerUp}
                 onPointerCancel={pinned ? undefined : handleLibraryPointerCancel}
                 class={`inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] ${
-                  props.selectedLibraryId === library.id
+                  store.selectedLibraryId() === library.id
                     ? offline()
                       ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
                       : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
@@ -561,7 +551,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
             <Button
               type="button"
               class="inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full"
-              disabled={isSubmitting()}
+              disabled={store.isSubmitting()}
               onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
             >
               <span class="block max-w-[140px] overflow-hidden text-ellipsis">
@@ -577,7 +567,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
           <Button
             type="button"
             class="inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full"
-            disabled={isSubmitting()}
+            disabled={store.isSubmitting()}
             onContextMenu={(event) => {
               event.preventDefault();
               const rect = event.currentTarget.getBoundingClientRect();
@@ -606,7 +596,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
               type="button"
               role="menuitem"
               class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-              disabled={isSubmitting()}
+              disabled={store.isSubmitting()}
               onClick={() => {
                 setShowAddDropdown(false);
                 void handleAddLibrary();
@@ -619,7 +609,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
                 type="button"
                 role="menuitem"
                 class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                disabled={isSubmitting()}
+                disabled={store.isSubmitting()}
                 onClick={() => {
                   setShowAddDropdown(false);
                   openAddS3Form();
@@ -636,8 +626,8 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
           <label class="block w-full w-56 touch-mobile:hidden">
             <input
               type="text"
-              value={props.filenameFilter}
-              onInput={(event) => props.onFilenameFilterInput(event.currentTarget.value)}
+              value={store.filenameFilter()}
+              onInput={(event) => store.setFilenameFilter(event.currentTarget.value)}
               class="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)] touch-mobile:h-10 touch-mobile:rounded-full touch-mobile:px-4 touch-mobile:text-base"
               placeholder="Search names or tags"
               aria-label="Search names or tags"
@@ -647,8 +637,8 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
             <Button
               type="button"
               class="h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40 min-w-7 px-1.5 text-[13px] leading-none"
-              disabled={props.zoomIndex === 0}
-              onClick={props.onZoomOut}
+              disabled={store.zoomIndex() === 0}
+              onClick={() => store.setZoomIndex((i) => Math.max(0, i - 1))}
               aria-label="Decrease thumbnail size"
             >
               -
@@ -656,8 +646,10 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
             <Button
               type="button"
               class="h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40 min-w-7 px-1.5 text-[13px] leading-none"
-              disabled={props.zoomIndex === props.zoomLevelCount - 1}
-              onClick={props.onZoomIn}
+              disabled={store.zoomIndex() === store.zoomLevelCount - 1}
+              onClick={() =>
+                store.setZoomIndex((i) => Math.min(store.zoomLevelCount - 1, i + 1))
+              }
               aria-label="Increase thumbnail size"
             >
               +
@@ -668,7 +660,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
         <Button
           type="button"
           class="h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40 min-w-8 px-2 text-[14px] leading-none"
-          disabled={isSubmitting() || !selectedLibrary()}
+          disabled={store.isSubmitting() || !selectedLibrary()}
           aria-label="Library actions"
           aria-haspopup="menu"
           aria-expanded={showLibraryActions() ? "true" : "false"}
@@ -685,7 +677,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
               type="button"
               role="menuitem"
               class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-              disabled={!canRefreshSelectedLibrary() || isSubmitting()}
+              disabled={!canRefreshSelectedLibrary() || store.isSubmitting()}
               onClick={() => {
                 setShowLibraryActions(false);
                 void handleRefreshLibrary();
@@ -698,7 +690,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
                 type="button"
                 role="menuitem"
                 class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                disabled={isSubmitting()}
+                disabled={store.isSubmitting()}
                 onClick={() => {
                   const library = selectedLibrary();
                   if (!library) return;
@@ -721,7 +713,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
                 type="button"
                 role="menuitem"
                 class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                disabled={isSubmitting()}
+                disabled={store.isSubmitting()}
                 onClick={() => {
                   const library = selectedLibrary();
                   if (!library) return;
@@ -750,7 +742,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
                     type="button"
                     role="menuitem"
                     class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                    disabled={isSubmitting()}
+                    disabled={store.isSubmitting()}
                     onClick={() => {
                       const library = selectedLibrary();
                       if (!library) return;
@@ -770,7 +762,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
                 type="button"
                 role="menuitem"
                 class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                disabled={isSubmitting()}
+                disabled={store.isSubmitting()}
                 onClick={() => {
                   setShowLibraryActions(false);
                   void openEditS3Form();
@@ -783,7 +775,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
               type="button"
               role="menuitem"
               class="flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40"
-              disabled={!selectedLibrary()?.removable || isSubmitting()}
+              disabled={!selectedLibrary()?.removable || store.isSubmitting()}
               onClick={() => {
                 setShowLibraryActions(false);
                 void handleRemoveLibrary();
@@ -889,7 +881,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
             <Button
               type="button"
               class="h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-              disabled={isSubmitting()}
+              disabled={store.isSubmitting()}
               onClick={() => void handleSubmitS3Library()}
             >
               {editingS3LibraryId() ? "Save S3 Library" : "Add S3 Library"}
@@ -897,7 +889,7 @@ export const LibrarySelector: Component<LibrarySelectorProps> = (props) => {
             <Button
               type="button"
               class="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-              disabled={isSubmitting()}
+              disabled={store.isSubmitting()}
               onClick={closeS3Form}
             >
               Cancel

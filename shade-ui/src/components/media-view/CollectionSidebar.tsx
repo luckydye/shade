@@ -1,7 +1,8 @@
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
-import type { Collection } from "../../types";
 import { Button } from "../Button";
+import { useCollectionMembershipStore } from "./collection-membership-store";
+import { useMediaViewStore } from "./media-view-store";
 
 function formatCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -14,19 +15,9 @@ const SIDEBAR_ITEM_ACTIVE = "bg-[var(--surface-active)] text-[var(--text)]";
 const SIDEBAR_ITEM_INACTIVE =
   "text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]";
 
-export type CollectionSidebarProps = {
-  collections: Collection[];
-  selectedCollectionId: string | null;
-  totalCount: number;
-  onSelect: (id: string | null) => void;
-  onCreate: () => void;
-  onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
-  mobileOpen?: boolean;
-  onMobileClose?: () => void;
-};
-
-export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
+export const CollectionSidebar: Component = () => {
+  const collections = useCollectionMembershipStore();
+  const store = useMediaViewStore();
   const [contextMenuId, setContextMenuId] = createSignal<string | null>(null);
   const [contextMenuPos, setContextMenuPos] = createSignal({ x: 0, y: 0 });
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
@@ -53,23 +44,22 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
   function commitRename(id: string, value: string) {
     const trimmed = value.trim();
     if (trimmed) {
-      props.onRename(id, trimmed);
+      void collections.handleRenameCollection(id, trimmed);
     }
     setRenamingId(null);
   }
 
   return (
     <>
-      {/* Mobile backdrop */}
-      <Show when={props.mobileOpen}>
+      <Show when={collections.mobileSidebarOpen()}>
         <div
           class="fixed inset-0 z-30 hidden touch-mobile:block bg-black/40"
-          onClick={() => props.onMobileClose?.()}
+          onClick={() => collections.setMobileSidebarOpen(false)}
         />
       </Show>
       <div
         class={`flex w-[180px] shrink-0 flex-col border-r border-[var(--border)] py-4 pl-4 touch-mobile:fixed touch-mobile:inset-y-0 touch-mobile:left-0 touch-mobile:z-40 touch-mobile:bg-[var(--panel-bg)] touch-mobile:shadow-xl touch-mobile:transition-transform touch-mobile:duration-300 ${
-          props.mobileOpen
+          collections.mobileSidebarOpen()
             ? "touch-mobile:translate-x-0"
             : "touch-mobile:-translate-x-full"
         }`}
@@ -78,19 +68,22 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
           <Button
             type="button"
             class={`${SIDEBAR_ITEM_BASE} ${
-              props.selectedCollectionId === null
+              collections.selectedCollectionId() === null
                 ? SIDEBAR_ITEM_ACTIVE
                 : SIDEBAR_ITEM_INACTIVE
             }`}
-            onClick={() => props.onSelect(null)}
+            onClick={() => {
+              collections.setSelectedCollectionId(null);
+              collections.setMobileSidebarOpen(false);
+            }}
           >
             All Photos
             <span class="shrink-0 text-[10px] text-[var(--text-faint)]">
-              {formatCount(props.totalCount)}
+              {formatCount(store.availableItemCount())}
             </span>
           </Button>
 
-          <For each={props.collections}>
+          <For each={collections.collections()}>
             {(collection) => (
               <Show
                 when={renamingId() !== collection.id}
@@ -114,11 +107,14 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
                 <Button
                   type="button"
                   class={`${SIDEBAR_ITEM_BASE} ${
-                    props.selectedCollectionId === collection.id
+                    collections.selectedCollectionId() === collection.id
                       ? SIDEBAR_ITEM_ACTIVE
                       : SIDEBAR_ITEM_INACTIVE
                   }`}
-                  onClick={() => props.onSelect(collection.id)}
+                  onClick={() => {
+                    collections.setSelectedCollectionId(collection.id);
+                    collections.setMobileSidebarOpen(false);
+                  }}
                   onDblClick={() => startRename(collection.id)}
                   onContextMenu={(e: MouseEvent) => handleContextMenu(e, collection.id)}
                 >
@@ -161,7 +157,7 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
           <Button
             type="button"
             class={`${SIDEBAR_ITEM_BASE} ${SIDEBAR_ITEM_INACTIVE}`}
-            onClick={() => props.onCreate()}
+            onClick={() => void collections.handleCreateCollection()}
           >
             + New Collection
           </Button>
@@ -197,7 +193,7 @@ export const CollectionSidebar: Component<CollectionSidebarProps> = (props) => {
                   class="flex h-7 w-full items-center px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)]"
                   onClick={() => {
                     closeContextMenu();
-                    props.onDelete(menuId());
+                    void collections.handleDeleteCollection(menuId());
                   }}
                 >
                   Delete

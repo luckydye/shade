@@ -1,6 +1,7 @@
 import type { Accessor, Setter } from "solid-js";
 import { createRoot, createSignal } from "solid-js";
 import type { MediaItem } from "../../data/use-library-items";
+import type { PresetInfo } from "../../types";
 import type { LibraryEntry } from "./media-utils";
 
 type MediaViewSelectionState = {
@@ -17,18 +18,27 @@ export type MediaViewStoreInput = {
   setSelectedLibraryId: Setter<string | null>;
   selectedLibrary: Accessor<LibraryEntry | null>;
   libraryEntries: Accessor<LibraryEntry[]>;
+  refetchLibraries: () => unknown;
+  availableItemCount: Accessor<number>;
+  filenameFilter: Accessor<string>;
+  setFilenameFilter: Setter<string>;
   flatItemIds: Accessor<string[]>;
   itemsById: Accessor<Map<string, MediaItem>>;
   canWriteSelectedLibrary: Accessor<boolean>;
   isSubmitting: Accessor<boolean>;
   setIsSubmitting: Setter<boolean>;
+  presets: Accessor<PresetInfo[] | null | undefined>;
+  refetchPresets: () => unknown;
+  showApplyPresetMenu: Accessor<boolean>;
   setError: Setter<string | null>;
   setMediaActionStatus: Setter<string | null>;
   setShowApplyPresetMenu: Setter<boolean>;
+  zoomIndex: Accessor<number>;
   setZoomIndex: Setter<number>;
   zoomLevelCount: number;
   syncProgress: Accessor<unknown>;
   pickDirectory: () => Promise<string | null>;
+  addMediaLibrary: (path: string) => Promise<LibraryEntry>;
   deleteMediaLibraryItem: (path: string) => Promise<unknown>;
   uploadMediaLibraryFile: (
     libraryId: string,

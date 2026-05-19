@@ -14,6 +14,7 @@ import { Button } from "../Button";
 import { actions } from "../../store/actions";
 import { mediaViewFocusedItemId } from "../../store/media-view-context";
 import { MediaTile } from "./MediaTile";
+import { useMediaViewStore } from "./media-view-store";
 import {
   formatModificationMonth,
   mediaItemKey,
@@ -34,7 +35,6 @@ export type PictureGridProps = {
   isEditorStrip: boolean;
   isLibraryScanComplete: boolean;
   availableItemCount: number;
-  selectedLibraryName: string | null;
   selectedLibraryIsOffline: boolean;
   itemsLoading: boolean;
   activeFilenameFilterCount: number;
@@ -53,11 +53,10 @@ export type PictureGridProps = {
   onToggleSelection: (id: string) => void;
   onShiftSelect: (id: string) => void;
   onFocusItem: (id: string) => void;
-  onAddLibrary: () => void;
-  isSubmitting: boolean;
 };
 
 export const PictureGrid: Component<PictureGridProps> = (props) => {
+  const store = useMediaViewStore();
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -280,6 +279,24 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
     return Math.round((top / scrollRange) * thumbRange + thumbHeight / 2);
   });
 
+  const handleAddLibrary = async () => {
+    if (store.isSubmitting()) return;
+    store.setIsSubmitting(true);
+    store.setError(null);
+    try {
+      const selectedPath = await store.pickDirectory();
+      if (selectedPath === null) return;
+      const library = await store.addMediaLibrary(selectedPath);
+      await store.refetchLibraries();
+      store.setSelectedLibraryId(library.id);
+      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+    } catch (err) {
+      store.setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      store.setIsSubmitting(false);
+    }
+  };
+
   createEffect(() => {
     const element = scrollRef();
     if (!(element instanceof HTMLDivElement)) {
@@ -477,8 +494,8 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
                   <Button
                     type="button"
                     class="h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                    disabled={props.isSubmitting}
-                    onClick={props.onAddLibrary}
+                    disabled={store.isSubmitting()}
+                    onClick={() => void handleAddLibrary()}
                   >
                     Add Library
                   </Button>
@@ -502,7 +519,7 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
                     >
                       {props.activeFilenameFilterCount > 0
                         ? `No media match "${props.filenameFilter.trim()}".`
-                        : `No images found in ${props.selectedLibraryName ?? "this library"}.`}
+                        : `No images found in ${store.selectedLibrary()?.name ?? "this library"}.`}
                     </div>
                   }
                 >
