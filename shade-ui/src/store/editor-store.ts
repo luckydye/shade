@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createEffect, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import type {
   AdjustmentValues,
@@ -9,7 +9,6 @@ import type {
 } from "../types";
 import type { CropAspectRatioPreset } from "../utils/crop-aspect";
 import type { RenderedTile } from "../viewport/types";
-import { createEffect } from "solid-js/types/server/reactive.js";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop" | "text";

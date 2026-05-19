@@ -246,13 +246,13 @@ export function useMediaViewModel() {
 
   createEffect(() => {
     selectedLibraryId();
-    actions.run("media.grid.reset-scroll", buildActionContext());
+    // actions.run("media.grid.reset-scroll", buildActionContext());
     selection.setSelectedMediaItemIds([]);
   });
 
   createEffect(() => {
     normalizedFilenameFilter();
-    actions.run("media.grid.reset-scroll", buildActionContext());
+    // actions.run("media.grid.reset-scroll", buildActionContext());
   });
 
   createEffect(() => {

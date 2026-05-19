@@ -6,51 +6,9 @@ import { showEditorView, showMediaView, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 
-const UploadIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    class="h-4 w-4"
-  >
-    <path d="M12 16V6" />
-    <path d="m7.5 10.5 4.5-4.5 4.5 4.5" />
-    <path d="M5 18.5c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2" />
-  </svg>
-);
-
-const SaveIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    class="h-4 w-4"
-  >
-    <path d="M12 4v9" />
-    <path d="m7.5 9.5 4.5 4.5 4.5-4.5" />
-    <path d="M5 18.5c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2" />
-  </svg>
-);
-
-const BackIcon = () => (
-  <svg
-    width="24px"
-    height="24px"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    class="h-4 w-4"
-  >
-    <path d="M15 18l-6-6 6-6" />
-  </svg>
-);
+import saveSvg from "../assets/icons/save.svg?raw";
+import backSvg from "../assets/icons/back.svg?raw";
+import uploadSvg from "../assets/icons/upload.svg?raw";
 
 export const Toolbar: Component = () => {
   const canResumeEditor = () =>
@@ -101,7 +59,7 @@ export const Toolbar: Component = () => {
               showMediaView();
             }}
           >
-            <BackIcon />
+            <span innerHTML={backSvg}></span>
           </Button>
         </Show>
       </div>
@@ -133,14 +91,14 @@ export const Toolbar: Component = () => {
         <div class="flex items-center justify-end gap-2">
           <ActionButton
             label="Export"
-            icon={<SaveIcon />}
+            icon={saveSvg}
             onClick={() => runAction("toolbar.export")}
             disabled={!canExport()}
             primary
           />
           <ActionButton
             label="Open"
-            icon={<UploadIcon />}
+            icon={uploadSvg}
             disabled={!state.webgpuAvailable}
             onClick={() => runAction("toolbar.open")}
           />

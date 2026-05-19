@@ -11,7 +11,7 @@ const TOOLBAR_BUTTON_SECONDARY_CLASS =
 export const ActionButton: Component<{
   label: string;
   class?: string;
-  icon: JSX.Element;
+  icon: string;
   onClick?: () => void;
   disabled?: boolean;
   primary?: boolean;
@@ -24,7 +24,7 @@ export const ActionButton: Component<{
       props.primary ? TOOLBAR_BUTTON_PRIMARY_CLASS : TOOLBAR_BUTTON_SECONDARY_CLASS
     }`}
   >
-    <span class="inline-flex items-center justify-center">{props.icon}</span>
+    <span class="inline-flex items-center justify-center" innerHTML={props.icon}></span>
     <span class="hidden sm:inline">{props.label}</span>
   </Button>
 );

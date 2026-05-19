@@ -38,38 +38,22 @@ export const MediaView: Component = () => {
         </div>
       </Show>
 
+      <Show when={state.currentView === "editor"}>
+        <div class="px-2 pt-2 pb-1 w-full flex">
+          <ActionButton
+            class="w-full"
+            label="Back"
+            icon={backSvg}
+            onClick={() => showMediaView()}
+          />
+        </div>
+      </Show>
+      
       <div class="relative flex-1 min-h-0 flex" onTouchStart={handleEdgeSwipe}>
         <Show when={!isEditorStrip() && model.selectedLibrary()}>
           <CollectionSidebar />
         </Show>
         <div class="relative flex-1 min-h-0 flex flex-col">
-          <Show when={state.currentView === "editor"}>
-            <div class="px-2 pt-2 pb-1 w-full flex">
-              <ActionButton
-                class="w-full"
-                label="Back"
-                icon={backSvg}
-                onClick={() => {
-                  showMediaView();
-                }}
-              />
-            </div>
-          </Show>
-
-          <Show
-            when={
-              !isEditorStrip() &&
-              !model.isLibraryScanComplete() &&
-              model.availableItems().length > 0
-            }
-          >
-            <div class="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-5 py-2 text-[11px] font-medium text-[var(--text-dim)]">
-              <div class="h-2.5 w-2.5 animate-spin rounded-full border border-[var(--border-medium)] border-t-[var(--text-muted)]" />
-              Indexing · {model.availableItems().length.toLocaleString()} images found so
-              far
-            </div>
-          </Show>
-
           <PictureGrid />
         </div>
       </div>
