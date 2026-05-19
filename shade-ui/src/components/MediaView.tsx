@@ -10,6 +10,7 @@ import { SelectionBar } from "./media-view/SelectionBar";
 import { UploadDropOverlay } from "./media-view/UploadDropOverlay";
 import { targetUsesOwnFocus } from "./media-view/media-utils";
 import { useMediaViewModel } from "./media-view/use-media-view-model";
+import backSvg from "../assets/icons/back.svg?raw";
 
 export const MediaView: Component = () => {
   const model = useMediaViewModel();
@@ -77,19 +78,7 @@ export const MediaView: Component = () => {
               <ActionButton
                 class="w-full"
                 label="Back"
-                icon={
-                  <svg
-                    width="24px"
-                    height="24px"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    class="h-4 w-4"
-                  >
-                    <path d="M15 18l-6-6 6-6" />
-                  </svg>
-                }
+                icon={backSvg}
                 onClick={() => {
                   showMediaView();
                 }}
@@ -109,44 +98,7 @@ export const MediaView: Component = () => {
               Indexing · {model.availableItems().length.toLocaleString()} images found so far
             </div>
           </Show>
-          <PictureGrid
-            displayedItemCount={model.displayedItems().length}
-            displayedItems={model.displayedItems()}
-            hasLibraries={model.hasLibraries()}
-            isEditorStrip={isEditorStrip()}
-            isLibraryScanComplete={model.isLibraryScanComplete()}
-            availableItemCount={model.availableItems().length}
-            selectedLibraryIsOffline={model.selectedLibraryIsOffline()}
-            itemsLoading={model.itemsLoading()}
-            activeFilenameFilterCount={model.activeFilenameFilter().length}
-            filenameFilter={model.filenameFilter()}
-            zoomIndex={model.zoomIndex()}
-            zoomLevels={model.zoomLevels}
-            itemById={(id) => model.itemsById().get(id)}
-            getBufferedThumbnailSrc={model.getBufferedThumbnailSrc}
-            shouldDeferEditorStripThumbnails={model.shouldDeferEditorStripThumbnails()}
-            activeMediaItemId={model.activeMediaItemId()}
-            isSelected={(id) => model.selection.selectedMediaItemIdSet().has(id)}
-            isFocused={(id) =>
-              model.selection.keyboardNavActive() &&
-              model.selection.focusedItemId() === id
-            }
-            showSelectionControls={model.selection.showSelectionControls()}
-            onThumbnailLoaded={model.rememberThumbnailSrc}
-            onActivate={(item, src) => {
-              const libraryId = model.selectedLibraryId();
-              if (!libraryId) {
-                throw new Error("selected library is required");
-              }
-              void model.itemActions.handleOpenItem(item, libraryId, src);
-            }}
-            onToggleSelection={model.selection.toggleMediaSelection}
-            onShiftSelect={model.selection.rangeSelectMedia}
-            onFocusItem={(id) => {
-              model.selection.setFocusedItemId(id);
-              model.selection.setKeyboardNavActive(false);
-            }}
-          />
+          <PictureGrid />
         </div>
       </div>
 

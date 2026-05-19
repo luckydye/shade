@@ -27,6 +27,12 @@ import {
   peerLibraryPeerId,
 } from "./media-utils";
 import { useMediaViewStore } from "./media-view-store";
+import {
+  PICTURE_GRID_ZOOM_LEVELS,
+  pictureGridZoomIndex,
+  zoomPictureGridIn,
+  zoomPictureGridOut,
+} from "./picture-grid-state";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -637,8 +643,8 @@ export const LibrarySelector: Component = () => {
             <Button
               type="button"
               class="h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40 min-w-7 px-1.5 text-[13px] leading-none"
-              disabled={store.zoomIndex() === 0}
-              onClick={() => store.setZoomIndex((i) => Math.max(0, i - 1))}
+              disabled={pictureGridZoomIndex() === 0}
+              onClick={zoomPictureGridOut}
               aria-label="Decrease thumbnail size"
             >
               -
@@ -646,10 +652,8 @@ export const LibrarySelector: Component = () => {
             <Button
               type="button"
               class="h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40 min-w-7 px-1.5 text-[13px] leading-none"
-              disabled={store.zoomIndex() === store.zoomLevelCount - 1}
-              onClick={() =>
-                store.setZoomIndex((i) => Math.min(store.zoomLevelCount - 1, i + 1))
-              }
+              disabled={pictureGridZoomIndex() === PICTURE_GRID_ZOOM_LEVELS.length - 1}
+              onClick={zoomPictureGridIn}
               aria-label="Increase thumbnail size"
             >
               +

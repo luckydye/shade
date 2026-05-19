@@ -2,6 +2,7 @@ import { createEffect, on, onCleanup, onMount } from "solid-js";
 import { actions } from "../../store/actions";
 import { registerMediaBrowserController } from "../../store/media-browser-control";
 import { useMediaViewStore } from "./media-view-store";
+import { zoomPictureGridIn, zoomPictureGridOut } from "./picture-grid-state";
 
 export function useMediaViewActions(params: {
   toggleMediaSelection: (itemId: string) => void;
@@ -112,7 +113,7 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        store.setZoomIndex((i) => Math.min(store.zoomLevelCount - 1, i + 1));
+        zoomPictureGridIn();
       },
     });
 
@@ -122,7 +123,7 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        store.setZoomIndex((i) => Math.max(0, i - 1));
+        zoomPictureGridOut();
       },
     });
 

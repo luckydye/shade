@@ -7,7 +7,7 @@ import {
 } from "solid-js";
 import { useBatchOperations } from "../../data/use-batch-operations";
 import { useLayerStack } from "../../data/use-layer-stack";
-import { type MediaItem, useLibraryItems } from "../../data/use-library-items";
+import { useLibraryItems } from "../../data/use-library-items";
 import { useLibrarySyncProgress } from "../../data/use-library-sync-progress";
 import { useMediaLibraryList } from "../../data/use-media-library-list";
 import { useMediaViewStatus } from "../../data/use-media-view-status";
@@ -16,6 +16,7 @@ import { usePresetList } from "../../data/use-preset-list";
 import { state } from "../../store/editor-store";
 import { actions, buildActionContext } from "../../store/actions";
 import { provideCollectionMembershipStore } from "./collection-membership-store";
+import { provideMediaSelectionStore } from "./media-selection-store";
 import {
   filterMediaItemsByFilename,
   isCameraLibrary,
@@ -33,9 +34,6 @@ import { useCollectionMembership } from "./use-collection-membership";
 import { useMediaItemActions } from "./use-media-item-actions";
 import { useMediaSelection } from "./use-media-selection";
 import { useMediaViewActions } from "./use-media-view-actions";
-
-const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
-const ZOOM_LEVELS = [80, 100, 120, 160, 200, 260, 320] as const;
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -76,47 +74,7 @@ export function useMediaViewModel() {
   const onlinePeerIds = createMemo(
     () => new Set(discoveredPeers().map((peer) => peer.endpoint_id)),
   );
-  const [zoomIndex, setZoomIndex] = createSignal(3);
   let isDisposed = false;
-
-  const thumbnailMemoryBuffer = new Map<string, string>();
-
-  const thumbnailBufferKey = (item: MediaItem) =>
-    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}::ev:${item.metadata.latestSnapshotCreatedAt ?? "none"}::modified:${item.modifiedAt ?? "none"}`;
-
-  const getBufferedThumbnailSrc = (item: MediaItem) => {
-    const key = thumbnailBufferKey(item);
-    const url = thumbnailMemoryBuffer.get(key);
-    if (!url) {
-      return undefined;
-    }
-    thumbnailMemoryBuffer.delete(key);
-    thumbnailMemoryBuffer.set(key, url);
-    return url;
-  };
-
-  const rememberThumbnailSrc = (item: MediaItem, src: string) => {
-    if (!src.startsWith("blob:")) {
-      return;
-    }
-    const key = thumbnailBufferKey(item);
-    thumbnailMemoryBuffer.delete(key);
-    thumbnailMemoryBuffer.set(key, src);
-    while (thumbnailMemoryBuffer.size > THUMBNAIL_MEMORY_BUFFER_SIZE) {
-      const oldestKey = thumbnailMemoryBuffer.keys().next().value;
-      if (typeof oldestKey !== "string") {
-        throw new Error("thumbnail memory buffer is out of sync");
-      }
-      const oldestSrc = thumbnailMemoryBuffer.get(oldestKey);
-      if (!oldestSrc) {
-        throw new Error("thumbnail memory buffer entry is missing");
-      }
-      thumbnailMemoryBuffer.delete(oldestKey);
-      if (oldestSrc !== state.loadingMediaSrc) {
-        URL.revokeObjectURL(oldestSrc);
-      }
-    }
-  };
 
   const libraryEntries = createMemo<LibraryEntry[]>(() => libraries() ?? []);
   const selectedLibrary = createMemo(
@@ -200,11 +158,19 @@ export function useMediaViewModel() {
     selectedLibrary,
     libraryEntries,
     refetchLibraries,
+    activeFilenameFilter,
+    activeMediaItemId,
     availableItemCount: () => availableItems().length,
+    displayedItems,
     filenameFilter,
     setFilenameFilter,
     flatItemIds,
+    hasLibraries,
+    isLibraryScanComplete,
+    itemsLoading: () => items.loading,
     itemsById,
+    selectedLibraryIsOffline,
+    shouldDeferEditorStripThumbnails,
     canWriteSelectedLibrary,
     isSubmitting,
     setIsSubmitting,
@@ -214,9 +180,6 @@ export function useMediaViewModel() {
     setError,
     setMediaActionStatus,
     setShowApplyPresetMenu,
-    zoomIndex,
-    setZoomIndex,
-    zoomLevelCount: ZOOM_LEVELS.length,
     syncProgress,
     pickDirectory,
     addMediaLibrary,
@@ -232,6 +195,7 @@ export function useMediaViewModel() {
   });
 
   const selection = useMediaSelection();
+  provideMediaSelectionStore(selection);
   const itemActions = useMediaItemActions();
   useMediaViewActions({
     toggleMediaSelection: selection.toggleMediaSelection,
@@ -284,12 +248,6 @@ export function useMediaViewModel() {
     onCleanup(() => {
       isDisposed = true;
       window.clearInterval(libraryRefreshTimer);
-      for (const src of thumbnailMemoryBuffer.values()) {
-        if (src !== state.loadingMediaSrc) {
-          URL.revokeObjectURL(src);
-        }
-      }
-      thumbnailMemoryBuffer.clear();
     });
   });
 
@@ -344,25 +302,9 @@ export function useMediaViewModel() {
   });
 
   return {
-    activeFilenameFilter,
-    activeMediaItemId,
     availableItems,
     collections,
-    displayedItems,
-    filenameFilter,
-    getBufferedThumbnailSrc,
-    hasLibraries,
     isLibraryScanComplete,
-    itemActions,
-    itemsLoading: () => items.loading,
-    itemsById,
-    rememberThumbnailSrc,
     selectedLibrary,
-    selectedLibraryId,
-    selectedLibraryIsOffline,
-    selection,
-    shouldDeferEditorStripThumbnails,
-    zoomIndex,
-    zoomLevels: ZOOM_LEVELS,
   };
 }

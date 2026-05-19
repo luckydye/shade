@@ -10,10 +10,13 @@ import {
   untrack,
 } from "solid-js";
 import type { MediaItem } from "../../data/use-library-items";
+import { state } from "../../store/editor-store";
 import { Button } from "../Button";
 import { actions } from "../../store/actions";
 import { mediaViewFocusedItemId } from "../../store/media-view-context";
 import { MediaTile } from "./MediaTile";
+import { useMediaItemActions } from "./use-media-item-actions";
+import { useMediaSelectionStore } from "./media-selection-store";
 import { useMediaViewStore } from "./media-view-store";
 import {
   formatModificationMonth,
@@ -21,42 +24,23 @@ import {
   type MediaGridRow,
   modificationMonthKey,
 } from "./media-utils";
-import { setPictureGridColumns, setPictureGridRows } from "./picture-grid-state";
+import {
+  PICTURE_GRID_ZOOM_LEVELS,
+  pictureGridZoomIndex,
+  setPictureGridColumns,
+  setPictureGridRows,
+} from "./picture-grid-state";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
 const HEADER_ROW_HEIGHT = 32;
 const OVERSCAN_ROWS = 2;
+const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
 
-export type PictureGridProps = {
-  displayedItemCount: number;
-  displayedItems: MediaItem[];
-  hasLibraries: boolean;
-  isEditorStrip: boolean;
-  isLibraryScanComplete: boolean;
-  availableItemCount: number;
-  selectedLibraryIsOffline: boolean;
-  itemsLoading: boolean;
-  activeFilenameFilterCount: number;
-  filenameFilter: string;
-  zoomIndex: number;
-  zoomLevels: readonly number[];
-  itemById: (id: string) => MediaItem | undefined;
-  getBufferedThumbnailSrc: (item: MediaItem) => string | undefined;
-  shouldDeferEditorStripThumbnails: boolean;
-  activeMediaItemId: string | null;
-  isSelected: (id: string) => boolean;
-  isFocused: (id: string) => boolean;
-  showSelectionControls: boolean;
-  onThumbnailLoaded: (item: MediaItem, src: string) => void;
-  onActivate: (item: MediaItem, src: string | null) => void;
-  onToggleSelection: (id: string) => void;
-  onShiftSelect: (id: string) => void;
-  onFocusItem: (id: string) => void;
-};
-
-export const PictureGrid: Component<PictureGridProps> = (props) => {
+export const PictureGrid: Component = () => {
   const store = useMediaViewStore();
+  const selection = useMediaSelectionStore();
+  const itemActions = useMediaItemActions();
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -64,10 +48,49 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
   const [anchorRowOffset, setAnchorRowOffset] = createSignal(0);
   const [isScrolling, setIsScrolling] = createSignal(false);
   const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | null>(null);
+  const isEditorStrip = () => state.currentView === "editor";
+  const thumbnailMemoryBuffer = new Map<string, string>();
   let scrollLabelTimeout: ReturnType<typeof setTimeout> | undefined;
 
+  const thumbnailBufferKey = (item: MediaItem) =>
+    `${mediaItemKey(item)}::snapshot:${item.metadata.latestSnapshotId ?? "none"}::ev:${item.metadata.latestSnapshotCreatedAt ?? "none"}::modified:${item.modifiedAt ?? "none"}`;
+
+  const getBufferedThumbnailSrc = (item: MediaItem) => {
+    const key = thumbnailBufferKey(item);
+    const url = thumbnailMemoryBuffer.get(key);
+    if (!url) {
+      return undefined;
+    }
+    thumbnailMemoryBuffer.delete(key);
+    thumbnailMemoryBuffer.set(key, url);
+    return url;
+  };
+
+  const rememberThumbnailSrc = (item: MediaItem, src: string) => {
+    if (!src.startsWith("blob:")) {
+      return;
+    }
+    const key = thumbnailBufferKey(item);
+    thumbnailMemoryBuffer.delete(key);
+    thumbnailMemoryBuffer.set(key, src);
+    while (thumbnailMemoryBuffer.size > THUMBNAIL_MEMORY_BUFFER_SIZE) {
+      const oldestKey = thumbnailMemoryBuffer.keys().next().value;
+      if (typeof oldestKey !== "string") {
+        throw new Error("thumbnail memory buffer is out of sync");
+      }
+      const oldestSrc = thumbnailMemoryBuffer.get(oldestKey);
+      if (!oldestSrc) {
+        throw new Error("thumbnail memory buffer entry is missing");
+      }
+      thumbnailMemoryBuffer.delete(oldestKey);
+      if (oldestSrc !== state.loadingMediaSrc) {
+        URL.revokeObjectURL(oldestSrc);
+      }
+    }
+  };
+
   const tileMinWidth = createMemo(() => {
-    const base = props.zoomLevels[props.zoomIndex] ?? 160;
+    const base = PICTURE_GRID_ZOOM_LEVELS[pictureGridZoomIndex()] ?? 160;
     if (viewportWidth() < 640) {
       return Math.min(base, 140);
     }
@@ -94,7 +117,7 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
     const currentColumns = columns();
     let lastDateKey: string | null = null;
     let currentRow: string[] = [];
-    for (const item of props.displayedItems) {
+    for (const item of store.displayedItems()) {
       const dateKey = modificationMonthKey(item.modifiedAt);
       if (lastDateKey !== dateKey) {
         if (currentRow.length > 0) {
@@ -263,7 +286,7 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
   const scrollLabel = createMemo(() => {
     const id = anchorItemId();
     if (!id) return "";
-    const item = props.itemById(id);
+    const item = store.itemsById().get(id);
     if (!item) return "";
     return formatModificationMonth(item.modifiedAt);
   });
@@ -385,6 +408,12 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
 
   onCleanup(() => {
     clearTimeout(scrollLabelTimeout);
+    for (const src of thumbnailMemoryBuffer.values()) {
+      if (src !== state.loadingMediaSrc) {
+        URL.revokeObjectURL(src);
+      }
+    }
+    thumbnailMemoryBuffer.clear();
     setPictureGridColumns(1);
     setPictureGridRows([]);
     actions.unregister("media.grid.reset-scroll");
@@ -420,28 +449,40 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
             ) : (
               <For each={row.ids}>
                 {(id) => {
-                  const item = () => props.itemById(id);
+                  const item = () => store.itemsById().get(id);
                   return (
                     <Show when={item()}>
                       <MediaTile
                         item={item()!}
-                        cachedSrc={props.getBufferedThumbnailSrc(item()!)}
+                        cachedSrc={getBufferedThumbnailSrc(item()!)}
                         compact={compact}
-                        offline={props.selectedLibraryIsOffline}
+                        offline={store.selectedLibraryIsOffline()}
                         disableThumbnailLoad={
-                          compact ? props.shouldDeferEditorStripThumbnails : undefined
+                          compact
+                            ? store.shouldDeferEditorStripThumbnails()
+                            : undefined
                         }
-                        active={props.activeMediaItemId === id}
-                        selected={props.isSelected(id)}
-                        focused={props.isFocused(id)}
-                        showSelectionControls={props.showSelectionControls}
-                        onThumbnailLoaded={(src) =>
-                          props.onThumbnailLoaded(item()!, src)
+                        active={store.activeMediaItemId() === id}
+                        selected={selection.selectedMediaItemIdSet().has(id)}
+                        focused={
+                          selection.keyboardNavActive() &&
+                          selection.focusedItemId() === id
                         }
-                        onActivate={(src) => props.onActivate(item()!, src)}
-                        onToggleSelection={() => props.onToggleSelection(id)}
-                        onShiftSelect={() => props.onShiftSelect(id)}
-                        onFocus={() => props.onFocusItem(id)}
+                        showSelectionControls={selection.showSelectionControls()}
+                        onThumbnailLoaded={(src) => rememberThumbnailSrc(item()!, src)}
+                        onActivate={(src) => {
+                          const libraryId = store.selectedLibraryId();
+                          if (!libraryId) {
+                            throw new Error("selected library is required");
+                          }
+                          void itemActions.handleOpenItem(item()!, libraryId, src);
+                        }}
+                        onToggleSelection={() => selection.toggleMediaSelection(id)}
+                        onShiftSelect={() => selection.rangeSelectMedia(id)}
+                        onFocus={() => {
+                          selection.setFocusedItemId(id);
+                          selection.setKeyboardNavActive(false);
+                        }}
                       />
                     </Show>
                   );
@@ -458,20 +499,20 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
     <div
       ref={setScrollRef}
       class={
-        props.isEditorStrip
+        isEditorStrip()
           ? "media-scroll relative flex-1 min-h-0 overflow-y-auto px-2 py-3"
           : "media-scroll relative flex-1 min-h-0 overflow-y-auto p-4 touch-mobile:p-1"
       }
       onScroll={handleScroll}
     >
       <Show
-        when={props.displayedItemCount > 0}
+        when={store.displayedItems().length > 0}
         fallback={
           <Show
-            when={props.hasLibraries}
+            when={store.hasLibraries()}
             fallback={
               <Show
-                when={!props.isEditorStrip}
+                when={!isEditorStrip()}
                 fallback={
                   <div class="px-3 py-4 text-sm text-[var(--text-faint)] mx-1 text-xs">
                     Open the media view to add your first library.
@@ -507,25 +548,25 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
             }
           >
             <Show
-              when={props.selectedLibraryIsOffline}
+              when={store.selectedLibraryIsOffline()}
               fallback={
                 <Show
-                  when={props.itemsLoading || !props.isLibraryScanComplete}
+                  when={store.itemsLoading() || !store.isLibraryScanComplete()}
                   fallback={
                     <div
                       class={`px-3 py-4 text-sm text-[var(--text-faint)] ${
-                        props.isEditorStrip ? "mx-1 text-xs" : "text-sm"
+                        isEditorStrip() ? "mx-1 text-xs" : "text-sm"
                       }`}
                     >
-                      {props.activeFilenameFilterCount > 0
-                        ? `No media match "${props.filenameFilter.trim()}".`
+                      {store.activeFilenameFilter().length > 0
+                        ? `No media match "${store.filenameFilter().trim()}".`
                         : `No images found in ${store.selectedLibrary()?.name ?? "this library"}.`}
                     </div>
                   }
                 >
                   <div
                     class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                      props.isEditorStrip ? "mx-1 text-xs" : "text-sm"
+                      isEditorStrip() ? "mx-1 text-xs" : "text-sm"
                     }`}
                   >
                     <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
@@ -533,12 +574,12 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
                     </div>
                     <div class="space-y-1">
                       <h2 class="text-sm font-semibold text-[var(--text)]">
-                        {props.availableItemCount > 0
-                          ? `Found ${props.availableItemCount.toLocaleString()} images…`
+                        {store.availableItemCount() > 0
+                          ? `Found ${store.availableItemCount().toLocaleString()} images…`
                           : "Scanning library…"}
                       </h2>
                       <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                        {props.itemsLoading
+                        {store.itemsLoading()
                           ? "Loading your library."
                           : "Indexing images in this library. This may take a while for large or remote libraries."}
                       </p>
@@ -549,7 +590,7 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
             >
               <div
                 class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                  props.isEditorStrip ? "mx-1 text-xs" : "text-sm"
+                  isEditorStrip() ? "mx-1 text-xs" : "text-sm"
                 }`}
               >
                 <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
@@ -583,13 +624,13 @@ export const PictureGrid: Component<PictureGridProps> = (props) => {
         }
       >
         <>
-          <Show when={!props.isEditorStrip} fallback={renderRows(true)}>
+          <Show when={!isEditorStrip()} fallback={renderRows(true)}>
             {renderRows(false)}
           </Show>
           <Show when={isScrolling() && scrollLabel()}>
             <div
               class={`pointer-events-none absolute ${
-                props.isEditorStrip
+                isEditorStrip()
                   ? "right-0 translate-x-[calc(100%+0.5rem)] text-left"
                   : "right-4"
               } z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]`}
