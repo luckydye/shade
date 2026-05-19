@@ -10,10 +10,14 @@ import { SelectionBar } from "./media-view/SelectionBar";
 import { UploadDropOverlay } from "./media-view/UploadDropOverlay";
 import { targetUsesOwnFocus } from "./media-view/media-utils";
 import { useMediaViewModel } from "./media-view/use-media-view-model";
+import { useEdgeSwipe } from "../app/use-edge-swipe";
 import backSvg from "../assets/icons/back.svg?raw";
 
 export const MediaView: Component = () => {
   const model = useMediaViewModel();
+  const handleEdgeSwipe = useEdgeSwipe({
+    onSwipe: () => model.collections.setMobileSidebarOpen(true),
+  });
   let mediaShellRef: HTMLDivElement | undefined;
 
   const isEditorStrip = () => state.currentView === "editor";
@@ -46,28 +50,7 @@ export const MediaView: Component = () => {
       </Show>
       <div
         class="relative flex-1 min-h-0 flex"
-        onTouchStart={(e) => {
-          const touch = e.touches[0];
-          if (touch.clientX > 24) return;
-          const startX = touch.clientX;
-          const startY = touch.clientY;
-          let moved = false;
-          function onMove(ev: TouchEvent) {
-            if (moved) return;
-            const dx = ev.touches[0].clientX - startX;
-            const dy = Math.abs(ev.touches[0].clientY - startY);
-            if (dx > 30 && dy < 50) {
-              moved = true;
-              model.collections.setMobileSidebarOpen(true);
-            }
-          }
-          function onEnd() {
-            document.removeEventListener("touchmove", onMove);
-            document.removeEventListener("touchend", onEnd);
-          }
-          document.addEventListener("touchmove", onMove, { passive: true });
-          document.addEventListener("touchend", onEnd, { once: true });
-        }}
+        onTouchStart={handleEdgeSwipe}
       >
         <Show when={!isEditorStrip() && model.selectedLibrary()}>
           <CollectionSidebar />
@@ -98,12 +81,13 @@ export const MediaView: Component = () => {
               Indexing · {model.availableItems().length.toLocaleString()} images found so far
             </div>
           </Show>
+          
           <PictureGrid />
         </div>
       </div>
 
       <div
-        class={`selection-bar ${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 touch-mobile:hidden lg:px-6`}
+        class={`${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 touch-mobile:hidden lg:px-6`}
       >
         <SelectionBar />
       </div>
