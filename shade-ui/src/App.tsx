@@ -1,57 +1,25 @@
-import { type Component, createEffect, onCleanup, onMount, Show } from "solid-js";
+import { type Component, onMount, Show } from "solid-js";
 import { useNavigationHistory } from "./app/use-navigation-history";
 import { EditorView } from "./components/EditorView";
 import { MediaView } from "./components/MediaView";
-import { targetAcceptsTextInput } from "./components/media-view/media-utils";
 import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
-import actionShortcuts from "./keybinds.json";
-import { type ActionShortcutMap, actions, buildActionContext } from "./store/actions";
-import { isAdjustmentSliderActive, setState, state } from "./store/editor-store";
+import { setState, state } from "./store/editor-store";
 import { checkWebGPU } from "./utils/webgpu-check";
-
-let actionShortcutsLoaded = false;
+import { useKeybinds } from "./store/use-keybinds";
 
 const App: Component = () => {
-  const hasImage = () => state.canvasWidth > 0 || state.isLoading;
-  const showEditor = () => hasImage() && state.currentView === "editor";
+  const showEditor = () => (state.canvasWidth > 0 || state.isLoading) && state.currentView === "editor";
 
   useNavigationHistory();
+  useKeybinds();
 
-  createEffect(() => {
-    document.documentElement.style.setProperty(
-      "--surface-opacity",
-      isAdjustmentSliderActive() ? "0" : "1",
-    );
-  });
-
-  onMount(() => {
-    void (async () => {
-      const webgpu = await checkWebGPU();
-      setState({
-        webgpuAvailable: webgpu.available,
-        webgpuReason: webgpu.available ? null : (webgpu.reason ?? "WebGPU unavailable"),
-      });
-    })();
-  });
-
-  onMount(() => {
-    if (!actionShortcutsLoaded) {
-      actions.loadShortcuts(actionShortcuts as ActionShortcutMap);
-      actionShortcutsLoaded = true;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (targetAcceptsTextInput(e.target)) return;
-      if (e.defaultPrevented) return;
-      const handled = actions.handleKey(e, buildActionContext());
-      if (handled) return;
-    };
-    document.addEventListener("keydown", handleKeyDown);
-
-    onCleanup(() => {
-      document.removeEventListener("keydown", handleKeyDown);
+  onMount(async () => {
+    const webgpu = await checkWebGPU();
+    setState({
+      webgpuAvailable: webgpu.available,
+      webgpuReason: webgpu.available ? null : (webgpu.reason ?? "WebGPU unavailable"),
     });
   });
 

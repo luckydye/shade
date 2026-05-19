@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import type { CropAspectRatioPreset } from "../utils/crop-aspect";
 import type { RenderedTile } from "../viewport/types";
+import { createEffect } from "solid-js/types/server/reactive.js";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop" | "text";
@@ -295,3 +296,10 @@ export function showEditorView() {
 export function showMediaView() {
   setState("currentView", "media");
 }
+
+createEffect(() => {
+  document.documentElement.style.setProperty(
+    "--surface-opacity",
+    isAdjustmentSliderActive() ? "0" : "1",
+  );
+});
