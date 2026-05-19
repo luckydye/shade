@@ -31,3 +31,7 @@ export function normalizeTags(tags: unknown) {
     ? tags.filter((tag): tag is string => typeof tag === "string" && tag.trim() !== "")
     : [];
 }
+
+export function tw(...classes: string[]): string {
+  return classes.filter(Boolean).join(" ");
+}

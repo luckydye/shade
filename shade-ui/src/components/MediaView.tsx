@@ -12,32 +12,23 @@ import { targetUsesOwnFocus } from "./media-view/media-utils";
 import { useMediaViewModel } from "./media-view/use-media-view-model";
 import { useEdgeSwipe } from "../app/use-edge-swipe";
 import backSvg from "../assets/icons/back.svg?raw";
+import { tw } from "../utils";
 
 export const MediaView: Component = () => {
   const model = useMediaViewModel();
   const handleEdgeSwipe = useEdgeSwipe({
     onSwipe: () => model.collections.setMobileSidebarOpen(true),
   });
-  let mediaShellRef: HTMLDivElement | undefined;
 
   const isEditorStrip = () => state.currentView === "editor";
-  const shellClass = () =>
-    isEditorStrip()
-      ? "flex w-[112px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel-bg)] touch-compact:hidden"
-      : "flex flex-1 flex-col overflow-hidden pt-0 touch-compact:pt-[calc(env(safe-area-inset-top)+3.5rem)]";
 
   return (
     <section
-      ref={mediaShellRef}
-      tabIndex={-1}
-      aria-label="Media view"
-      class={`${shellClass()} mobile-slider-fade outline-none relative transition-opacity duration-150`}
-      onPointerDown={(event) => {
-        if (targetUsesOwnFocus(event.target)) {
-          return;
-        }
-        mediaShellRef?.focus();
-      }}
+      class={tw(`mobile-slider-fade outline-none relative transition-opacity duration-150`,
+        isEditorStrip()
+          ? "flex w-[112px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel-bg)] touch-compact:hidden"
+          : "flex flex-1 flex-col overflow-hidden pt-0 touch-compact:pt-[calc(env(safe-area-inset-top)+3.5rem)]"
+      )}
     >
       <UploadDropOverlay />
       <Show when={!isEditorStrip()}>
