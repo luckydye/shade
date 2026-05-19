@@ -17,13 +17,6 @@ export type MediaGridRow =
 
 export type OpenMediaMode = "append" | "replace";
 
-export type UploadProgress = {
-  phase: "uploading" | "refreshing";
-  totalFiles: number;
-  completedFiles: number;
-  currentFileName: string | null;
-};
-
 export type UploadDragFeedback = {
   itemCount: number | null;
 };

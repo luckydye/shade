@@ -1,27 +1,31 @@
-import { type Component, createEffect, onCleanup, onMount } from "solid-js";
+import {
+  type Component,
+  createEffect,
+  onCleanup,
+  onMount,
+} from "solid-js";
+import actionShortcuts from "./keybinds.json";
+import { EditorCopy } from "./actions/editor-copy";
+import { EditorPaste } from "./actions/editor-paste";
+import { EditorRedo } from "./actions/editor-redo";
+import { EditorUndo } from "./actions/editor-undo";
 import { Inspector } from "./components/Inspector";
 import { MediaView } from "./components/MediaView";
 import { targetAcceptsTextInput } from "./components/media-view/media-utils";
+import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
-import { useLayerStack } from "./data/use-layer-stack";
-import { usePresetList } from "./data/use-preset-list";
-import { actions, buildActionContext } from "./store/actions";
+import { actions, type ActionShortcutMap, buildActionContext } from "./store/actions";
 import { setState, showEditorView, showMediaView, state } from "./store/editor-store";
-import { redo, undo } from "./store/history";
-import { getMediaBrowserController } from "./store/media-browser-control";
-import { mediaViewFocusedItem } from "./store/media-view-context";
-import { showToast } from "./store/toast";
 import { checkWebGPU } from "./utils/webgpu-check";
-
-const CLIPBOARD_PRESET_NAME = "__clipboard__";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };
 
 const MEDIA_HISTORY_STATE: MobileHistoryState = { shadeView: "media" };
 const EDITOR_HISTORY_STATE: MobileHistoryState = { shadeView: "editor" };
+let actionShortcutsLoaded = false;
 
 function historyView(value: unknown): AppView | null {
   if (!value || typeof value !== "object") {
@@ -32,12 +36,6 @@ function historyView(value: unknown): AppView | null {
 }
 
 const App: Component = () => {
-  const {
-    deletePreset,
-    getSnapshotPresetJson,
-    savePresetFromJson,
-    serializeCurrentPreset,
-  } = usePresetList();
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   const showEditor = () => hasImage() && state.currentView === "editor";
   let isHandlingHistoryPop = false;
@@ -59,86 +57,15 @@ const App: Component = () => {
   });
 
   onMount(() => {
-    actions.register({
-      id: "editor.undo",
-      title: "Undo",
-      group: "Editor",
-      when: (ctx) => ctx.hasImage,
-      run: () => undo(),
-    });
+    if (!actionShortcutsLoaded) {
+      actions.loadShortcuts(actionShortcuts as ActionShortcutMap);
+      actionShortcutsLoaded = true;
+    }
 
-    actions.register({
-      id: "editor.redo",
-      title: "Redo",
-      group: "Editor",
-      when: (ctx) => ctx.hasImage,
-      run: () => redo(),
-    });
-
-    actions.register({
-      id: "editor.copy-edits",
-      title: "Copy Edits",
-      group: "Editor",
-      when: (ctx) =>
-        (ctx.hasImage && ctx.currentView === "editor") ||
-        (ctx.currentView === "media" && ctx.mediaViewFocusedItemId !== null),
-      run: async (ctx) => {
-        let json: string | null;
-        if (ctx.currentView === "media") {
-          const item = mediaViewFocusedItem();
-          if (!item) return;
-          json = await getSnapshotPresetJson(item.fingerprint, item.path);
-          if (!json) {
-            showToast("No edits to copy");
-            return;
-          }
-        } else {
-          json = await serializeCurrentPreset();
-        }
-        await navigator.clipboard.writeText(json);
-        showToast("Edits copied");
-      },
-    });
-
-    actions.register({
-      id: "editor.paste-edits",
-      title: "Paste Edits",
-      group: "Editor",
-      when: (ctx) => {
-        if (ctx.currentView === "editor") return ctx.hasImage;
-        if (ctx.currentView === "media") return ctx.mediaViewSelectedItemIds.length > 0;
-        return false;
-      },
-      run: async (ctx) => {
-        let json: string;
-        try {
-          json = await navigator.clipboard.readText();
-          JSON.parse(json);
-        } catch {
-          showToast("Nothing to paste");
-          return;
-        }
-        try {
-          await savePresetFromJson(CLIPBOARD_PRESET_NAME, json);
-          if (ctx.currentView === "editor") {
-            await useLayerStack().loadPreset(CLIPBOARD_PRESET_NAME);
-            showToast("Edits pasted");
-          } else {
-            await getMediaBrowserController().pasteEdits(CLIPBOARD_PRESET_NAME);
-            showToast(
-              `Edits pasted to ${ctx.mediaViewSelectedItemIds.length} image${ctx.mediaViewSelectedItemIds.length > 1 ? "s" : ""}`,
-            );
-          }
-        } finally {
-          await deletePreset(CLIPBOARD_PRESET_NAME).catch(() => undefined);
-        }
-      },
-    });
-
-    actions.mapShortcut("mod+z", "editor.undo");
-    actions.mapShortcut("mod+shift+z", "editor.redo");
-    actions.mapShortcut("mod+c", "editor.copy-edits");
-    actions.mapShortcut("mod+v", "editor.paste-edits");
+    actions.register(EditorUndo);
+    actions.register(EditorRedo);
+    actions.register(EditorCopy);
+    actions.register(EditorPaste);
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (targetAcceptsTextInput(e.target)) return;
@@ -207,13 +134,14 @@ const App: Component = () => {
       <Toolbar />
       <div class="flex min-h-0 flex-1">
         <MediaView />
-        <div
+        {/*<div
           class={`min-h-0 flex-1 flex-row touch-compact:flex-col ${showEditor() ? "flex" : "hidden"}`}
         >
           <Viewport />
           <Inspector />
-        </div>
+        </div>*/}
       </div>
+      <StatusPanel />
       <Toast />
     </div>
   );

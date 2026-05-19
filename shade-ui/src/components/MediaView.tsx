@@ -1,98 +1,47 @@
-import type { Component, JSX } from "solid-js";
+import type { Component } from "solid-js";
 import {
   createEffect,
   createMemo,
   createSignal,
-  For,
-  on,
   onCleanup,
   onMount,
   Show,
-  untrack,
 } from "solid-js";
-import { Portal } from "solid-js/web";
-import type { S3MediaLibraryInput } from "../types";
 import { useBatchOperations } from "../data/use-batch-operations";
-import { useCollectionItems } from "../data/use-collection-items";
-import { useCollectionList } from "../data/use-collection-list";
 import { useLayerStack } from "../data/use-layer-stack";
 import { type MediaItem, useLibraryItems } from "../data/use-library-items";
 import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
 import { useMediaLibraryList } from "../data/use-media-library-list";
-import { listenNativeDragDrop } from "../data/use-native-drag-drop";
 import { usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
-import { actions, buildActionContext } from "../store/actions";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor-store";
-import { registerMediaBrowserController } from "../store/media-browser-control";
-import {
-  setMediaViewFocusedItem,
-  setMediaViewFocusedItemId,
-  setMediaViewSelectedBatchItems,
-  setMediaViewSelectedItemIds,
-  setMediaViewSelectedLibraryId,
-} from "../store/media-view-context";
-import { useOpenImage } from "../store/use-open-image";
-import { isTauriRuntime } from "../utils";
 import { ActionButton } from "./ActionButton";
-import { Button } from "./Button";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
-import { MediaTile } from "./media-view/MediaTile";
+import { LibrarySelector } from "./media-view/LibrarySelector";
+import { PictureGrid } from "./media-view/PictureGrid";
+import { SelectionBar } from "./media-view/SelectionBar";
+import { pictureGridColumns, pictureGridRows } from "./media-view/picture-grid-state";
 import {
-  clipboardImageFiles,
-  draggedItemCount,
-  draggedPathCount,
-  droppedFiles,
   filterMediaItemsByFilename,
-  formatModificationMonth,
   isCameraLibrary,
   isLibraryOffline,
   isLocalLibraryRefreshing,
   isPeerLibrary,
-  isPinnedLibrary,
   isS3Library,
   type LibraryEntry,
   libraryIsWritable,
-  type MediaGridRow,
   mediaItemKey,
-  mergeLibraryOrder,
-  modificationMonthKey,
-  moveIdInOrder,
   normalizeFilenameFilter,
-  openMediaItem,
   peerLibraryPeerId,
-  targetAcceptsTextInput,
   targetUsesOwnFocus,
-  type UploadDragFeedback,
-  type UploadProgress,
 } from "./media-view/media-utils";
-import { filenameFromUrl, transformImageUrl } from "./media-view/url-transformers";
+import { useCollectionMembership } from "./media-view/use-collection-membership";
+import { useMediaItemActions } from "./media-view/use-media-item-actions";
+import { useMediaSelection } from "./media-view/use-media-selection";
+import { useMediaUploadHandlers } from "./media-view/use-media-upload-handlers";
+import { useMediaViewActions } from "./media-view/use-media-view-actions";
+import { actions, buildActionContext } from "../store/actions";
 
-type LocalMediaItem = Extract<MediaItem, { kind: "local" }>;
-
-const GRID_GAP = 12;
-const TILE_LABEL_HEIGHT = 24;
-const HEADER_ROW_HEIGHT = 32;
-const OVERSCAN_ROWS = 2;
-const PANEL_SECTION_TITLE_CLASS =
-  "text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)]";
-const SURFACE_BUTTON_CLASS =
-  "h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
-const GHOST_BUTTON_CLASS =
-  "h-8 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
-const DANGER_BUTTON_CLASS =
-  "h-8 rounded-md border border-[var(--danger-border)] bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:border-[var(--danger-hover-border)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
-const MENU_ITEM_BUTTON_CLASS =
-  "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";
-const MENU_DANGER_ITEM_BUTTON_CLASS =
-  "flex h-8 w-full items-center rounded-md px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger-hover-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--danger-hover-border)] disabled:opacity-40";
-const INPUT_CLASS =
-  "h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)] touch-mobile:h-10 touch-mobile:rounded-full touch-mobile:px-4 touch-mobile:text-base";
-const EMPTY_STATE_CLASS = "px-3 py-4 text-sm text-[var(--text-faint)]";
-const EMPTY_STATE_PANEL_CLASS =
-  "mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-8 text-center";
-const LIBRARY_TAB_BASE_CLASS =
-  "inline-flex h-7 shrink-0 items-center rounded-full border px-4 text-[12px] font-semibold tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)]";
 const THUMBNAIL_MEMORY_BUFFER_SIZE = 192;
 
 function toErrorMessage(err: unknown): string {
@@ -106,15 +55,8 @@ export const MediaView: Component = () => {
     libraries,
     refetch: refetchLibraries,
     addMediaLibrary,
-    addS3MediaLibrary,
-    getS3MediaLibrary,
     refreshLibraryIndex,
-    removeMediaLibrary,
-    removePeerLibrary,
-    setLibraryMode,
-    setMediaLibraryOrder,
     syncLibrary,
-    updateS3MediaLibrary,
     pickDirectory,
   } = useMediaLibraryList();
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
@@ -131,138 +73,19 @@ export const MediaView: Component = () => {
   const refetchCachedLibraryItems = () => refetchLibraryItems();
   const { presets, refetch: refetchPresets } = usePresetList();
   const [isSubmitting, setIsSubmitting] = createSignal(false);
-  const [supportsS3Libraries, setSupportsS3Libraries] = createSignal(false);
-  const [showS3Form, setShowS3Form] = createSignal(false);
-  const [editingS3LibraryId, setEditingS3LibraryId] = createSignal<string | null>(null);
-  const [showLibraryActions, setShowLibraryActions] = createSignal(false);
-  const [showAddDropdown, setShowAddDropdown] = createSignal(false);
-  const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
-  const [lastSelectedMediaItemId, setLastSelectedMediaItemId] = createSignal<
-    string | null
-  >(null);
   const [showApplyPresetMenu, setShowApplyPresetMenu] = createSignal(false);
   const [mediaActionStatus, setMediaActionStatus] = createSignal<string | null>(null);
   const [filenameFilter, setFilenameFilter] = createSignal("");
-  const [libraryOrder, setLibraryOrder] = createSignal<string[]>([]);
-  const [s3Draft, setS3Draft] = createSignal<S3MediaLibraryInput>({
-    name: "",
-    endpoint: "",
-    bucket: "",
-    region: "us-east-1",
-    access_key_id: "",
-    secret_access_key: "",
-    prefix: "",
-  });
   const [error, setError] = createSignal<string | null>(null);
-  const [viewportHeight, setViewportHeight] = createSignal(0);
-  const [viewportWidth, setViewportWidth] = createSignal(0);
-  const [scrollTop, setScrollTop] = createSignal(0);
-  const [libraryDropTarget, setLibraryDropTarget] = createSignal<{
-    libraryIdx: number;
-    position: "before" | "after";
-  } | null>(null);
-  // Scroll anchor: track the first visible item so scroll position can be
-  // restored after column count changes (e.g. window resize or view switch).
-  const [anchorItemId, setAnchorItemId] = createSignal<string | null>(null);
-  const [anchorRowOffset, setAnchorRowOffset] = createSignal(0);
-  const [isScrolling, setIsScrolling] = createSignal(false);
-  let scrollLabelTimeout: ReturnType<typeof setTimeout> | undefined;
-  let libraryDragState: {
-    pointerId: number;
-    libraryIdx: number;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-  } | null = null;
-  let suppressLibraryClickUntil = 0;
-  const [selectedCollectionId, setSelectedCollectionId] = createSignal<string | null>(
-    null,
-  );
-  const {
-    collections: collectionList,
-    refetch: refetchCollections,
-    createCollection,
-    deleteCollection,
-    renameCollection,
-  } = useCollectionList(selectedLibraryId);
-  const collections = () => collectionList() ?? [];
-  const {
-    items: collectionItemList,
-    refetch: refetchCollectionItemsRaw,
-    addToCollection,
-    removeFromCollection,
-  } = useCollectionItems(selectedCollectionId);
-  const collectionItemPaths = createMemo(
-    () => new Set((collectionItemList() ?? []).map((i) => i.fingerprint)),
-  );
-  const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
-  const [showAddToCollectionMenu, setShowAddToCollectionMenu] = createSignal(false);
-  const [uploadDragFeedback, setUploadDragFeedback] =
-    createSignal<UploadDragFeedback | null>(null);
-  const [uploadProgress, setUploadProgress] = createSignal<UploadProgress | null>(null);
   const syncProgress = useLibrarySyncProgress();
-  const exportProgress = batchOps.exportProgress;
-  const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
-  const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
-  const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
+  const { peers: discoveredPeers } = usePeerDiscovery();
+  const onlinePeerIds = createMemo(
+    () => new Set(discoveredPeers().map((peer) => peer.endpoint_id)),
+  );
   const ZOOM_LEVELS = [80, 100, 120, 160, 200, 260, 320];
   const [zoomIndex, setZoomIndex] = createSignal(3);
   let isDisposed = false;
   let mediaShellRef: HTMLDivElement | undefined;
-  const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | null>(null);
-  let libraryTabsRef: HTMLDivElement | undefined;
-  let libraryActionsRef: HTMLDivElement | undefined;
-  let addDropdownRef: HTMLDivElement | undefined;
-  let addDropdownMenuRef: HTMLDivElement | undefined;
-  const [addDropdownPosition, setAddDropdownPosition] = createSignal<{
-    left: number;
-    top: number;
-  } | null>(null);
-  createEffect(() => {
-    setMediaViewFocusedItemId(focusedItemId());
-    const id = focusedItemId();
-    const item = id ? itemsById().get(id) : undefined;
-    setMediaViewFocusedItem(
-      item
-        ? item.kind === "peer"
-          ? {
-              path: item.name,
-              fingerprint: item.fingerprint,
-              kind: "peer",
-              peerId: item.peerId,
-              id: item.id,
-            }
-          : { path: item.path, fingerprint: item.fingerprint, kind: "local" }
-        : null,
-    );
-  });
-
-  createEffect(() => {
-    setMediaViewSelectedItemIds(selectedMediaItemIds());
-  });
-
-  createEffect(() => {
-    setMediaViewSelectedLibraryId(selectedLibraryId());
-  });
-
-  createEffect(() => {
-    const byId = itemsById();
-    const batchItems = selectedMediaItemIds()
-      .map((id) => byId.get(id))
-      .filter((item): item is MediaItem => !!item)
-      .map((item) =>
-        item.kind === "peer"
-          ? {
-              path: item.name,
-              fingerprint: item.fingerprint,
-              kind: "peer" as const,
-              peerId: item.peerId,
-              id: item.id,
-            }
-          : { path: item.path, fingerprint: item.fingerprint, kind: "local" as const },
-      );
-    setMediaViewSelectedBatchItems(batchItems);
-  });
 
   const thumbnailMemoryBuffer = new Map<string, string>();
 
@@ -303,249 +126,14 @@ export const MediaView: Component = () => {
     }
   };
 
-  const navigateFocus = (direction: "left" | "right" | "up" | "down") => {
-    const ids = flatItemIds();
-    if (ids.length === 0) return;
-    let index = focusedItemId() ? ids.indexOf(focusedItemId()!) : -1;
-    if (index === -1) {
-      setFocusedItemId(ids[0]);
-      return;
-    }
-    const colCount = columns();
-    switch (direction) {
-      case "left":
-        index -= 1;
-        break;
-      case "right":
-        index += 1;
-        break;
-      case "up":
-        index -= colCount;
-        break;
-      case "down":
-        index += colCount;
-        break;
-    }
-    if (index >= 0 && index < ids.length) {
-      setFocusedItemId(ids[index]);
-    }
-  };
-
-  const scrollFocusedItemIntoView = () => {
-    const id = focusedItemId();
-    if (!id || !keyboardNavActive()) return;
-    const rows = stableGridRows();
-    const offsets = rowOffsets();
-    const rowHeight = tileRowHeight();
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (row.kind !== "items" || !row.ids.includes(id)) continue;
-      const rowTop = offsets[i];
-      const rowBottom = rowTop + rowHeight;
-      const container = scrollRef();
-      if (!container) return;
-      const viewTop = scrollTop();
-      const viewBottom = viewTop + viewportHeight();
-      if (rowTop < viewTop) {
-        container.scrollTop = rowTop - 4;
-        setScrollTop(rowTop - 4);
-      } else if (rowBottom > viewBottom) {
-        const newTop = rowBottom - viewportHeight() + 4;
-        container.scrollTop = newTop;
-        setScrollTop(newTop);
-      }
-      break;
-    }
-  };
-
-  const clearLibraryDragState = () => {
-    libraryDragState = null;
-    setLibraryDropTarget(null);
-  };
-
-  const resolveLibraryDropIndex = (target: {
-    libraryIdx: number;
-    position: "before" | "after";
-  }) => (target.position === "before" ? target.libraryIdx : target.libraryIdx + 1);
-
-  const updateLibraryDropTargetFromPoint = (clientX: number, clientY: number) => {
-    const element = document.elementFromPoint(clientX, clientY);
-    const target = element?.closest("[data-library-tab='true']");
-    if (!(target instanceof HTMLButtonElement)) {
-      setLibraryDropTarget(null);
-      return;
-    }
-    const libraryIdxAttr = target.dataset.libraryIdx;
-    if (!libraryIdxAttr) {
-      throw new Error("library tab is missing an index");
-    }
-    const libraryIdx = Number(libraryIdxAttr);
-    if (!Number.isInteger(libraryIdx)) {
-      throw new Error("library tab index must be an integer");
-    }
-    const bounds = target.getBoundingClientRect();
-    const isPinned = target.dataset.pinned === "true";
-    const position =
-      isPinned && clientX < bounds.left + bounds.width * 0.5
-        ? "after"
-        : clientX < bounds.left + bounds.width * 0.5
-          ? "before"
-          : "after";
-    setLibraryDropTarget({ libraryIdx, position });
-  };
-
-  const getLibraryDropCursorStyle = () => {
-    const container = libraryTabsRef;
-    const target = libraryDropTarget();
-    if (!container || !target) {
-      return { opacity: 0 };
-    }
-    const tab = container.querySelector<HTMLButtonElement>(
-      `[data-library-idx="${target.libraryIdx}"]`,
-    );
-    if (!(tab instanceof HTMLButtonElement)) {
-      throw new Error("library drop target tab is missing");
-    }
-    const containerBounds = container.getBoundingClientRect();
-    const tabBounds = tab.getBoundingClientRect();
-    const left =
-      (target.position === "before" ? tabBounds.left : tabBounds.right) -
-      containerBounds.left -
-      1.5;
-    return {
-      opacity: 1,
-      left: `${left}px`,
-      top: `${tabBounds.top - containerBounds.top}px`,
-      height: `${tabBounds.height}px`,
-    };
-  };
-
-  const startLibraryDrag = (event: PointerEvent, libraryIdx: number) => {
-    if (event.pointerType === "mouse" && event.button !== 0) {
-      return;
-    }
-    const currentTarget = event.currentTarget;
-    if (!(currentTarget instanceof HTMLButtonElement)) {
-      throw new Error("library tab must be a button");
-    }
-    if (currentTarget.dataset.pinned === "true") {
-      return;
-    }
-    currentTarget.setPointerCapture(event.pointerId);
-    libraryDragState = {
-      pointerId: event.pointerId,
-      libraryIdx,
-      startX: event.clientX,
-      startY: event.clientY,
-      dragging: false,
-    };
-  };
-
-  const commitLibraryDrop = async () => {
-    const fromIdx = libraryDragState?.libraryIdx ?? null;
-    const target = libraryDropTarget();
-    clearLibraryDragState();
-    if (fromIdx === null || target === null) {
-      return;
-    }
-    const nextOrder = moveIdInOrder(
-      libraryOrder(),
-      fromIdx,
-      resolveLibraryDropIndex(target),
-    );
-    await setMediaLibraryOrder(nextOrder);
-    setLibraryOrder(nextOrder);
-  };
-
-  const handleLibraryPointerMove = (event: PointerEvent) => {
-    const drag = libraryDragState;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const deltaX = Math.abs(event.clientX - drag.startX);
-    const deltaY = Math.abs(event.clientY - drag.startY);
-    if (!drag.dragging) {
-      if (Math.hypot(deltaX, deltaY) < 8) {
-        return;
-      }
-      libraryDragState = { ...drag, dragging: true };
-    }
-    event.preventDefault();
-    updateLibraryDropTargetFromPoint(event.clientX, event.clientY);
-  };
-
-  const handleLibraryPointerUp = (event: PointerEvent) => {
-    const drag = libraryDragState;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const currentTarget = event.currentTarget;
-    if (
-      currentTarget instanceof HTMLButtonElement &&
-      currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (drag.dragging) {
-      event.preventDefault();
-      suppressLibraryClickUntil = performance.now() + 750;
-      void commitLibraryDrop();
-      return;
-    }
-    clearLibraryDragState();
-  };
-
-  const handleLibraryPointerCancel = (event: PointerEvent) => {
-    const currentTarget = event.currentTarget;
-    if (
-      currentTarget instanceof HTMLButtonElement &&
-      currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      currentTarget.releasePointerCapture(event.pointerId);
-    }
-    clearLibraryDragState();
-  };
-
-  const { peers: discoveredPeers, pairPeerDevice } = usePeerDiscovery();
-  const discoveredPeerIds = createMemo(() =>
-    discoveredPeers().map((peer) => peer.endpoint_id),
-  );
-  const onlinePeerIds = createMemo(() => new Set(discoveredPeerIds()));
   const libraryEntries = createMemo<LibraryEntry[]>(() => libraries() ?? []);
-  const orderedLibraryEntries = createMemo(() => {
-    const entries = libraryEntries();
-    const order = mergeLibraryOrder(
-      libraryOrder(),
-      entries.map((library) => library.id),
-    );
-    const positions = new Map(order.map((id, index) => [id, index]));
-    return [...entries].sort((left, right) => {
-      const leftIndex = positions.get(left.id);
-      const rightIndex = positions.get(right.id);
-      if (leftIndex === undefined || rightIndex === undefined) {
-        throw new Error("library order is missing a visible library id");
-      }
-      return leftIndex - rightIndex;
-    });
-  });
-  const suggestedPeers = createMemo(() => {
-    const addedPeerIds = new Set(
-      libraryEntries()
-        .filter(isPeerLibrary)
-        .map((library) => peerLibraryPeerId(library)),
-    );
-    return discoveredPeers().filter((peer) => !addedPeerIds.has(peer.endpoint_id));
-  });
   const selectedLibrary = createMemo(
     () =>
-      orderedLibraryEntries().find((library) => library.id === selectedLibraryId()) ??
-      null,
+      libraryEntries().find((library) => library.id === selectedLibraryId()) ?? null,
   );
   const activeMediaItemId = createMemo(() =>
     state.activeMediaLibraryId === selectedLibraryId() ? state.activeMediaItemId : null,
   );
-  const selectedMediaItemIdSet = createMemo(() => new Set(selectedMediaItemIds()));
-  const showSelectionControls = createMemo(() => selectedMediaItemIds().length > 0);
   const availableItems = createMemo(() => {
     const current = items();
     if (current?.libraryId === selectedLibraryId()) {
@@ -562,10 +150,13 @@ export const MediaView: Component = () => {
   const filteredByFilename = createMemo(() =>
     filterMediaItemsByFilename(availableItems(), activeFilenameFilter()),
   );
+  const collections = useCollectionMembership({
+    selectedLibraryId,
+  });
   const displayedItems = createMemo(() => {
     const items = filteredByFilename();
-    const fingerprints = collectionItemPaths();
-    if (selectedCollectionId() === null || fingerprints.size === 0) {
+    const fingerprints = collections.collectionItemPaths();
+    if (collections.selectedCollectionId() === null || fingerprints.size === 0) {
       return items;
     }
     return items.filter(
@@ -611,42 +202,13 @@ export const MediaView: Component = () => {
     }
     return error();
   });
-  const hasLibraries = createMemo(() => orderedLibraryEntries().length > 0);
-  const canRefreshSelectedLibrary = createMemo(() => {
-    const library = selectedLibrary();
-    if (!library) return false;
-    if (isS3Library(library)) return true;
-    return (
-      !isPeerLibrary(library) && !isCameraLibrary(library) && library.is_online !== false
-    );
-  });
+  const hasLibraries = createMemo(() => libraryEntries().length > 0);
   const canWriteSelectedLibrary = createMemo(() => libraryIsWritable(selectedLibrary()));
   const shouldDeferEditorStripThumbnails = createMemo(
     () => state.currentView === "editor" && isS3Library(selectedLibrary()),
   );
-  const isUploadDragActive = createMemo(() => uploadDragFeedback() !== null);
-  const uploadDragLabel = createMemo(() => {
-    const feedback = uploadDragFeedback();
-    if (!feedback) {
-      return "";
-    }
-    if (feedback.itemCount === null) {
-      return "Drop Files To Upload";
-    }
-    return feedback.itemCount === 1
-      ? "Drop 1 File To Upload"
-      : `Drop ${feedback.itemCount} Files To Upload`;
-  });
-  const uploadProgressPercent = createMemo(() => {
-    const progress = uploadProgress();
-    if (!progress) {
-      return 0;
-    }
-    return Math.round((progress.completedFiles / progress.totalFiles) * 100);
-  });
-
   createEffect(() => {
-    const availableLibraries = orderedLibraryEntries();
+    const availableLibraries = libraryEntries();
     if (!availableLibraries.length) {
       setSelectedLibraryId(null);
       return;
@@ -661,274 +223,92 @@ export const MediaView: Component = () => {
     setSelectedLibraryId(firstLocalLibrary?.id ?? null);
   });
 
-  createEffect(() => {
-    if (canWriteSelectedLibrary()) {
-      return;
-    }
-    setUploadDragFeedback(null);
+  const selection = useMediaSelection({
+    selectedLibraryId,
+    flatItemIds,
+    itemsById,
+    gridRows: pictureGridRows,
+    columns: pictureGridColumns,
+    onActionStatus: setMediaActionStatus,
   });
-
-  createEffect(() => {
-    const entries = libraryEntries();
-    const nextOrder = mergeLibraryOrder(
-      libraryOrder(),
-      entries.map((library) => library.id),
-    );
-    if (
-      nextOrder.length === libraryOrder().length &&
-      nextOrder.every((id, index) => id === libraryOrder()[index])
-    ) {
-      return;
-    }
-    setLibraryOrder(nextOrder);
-  });
-  const tileMinWidth = createMemo(() => {
-    const base = ZOOM_LEVELS[zoomIndex()] ?? 160;
-    if (viewportWidth() < 640) {
-      return Math.min(base, 140);
-    }
-    return base;
-  });
-  const columns = createMemo(() =>
-    Math.max(1, Math.floor((viewportWidth() + GRID_GAP) / (tileMinWidth() + GRID_GAP))),
-  );
-  const tileWidth = createMemo(() => {
-    const width = viewportWidth();
-    const columnCount = columns();
-    if (width <= 0) {
-      return tileMinWidth();
-    }
-    return (width - GRID_GAP * (columnCount - 1)) / columnCount;
-  });
-  const tileRowHeight = createMemo(() => tileWidth() + TILE_LABEL_HEIGHT);
-  const gridRows = createMemo<MediaGridRow[]>(() => {
-    const rows: MediaGridRow[] = [];
-    const currentColumns = columns();
-    let lastDateKey: string | null = null;
-    let currentRow: string[] = [];
-    for (const item of displayedItems()) {
-      const dateKey = modificationMonthKey(item.modifiedAt);
-      if (lastDateKey !== dateKey) {
-        if (currentRow.length > 0) {
-          rows.push({ kind: "items", ids: currentRow });
-          currentRow = [];
-        }
-        rows.push({ kind: "date", modifiedAt: item.modifiedAt });
-        lastDateKey = dateKey;
+  const selectedMediaItemIds = selection.selectedMediaItemIds;
+  const setSelectedMediaItemIds = selection.setSelectedMediaItemIds;
+  const selectedMediaItemIdSet = selection.selectedMediaItemIdSet;
+  const showSelectionControls = selection.showSelectionControls;
+  const keyboardNavActive = selection.keyboardNavActive;
+  const setKeyboardNavActive = selection.setKeyboardNavActive;
+  const focusedItemId = selection.focusedItemId;
+  const setFocusedItemId = selection.setFocusedItemId;
+  const toggleMediaSelection = selection.toggleMediaSelection;
+  const rangeSelectMedia = selection.rangeSelectMedia;
+  const navigateFocus = selection.navigateFocus;
+  const selectedCollectionFileHashes = () =>
+    selectedMediaItemIds().map((itemId) => {
+      const item = itemsById().get(itemId);
+      if (!item) {
+        throw new Error(`selected media item not found: ${itemId}`);
       }
-      currentRow.push(mediaItemKey(item));
-      if (currentRow.length === currentColumns) {
-        rows.push({ kind: "items", ids: currentRow });
-        currentRow = [];
+      if (item.kind !== "local") {
+        throw new Error(`collection item is not local: ${itemId}`);
       }
-    }
-    if (currentRow.length > 0) {
-      rows.push({ kind: "items", ids: currentRow });
-    }
-    return rows;
-  });
-  const stableGridRows = createMemo<MediaGridRow[]>((previous) => {
-    const next = gridRows();
-    if (!previous) return next;
-    let allSame = next.length === previous.length;
-    const result = next.map((row, i) => {
-      const prev = previous[i];
-      if (!prev || prev.kind !== row.kind) {
-        allSame = false;
-        return row;
-      }
-      if (row.kind === "date" && prev.kind === "date") {
-        if (row.modifiedAt === prev.modifiedAt) return prev;
-        allSame = false;
-        return row;
-      }
-      if (row.kind === "items" && prev.kind === "items") {
-        if (
-          row.ids.length === prev.ids.length &&
-          row.ids.every((id, j) => id === prev.ids[j])
-        ) {
-          return prev;
-        }
-        allSame = false;
-        return row;
-      }
-      allSame = false;
-      return row;
+      return item.fingerprint ?? item.path;
     });
-    return allSame ? previous : result;
-  });
-  const rowOffsets = createMemo(() => {
-    const offsets: number[] = [];
-    let offset = 0;
-    for (const row of stableGridRows()) {
-      offsets.push(offset);
-      offset += row.kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight();
-    }
-    return offsets;
-  });
-  // Update the scroll anchor from a raw scrollTop value.
-  // Finds the first visible items row and records its leading item ID
-  // plus how many pixels the viewport top is into that row.
-  const updateScrollAnchor = (top: number) => {
-    const rows = untrack(stableGridRows);
-    const offsets = untrack(rowOffsets);
-    const rowHeight = untrack(tileRowHeight);
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const height = row.kind === "date" ? HEADER_ROW_HEIGHT : rowHeight;
-      if (offsets[i] + height > top) {
-        if (row.kind === "items") {
-          setAnchorItemId(row.ids[0]);
-          setAnchorRowOffset(top - offsets[i]);
-        } else {
-          // Date header is at the top — anchor to the next items row instead
-          for (let j = i + 1; j < rows.length; j++) {
-            const next = rows[j];
-            if (next.kind === "items") {
-              setAnchorItemId(next.ids[0]);
-              setAnchorRowOffset(0);
-              break;
-            }
-          }
-        }
-        break;
-      }
-    }
-  };
 
-  // When the column count changes (resize / view switch), restore the scroll
-  // position so the same media items remain visible.
-  createEffect(
-    on(columns, (_cols, prevCols) => {
-      if (prevCols === undefined) return; // skip initial evaluation
-      const anchor = untrack(anchorItemId);
-      if (!anchor) return;
-      const rows = untrack(stableGridRows);
-      const offsets = untrack(rowOffsets);
-      const rowHeight = untrack(tileRowHeight);
-      const offset = untrack(anchorRowOffset);
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        if (row.kind === "items" && row.ids.includes(anchor)) {
-          const newTop = offsets[i] + Math.min(offset, rowHeight - 1);
-          const element = scrollRef();
-          if (!element) {
-            return;
-          }
-          element.scrollTop = newTop;
-          setScrollTop(newTop);
-          break;
-        }
-      }
-    }),
-  );
-
-  const totalHeight = createMemo(() => {
-    const rows = stableGridRows();
-    if (rows.length === 0) {
-      return 0;
-    }
-    const offsets = rowOffsets();
-    const lastRow = rows[rows.length - 1];
-    return (
-      offsets[offsets.length - 1] +
-      (lastRow.kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight())
-    );
+  const uploads = useMediaUploadHandlers({
+    selectedLibrary,
+    canWriteSelectedLibrary,
+    isSubmitting,
+    setIsSubmitting,
+    setError,
+    uploadMediaLibraryFile,
+    uploadMediaLibraryPath,
+    uploadMediaLibraryUrl,
+    refreshLibraryIndex,
+    refetchCachedLibraryItems,
+    refetchItems,
   });
-  const visibleRowRange = createMemo(() => {
-    const rows = stableGridRows();
-    const offsets = rowOffsets();
-    const height = viewportHeight();
-    const top = scrollTop();
-    if (rows.length === 0 || height <= 0) {
-      return { start: 0, end: 0 };
-    }
-    let start = 0;
-    while (start < rows.length) {
-      const rowTop = offsets[start];
-      const rowBottom =
-        rowTop + (rows[start].kind === "date" ? HEADER_ROW_HEIGHT : tileRowHeight());
-      if (rowBottom >= top) {
-        break;
-      }
-      start += 1;
-    }
-    let end = start;
-    while (end < rows.length) {
-      const rowTop = offsets[end];
-      if (rowTop > top + height) {
-        break;
-      }
-      end += 1;
-    }
-    return {
-      start: Math.max(0, start - OVERSCAN_ROWS),
-      end: Math.min(rows.length, end + OVERSCAN_ROWS),
-    };
+  const itemActions = useMediaItemActions({
+    selectedLibraryId,
+    selectedMediaItemIds,
+    setSelectedMediaItemIds,
+    itemsById,
+    canWriteSelectedLibrary,
+    setShowApplyPresetMenu,
+    setIsSubmitting,
+    setError,
+    setMediaActionStatus,
+    pickDirectory,
+    deleteMediaLibraryItem,
+    refetchItems,
+    refetchCachedLibraryItems,
+    layerOps,
+    batchOps,
   });
-  const visibleRows = createMemo(() =>
-    stableGridRows().slice(visibleRowRange().start, visibleRowRange().end),
-  );
-  const offsetY = createMemo(() => rowOffsets()[visibleRowRange().start] ?? 0);
-  const gridTemplateColumns = createMemo(() => `repeat(${columns()}, minmax(0, 1fr))`);
-
-  const totalRows = createMemo(() => stableGridRows().length);
-
-  const containerHeight = createMemo(() => {
-    if (totalRows() === 0) {
-      return 0;
-    }
-    return totalHeight();
-  });
-
-  // Label shown in the scroll landmark tooltip — the month/year of the anchor item.
-  const scrollLabel = createMemo(() => {
-    const id = anchorItemId();
-    if (!id) return "";
-    const item = itemsById().get(id);
-    if (!item) return "";
-    return formatModificationMonth(item.modifiedAt);
-  });
-
-  // Vertical position (px from top of scroll viewport) for the landmark tooltip,
-  // tracking the scrollbar thumb center.
-  const tooltipTop = createMemo(() => {
-    const total = totalHeight();
-    const viewport = viewportHeight();
-    const top = scrollTop();
-    if (total <= viewport || viewport <= 0) return viewport / 2;
-    const thumbHeight = Math.max(40, (viewport * viewport) / total);
-    const thumbRange = viewport - thumbHeight;
-    const scrollRange = total - viewport;
-    return Math.round((top / scrollRange) * thumbRange + thumbHeight / 2);
+  useMediaViewActions({
+    selectedLibraryId,
+    setSelectedLibraryId,
+    libraryEntries,
+    flatItemIds,
+    selectedFocusedItemId: focusedItemId,
+    setFocusedItemId,
+    setSelectedMediaItemIds,
+    setKeyboardNavActive,
+    toggleMediaSelection,
+    navigateFocus,
+    setZoomIndex,
+    zoomLevelCount: ZOOM_LEVELS.length,
+    syncProgress,
+    refetchItems,
+    pasteEdits: itemActions.handleApplyPresetToSelected,
   });
 
   onMount(() => {
-    const unregisterMediaBrowserController = registerMediaBrowserController({
-      selectLibrary(libraryId) {
-        setSelectedLibraryId(libraryId);
-      },
-      getSelectedLibraryId() {
-        return selectedLibraryId();
-      },
-      async pasteEdits(presetName: string) {
-        await handleApplyPresetToSelected(presetName);
-      },
-    });
-    setSupportsS3Libraries(isTauriRuntime());
-    // Refetch library items when an in-flight sync completes.
-    createEffect(
-      on(syncProgress, (current, prev) => {
-        if (prev && !current) void refetchItems();
-      }),
-    );
     const libraryRefreshTimer = window.setInterval(() => {
       void Promise.resolve(refetchLibraries()).catch(() => undefined);
       syncSelectedLibraryIfNeeded();
     }, 3000);
     onCleanup(() => {
       isDisposed = true;
-      unregisterMediaBrowserController();
       window.clearInterval(libraryRefreshTimer);
       for (const src of thumbnailMemoryBuffer.values()) {
         if (src !== state.loadingMediaSrc) {
@@ -940,272 +320,14 @@ export const MediaView: Component = () => {
   });
 
   createEffect(() => {
-    const element = scrollRef();
-    if (!(element instanceof HTMLDivElement)) {
-      return;
-    }
-    const updateViewport = () => {
-      setViewportHeight(element.clientHeight);
-      setViewportWidth(element.clientWidth - 48);
-    };
-    updateViewport();
-    const observer = new ResizeObserver(updateViewport);
-    observer.observe(element);
-    onCleanup(() => {
-      observer.disconnect();
-    });
-  });
-
-  onMount(() => {
-    const mediaWhen = (ctx: { currentView: string; selectedLibraryId: string | null }) =>
-      ctx.currentView === "media" && ctx.selectedLibraryId !== null;
-
-    actions.register({
-      id: "media.select-all",
-      title: "Select All Images",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setKeyboardNavActive(true);
-        const ids = flatItemIds();
-        setSelectedMediaItemIds(ids);
-        if (!focusedItemId() && ids.length > 0) {
-          setFocusedItemId(ids[0]);
-        }
-      },
-    });
-
-    actions.register({
-      id: "media.toggle-selection",
-      title: "Toggle Image Selection",
-      group: "Media",
-      when: (ctx) => ctx.currentView === "media" && ctx.mediaViewFocusedItemId !== null,
-      run: () => {
-        const id = focusedItemId();
-        if (id) {
-          setKeyboardNavActive(true);
-          toggleMediaSelection(id);
-        }
-      },
-    });
-
-    actions.register({
-      id: "media.navigate-up",
-      title: "Navigate Up",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setKeyboardNavActive(true);
-        navigateFocus("up");
-      },
-    });
-
-    actions.register({
-      id: "media.navigate-down",
-      title: "Navigate Down",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setKeyboardNavActive(true);
-        navigateFocus("down");
-      },
-    });
-
-    actions.register({
-      id: "media.navigate-left",
-      title: "Navigate Left",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setKeyboardNavActive(true);
-        navigateFocus("left");
-      },
-    });
-
-    actions.register({
-      id: "media.navigate-right",
-      title: "Navigate Right",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setKeyboardNavActive(true);
-        navigateFocus("right");
-      },
-    });
-
-    actions.register({
-      id: "media.prev-library",
-      title: "Previous Library",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        const entries = orderedLibraryEntries();
-        if (entries.length === 0) return;
-        const idx = entries.findIndex((lib) => lib.id === selectedLibraryId());
-        const nextIdx = idx <= 0 ? entries.length - 1 : idx - 1;
-        setSelectedLibraryId(entries[nextIdx].id);
-      },
-    });
-
-    actions.register({
-      id: "media.next-library",
-      title: "Next Library",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        const entries = orderedLibraryEntries();
-        if (entries.length === 0) return;
-        const idx = entries.findIndex((lib) => lib.id === selectedLibraryId());
-        const nextIdx = idx === -1 || idx >= entries.length - 1 ? 0 : idx + 1;
-        setSelectedLibraryId(entries[nextIdx].id);
-      },
-    });
-
-    actions.register({
-      id: "media.zoom-in",
-      title: "Zoom In",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1));
-      },
-    });
-
-    actions.register({
-      id: "media.zoom-out",
-      title: "Zoom Out",
-      group: "Media",
-      when: mediaWhen,
-      run: () => {
-        setZoomIndex((i) => Math.max(0, i - 1));
-      },
-    });
-
-    actions.mapShortcut("mod+a", "media.select-all");
-    actions.mapShortcut("[", "media.prev-library");
-    actions.mapShortcut("]", "media.next-library");
-    actions.mapShortcut(" ", "media.toggle-selection");
-    actions.mapShortcut("arrowup", "media.navigate-up");
-    actions.mapShortcut("arrowdown", "media.navigate-down");
-    actions.mapShortcut("arrowleft", "media.navigate-left");
-    actions.mapShortcut("arrowright", "media.navigate-right");
-    actions.mapShortcut("+", "media.zoom-in");
-    actions.mapShortcut("=", "media.zoom-in");
-    actions.mapShortcut("-", "media.zoom-out");
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        throw new Error("pointer event target must be a node");
-      }
-      setKeyboardNavActive(false);
-      if (showLibraryActions() && !libraryActionsRef?.contains(target)) {
-        setShowLibraryActions(false);
-      }
-      if (
-        showAddDropdown() &&
-        !addDropdownRef?.contains(target) &&
-        !addDropdownMenuRef?.contains(target)
-      ) {
-        setShowAddDropdown(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (targetAcceptsTextInput(event.target)) return;
-      if (event.defaultPrevented) return;
-
-      if (event.key === "Escape") {
-        setShowLibraryActions(false);
-        setShowAddDropdown(false);
-        return;
-      }
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    onCleanup(() => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      actions.unregister("media.select-all");
-      actions.unregister("media.toggle-selection");
-      actions.unregister("media.navigate-up");
-      actions.unregister("media.navigate-down");
-      actions.unregister("media.navigate-left");
-      actions.unregister("media.navigate-right");
-      actions.unregister("media.prev-library");
-      actions.unregister("media.next-library");
-      actions.unregister("media.zoom-in");
-      actions.unregister("media.zoom-out");
-    });
-  });
-
-  onMount(() => {
-    let unlisten: (() => void) | null = null;
-    if (isTauriRuntime()) {
-      setUsesNativeDragDrop(true);
-      void listenNativeDragDrop((payload) => {
-        if (!canWriteSelectedLibrary()) {
-          setUploadDragFeedback(null);
-          return;
-        }
-        if (payload.type === "leave") {
-          setUploadDragFeedback(null);
-          return;
-        }
-        if (payload.type === "enter") {
-          setUploadDragFeedback({
-            itemCount: draggedPathCount(payload.paths),
-          });
-          return;
-        }
-        if (payload.type === "over") {
-          setUploadDragFeedback((current) => current ?? { itemCount: null });
-          return;
-        }
-        setUploadDragFeedback(null);
-        if (payload.paths.length === 0) {
-          setError("drop did not contain files");
-          return;
-        }
-        void handleUploadLibraryPaths(payload.paths);
-      }).then((u) => {
-        unlisten = u;
-      });
-    }
-    onCleanup(() => {
-      unlisten?.();
-    });
-  });
-
-  createEffect(() => {
     selectedLibraryId();
-    setScrollTop(0);
-    setAnchorItemId(null);
-    setAnchorRowOffset(0);
+    actions.run("media.grid.reset-scroll", buildActionContext());
     setSelectedMediaItemIds([]);
-    setShowLibraryActions(false);
-    const element = scrollRef();
-    if (element) {
-      element.scrollTop = 0;
-    }
   });
 
   createEffect(() => {
     normalizedFilenameFilter();
-    setScrollTop(0);
-    setAnchorItemId(null);
-    setAnchorRowOffset(0);
-    const element = scrollRef();
-    if (element) {
-      element.scrollTop = 0;
-    }
-  });
-
-  createEffect(() => {
-    const availableItemIds = new Set(displayedItems().map(mediaItemKey));
-    setSelectedMediaItemIds((current) => {
-      const next = current.filter((id) => availableItemIds.has(id));
-      return next.length === current.length ? current : next;
-    });
+    actions.run("media.grid.reset-scroll", buildActionContext());
   });
 
   createEffect(() => {
@@ -1244,17 +366,8 @@ export const MediaView: Component = () => {
 
   createEffect(() => {
     const id = focusedItemId();
-    if (!id) return;
-    const ids = new Set(flatItemIds());
-    if (!ids.has(id)) {
-      setFocusedItemId(null);
-    }
-  });
-
-  createEffect(() => {
-    const id = focusedItemId();
     if (!id || !keyboardNavActive()) return;
-    scrollFocusedItemIntoView();
+    actions.run("media.grid.scroll-focused-into-view", buildActionContext());
   });
 
   async function withSubmitting(fn: () => Promise<void>) {
@@ -1281,100 +394,6 @@ export const MediaView: Component = () => {
     });
   }
 
-  function updateS3Draft<K extends keyof S3MediaLibraryInput>(
-    key: K,
-    value: S3MediaLibraryInput[K],
-  ) {
-    setS3Draft((current) => ({
-      ...current,
-      [key]: value,
-    }));
-  }
-
-  function resetS3Draft() {
-    setS3Draft({
-      name: "",
-      endpoint: "",
-      bucket: "",
-      region: "us-east-1",
-      access_key_id: "",
-      secret_access_key: "",
-      prefix: "",
-    });
-  }
-
-  function closeS3Form() {
-    resetS3Draft();
-    setEditingS3LibraryId(null);
-    setShowS3Form(false);
-  }
-
-  async function openAddS3Form() {
-    resetS3Draft();
-    setEditingS3LibraryId(null);
-    setShowS3Form(true);
-  }
-
-  async function openEditS3Form() {
-    const library = selectedLibrary();
-    if (!library || !isS3Library(library)) {
-      return;
-    }
-    await withSubmitting(async () => {
-      const draft = await getS3MediaLibrary(library.id);
-      setS3Draft({
-        ...draft,
-        name: draft.name ?? "",
-        prefix: draft.prefix ?? "",
-      });
-      setEditingS3LibraryId(library.id);
-      setShowS3Form(true);
-    });
-  }
-
-  async function handleSubmitS3Library() {
-    await withSubmitting(async () => {
-      const editingLibraryId = editingS3LibraryId();
-      const library = editingLibraryId
-        ? await updateS3MediaLibrary(editingLibraryId, s3Draft())
-        : await addS3MediaLibrary(s3Draft());
-      closeS3Form();
-      await refetchLibraries();
-      setSelectedLibraryId(library.id);
-      await refetchItems();
-    });
-  }
-
-  async function handleAddPeerLibrary(peerId: string) {
-    await withSubmitting(async () => {
-      await pairPeerDevice(peerId);
-      const peer = discoveredPeers().find((entry) => entry.endpoint_id === peerId);
-      if (!peer) {
-        throw new Error("peer is no longer available");
-      }
-      await refetchLibraries();
-      setSelectedLibraryId(`peer:${peerId}`);
-      await refetchCachedLibraryItems();
-      await refetchItems();
-    });
-  }
-
-  async function handleRemoveLibrary() {
-    const library = selectedLibrary();
-    if (!library?.removable) return;
-    await withSubmitting(async () => {
-      if (isPeerLibrary(library)) {
-        await removeMediaLibrary(library.id);
-        await removePeerLibrary(peerLibraryPeerId(library));
-        await refetchLibraries();
-        await refetchCachedLibraryItems();
-        return;
-      }
-      await removeMediaLibrary(library.id);
-      await refetchLibraries();
-    });
-  }
-
   function syncSelectedLibraryIfNeeded() {
     const library = selectedLibrary();
     if (!library || library.mode !== "sync" || syncProgress()) {
@@ -1385,539 +404,6 @@ export const MediaView: Component = () => {
     });
   }
 
-  async function handleRefreshLibrary() {
-    const library = selectedLibrary();
-    if (!library || isPeerLibrary(library) || isCameraLibrary(library)) {
-      syncSelectedLibraryIfNeeded();
-      return;
-    }
-    await withSubmitting(async () => {
-      await refreshLibraryIndex(library.id);
-      await refetchItems();
-      syncSelectedLibraryIfNeeded();
-    });
-  }
-
-  async function handleUploadLibraryFiles(
-    files: File[],
-    appendTimestampOnConflict = false,
-  ) {
-    const library = selectedLibrary();
-    if (!library || !libraryIsWritable(library)) {
-      throw new Error("selected library is readonly");
-    }
-    if (files.length === 0) {
-      return;
-    }
-    if (isSubmitting()) {
-      setError("media library operation already in progress");
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      for (const [index, file] of files.entries()) {
-        setUploadProgress({
-          phase: "uploading",
-          totalFiles: files.length,
-          completedFiles: index,
-          currentFileName: file.name,
-        });
-        await uploadMediaLibraryFile(library.id, file, appendTimestampOnConflict);
-      }
-      setUploadProgress({
-        phase: "refreshing",
-        totalFiles: files.length,
-        completedFiles: files.length,
-        currentFileName: null,
-      });
-      if (isS3Library(library)) {
-        await refreshLibraryIndex(library.id);
-      }
-      await refetchCachedLibraryItems();
-      await refetchItems();
-    } catch (err) {
-      setError(toErrorMessage(err));
-    } finally {
-      setUploadProgress(null);
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleUploadLibraryPaths(paths: string[]) {
-    const library = selectedLibrary();
-    if (!library || !libraryIsWritable(library)) {
-      throw new Error("selected library is readonly");
-    }
-    if (paths.length === 0) {
-      return;
-    }
-    if (isSubmitting()) {
-      setError("media library operation already in progress");
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      for (const [index, path] of paths.entries()) {
-        setUploadProgress({
-          phase: "uploading",
-          totalFiles: paths.length,
-          completedFiles: index,
-          currentFileName: path.split(/[/\\\\]/).pop() ?? path,
-        });
-        await uploadMediaLibraryPath(library.id, path);
-      }
-      setUploadProgress({
-        phase: "refreshing",
-        totalFiles: paths.length,
-        completedFiles: paths.length,
-        currentFileName: null,
-      });
-      if (isS3Library(library)) {
-        await refreshLibraryIndex(library.id);
-      }
-      await refetchCachedLibraryItems();
-      await refetchItems();
-    } catch (err) {
-      setError(toErrorMessage(err));
-    } finally {
-      setUploadProgress(null);
-      setIsSubmitting(false);
-    }
-  }
-
-  function handleUploadDragEnter(event: DragEvent) {
-    if (usesNativeDragDrop() || !canWriteSelectedLibrary()) {
-      return;
-    }
-    event.preventDefault();
-    setUploadDragFeedback({
-      itemCount: draggedItemCount(event.dataTransfer),
-    });
-  }
-
-  function handleUploadDragOver(event: DragEvent) {
-    if (usesNativeDragDrop() || !canWriteSelectedLibrary()) {
-      return;
-    }
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "copy";
-    }
-    setUploadDragFeedback({
-      itemCount: draggedItemCount(event.dataTransfer),
-    });
-  }
-
-  function handleUploadDragLeave(event: DragEvent) {
-    if (
-      !canWriteSelectedLibrary() ||
-      usesNativeDragDrop() ||
-      (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)
-    ) {
-      return;
-    }
-    setUploadDragFeedback(null);
-  }
-
-  function handleUploadDrop(event: DragEvent) {
-    if (usesNativeDragDrop() || !canWriteSelectedLibrary()) {
-      return;
-    }
-    event.preventDefault();
-    setUploadDragFeedback(null);
-    const files = droppedFiles(event.dataTransfer);
-    if (files.length === 0) {
-      setError("drop did not contain files");
-      return;
-    }
-    void handleUploadLibraryFiles(files);
-  }
-
-  function handleUploadPaste(event: ClipboardEvent) {
-    if (!canWriteSelectedLibrary() || targetAcceptsTextInput(event.target)) {
-      return;
-    }
-    let files: File[];
-    try {
-      files = clipboardImageFiles(event.clipboardData);
-    } catch (error) {
-      event.preventDefault();
-      setError(toErrorMessage(error));
-      return;
-    }
-    if (files.length > 0) {
-      event.preventDefault();
-      void handleUploadLibraryFiles(files, true);
-      return;
-    }
-    const text = event.clipboardData?.getData("text/plain")?.trim();
-    if (!text) return;
-    const imageUrl = transformImageUrl(text);
-    if (!imageUrl) return;
-    event.preventDefault();
-    void handleUploadFromUrl(imageUrl, text);
-  }
-
-  async function handleUploadFromUrl(fetchUrl: string, originalUrl: string) {
-    const library = selectedLibrary();
-    if (!library || !libraryIsWritable(library)) return;
-    if (isSubmitting()) {
-      setError("media library operation already in progress");
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    const fileName = filenameFromUrl(originalUrl);
-    setUploadProgress({
-      phase: "uploading",
-      totalFiles: 1,
-      completedFiles: 0,
-      currentFileName: fileName,
-    });
-    try {
-      await uploadMediaLibraryUrl(library.id, fetchUrl, fileName);
-      setUploadProgress({
-        phase: "refreshing",
-        totalFiles: 1,
-        completedFiles: 1,
-        currentFileName: null,
-      });
-      if (isS3Library(library)) {
-        await refreshLibraryIndex(library.id);
-      }
-      await refetchCachedLibraryItems();
-      await refetchItems();
-    } catch (error) {
-      setError(toErrorMessage(error));
-    } finally {
-      setUploadProgress(null);
-      setIsSubmitting(false);
-    }
-  }
-
-  function toggleMediaSelection(itemId: string) {
-    setLastSelectedMediaItemId(itemId);
-    setMediaActionStatus(null);
-    setSelectedMediaItemIds((current) =>
-      current.includes(itemId)
-        ? current.filter((candidate) => candidate !== itemId)
-        : [...current, itemId],
-    );
-  }
-
-  function rangeSelectMedia(itemId: string) {
-    const lastId = lastSelectedMediaItemId();
-    const allIds = stableGridRows()
-      .filter(
-        (row): row is Extract<MediaGridRow, { kind: "items" }> => row.kind === "items",
-      )
-      .flatMap((row) => row.ids);
-    const fromIndex = lastId != null ? allIds.indexOf(lastId) : -1;
-    const toIndex = allIds.indexOf(itemId);
-    if (fromIndex === -1 || toIndex === -1) {
-      toggleMediaSelection(itemId);
-      return;
-    }
-    const [start, end] =
-      fromIndex <= toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
-    const rangeIds = allIds.slice(start, end + 1);
-    setSelectedMediaItemIds((current) => {
-      const result = new Set(current);
-      for (const id of rangeIds) result.add(id);
-      return [...result];
-    });
-    setMediaActionStatus(null);
-    setLastSelectedMediaItemId(itemId);
-  }
-
-  async function handleOpenItem(item: MediaItem, libraryId: string, src: string | null) {
-    setSelectedMediaItemIds([]);
-    setError(null);
-    try {
-      await openMediaItem(item, libraryId, src);
-    } catch (err) {
-      setError(toErrorMessage(err));
-    }
-  }
-
-  async function handleOpenSelectedItems() {
-    const libraryId = selectedLibraryId();
-    if (!libraryId) {
-      throw new Error("cannot open selected media without a library");
-    }
-    const itemIds = selectedMediaItemIds();
-    if (itemIds.length === 0) {
-      return;
-    }
-    setError(null);
-    try {
-      for (const [index, itemId] of itemIds.entries()) {
-        const item = itemsById().get(itemId);
-        if (!item) {
-          throw new Error(`selected media item not found: ${itemId}`);
-        }
-        await openMediaItem(item, libraryId, null, index === 0 ? "replace" : "append");
-      }
-    } catch (err) {
-      setError(toErrorMessage(err));
-    }
-  }
-
-  async function handleApplyPresetToSelected(name: string) {
-    const libraryId = selectedLibraryId();
-    if (!libraryId) {
-      throw new Error("cannot apply a preset without a selected library");
-    }
-    const itemIds = selectedMediaItemIds();
-    if (itemIds.length === 0) {
-      throw new Error("select at least one image to apply a preset");
-    }
-    setShowApplyPresetMenu(false);
-    setIsSubmitting(true);
-    setError(null);
-    setMediaActionStatus(
-      `Applying ${name} to ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
-    );
-    try {
-      const items = itemIds
-        .map((id) => itemsById().get(id))
-        .filter(Boolean) as MediaItem[];
-      const hasPeer = items.some((item) => item.kind === "peer");
-      const isTauri = isTauriRuntime();
-      if (isTauri && !hasPeer) {
-        const localItems = items.filter(
-          (item): item is LocalMediaItem => item.kind === "local",
-        );
-        const batchItems = localItems.map((item) => ({
-          path: item.path,
-          fingerprint: item.fingerprint,
-        }));
-        const count = await batchOps.applyPresetSnapshot(batchItems, name);
-        setMediaActionStatus(
-          `Applied ${name} and saved ${count} snapshot${count > 1 ? "s" : ""}`,
-        );
-      } else {
-        for (const [index, item] of items.entries()) {
-          if (item.kind === "peer") {
-            const picture = {
-              id: item.id,
-              name: item.name,
-              modified_at: item.modifiedAt,
-              has_snapshots: item.metadata.hasSnapshots,
-              latest_snapshot_id: item.metadata.latestSnapshotId,
-            };
-            await useOpenImage().openPeer(item.peerId, picture);
-            await layerOps.applyPresetSnapshot(name, null);
-          } else {
-            await useOpenImage().open(item.path);
-            await layerOps.applyPresetSnapshot(name, item.path);
-          }
-          setMediaActionStatus(`Applying ${name}... (${index + 1}/${items.length})`);
-        }
-        setMediaActionStatus(
-          `Applied ${name} and saved ${items.length} snapshot${items.length > 1 ? "s" : ""}`,
-        );
-      }
-      await Promise.all([refetchItems(), refetchCachedLibraryItems()]);
-    } catch (err) {
-      setError(toErrorMessage(err));
-      setMediaActionStatus(null);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleClearEditsForSelected() {
-    const libraryId = selectedLibraryId();
-    if (!libraryId) {
-      throw new Error("cannot clear edits without a selected library");
-    }
-    const itemIds = selectedMediaItemIds();
-    if (itemIds.length === 0) {
-      throw new Error("select at least one image to clear edits");
-    }
-    setShowApplyPresetMenu(false);
-    setIsSubmitting(true);
-    setError(null);
-    setMediaActionStatus(
-      `Clearing edits for ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
-    );
-    try {
-      const items = itemIds
-        .map((id) => itemsById().get(id))
-        .filter(Boolean) as MediaItem[];
-      const isTauri = isTauriRuntime();
-      if (isTauri) {
-        const paths = items.flatMap((item) => (item.kind === "local" ? [item.path] : []));
-        const count = await batchOps.clearEdits(paths);
-        setMediaActionStatus(`Cleared edits for ${count} image${count > 1 ? "s" : ""}`);
-      } else {
-        setMediaActionStatus("Clear edits is only supported in the native app");
-      }
-      await Promise.all([refetchItems(), refetchCachedLibraryItems()]);
-    } catch (err) {
-      setError(toErrorMessage(err));
-      setMediaActionStatus(null);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleDeleteSelectedItems() {
-    if (!canWriteSelectedLibrary()) {
-      throw new Error("selected library is readonly");
-    }
-    const itemIds = selectedMediaItemIds();
-    if (itemIds.length === 0) {
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      for (const itemId of itemIds) {
-        const item = itemsById().get(itemId);
-        if (!item) {
-          throw new Error(`selected media item not found: ${itemId}`);
-        }
-        if (item.kind !== "local") {
-          throw new Error(`media item is not deletable: ${itemId}`);
-        }
-        await deleteMediaLibraryItem(item.path);
-      }
-      setSelectedMediaItemIds([]);
-      await refetchCachedLibraryItems();
-      await refetchItems();
-    } catch (err) {
-      setError(toErrorMessage(err));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleExportSelected() {
-    const libraryId = selectedLibraryId();
-    if (!libraryId) {
-      throw new Error("cannot export without a selected library");
-    }
-    const itemIds = selectedMediaItemIds();
-    if (itemIds.length === 0) {
-      throw new Error("select at least one image to export");
-    }
-    const targetDir = await pickDirectory();
-    if (!targetDir || typeof targetDir !== "string") {
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    setMediaActionStatus(
-      `Exporting ${itemIds.length} image${itemIds.length > 1 ? "s" : ""}...`,
-    );
-    try {
-      const items = itemIds
-        .map((id) => itemsById().get(id))
-        .filter(Boolean) as MediaItem[];
-      const localItems = items.filter((item) => item.kind === "local");
-      if (localItems.length === 0) {
-        throw new Error("export is only supported for local images");
-      }
-      const isTauri = isTauriRuntime();
-      if (!isTauri) {
-        setMediaActionStatus("Export is only supported in the native app");
-        return;
-      }
-      const batchItems = localItems.map((item) => ({
-        path: item.path,
-        fingerprint: item.fingerprint,
-        name: item.name,
-      }));
-      const count = await batchOps.exportImages(batchItems, targetDir);
-      setMediaActionStatus(
-        `Exported ${count} image${count > 1 ? "s" : ""} to ${targetDir}`,
-      );
-    } catch (err) {
-      setError(toErrorMessage(err));
-      setMediaActionStatus(null);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  const refreshCollections = refetchCollections;
-  const refreshCollectionItems = refetchCollectionItemsRaw;
-
-  function selectedCollectionFileHashes() {
-    return selectedMediaItemIds().map((itemId) => {
-      const item = itemsById().get(itemId);
-      if (!item) {
-        throw new Error(`selected media item not found: ${itemId}`);
-      }
-      if (item.kind !== "local") {
-        throw new Error(`collection item is not local: ${itemId}`);
-      }
-      return item.fingerprint ?? item.path;
-    });
-  }
-
-  async function handleCreateCollection() {
-    const libId = selectedLibraryId();
-    if (!libId) return;
-    const col = await createCollection(libId, "Untitled");
-    await refreshCollections();
-    setSelectedCollectionId(col.id);
-  }
-
-  async function handleRenameCollection(id: string, name: string) {
-    await renameCollection(id, name);
-    await refreshCollections();
-  }
-
-  async function handleDeleteCollection(id: string) {
-    await deleteCollection(id);
-    if (selectedCollectionId() === id) {
-      setSelectedCollectionId(null);
-    }
-    await refreshCollections();
-  }
-
-  async function handleAddToCollection(collectionId: string) {
-    const fingerprints = selectedCollectionFileHashes();
-    if (fingerprints.length === 0) return;
-    await addToCollection(collectionId, fingerprints);
-    setShowAddToCollectionMenu(false);
-    if (selectedCollectionId() === collectionId) {
-      await refreshCollectionItems();
-    }
-    await refreshCollections();
-  }
-
-  async function handleRemoveFromCollection() {
-    const colId = selectedCollectionId();
-    if (!colId) return;
-    const fingerprints = selectedCollectionFileHashes();
-    if (fingerprints.length === 0) return;
-    await removeFromCollection(colId, fingerprints);
-    setSelectedMediaItemIds([]);
-    await refreshCollectionItems();
-    await refreshCollections();
-  }
-
-  // Refresh collections when library changes
-  createEffect(
-    on(selectedLibraryId, () => {
-      setSelectedCollectionId(null);
-      void refreshCollections();
-    }),
-  );
-
-  // Refresh collection items when selected collection changes
-  createEffect(
-    on(selectedCollectionId, () => {
-      void refreshCollectionItems();
-    }),
-  );
-
   const isEditorStrip = () => state.currentView === "editor";
   const mediaVisibleClass = () =>
     isEditorStrip() ? "flex touch-compact:hidden" : "flex";
@@ -1925,10 +411,6 @@ export const MediaView: Component = () => {
     isEditorStrip()
       ? "flex w-[112px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--panel-bg)] touch-compact:hidden"
       : "flex flex-1 flex-col overflow-hidden pt-0 touch-compact:pt-[calc(env(safe-area-inset-top)+3.5rem)]";
-  const scrollClass = () =>
-    isEditorStrip()
-      ? "media-scroll flex-1 min-h-0 overflow-y-auto px-2 py-3"
-      : "media-scroll flex-1 min-h-0 overflow-y-auto p-4 touch-mobile:p-1";
 
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
 
@@ -1939,11 +421,11 @@ export const MediaView: Component = () => {
       aria-label="Media view"
       data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class={`${shellClass()} mobile-slider-fade outline-none relative transition-opacity duration-150`}
-      onDragEnter={handleUploadDragEnter}
-      onDragOver={handleUploadDragOver}
-      onDragLeave={handleUploadDragLeave}
-      onDrop={handleUploadDrop}
-      onPaste={handleUploadPaste}
+      onDragEnter={uploads.handleUploadDragEnter}
+      onDragOver={uploads.handleUploadDragOver}
+      onDragLeave={uploads.handleUploadDragLeave}
+      onDrop={uploads.handleUploadDrop}
+      onPaste={uploads.handleUploadPaste}
       onPointerDown={(event) => {
         if (targetUsesOwnFocus(event.target)) {
           return;
@@ -1951,11 +433,11 @@ export const MediaView: Component = () => {
         mediaShellRef?.focus();
       }}
     >
-      <Show when={isUploadDragActive()}>
+      <Show when={uploads.isUploadDragActive()}>
         <div class="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-xl border border-dashed border-[var(--border-active)] bg-[color-mix(in_srgb,var(--surface-active)_68%,transparent)]">
           <div class="flex flex-col items-center gap-2 rounded-2xl border border-[var(--border-active)] bg-[var(--panel-bg)] px-5 py-4 text-center shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
             <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text)]">
-              {uploadDragLabel()}
+              {uploads.uploadDragLabel()}
             </div>
             <p class="text-[12px] font-medium text-[var(--text-dim)]">
               {selectedLibrary()?.name ?? "Selected library"}
@@ -1967,442 +449,23 @@ export const MediaView: Component = () => {
         <div
           class={`${mediaVisibleClass()} border-b border-[var(--border)] px-4 py-4 touch-mobile:px-4`}
         >
-          <div class="relative flex w-full flex-wrap items-center gap-3">
-            <div ref={libraryTabsRef} class="relative gap-2 flex flex-1 overflow-x-auto">
-              <div
-                aria-hidden="true"
-                class="pointer-events-none absolute z-10 w-[3px] rounded-full bg-blue-400 shadow-[0_0_0_3px_rgba(96,165,250,0.18)]"
-                style={getLibraryDropCursorStyle()}
-              />
-              <For each={orderedLibraryEntries()}>
-                {(library, libraryIdx) => {
-                  const offline = isLibraryOffline(library, onlinePeerIds());
-                  const refreshing = isLocalLibraryRefreshing(library);
-                  const pinned = isPinnedLibrary(library);
-                  return (
-                    <Button
-                      type="button"
-                      data-library-tab="true"
-                      data-library-idx={String(libraryIdx())}
-                      data-pinned={pinned ? "true" : "false"}
-                      onClick={(event) => {
-                        if (performance.now() < suppressLibraryClickUntil) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          return;
-                        }
-                        setSelectedLibraryId(library.id);
-                      }}
-                      onPointerDown={(event) => startLibraryDrag(event, libraryIdx())}
-                      onPointerMove={pinned ? undefined : handleLibraryPointerMove}
-                      onPointerUp={pinned ? undefined : handleLibraryPointerUp}
-                      onPointerCancel={pinned ? undefined : handleLibraryPointerCancel}
-                      class={`${LIBRARY_TAB_BASE_CLASS} ${
-                        selectedLibraryId() === library.id
-                          ? offline
-                            ? "border-dashed border-amber-400/45 bg-[var(--surface-active)] text-[var(--text)]"
-                            : "border-[var(--border-active)] bg-[var(--surface-active)] text-[var(--text)]"
-                          : offline
-                            ? "border-dashed border-amber-500/25 bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-amber-400/40 hover:text-[var(--text)]"
-                            : "border-[var(--border-subtle)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-medium)] hover:text-[var(--text)]"
-                      }`}
-                    >
-                      <span class="flex items-center gap-2">
-                        {(isPeerLibrary(library) ||
-                          isCameraLibrary(library) ||
-                          isS3Library(library) ||
-                          refreshing ||
-                          offline) && (
-                          <span
-                            class={`h-1.5 w-1.5 rounded-full ${
-                              refreshing
-                                ? "animate-pulse bg-sky-400"
-                                : offline
-                                  ? "bg-amber-400"
-                                  : "bg-emerald-400"
-                            }`}
-                          />
-                        )}
-                        <span class="block max-w-[140px] overflow-hidden text-ellipsis">
-                          {library.name}
-                        </span>
-                      </span>
-                    </Button>
-                  );
-                }}
-              </For>
-              <For each={suggestedPeers()}>
-                {(peer) => (
-                  <Button
-                    type="button"
-                    class={`${LIBRARY_TAB_BASE_CLASS} w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full`}
-                    disabled={isSubmitting()}
-                    onClick={() => void handleAddPeerLibrary(peer.endpoint_id)}
-                  >
-                    <span class="block max-w-[140px] overflow-hidden text-ellipsis">
-                      {peer.name}
-                    </span>
-                  </Button>
-                )}
-              </For>
-              <div
-                class="relative flex shrink-0 items-center touch-mobile:hidden"
-                ref={addDropdownRef}
-              >
-                <Button
-                  type="button"
-                  class={`${LIBRARY_TAB_BASE_CLASS} w-auto border-dashed border-[var(--border-dashed)] bg-[var(--surface-subtle)] px-3 text-[14px] leading-none text-[var(--text-muted)] hover:border-[var(--border-active)] hover:text-[var(--text)] touch-mobile:w-full`}
-                  disabled={isSubmitting()}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    setAddDropdownPosition({
-                      left: rect.left,
-                      top: rect.bottom,
-                    });
-                    setShowAddDropdown((current) => !current);
-                  }}
-                  onClick={() => {
-                    void handleAddLibrary();
-                  }}
-                  aria-label="Add library"
-                >
-                  +
-                </Button>
-              </div>
-            </div>
-            <Show when={showAddDropdown() && addDropdownPosition()}>
-              <Portal>
-                <div
-                  ref={addDropdownMenuRef}
-                  role="menu"
-                  class="fixed z-50 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                  style={{
-                    left: `${addDropdownPosition()?.left}px`,
-                    top: `${(addDropdownPosition()?.top ?? 0) + 8}px`,
-                  }}
-                >
-                  <Button
-                    type="button"
-                    role="menuitem"
-                    class={MENU_ITEM_BUTTON_CLASS}
-                    disabled={isSubmitting()}
-                    onClick={() => {
-                      setShowAddDropdown(false);
-                      void handleAddLibrary();
-                    }}
-                  >
-                    Directory
-                  </Button>
-                  <Show when={supportsS3Libraries()}>
-                    <Button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_ITEM_BUTTON_CLASS}
-                      disabled={isSubmitting()}
-                      onClick={() => {
-                        setShowAddDropdown(false);
-                        void openAddS3Form();
-                      }}
-                    >
-                      S3
-                    </Button>
-                  </Show>
-                </div>
-              </Portal>
-            </Show>
-            <div class="relative flex items-center gap-2" ref={libraryActionsRef}>
-              <Show when={selectedLibrary()}>
-                <label class="block w-full w-56 touch-mobile:hidden">
-                  <input
-                    type="text"
-                    value={filenameFilter()}
-                    onInput={(event) => setFilenameFilter(event.currentTarget.value)}
-                    class={INPUT_CLASS}
-                    placeholder="Search names or tags"
-                    aria-label="Search names or tags"
-                  />
-                </label>
-                <div class="flex items-center gap-0.5 touch-mobile:hidden">
-                  <Button
-                    type="button"
-                    class={`${GHOST_BUTTON_CLASS} min-w-7 px-1.5 text-[13px] leading-none`}
-                    disabled={zoomIndex() === 0}
-                    onClick={() => setZoomIndex((i) => Math.max(0, i - 1))}
-                    aria-label="Decrease thumbnail size"
-                  >
-                    -
-                  </Button>
-                  <Button
-                    type="button"
-                    class={`${GHOST_BUTTON_CLASS} min-w-7 px-1.5 text-[13px] leading-none`}
-                    disabled={zoomIndex() === ZOOM_LEVELS.length - 1}
-                    onClick={() =>
-                      setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1))
-                    }
-                    aria-label="Increase thumbnail size"
-                  >
-                    +
-                  </Button>
-                </div>
-              </Show>
-
-              <Button
-                type="button"
-                class={`${GHOST_BUTTON_CLASS} min-w-8 px-2 text-[14px] leading-none`}
-                disabled={isSubmitting() || !selectedLibrary()}
-                aria-label="Library actions"
-                aria-haspopup="menu"
-                aria-expanded={showLibraryActions() ? "true" : "false"}
-                onClick={() => setShowLibraryActions((current) => !current)}
-              >
-                •••
-              </Button>
-              <Show when={showLibraryActions()}>
-                <div
-                  role="menu"
-                  class="absolute right-0 top-full z-10 mt-2 min-w-36 rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-                >
-                  <Button
-                    type="button"
-                    role="menuitem"
-                    class={MENU_ITEM_BUTTON_CLASS}
-                    disabled={!canRefreshSelectedLibrary() || isSubmitting()}
-                    onClick={() => {
-                      setShowLibraryActions(false);
-                      void handleRefreshLibrary();
-                    }}
-                  >
-                    Refresh
-                  </Button>
-                  <Show when={selectedLibrary()?.mode === "sync"}>
-                    <Button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_ITEM_BUTTON_CLASS}
-                      disabled={isSubmitting()}
-                      onClick={() => {
-                        const library = selectedLibrary();
-                        if (!library) return;
-                        setShowLibraryActions(false);
-                        void setLibraryMode(library.id, "browse", null).then(() =>
-                          refetchLibraries(),
-                        );
-                      }}
-                    >
-                      Disable Sync
-                    </Button>
-                  </Show>
-                  <Show
-                    when={
-                      selectedLibrary()?.mode !== "sync" &&
-                      (selectedLibrary()?.kind === "s3" ||
-                        selectedLibrary()?.kind === "peer")
-                    }
-                  >
-                    <Button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_ITEM_BUTTON_CLASS}
-                      disabled={isSubmitting()}
-                      onClick={() => {
-                        const library = selectedLibrary();
-                        if (!library) return;
-                        setShowLibraryActions(false);
-                        void setLibraryMode(library.id, "sync")
-                          .then(() => {
-                            void refetchLibraries();
-                            return syncLibrary(library.id);
-                          })
-                          .catch((err) => {
-                            setError(toErrorMessage(err));
-                          });
-                      }}
-                    >
-                      Enable Sync
-                    </Button>
-                  </Show>
-                  <Show
-                    when={
-                      selectedLibrary()?.mode !== "sync" &&
-                      selectedLibrary()?.kind === "directory" &&
-                      orderedLibraryEntries().filter(
-                        (lib) =>
-                          lib.id !== selectedLibrary()?.id &&
-                          (lib.kind === "s3" || lib.kind === "peer"),
-                      ).length > 0
-                    }
-                  >
-                    <div class="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.05em] text-[var(--text-subtle)]">
-                      Sync to
-                    </div>
-                    <For
-                      each={orderedLibraryEntries().filter(
-                        (lib) =>
-                          lib.id !== selectedLibrary()?.id &&
-                          (lib.kind === "s3" || lib.kind === "peer"),
-                      )}
-                    >
-                      {(target) => (
-                        <Button
-                          type="button"
-                          role="menuitem"
-                          class={MENU_ITEM_BUTTON_CLASS}
-                          disabled={isSubmitting()}
-                          onClick={() => {
-                            const library = selectedLibrary();
-                            if (!library) return;
-                            setShowLibraryActions(false);
-                            void setLibraryMode(library.id, "sync", target.id)
-                              .then(() => {
-                                void refetchLibraries();
-                                return syncLibrary(library.id);
-                              })
-                              .catch((err) => {
-                                setError(toErrorMessage(err));
-                              });
-                          }}
-                        >
-                          {target.name}
-                        </Button>
-                      )}
-                    </For>
-                  </Show>
-                  <Show when={supportsS3Libraries() && isS3Library(selectedLibrary())}>
-                    <Button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_ITEM_BUTTON_CLASS}
-                      disabled={isSubmitting()}
-                      onClick={() => {
-                        setShowLibraryActions(false);
-                        void openEditS3Form();
-                      }}
-                    >
-                      Edit S3
-                    </Button>
-                  </Show>
-                  <Button
-                    type="button"
-                    role="menuitem"
-                    class={MENU_DANGER_ITEM_BUTTON_CLASS}
-                    disabled={!selectedLibrary()?.removable || isSubmitting()}
-                    onClick={() => {
-                      setShowLibraryActions(false);
-                      void handleRemoveLibrary();
-                    }}
-                  >
-                    Remove Collection
-                  </Button>
-                </div>
-              </Show>
-            </div>
-
-            <Show when={showS3Form()}>
-              <div class="absolute left-1/4 top-full z-10 mt-2 grid grid-cols-3 gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-3 touch-mobile:grid-cols-1">
-                <div class="col-span-3 touch-mobile:col-span-1">
-                  <div class={PANEL_SECTION_TITLE_CLASS}>
-                    {editingS3LibraryId() ? "Edit S3 Library" : "S3 Library"}
-                  </div>
-                </div>
-                <label class="flex flex-col gap-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Name</span>
-                  <input
-                    type="text"
-                    value={(s3Draft().name as string | undefined) ?? ""}
-                    onInput={(event) => updateS3Draft("name", event.currentTarget.value)}
-                    class={INPUT_CLASS}
-                  />
-                </label>
-                <label class="col-span-2 flex flex-col gap-1 touch-mobile:col-span-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Endpoint</span>
-                  <input
-                    type="text"
-                    value={s3Draft().endpoint}
-                    onInput={(event) =>
-                      updateS3Draft("endpoint", event.currentTarget.value)
-                    }
-                    class={INPUT_CLASS}
-                    placeholder="https://s3.example.com"
-                  />
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Bucket</span>
-                  <input
-                    type="text"
-                    value={s3Draft().bucket}
-                    onInput={(event) =>
-                      updateS3Draft("bucket", event.currentTarget.value)
-                    }
-                    class={INPUT_CLASS}
-                  />
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Region</span>
-                  <input
-                    type="text"
-                    value={s3Draft().region}
-                    onInput={(event) =>
-                      updateS3Draft("region", event.currentTarget.value)
-                    }
-                    class={INPUT_CLASS}
-                  />
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Prefix</span>
-                  <input
-                    type="text"
-                    value={(s3Draft().prefix as string | undefined) ?? ""}
-                    onInput={(event) =>
-                      updateS3Draft("prefix", event.currentTarget.value)
-                    }
-                    class={INPUT_CLASS}
-                    placeholder="optional/path"
-                  />
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Access Key ID</span>
-                  <input
-                    type="text"
-                    value={s3Draft().access_key_id}
-                    onInput={(event) =>
-                      updateS3Draft("access_key_id", event.currentTarget.value)
-                    }
-                    class={INPUT_CLASS}
-                  />
-                </label>
-                <label class="col-span-2 flex flex-col gap-1 touch-mobile:col-span-1">
-                  <span class={PANEL_SECTION_TITLE_CLASS}>Secret Access Key</span>
-                  <input
-                    type="password"
-                    value={s3Draft().secret_access_key}
-                    onInput={(event) =>
-                      updateS3Draft("secret_access_key", event.currentTarget.value)
-                    }
-                    class={INPUT_CLASS}
-                  />
-                </label>
-                <div class="col-span-3 flex items-end gap-2 touch-mobile:col-span-1">
-                  <Button
-                    type="button"
-                    class={SURFACE_BUTTON_CLASS}
-                    disabled={isSubmitting()}
-                    onClick={() => void handleSubmitS3Library()}
-                  >
-                    {editingS3LibraryId() ? "Save S3 Library" : "Add S3 Library"}
-                  </Button>
-                  <Button
-                    type="button"
-                    class="h-8 px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-faint)] transition-colors hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40"
-                    disabled={isSubmitting()}
-                    onClick={closeS3Form}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            </Show>
-          </div>
+          <LibrarySelector
+            libraries={libraryEntries()}
+            selectedLibraryId={selectedLibraryId()}
+            filenameFilter={filenameFilter()}
+            zoomIndex={zoomIndex()}
+            zoomLevelCount={ZOOM_LEVELS.length}
+            onSelectLibrary={setSelectedLibraryId}
+            onFilenameFilterInput={setFilenameFilter}
+            onZoomOut={() => setZoomIndex((i) => Math.max(0, i - 1))}
+            onZoomIn={() => setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1))}
+            onLibrariesChanged={refetchLibraries}
+            onLibraryItemsChanged={async () => {
+              await refetchCachedLibraryItems();
+              await refetchItems();
+            }}
+            onError={setError}
+          />
         </div>
       </Show>
       <div
@@ -2419,7 +482,7 @@ export const MediaView: Component = () => {
             const dy = Math.abs(ev.touches[0].clientY - startY);
             if (dx > 30 && dy < 50) {
               moved = true;
-              setMobileSidebarOpen(true);
+              collections.setMobileSidebarOpen(true);
             }
           }
           function onEnd() {
@@ -2432,18 +495,18 @@ export const MediaView: Component = () => {
       >
         <Show when={!isEditorStrip() && selectedLibrary()}>
           <CollectionSidebar
-            collections={collections()}
-            selectedCollectionId={selectedCollectionId()}
+            collections={collections.collections()}
+            selectedCollectionId={collections.selectedCollectionId()}
             totalCount={availableItems().length}
             onSelect={(id) => {
-              setSelectedCollectionId(id);
-              setMobileSidebarOpen(false);
+              collections.setSelectedCollectionId(id);
+              collections.setMobileSidebarOpen(false);
             }}
-            onCreate={() => void handleCreateCollection()}
-            onRename={(id, name) => void handleRenameCollection(id, name)}
-            onDelete={(id) => void handleDeleteCollection(id)}
-            mobileOpen={mobileSidebarOpen()}
-            onMobileClose={() => setMobileSidebarOpen(false)}
+            onCreate={() => void collections.handleCreateCollection()}
+            onRename={(id, name) => void collections.handleRenameCollection(id, name)}
+            onDelete={(id) => void collections.handleDeleteCollection(id)}
+            mobileOpen={collections.mobileSidebarOpen()}
+            onMobileClose={() => collections.setMobileSidebarOpen(false)}
           />
         </Show>
         <div class="relative flex-1 min-h-0 flex flex-col">
@@ -2482,273 +545,49 @@ export const MediaView: Component = () => {
               Indexing · {availableItems().length.toLocaleString()} images found so far
             </div>
           </Show>
-          <div
-            ref={setScrollRef}
-            class={scrollClass()}
-            onScroll={(event) => {
-              const top = event.currentTarget.scrollTop;
-              setScrollTop(top);
-              updateScrollAnchor(top);
-              setIsScrolling(true);
-              clearTimeout(scrollLabelTimeout);
-              scrollLabelTimeout = setTimeout(() => setIsScrolling(false), 1000);
-            }}
-          >
-            <Show
-              when={displayedItems().length > 0}
-              fallback={
-                <Show
-                  when={hasLibraries()}
-                  fallback={
-                    <Show
-                      when={!isEditorStrip()}
-                      fallback={
-                        <div class={`${EMPTY_STATE_CLASS} mx-1 text-xs`}>
-                          Open the media view to add your first library.
-                        </div>
-                      }
-                    >
-                      <div class={EMPTY_STATE_PANEL_CLASS}>
-                        <div class="space-y-1">
-                          <p class={PANEL_SECTION_TITLE_CLASS}>Media Library</p>
-                          <h2 class="text-lg font-semibold text-[var(--text)]">
-                            Add your first library
-                          </h2>
-                        </div>
-                        <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                          Pick a folder with your images. Shade will index it and show it
-                          here in the media view.
-                        </p>
-                        <Button
-                          type="button"
-                          class={SURFACE_BUTTON_CLASS}
-                          disabled={isSubmitting()}
-                          onClick={() => void handleAddLibrary()}
-                        >
-                          Add Library
-                        </Button>
-                        <p class="text-xs text-[var(--text-faint)]">
-                          You can also use the + button in the library bar.
-                        </p>
-                      </div>
-                    </Show>
-                  }
-                >
-                  <Show
-                    when={selectedLibraryIsOffline()}
-                    fallback={
-                      <Show
-                        when={items.loading || !isLibraryScanComplete()}
-                        fallback={
-                          <div
-                            class={`${EMPTY_STATE_CLASS} ${
-                              isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                            }`}
-                          >
-                            {activeFilenameFilter().length > 0
-                              ? `No media match "${filenameFilter().trim()}".`
-                              : `No images found in ${selectedLibrary()?.name ?? "this library"}.`}
-                          </div>
-                        }
-                      >
-                        <div
-                          class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                            isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                          }`}
-                        >
-                          <div class="flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--text-muted)]">
-                            <div class="relative h-8 w-8 animate-spin rounded-full border-2 border-[var(--border-medium)] border-t-[var(--text-muted)]"></div>
-                          </div>
-                          <div class="space-y-1">
-                            <h2 class="text-sm font-semibold text-[var(--text)]">
-                              {availableItems().length > 0
-                                ? `Found ${availableItems().length.toLocaleString()} images…`
-                                : "Scanning library…"}
-                            </h2>
-                            <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                              {items.loading
-                                ? "Loading your library."
-                                : "Indexing images in this library. This may take a while for large or remote libraries."}
-                            </p>
-                          </div>
-                        </div>
-                      </Show>
-                    }
-                  >
-                    <div
-                      class={`mx-auto flex max-w-md flex-col items-center gap-4 rounded-xl px-6 py-8 text-center ${
-                        isEditorStrip() ? "mx-1 text-xs" : "text-sm"
-                      }`}
-                    >
-                      <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-medium)] bg-[var(--surface)] text-[var(--text-muted)]">
-                        <svg
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                          class="h-7 w-7"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.7"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" />
-                          <path d="M7.5 14.5 10 12l2 2 2-2 2.5 2.5" />
-                          <path d="M8 9.5h.01" />
-                          <path d="M5 19 19 5" />
-                        </svg>
-                      </div>
-                      <div class="space-y-1">
-                        <h2 class="text-sm font-semibold text-[var(--text)]">
-                          This library is currently offline
-                        </h2>
-                        <p class="max-w-sm text-sm leading-6 text-[var(--text-dim)]">
-                          Reconnect it to browse the images that are already cached.
-                        </p>
-                      </div>
-                    </div>
-                  </Show>
-                </Show>
+          <PictureGrid
+            displayedItemCount={displayedItems().length}
+            displayedItems={displayedItems()}
+            hasLibraries={hasLibraries()}
+            isEditorStrip={isEditorStrip()}
+            isLibraryScanComplete={isLibraryScanComplete()}
+            availableItemCount={availableItems().length}
+            selectedLibraryName={selectedLibrary()?.name ?? null}
+            selectedLibraryIsOffline={selectedLibraryIsOffline()}
+            itemsLoading={items.loading}
+            activeFilenameFilterCount={activeFilenameFilter().length}
+            filenameFilter={filenameFilter()}
+            zoomIndex={zoomIndex()}
+            zoomLevels={ZOOM_LEVELS}
+            itemById={(id) => itemsById().get(id)}
+            getBufferedThumbnailSrc={getBufferedThumbnailSrc}
+            shouldDeferEditorStripThumbnails={shouldDeferEditorStripThumbnails()}
+            activeMediaItemId={activeMediaItemId()}
+            isSelected={(id) => selectedMediaItemIdSet().has(id)}
+            isFocused={(id) => keyboardNavActive() && focusedItemId() === id}
+            showSelectionControls={showSelectionControls()}
+            onThumbnailLoaded={rememberThumbnailSrc}
+            onActivate={(item, src) => {
+              const libraryId = selectedLibraryId();
+              if (!libraryId) {
+                throw new Error("selected library is required");
               }
-            >
-              <Show
-                when={!isEditorStrip()}
-                fallback={
-                  <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
-                    <div
-                      class="grid gap-x-0 gap-y-1"
-                      style={{
-                        "grid-template-columns": gridTemplateColumns(),
-                        transform: `translateY(${offsetY()}px)`,
-                      }}
-                    >
-                      <For each={visibleRows()}>
-                        {(row) =>
-                          row.kind === "date" ? (
-                            <h2 class="col-span-full px-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
-                              {formatModificationMonth(row.modifiedAt)}
-                            </h2>
-                          ) : (
-                            <For each={row.ids}>
-                              {(id) => {
-                                const item = () => itemsById().get(id);
-                                return (
-                                  <Show when={item()}>
-                                    <MediaTile
-                                      item={item()!}
-                                      cachedSrc={getBufferedThumbnailSrc(item()!)}
-                                      compact
-                                      offline={selectedLibraryIsOffline()}
-                                      disableThumbnailLoad={shouldDeferEditorStripThumbnails()}
-                                      active={activeMediaItemId() === id}
-                                      selected={selectedMediaItemIdSet().has(id)}
-                                      focused={
-                                        keyboardNavActive() && focusedItemId() === id
-                                      }
-                                      showSelectionControls={showSelectionControls()}
-                                      onThumbnailLoaded={(src) =>
-                                        rememberThumbnailSrc(item()!, src)
-                                      }
-                                      onActivate={(src) => {
-                                        const libraryId = selectedLibraryId();
-                                        if (!libraryId) {
-                                          throw new Error("selected library is required");
-                                        }
-                                        void handleOpenItem(item()!, libraryId, src);
-                                      }}
-                                      onToggleSelection={() => toggleMediaSelection(id)}
-                                      onShiftSelect={() => rangeSelectMedia(id)}
-                                      onFocus={() => {
-                                        setFocusedItemId(id);
-                                        setKeyboardNavActive(false);
-                                      }}
-                                    />
-                                  </Show>
-                                );
-                              }}
-                            </For>
-                          )
-                        }
-                      </For>
-                    </div>
-                  </div>
-                }
-              >
-                <div style={{ height: `${containerHeight()}px`, position: "relative" }}>
-                  <div
-                    class="grid gap-1"
-                    style={{
-                      "grid-template-columns": gridTemplateColumns(),
-                      transform: `translateY(${offsetY()}px)`,
-                    }}
-                  >
-                    <For each={visibleRows()}>
-                      {(row) =>
-                        row.kind === "date" ? (
-                          <h2 class="px-1 col-span-full py-3 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text-subtle)] first:pt-0">
-                            {formatModificationMonth(row.modifiedAt)}
-                          </h2>
-                        ) : (
-                          <For each={row.ids}>
-                            {(id) => {
-                              const item = () => itemsById().get(id);
-                              return (
-                                <Show when={item()}>
-                                  <MediaTile
-                                    item={item()!}
-                                    cachedSrc={getBufferedThumbnailSrc(item()!)}
-                                    offline={selectedLibraryIsOffline()}
-                                    active={activeMediaItemId() === id}
-                                    selected={selectedMediaItemIdSet().has(id)}
-                                    focused={
-                                      keyboardNavActive() && focusedItemId() === id
-                                    }
-                                    showSelectionControls={showSelectionControls()}
-                                    onThumbnailLoaded={(src) =>
-                                      rememberThumbnailSrc(item()!, src)
-                                    }
-                                    onActivate={(src) => {
-                                      const libraryId = selectedLibraryId();
-                                      if (!libraryId) {
-                                        throw new Error("selected library is required");
-                                      }
-                                      void handleOpenItem(item()!, libraryId, src);
-                                    }}
-                                    onToggleSelection={() => toggleMediaSelection(id)}
-                                    onShiftSelect={() => rangeSelectMedia(id)}
-                                    onFocus={() => {
-                                      setFocusedItemId(id);
-                                      setKeyboardNavActive(false);
-                                    }}
-                                  />
-                                </Show>
-                              );
-                            }}
-                          </For>
-                        )
-                      }
-                    </For>
-                  </div>
-                </div>
-              </Show>
-            </Show>
-          </div>
-          <Show when={isScrolling() && scrollLabel()}>
-            <div
-              class={`pointer-events-none absolute ${
-                isEditorStrip()
-                  ? "right-0 translate-x-[calc(100%+0.5rem)] text-left"
-                  : "right-4"
-              } z-20 -translate-y-1/2 rounded-md bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text)] shadow-md ring-1 ring-[var(--border-medium)]`}
-              style={{ top: `${tooltipTop()}px` }}
-            >
-              {scrollLabel()}
-            </div>
-          </Show>
+              void itemActions.handleOpenItem(item, libraryId, src);
+            }}
+            onToggleSelection={toggleMediaSelection}
+            onShiftSelect={rangeSelectMedia}
+            onFocusItem={(id) => {
+              setFocusedItemId(id);
+              setKeyboardNavActive(false);
+            }}
+            onAddLibrary={() => void handleAddLibrary()}
+            isSubmitting={isSubmitting()}
+          />
         </div>
       </div>
 
       <div
-        class={`${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 touch-mobile:hidden lg:px-6`}
+        class={`selection-bar ${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 touch-mobile:hidden lg:px-6`}
       >
         {displayedError() && (
           <p class="text-sm py-3 text-[var(--danger-text)]">{displayedError()}</p>
@@ -2756,145 +595,50 @@ export const MediaView: Component = () => {
         <Show when={mediaActionStatus()}>
           {(status) => <p class="text-sm py-3 text-[var(--text-value)]">{status()}</p>}
         </Show>
-        <Show when={selectedMediaItemIds().length > 0}>
-          <div class="flex items-center justify-between gap-2 py-3">
-            <p class="text-[11px] font-medium text-[var(--text-dim)]">
-              {selectedMediaItemIds().length} selected
-            </p>
-            <div class="flex items-center gap-2">
-              <Button
-                type="button"
-                class={SURFACE_BUTTON_CLASS}
-                onClick={() => void handleOpenSelectedItems()}
-              >
-                Open Selected
-              </Button>
-              <Button
-                type="button"
-                class={SURFACE_BUTTON_CLASS}
-                disabled={isSubmitting()}
-                onClick={() => void handleExportSelected()}
-              >
-                Export Selected
-              </Button>
-              <div class="relative">
-                <Button
-                  type="button"
-                  class={SURFACE_BUTTON_CLASS}
-                  disabled={isSubmitting() || selectedMediaItemIds().length === 0}
-                  onClick={() => {
-                    setShowApplyPresetMenu(!showApplyPresetMenu());
-                    if (!presets()) {
-                      void refetchPresets();
-                    }
-                  }}
-                >
-                  Apply Preset
-                </Button>
-                <Show when={showApplyPresetMenu()}>
-                  <div class="absolute bottom-full right-0 mb-1 min-w-[180px] rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] py-1 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
-                    <Show
-                      when={(presets()?.length ?? 0) > 0}
-                      fallback={
-                        <div class="px-3 py-2 text-[11px] font-medium text-[var(--text-faint)]">
-                          No presets saved
-                        </div>
-                      }
-                    >
-                      <For each={presets() ?? []}>
-                        {(preset) => (
-                          <button
-                            type="button"
-                            class="flex h-7 w-full items-center px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
-                            disabled={isSubmitting()}
-                            onClick={() => void handleApplyPresetToSelected(preset.name)}
-                          >
-                            {preset.name}
-                          </button>
-                        )}
-                      </For>
-                      <button
-                        type="button"
-                        class="flex h-7 w-full items-center border-t border-[var(--border)] px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--danger-text)] hover:bg-[var(--surface-hover)] disabled:opacity-40"
-                        disabled={isSubmitting()}
-                        onClick={() => void handleClearEditsForSelected()}
-                      >
-                        Clear Edits
-                      </button>
-                    </Show>
-                  </div>
-                </Show>
-              </div>
-              <div class="relative">
-                <Button
-                  type="button"
-                  class={SURFACE_BUTTON_CLASS}
-                  onClick={() => setShowAddToCollectionMenu(!showAddToCollectionMenu())}
-                >
-                  Add to Collection
-                </Button>
-                <Show when={showAddToCollectionMenu()}>
-                  <div class="absolute bottom-full right-0 mb-1 min-w-[160px] rounded-lg border border-[var(--border-medium)] bg-[var(--panel-bg)] py-1 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
-                    <For each={collections()}>
-                      {(col) => (
-                        <button
-                          type="button"
-                          class="flex h-7 w-full items-center px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
-                          onClick={() => void handleAddToCollection(col.id)}
-                        >
-                          {col.name}
-                        </button>
-                      )}
-                    </For>
-                    <button
-                      type="button"
-                      class="flex h-7 w-full items-center border-t border-[var(--border)] px-3 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
-                      onClick={async () => {
-                        const libId = selectedLibraryId();
-                        if (!libId) return;
-                        const col = await createCollection(libId, "Untitled");
-                        await refreshCollections();
-                        await handleAddToCollection(col.id);
-                      }}
-                    >
-                      + New Collection
-                    </button>
-                  </div>
-                </Show>
-              </div>
-              <Show when={selectedCollectionId()}>
-                <Button
-                  type="button"
-                  class={DANGER_BUTTON_CLASS}
-                  onClick={() => void handleRemoveFromCollection()}
-                >
-                  Remove from Collection
-                </Button>
-              </Show>
-              <Show when={canWriteSelectedLibrary()}>
-                <Button
-                  type="button"
-                  class={DANGER_BUTTON_CLASS}
-                  disabled={isSubmitting()}
-                  onClick={() => void handleDeleteSelectedItems()}
-                >
-                  Delete Selected
-                </Button>
-              </Show>
-              <Button
-                type="button"
-                class={SURFACE_BUTTON_CLASS}
-                onClick={() => {
-                  setSelectedMediaItemIds([]);
-                  setShowApplyPresetMenu(false);
-                  setMediaActionStatus(null);
-                }}
-              >
-                Clear
-              </Button>
-            </div>
-          </div>
-        </Show>
+        <SelectionBar
+          selectedCount={selectedMediaItemIds().length}
+          isSubmitting={isSubmitting()}
+          canWriteSelectedLibrary={canWriteSelectedLibrary()}
+          selectedCollectionId={collections.selectedCollectionId()}
+          presets={presets() ?? []}
+          showApplyPresetMenu={showApplyPresetMenu()}
+          showAddToCollectionMenu={collections.showAddToCollectionMenu()}
+          collections={collections.collections()}
+          onOpenSelected={() => void itemActions.handleOpenSelectedItems()}
+          onExportSelected={() => void itemActions.handleExportSelected()}
+          onToggleApplyPresetMenu={() => {
+            setShowApplyPresetMenu(!showApplyPresetMenu());
+            if (!presets()) {
+              void refetchPresets();
+            }
+          }}
+          onApplyPreset={(name) => void itemActions.handleApplyPresetToSelected(name)}
+          onClearEdits={() => void itemActions.handleClearEditsForSelected()}
+          onToggleAddToCollectionMenu={() =>
+            collections.setShowAddToCollectionMenu(
+              !collections.showAddToCollectionMenu(),
+            )
+          }
+          onAddToCollection={(id) =>
+            void collections.handleAddToCollection(id, selectedCollectionFileHashes())
+          }
+          onCreateAndAddToCollection={() =>
+            void collections.handleCreateAndAddToCollection(
+              selectedCollectionFileHashes(),
+            )
+          }
+          onRemoveFromCollection={() =>
+            void collections
+              .handleRemoveFromCollection(selectedCollectionFileHashes())
+              .then(() => setSelectedMediaItemIds([]))
+          }
+          onDeleteSelected={() => void itemActions.handleDeleteSelectedItems()}
+          onClearSelection={() => {
+            setSelectedMediaItemIds([]);
+            setShowApplyPresetMenu(false);
+            setMediaActionStatus(null);
+          }}
+        />
         {/*<Show when={selectedLibraryDetail()}>
           <p class="overflow-hidden whitespace-nowrap text-ellipsis text-[11px] font-medium text-[var(--text-dim)]">
             {selectedLibraryDetail()}
@@ -2914,90 +658,13 @@ export const MediaView: Component = () => {
             type="text"
             value={filenameFilter()}
             onInput={(event) => setFilenameFilter(event.currentTarget.value)}
-            class={INPUT_CLASS}
+            class="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--input-bg)] px-2 text-[13px] font-medium text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-dim)] focus-visible:ring-1 focus-visible:ring-[var(--border-active)] touch-mobile:h-10 touch-mobile:rounded-full touch-mobile:px-4 touch-mobile:text-base"
             placeholder="Search names or tags"
             aria-label="Search names or tags"
           />
         </div>
       </Show>
 
-      <Show when={uploadProgress()}>
-        {(progress) => (
-          <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
-            <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
-              <span>
-                {progress().phase === "uploading" ? "Uploading" : "Refreshing Library"}
-              </span>
-              <span class="text-[var(--text-dim)]">
-                {progress().completedFiles}/{progress().totalFiles}
-              </span>
-            </div>
-            <Show when={progress().currentFileName}>
-              <p class="mt-1 overflow-hidden whitespace-nowrap text-ellipsis text-[12px] font-medium text-[var(--text-dim)]">
-                {progress().currentFileName}
-              </p>
-            </Show>
-            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-              <div
-                class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
-                style={{ width: `${uploadProgressPercent()}%` }}
-              />
-            </div>
-          </div>
-        )}
-      </Show>
-
-      <Show when={syncProgress()}>
-        {(progress) => (
-          <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
-            <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
-              <span>Syncing Library</span>
-              <span class="text-[var(--text-dim)]">
-                {progress().completed}/{progress().total}
-              </span>
-            </div>
-            <Show when={progress().current_name}>
-              <p class="mt-1 overflow-hidden whitespace-nowrap text-ellipsis text-[12px] font-medium text-[var(--text-dim)]">
-                {progress().current_name}
-              </p>
-            </Show>
-            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-              <div
-                class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
-                style={{
-                  width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%`,
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </Show>
-
-      <Show when={exportProgress()}>
-        {(progress) => (
-          <div class="pointer-events-none absolute bottom-4 right-4 z-30 w-[min(20rem,calc(100%-2rem))] rounded-xl border border-[var(--border-medium)] bg-[color-mix(in_srgb,var(--panel-bg)_92%,transparent)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-md">
-            <div class="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text)]">
-              <span>Exporting Images</span>
-              <span class="text-[var(--text-dim)]">
-                {progress().completed}/{progress().total}
-              </span>
-            </div>
-            <Show when={progress().current_name}>
-              <p class="mt-1 overflow-hidden whitespace-nowrap text-ellipsis text-[12px] font-medium text-[var(--text-dim)]">
-                {progress().current_name}
-              </p>
-            </Show>
-            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-              <div
-                class="h-full rounded-full bg-[var(--border-active)] transition-[width] duration-150"
-                style={{
-                  width: `${progress().total > 0 ? Math.round((progress().completed / progress().total) * 100) : 0}%`,
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </Show>
     </section>
   );
 };

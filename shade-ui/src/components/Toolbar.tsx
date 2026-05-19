@@ -1,16 +1,15 @@
-import { type Component, Show } from "solid-js";
+import { type Component, onCleanup, onMount, Show } from "solid-js";
+import { ToolbarExport } from "../actions/toolbar-export";
+import { ToolbarOpen } from "../actions/toolbar-open";
 import {
   isAdjustmentSliderActive,
   showEditorView,
   showMediaView,
   state,
 } from "../store/editor-store";
-import { useOpenImage } from "../store/use-open-image";
+import { actions, buildActionContext } from "../store/actions";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
-
-const MEDIA_FILE_ACCEPT =
-  "image/jpeg,image/png,image/tiff,image/webp,image/avif,image/x-exr,.exr,.3fr,.ari,.arw,.cr2,.cr3,.crm,.crw,.dcr,.dcs,.dng,.erf,.fff,.iiq,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.ori,.pef,.qtk,.raf,.raw,.rw2,.rwl,.srw,.x3f";
 
 const UploadIcon = () => (
   <svg
@@ -59,13 +58,11 @@ const BackIcon = () => (
 );
 
 export const Toolbar: Component = () => {
-  const image = useOpenImage();
-  let fileInputRef: HTMLInputElement | undefined;
-  const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   const canResumeEditor = () =>
     state.artboards.length > 0 && state.currentView === "media";
   const canExport = () => state.canvasWidth > 0 && state.canvasHeight > 0;
   const showMobileLibraryButton = () => state.currentView === "editor";
+  const runAction = (id: string) => actions.run(id, buildActionContext());
 
   const statusText = () => {
     if (state.loadError) return state.loadError;
@@ -85,29 +82,14 @@ export const Toolbar: Component = () => {
     ].join(" · ");
   };
 
-  const handleFileChange = async (e: Event) => {
-    const files = (e.currentTarget as HTMLInputElement).files;
-    if (!files || files.length === 0) {
-      return;
-    }
-    const selectedFiles = Array.from(files);
-    try {
-      for (const [index, file] of selectedFiles.entries()) {
-        await image.openFile(file, index === 0 ? "replace" : "append");
-      }
-    } catch {
-      return;
-    }
-    if (fileInputRef) fileInputRef.value = "";
-  };
-
-  const handleExport = async () => {
-    const path = await image.pickExportTarget();
-    if (!path) {
-      return;
-    }
-    await image.exportTo(path);
-  };
+  onMount(() => {
+    actions.register(ToolbarExport);
+    actions.register(ToolbarOpen);
+    onCleanup(() => {
+      actions.unregister("toolbar.export");
+      actions.unregister("toolbar.open");
+    });
+  });
 
   return (
     <header
@@ -154,19 +136,11 @@ export const Toolbar: Component = () => {
       </div>
 
       <div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={MEDIA_FILE_ACCEPT}
-          class="hidden"
-          onChange={handleFileChange}
-        />
         <div class="flex items-center justify-end gap-2">
           <ActionButton
             label="Export"
             icon={<SaveIcon />}
-            onClick={() => void handleExport()}
+            onClick={() => runAction("toolbar.export")}
             disabled={!canExport()}
             primary
           />
@@ -174,7 +148,7 @@ export const Toolbar: Component = () => {
             label="Open"
             icon={<UploadIcon />}
             disabled={!state.webgpuAvailable}
-            onClick={() => fileInputRef?.click()}
+            onClick={() => runAction("toolbar.open")}
           />
         </div>
       </div>

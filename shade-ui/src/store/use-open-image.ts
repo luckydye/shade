@@ -59,7 +59,7 @@ interface ViewportSpec {
 
 // ── Preview tile subscriber & application ───────────────────────────────────
 
-async function ensurePlatformDetected(): Promise<boolean> {
+function ensurePlatformDetected(): boolean {
   if (isTauriPlatform === null) {
     isTauriPlatform = isTauriRuntime();
   }
@@ -438,7 +438,7 @@ function supportsFloat16Preview() {
 
 async function dispatchRefresh(quality: PreviewQuality) {
   if (previewSuspended) return;
-  if (await ensurePlatformDetected()) {
+  if (ensurePlatformDetected()) {
     await tauriRefresh(quality);
   } else {
     await browserRefresh(quality);

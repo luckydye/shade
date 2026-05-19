@@ -1,12 +1,14 @@
-/ <reference types="vitest" />
+/// <reference types="vitest" />
 
 import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
+const isVitest = process.env.VITEST === "true";
+
 export default defineConfig({
-  plugins: [solid(), tailwindcss()],
+  plugins: isVitest ? [] : [solid(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 5173,

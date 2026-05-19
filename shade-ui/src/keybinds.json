@@ -1,0 +1,16 @@
+{
+  "editor.undo": ["mod+z"],
+  "editor.redo": ["mod+shift+z"],
+  "editor.copy-edits": ["mod+c"],
+  "editor.paste-edits": ["mod+v"],
+  "media.select-all": ["mod+a"],
+  "media.prev-library": ["["],
+  "media.next-library": ["]"],
+  "media.toggle-selection": [" "],
+  "media.navigate-up": ["arrowup"],
+  "media.navigate-down": ["arrowdown"],
+  "media.navigate-left": ["arrowleft"],
+  "media.navigate-right": ["arrowright"],
+  "media.zoom-in": ["+", "="],
+  "media.zoom-out": ["-"]
+}

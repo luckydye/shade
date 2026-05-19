@@ -27,6 +27,8 @@ export interface ActionDef {
   run: (ctx: ActionContext) => Promise<void> | void;
 }
 
+export type ActionShortcutMap = Record<string, string | string[]>;
+
 export class ActionsRegistry {
   private actions = new Map<string, ActionDef>();
   private shortcuts = new Map<string, string>();
@@ -38,11 +40,6 @@ export class ActionsRegistry {
 
   unregister(id: string): void {
     this.actions.delete(id);
-    for (const [shortcut, actionId] of this.shortcuts) {
-      if (actionId === id) {
-        this.shortcuts.delete(shortcut);
-      }
-    }
   }
 
   get(id: string): ActionDef | undefined {
@@ -79,6 +76,15 @@ export class ActionsRegistry {
 
   mapShortcut(shortcut: string, actionId: string): void {
     this.shortcuts.set(shortcut.toLowerCase(), actionId);
+  }
+
+  loadShortcuts(bindings: ActionShortcutMap): void {
+    for (const [actionId, shortcuts] of Object.entries(bindings)) {
+      const list = Array.isArray(shortcuts) ? shortcuts : [shortcuts];
+      for (const shortcut of list) {
+        this.mapShortcut(shortcut, actionId);
+      }
+    }
   }
 
   unmapShortcut(shortcut: string): void {
