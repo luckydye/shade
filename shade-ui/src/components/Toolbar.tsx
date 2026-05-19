@@ -2,7 +2,6 @@ import { type Component, onCleanup, onMount, Show } from "solid-js";
 import { ToolbarExport } from "../actions/toolbar-export";
 import { ToolbarOpen } from "../actions/toolbar-open";
 import {
-  isAdjustmentSliderActive,
   showEditorView,
   showMediaView,
   state,
@@ -94,7 +93,6 @@ export const Toolbar: Component = () => {
   return (
     <header
       data-tauri-drag-region
-      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class="mobile-slider-fade static z-40 grid w-full select-none grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--border)] bg-[var(--toolbar-bg)] px-4 pb-3 pt-3 backdrop-blur-[18px] transition-opacity duration-150 touch-compact:fixed touch-compact:inset-x-0 touch-compact:top-0 touch-compact:pt-[calc(env(safe-area-inset-top)+0.75rem)] touch-mobile:grid-cols-[40px_minmax(0,1fr)_auto]"
     >
       <div class="flex h-8 items-center">

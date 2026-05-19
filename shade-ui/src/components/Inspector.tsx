@@ -25,7 +25,6 @@ import {
   isDrawerOpen,
   type LayerInfo,
   setCropAspectRatioPreset,
-  setIsAdjustmentSliderActive,
   setIsDrawerOpen,
   state,
 } from "../store/editor-store";
@@ -163,7 +162,6 @@ const SectionHeader: Component<{ title: string; detail?: string | (() => string)
   props,
 ) => (
   <div
-    data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
     class="mobile-slider-fade mb-2 flex items-center justify-between gap-3 bg-surface-input px-3 py-1.5 transition-opacity duration-150"
   >
     <div class="text-[12px] text-[var(--text)]">{props.title}</div>
@@ -610,9 +608,8 @@ export const Inspector: Component = () => {
     };
     return (
       <div class="space-y-3">
-        <div class="mobile-slider-fade flex gap-2">
+          <div class="mobile-slider-fade flex gap-2">
           <div
-            data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
             class="flex justify-end transition-opacity duration-150"
           >
             <Button
@@ -637,7 +634,6 @@ export const Inspector: Component = () => {
             </Button>
           </div>
           <div
-            data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
             class="grid h-8 rounded-lg bg-[var(--surface)] p-0.5 grid-cols-3 transition-opacity duration-150 flex-1"
           >
             {(["red", "green", "blue"] as const).map((c) => (
@@ -1670,7 +1666,6 @@ export const Inspector: Component = () => {
 
   const InspectorTabs: Component<{ class?: string }> = (props) => (
     <div
-      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class={`${props.class ?? ""} mobile-slider-fade transition-opacity duration-150`}
     >
       <div class="grid h-8 rounded-lg bg-[var(--surface)] p-0.5 grid-cols-2">
@@ -1693,7 +1688,6 @@ export const Inspector: Component = () => {
 
   const DesktopLayerList: Component = () => (
     <div
-      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class="mobile-slider-fade flex flex-col gap-1 transition-opacity duration-150"
     >
       <div
@@ -2058,7 +2052,6 @@ export const Inspector: Component = () => {
 
       <Show when={selectedAdjustmentLayer()}>
         <div
-          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
           class="mobile-slider-fade mt-3 flex flex-col gap-3 border-t border-[var(--border)] pt-3 transition-opacity duration-150"
         >
           <Show when={isPickerOpen()}>
@@ -2217,7 +2210,6 @@ export const Inspector: Component = () => {
         }`}
       >
         <div
-          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
           class="mobile-slider-fade flex cursor-pointer flex-col items-center px-4 pt-3 pb-1 transition-opacity duration-150"
           onClick={() => setIsDrawerOpen((v) => !v)}
         >
@@ -2229,7 +2221,6 @@ export const Inspector: Component = () => {
         </div>
 
         <div
-          data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
           class="mobile-slider-fade pb-[env(safe-area-inset-bottom)] transition-opacity duration-150"
         ></div>
       </div>

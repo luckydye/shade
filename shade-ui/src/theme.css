@@ -45,6 +45,11 @@
   --line-height-interactive: 2rem;
 }
 
+.mobile-slider-fade,
+.mobile-slider-fade-row {
+  opacity: var(--surface-opacity, 1);
+}
+
 @media (prefers-color-scheme: dark) {
   /* Dark mode overrides */
   :root {

@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { Show } from "solid-js";
-import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor-store";
+import { showMediaView, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
 import { LibrarySelector } from "./media-view/LibrarySelector";
@@ -31,7 +31,6 @@ export const MediaView: Component = () => {
       ref={mediaShellRef}
       tabIndex={-1}
       aria-label="Media view"
-      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class={`${shellClass()} mobile-slider-fade outline-none relative transition-opacity duration-150`}
       onPointerDown={(event) => {
         if (targetUsesOwnFocus(event.target)) {

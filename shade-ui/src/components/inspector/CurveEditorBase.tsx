@@ -11,7 +11,6 @@ import {
 } from "solid-js";
 import type { AdjustmentValues } from "../../types";
 import {
-  isAdjustmentSliderActive,
   state,
   viewportToneSample,
 } from "../../store/editor-store";
@@ -291,7 +290,6 @@ export const CurveEditorBase: Component<CurveEditorBaseProps> = (props) => {
 
   return (
     <div
-      data-mobile-faded={isAdjustmentSliderActive() ? "true" : undefined}
       class={`${props.parameterRowClass} mobile-slider-fade gap-y-1.5 transition-opacity duration-150`}
     >
       <span

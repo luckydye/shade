@@ -1,5 +1,6 @@
 import {
   type Component,
+  createEffect,
   onCleanup,
   onMount,
   Show,
@@ -12,7 +13,7 @@ import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { actions, type ActionShortcutMap, buildActionContext } from "./store/actions";
-import { setState, state } from "./store/editor-store";
+import { isAdjustmentSliderActive, setState, state } from "./store/editor-store";
 import { useNavigationHistory } from "./app/use-navigation-history";
 import { checkWebGPU } from "./utils/webgpu-check";
 
@@ -21,8 +22,15 @@ let actionShortcutsLoaded = false;
 const App: Component = () => {
   const hasImage = () => state.canvasWidth > 0 || state.isLoading;
   const showEditor = () => hasImage() && state.currentView === "editor";
-  
+
   useNavigationHistory();
+
+  createEffect(() => {
+    document.documentElement.style.setProperty(
+      "--surface-opacity",
+      isAdjustmentSliderActive() ? "0" : "1",
+    );
+  });
 
   onMount(() => {
     void (async () => {
