@@ -16,7 +16,6 @@
         "@tauri-apps/api": "^2.0.0",
         "@tauri-apps/plugin-dialog": "2.6.0",
         "shade-ui": "workspace:*",
-        "solid-js": "^1.8.0",
       },
       "devDependencies": {
         "@types/node": "^20.0.0",
@@ -31,18 +30,14 @@
       "version": "0.1.0",
       "dependencies": {
         "@tailwindcss/vite": "^4.2.1",
-        "@types/node": "^20.0.0",
-        "i18next": "^26.0.3",
         "solid-js": "^1.8.0",
         "tailwindcss": "^4",
         "typescript": "^5.0.0",
         "vite": "^5.0.0",
         "vite-plugin-solid": "^2.8.0",
-        "vite-plugin-terminal": "^1.4.0",
         "yjs": "^13.6.30",
       },
       "devDependencies": {
-        "@solidjs/testing-library": "^0.8.10",
         "happy-dom": "^20.9.0",
         "vitest": "^4.1.5",
       },
@@ -681,8 +676,10 @@
 
     "vitest/vite": ["vite@8.0.13", "", { "dependencies": { "lightningcss": "^1.32.0", "picomatch": "^4.0.4", "postcss": "^8.5.14", "rolldown": "1.0.1", "tinyglobby": "^0.2.16" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "@vitejs/devtools": "^0.1.18", "esbuild": "^0.27.0 || ^0.28.0", "jiti": ">=1.21.0", "less": "^4.0.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "@vitejs/devtools", "esbuild", "jiti", "less", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-MFtjBYgzmSxmgA4RAfjIyXWpGe1oALnjgUTzzV7QLx/TKxCzjtMH6Fd9/eVK+5Fg1qNoz5VAwsmMs/NofrmJvw=="],
 
-    "web/shade-ui": ["shade-ui@file:shade-ui", { "dependencies": { "@tailwindcss/vite": "^4.2.1", "@types/node": "^20.0.0", "i18next": "^26.0.3", "solid-js": "^1.8.0", "tailwindcss": "^4", "typescript": "^5.0.0", "vite": "^5.0.0", "vite-plugin-solid": "^2.8.0", "vite-plugin-terminal": "^1.4.0", "yjs": "^13.6.30" }, "devDependencies": { "@solidjs/testing-library": "^0.8.10", "happy-dom": "^20.9.0", "vitest": "^4.1.5" } }],
+    "web/shade-wasm": ["shade-wasm@file:shade-wasm", { "dependencies": { "shade-ui": "../shade-ui" } }],
 
     "@babel/helper-compilation-targets/lru-cache/yallist": ["yallist@3.1.1", "", {}, "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="],
+
+    "web/shade-wasm/shade-ui": ["shade-ui@file:shade-ui", {}],
   }
 }

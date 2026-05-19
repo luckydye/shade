@@ -50,6 +50,8 @@ function FatalErrorView(props: { message: string }) {
 }
 
 function reportFatalError(error: unknown) {
+  console.error(error);
+  
   const message = formatError(error);
   setFatalError(message);
   return message;
@@ -73,11 +75,17 @@ try {
     });
     await invoke("register_preview_channel", { channel });
   }).catch(reportFatalError);
+  
   void startRemoteControlBridge().catch(reportFatalError);
+  
   render(
     () => (
       <ErrorBoundary
-        fallback={(error) => <FatalErrorView message={reportFatalError(error)} />}
+        fallback={(error) => {
+          const message = formatError(error);
+          queueMicrotask(() => setFatalError(message));
+          return <FatalErrorView message={message} />;
+        }}
       >
         <App />
       </ErrorBoundary>
@@ -85,7 +93,6 @@ try {
     root,
   );
 } catch (error) {
-  console.error(error);
   reportFatalError(error);
   throw error;
 }
