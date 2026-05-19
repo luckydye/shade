@@ -1,4 +1,3 @@
-import type { Accessor, Setter } from "solid-js";
 import { createEffect, createMemo, createSignal } from "solid-js";
 import type { MediaItem } from "../../data/use-library-items";
 import {
@@ -9,6 +8,8 @@ import {
   setMediaViewSelectedLibraryId,
 } from "../../store/media-view-context";
 import { mediaItemKey, type MediaGridRow } from "./media-utils";
+import { pictureGridColumns, pictureGridRows } from "./picture-grid-state";
+import { useMediaViewStore } from "./media-view-store";
 
 function mediaItemToBatchItem(item: MediaItem) {
   return item.kind === "peer"
@@ -22,33 +23,28 @@ function mediaItemToBatchItem(item: MediaItem) {
     : { path: item.path, fingerprint: item.fingerprint, kind: "local" as const };
 }
 
-export function useMediaSelection(params: {
-  selectedLibraryId: Accessor<string | null>;
-  flatItemIds: Accessor<string[]>;
-  itemsById: Accessor<Map<string, MediaItem>>;
-  gridRows: Accessor<MediaGridRow[]>;
-  columns: Accessor<number>;
-  onActionStatus: Setter<string | null>;
-}) {
-  const [selectedMediaItemIds, setSelectedMediaItemIds] = createSignal<string[]>([]);
+export function useMediaSelection() {
+  const store = useMediaViewStore();
   const [lastSelectedMediaItemId, setLastSelectedMediaItemId] = createSignal<
     string | null
   >(null);
-  const [keyboardNavActive, setKeyboardNavActive] = createSignal(false);
-  const [focusedItemId, setFocusedItemId] = createSignal<string | null>(null);
 
-  const selectedMediaItemIdSet = createMemo(() => new Set(selectedMediaItemIds()));
-  const showSelectionControls = createMemo(() => selectedMediaItemIds().length > 0);
+  const selectedMediaItemIdSet = createMemo(
+    () => new Set(store.selectedMediaItemIds()),
+  );
+  const showSelectionControls = createMemo(
+    () => store.selectedMediaItemIds().length > 0,
+  );
 
   const clearSelection = () => {
-    setSelectedMediaItemIds([]);
-    params.onActionStatus(null);
+    store.setSelectedMediaItemIds([]);
+    store.setMediaActionStatus(null);
   };
 
   const toggleMediaSelection = (itemId: string) => {
     setLastSelectedMediaItemId(itemId);
-    params.onActionStatus(null);
-    setSelectedMediaItemIds((current) =>
+    store.setMediaActionStatus(null);
+    store.setSelectedMediaItemIds((current) =>
       current.includes(itemId)
         ? current.filter((candidate) => candidate !== itemId)
         : [...current, itemId],
@@ -57,8 +53,7 @@ export function useMediaSelection(params: {
 
   const rangeSelectMedia = (itemId: string) => {
     const lastId = lastSelectedMediaItemId();
-    const allIds = params
-      .gridRows()
+    const allIds = pictureGridRows()
       .filter(
         (row): row is Extract<MediaGridRow, { kind: "items" }> => row.kind === "items",
       )
@@ -72,24 +67,24 @@ export function useMediaSelection(params: {
     const [start, end] =
       fromIndex <= toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
     const rangeIds = allIds.slice(start, end + 1);
-    setSelectedMediaItemIds((current) => {
+    store.setSelectedMediaItemIds((current) => {
       const result = new Set(current);
       for (const id of rangeIds) result.add(id);
       return [...result];
     });
-    params.onActionStatus(null);
+    store.setMediaActionStatus(null);
     setLastSelectedMediaItemId(itemId);
   };
 
   const navigateFocus = (direction: "left" | "right" | "up" | "down") => {
-    const ids = params.flatItemIds();
+    const ids = store.flatItemIds();
     if (ids.length === 0) return;
-    let index = focusedItemId() ? ids.indexOf(focusedItemId()!) : -1;
+    let index = store.focusedItemId() ? ids.indexOf(store.focusedItemId()!) : -1;
     if (index === -1) {
-      setFocusedItemId(ids[0]);
+      store.setFocusedItemId(ids[0]);
       return;
     }
-    const colCount = params.columns();
+    const colCount = pictureGridColumns();
     switch (direction) {
       case "left":
         index -= 1;
@@ -105,28 +100,29 @@ export function useMediaSelection(params: {
         break;
     }
     if (index >= 0 && index < ids.length) {
-      setFocusedItemId(ids[index]);
+      store.setFocusedItemId(ids[index]);
     }
   };
 
   createEffect(() => {
-    setMediaViewFocusedItemId(focusedItemId());
-    const id = focusedItemId();
-    const item = id ? params.itemsById().get(id) : undefined;
+    setMediaViewFocusedItemId(store.focusedItemId());
+    const id = store.focusedItemId();
+    const item = id ? store.itemsById().get(id) : undefined;
     setMediaViewFocusedItem(item ? mediaItemToBatchItem(item) : null);
   });
 
   createEffect(() => {
-    setMediaViewSelectedItemIds(selectedMediaItemIds());
+    setMediaViewSelectedItemIds(store.selectedMediaItemIds());
   });
 
   createEffect(() => {
-    setMediaViewSelectedLibraryId(params.selectedLibraryId());
+    setMediaViewSelectedLibraryId(store.selectedLibraryId());
   });
 
   createEffect(() => {
-    const byId = params.itemsById();
-    const batchItems = selectedMediaItemIds()
+    const byId = store.itemsById();
+    const batchItems = store
+      .selectedMediaItemIds()
       .map((id) => byId.get(id))
       .filter((item): item is MediaItem => !!item)
       .map(mediaItemToBatchItem);
@@ -134,31 +130,31 @@ export function useMediaSelection(params: {
   });
 
   createEffect(() => {
-    const availableItemIds = new Set(params.flatItemIds());
-    setSelectedMediaItemIds((current) => {
+    const availableItemIds = new Set(store.flatItemIds());
+    store.setSelectedMediaItemIds((current) => {
       const next = current.filter((id) => availableItemIds.has(id));
       return next.length === current.length ? current : next;
     });
   });
 
   createEffect(() => {
-    const id = focusedItemId();
+    const id = store.focusedItemId();
     if (!id) return;
-    const ids = new Set(params.flatItemIds());
+    const ids = new Set(store.flatItemIds());
     if (!ids.has(id)) {
-      setFocusedItemId(null);
+      store.setFocusedItemId(null);
     }
   });
 
   return {
-    selectedMediaItemIds,
-    setSelectedMediaItemIds,
+    selectedMediaItemIds: store.selectedMediaItemIds,
+    setSelectedMediaItemIds: store.setSelectedMediaItemIds,
     selectedMediaItemIdSet,
     showSelectionControls,
-    keyboardNavActive,
-    setKeyboardNavActive,
-    focusedItemId,
-    setFocusedItemId,
+    keyboardNavActive: store.keyboardNavActive,
+    setKeyboardNavActive: store.setKeyboardNavActive,
+    focusedItemId: store.focusedItemId,
+    setFocusedItemId: store.setFocusedItemId,
     clearSelection,
     toggleMediaSelection,
     rangeSelectMedia,

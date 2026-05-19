@@ -14,13 +14,13 @@ import { useLibrarySyncProgress } from "../data/use-library-sync-progress";
 import { useMediaLibraryList } from "../data/use-media-library-list";
 import { usePeerDiscovery } from "../data/use-peer-discovery";
 import { usePresetList } from "../data/use-preset-list";
+import { useMediaViewStatus } from "../data/use-media-view-status";
 import { isAdjustmentSliderActive, showMediaView, state } from "../store/editor-store";
 import { ActionButton } from "./ActionButton";
 import { CollectionSidebar } from "./media-view/CollectionSidebar";
 import { LibrarySelector } from "./media-view/LibrarySelector";
 import { PictureGrid } from "./media-view/PictureGrid";
 import { SelectionBar } from "./media-view/SelectionBar";
-import { pictureGridColumns, pictureGridRows } from "./media-view/picture-grid-state";
 import {
   filterMediaItemsByFilename,
   isCameraLibrary,
@@ -36,6 +36,7 @@ import {
   targetUsesOwnFocus,
 } from "./media-view/media-utils";
 import { useCollectionMembership } from "./media-view/use-collection-membership";
+import { provideMediaViewStore } from "./media-view/media-view-store";
 import { useMediaItemActions } from "./media-view/use-media-item-actions";
 import { useMediaSelection } from "./media-view/use-media-selection";
 import { useMediaUploadHandlers } from "./media-view/use-media-upload-handlers";
@@ -77,6 +78,7 @@ export const MediaView: Component = () => {
   const [mediaActionStatus, setMediaActionStatus] = createSignal<string | null>(null);
   const [filenameFilter, setFilenameFilter] = createSignal("");
   const [error, setError] = createSignal<string | null>(null);
+  const { setMediaViewActionStatus, setMediaViewError } = useMediaViewStatus();
   const syncProgress = useLibrarySyncProgress();
   const { peers: discoveredPeers } = usePeerDiscovery();
   const onlinePeerIds = createMemo(
@@ -202,6 +204,16 @@ export const MediaView: Component = () => {
     }
     return error();
   });
+  createEffect(() => {
+    setMediaViewError(displayedError());
+  });
+  createEffect(() => {
+    setMediaViewActionStatus(mediaActionStatus());
+  });
+  onCleanup(() => {
+    setMediaViewActionStatus(null);
+    setMediaViewError(null);
+  });
   const hasLibraries = createMemo(() => libraryEntries().length > 0);
   const canWriteSelectedLibrary = createMemo(() => libraryIsWritable(selectedLibrary()));
   const shouldDeferEditorStripThumbnails = createMemo(
@@ -223,27 +235,36 @@ export const MediaView: Component = () => {
     setSelectedLibraryId(firstLocalLibrary?.id ?? null);
   });
 
-  const selection = useMediaSelection({
+  provideMediaViewStore({
     selectedLibraryId,
+    setSelectedLibraryId,
+    selectedLibrary,
+    libraryEntries,
     flatItemIds,
     itemsById,
-    gridRows: pictureGridRows,
-    columns: pictureGridColumns,
-    onActionStatus: setMediaActionStatus,
+    canWriteSelectedLibrary,
+    isSubmitting,
+    setIsSubmitting,
+    setError,
+    setMediaActionStatus,
+    setShowApplyPresetMenu,
+    setZoomIndex,
+    zoomLevelCount: ZOOM_LEVELS.length,
+    syncProgress,
+    pickDirectory,
+    deleteMediaLibraryItem,
+    uploadMediaLibraryFile,
+    uploadMediaLibraryPath,
+    uploadMediaLibraryUrl,
+    refreshLibraryIndex,
+    refetchItems,
+    refetchCachedLibraryItems,
+    layerOps,
+    batchOps,
   });
-  const selectedMediaItemIds = selection.selectedMediaItemIds;
-  const setSelectedMediaItemIds = selection.setSelectedMediaItemIds;
-  const selectedMediaItemIdSet = selection.selectedMediaItemIdSet;
-  const showSelectionControls = selection.showSelectionControls;
-  const keyboardNavActive = selection.keyboardNavActive;
-  const setKeyboardNavActive = selection.setKeyboardNavActive;
-  const focusedItemId = selection.focusedItemId;
-  const setFocusedItemId = selection.setFocusedItemId;
-  const toggleMediaSelection = selection.toggleMediaSelection;
-  const rangeSelectMedia = selection.rangeSelectMedia;
-  const navigateFocus = selection.navigateFocus;
+  const selection = useMediaSelection();
   const selectedCollectionFileHashes = () =>
-    selectedMediaItemIds().map((itemId) => {
+    selection.selectedMediaItemIds().map((itemId) => {
       const item = itemsById().get(itemId);
       if (!item) {
         throw new Error(`selected media item not found: ${itemId}`);
@@ -254,51 +275,11 @@ export const MediaView: Component = () => {
       return item.fingerprint ?? item.path;
     });
 
-  const uploads = useMediaUploadHandlers({
-    selectedLibrary,
-    canWriteSelectedLibrary,
-    isSubmitting,
-    setIsSubmitting,
-    setError,
-    uploadMediaLibraryFile,
-    uploadMediaLibraryPath,
-    uploadMediaLibraryUrl,
-    refreshLibraryIndex,
-    refetchCachedLibraryItems,
-    refetchItems,
-  });
-  const itemActions = useMediaItemActions({
-    selectedLibraryId,
-    selectedMediaItemIds,
-    setSelectedMediaItemIds,
-    itemsById,
-    canWriteSelectedLibrary,
-    setShowApplyPresetMenu,
-    setIsSubmitting,
-    setError,
-    setMediaActionStatus,
-    pickDirectory,
-    deleteMediaLibraryItem,
-    refetchItems,
-    refetchCachedLibraryItems,
-    layerOps,
-    batchOps,
-  });
+  const uploads = useMediaUploadHandlers();
+  const itemActions = useMediaItemActions();
   useMediaViewActions({
-    selectedLibraryId,
-    setSelectedLibraryId,
-    libraryEntries,
-    flatItemIds,
-    selectedFocusedItemId: focusedItemId,
-    setFocusedItemId,
-    setSelectedMediaItemIds,
-    setKeyboardNavActive,
-    toggleMediaSelection,
-    navigateFocus,
-    setZoomIndex,
-    zoomLevelCount: ZOOM_LEVELS.length,
-    syncProgress,
-    refetchItems,
+    toggleMediaSelection: selection.toggleMediaSelection,
+    navigateFocus: selection.navigateFocus,
     pasteEdits: itemActions.handleApplyPresetToSelected,
   });
 
@@ -322,7 +303,7 @@ export const MediaView: Component = () => {
   createEffect(() => {
     selectedLibraryId();
     actions.run("media.grid.reset-scroll", buildActionContext());
-    setSelectedMediaItemIds([]);
+    selection.setSelectedMediaItemIds([]);
   });
 
   createEffect(() => {
@@ -365,8 +346,8 @@ export const MediaView: Component = () => {
   });
 
   createEffect(() => {
-    const id = focusedItemId();
-    if (!id || !keyboardNavActive()) return;
+    const id = selection.focusedItemId();
+    if (!id || !selection.keyboardNavActive()) return;
     actions.run("media.grid.scroll-focused-into-view", buildActionContext());
   });
 
@@ -563,9 +544,11 @@ export const MediaView: Component = () => {
             getBufferedThumbnailSrc={getBufferedThumbnailSrc}
             shouldDeferEditorStripThumbnails={shouldDeferEditorStripThumbnails()}
             activeMediaItemId={activeMediaItemId()}
-            isSelected={(id) => selectedMediaItemIdSet().has(id)}
-            isFocused={(id) => keyboardNavActive() && focusedItemId() === id}
-            showSelectionControls={showSelectionControls()}
+            isSelected={(id) => selection.selectedMediaItemIdSet().has(id)}
+            isFocused={(id) =>
+              selection.keyboardNavActive() && selection.focusedItemId() === id
+            }
+            showSelectionControls={selection.showSelectionControls()}
             onThumbnailLoaded={rememberThumbnailSrc}
             onActivate={(item, src) => {
               const libraryId = selectedLibraryId();
@@ -574,11 +557,11 @@ export const MediaView: Component = () => {
               }
               void itemActions.handleOpenItem(item, libraryId, src);
             }}
-            onToggleSelection={toggleMediaSelection}
-            onShiftSelect={rangeSelectMedia}
+            onToggleSelection={selection.toggleMediaSelection}
+            onShiftSelect={selection.rangeSelectMedia}
             onFocusItem={(id) => {
-              setFocusedItemId(id);
-              setKeyboardNavActive(false);
+              selection.setFocusedItemId(id);
+              selection.setKeyboardNavActive(false);
             }}
             onAddLibrary={() => void handleAddLibrary()}
             isSubmitting={isSubmitting()}
@@ -589,14 +572,8 @@ export const MediaView: Component = () => {
       <div
         class={`selection-bar ${isEditorStrip() ? "hidden" : "flex"} flex-col gap-2 border-t border-[var(--border)] px-4 touch-mobile:hidden lg:px-6`}
       >
-        {displayedError() && (
-          <p class="text-sm py-3 text-[var(--danger-text)]">{displayedError()}</p>
-        )}
-        <Show when={mediaActionStatus()}>
-          {(status) => <p class="text-sm py-3 text-[var(--text-value)]">{status()}</p>}
-        </Show>
         <SelectionBar
-          selectedCount={selectedMediaItemIds().length}
+          selectedCount={selection.selectedMediaItemIds().length}
           isSubmitting={isSubmitting()}
           canWriteSelectedLibrary={canWriteSelectedLibrary()}
           selectedCollectionId={collections.selectedCollectionId()}
@@ -630,26 +607,15 @@ export const MediaView: Component = () => {
           onRemoveFromCollection={() =>
             void collections
               .handleRemoveFromCollection(selectedCollectionFileHashes())
-              .then(() => setSelectedMediaItemIds([]))
+              .then(() => selection.setSelectedMediaItemIds([]))
           }
           onDeleteSelected={() => void itemActions.handleDeleteSelectedItems()}
           onClearSelection={() => {
-            setSelectedMediaItemIds([]);
+            selection.setSelectedMediaItemIds([]);
             setShowApplyPresetMenu(false);
             setMediaActionStatus(null);
           }}
         />
-        {/*<Show when={selectedLibraryDetail()}>
-          <p class="overflow-hidden whitespace-nowrap text-ellipsis text-[11px] font-medium text-[var(--text-dim)]">
-            {selectedLibraryDetail()}
-            {selectedLibraryIsOffline() && " • offline"}
-            {selectedLibraryIsRefreshing() && " • refreshing library index"}
-            {!selectedLibraryIsRefreshing() &&
-              !selectedLibraryIsOffline() &&
-              !isLibraryScanComplete() &&
-              ` • indexing ${availableItems().length} images`}
-          </p>
-        </Show>*/}
       </div>
 
       <Show when={selectedLibrary()}>

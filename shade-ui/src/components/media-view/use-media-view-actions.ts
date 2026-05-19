@@ -1,33 +1,21 @@
-import type { Accessor, Setter } from "solid-js";
 import { createEffect, on, onCleanup, onMount } from "solid-js";
 import { actions } from "../../store/actions";
 import { registerMediaBrowserController } from "../../store/media-browser-control";
-import type { LibraryEntry } from "./media-utils";
+import { useMediaViewStore } from "./media-view-store";
 
 export function useMediaViewActions(params: {
-  selectedLibraryId: Accessor<string | null>;
-  setSelectedLibraryId: Setter<string | null>;
-  libraryEntries: Accessor<LibraryEntry[]>;
-  flatItemIds: Accessor<string[]>;
-  selectedFocusedItemId: Accessor<string | null>;
-  setFocusedItemId: Setter<string | null>;
-  setSelectedMediaItemIds: Setter<string[]>;
-  setKeyboardNavActive: Setter<boolean>;
   toggleMediaSelection: (itemId: string) => void;
   navigateFocus: (direction: "left" | "right" | "up" | "down") => void;
-  setZoomIndex: Setter<number>;
-  zoomLevelCount: number;
-  syncProgress: Accessor<unknown>;
-  refetchItems: () => unknown;
   pasteEdits: (presetName: string) => Promise<void>;
 }) {
+  const store = useMediaViewStore();
   onMount(() => {
     const unregisterMediaBrowserController = registerMediaBrowserController({
       selectLibrary(libraryId) {
-        params.setSelectedLibraryId(libraryId);
+        store.setSelectedLibraryId(libraryId);
       },
       getSelectedLibraryId() {
-        return params.selectedLibraryId();
+        return store.selectedLibraryId();
       },
       async pasteEdits(presetName: string) {
         await params.pasteEdits(presetName);
@@ -35,8 +23,8 @@ export function useMediaViewActions(params: {
     });
 
     createEffect(
-      on(params.syncProgress, (current, prev) => {
-        if (prev && !current) void params.refetchItems();
+      on(store.syncProgress, (current, prev) => {
+        if (prev && !current) void store.refetchItems();
       }),
     );
 
@@ -49,11 +37,11 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        params.setKeyboardNavActive(true);
-        const ids = params.flatItemIds();
-        params.setSelectedMediaItemIds(ids);
-        if (!params.selectedFocusedItemId() && ids.length > 0) {
-          params.setFocusedItemId(ids[0]);
+        store.setKeyboardNavActive(true);
+        const ids = store.flatItemIds();
+        store.setSelectedMediaItemIds(ids);
+        if (!store.focusedItemId() && ids.length > 0) {
+          store.setFocusedItemId(ids[0]);
         }
       },
     });
@@ -64,9 +52,9 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: (ctx) => ctx.currentView === "media" && ctx.mediaViewFocusedItemId !== null,
       run: () => {
-        const id = params.selectedFocusedItemId();
+        const id = store.focusedItemId();
         if (id) {
-          params.setKeyboardNavActive(true);
+          store.setKeyboardNavActive(true);
           params.toggleMediaSelection(id);
         }
       },
@@ -84,7 +72,7 @@ export function useMediaViewActions(params: {
         group: "Media",
         when: mediaWhen,
         run: () => {
-          params.setKeyboardNavActive(true);
+          store.setKeyboardNavActive(true);
           params.navigateFocus(direction);
         },
       });
@@ -96,11 +84,11 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        const entries = params.libraryEntries();
+        const entries = store.libraryEntries();
         if (entries.length === 0) return;
-        const idx = entries.findIndex((lib) => lib.id === params.selectedLibraryId());
+        const idx = entries.findIndex((lib) => lib.id === store.selectedLibraryId());
         const nextIdx = idx <= 0 ? entries.length - 1 : idx - 1;
-        params.setSelectedLibraryId(entries[nextIdx].id);
+        store.setSelectedLibraryId(entries[nextIdx].id);
       },
     });
 
@@ -110,11 +98,11 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        const entries = params.libraryEntries();
+        const entries = store.libraryEntries();
         if (entries.length === 0) return;
-        const idx = entries.findIndex((lib) => lib.id === params.selectedLibraryId());
+        const idx = entries.findIndex((lib) => lib.id === store.selectedLibraryId());
         const nextIdx = idx === -1 || idx >= entries.length - 1 ? 0 : idx + 1;
-        params.setSelectedLibraryId(entries[nextIdx].id);
+        store.setSelectedLibraryId(entries[nextIdx].id);
       },
     });
 
@@ -124,7 +112,7 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        params.setZoomIndex((i) => Math.min(params.zoomLevelCount - 1, i + 1));
+        store.setZoomIndex((i) => Math.min(store.zoomLevelCount - 1, i + 1));
       },
     });
 
@@ -134,12 +122,12 @@ export function useMediaViewActions(params: {
       group: "Media",
       when: mediaWhen,
       run: () => {
-        params.setZoomIndex((i) => Math.max(0, i - 1));
+        store.setZoomIndex((i) => Math.max(0, i - 1));
       },
     });
 
     const handlePointerDown = () => {
-      params.setKeyboardNavActive(false);
+      store.setKeyboardNavActive(false);
     };
     document.addEventListener("pointerdown", handlePointerDown);
     onCleanup(() => {

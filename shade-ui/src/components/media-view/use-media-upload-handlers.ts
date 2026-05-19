@@ -1,4 +1,3 @@
-import type { Accessor, Setter } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { listenNativeDragDrop } from "../../data/use-native-drag-drop";
 import { useMediaUploadProgress } from "../../data/use-media-upload-progress";
@@ -15,32 +14,14 @@ import {
   type LibraryEntry,
   type UploadDragFeedback,
 } from "./media-utils";
+import { useMediaViewStore } from "./media-view-store";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function useMediaUploadHandlers(params: {
-  selectedLibrary: Accessor<LibraryEntry | null>;
-  canWriteSelectedLibrary: Accessor<boolean>;
-  isSubmitting: Accessor<boolean>;
-  setIsSubmitting: Setter<boolean>;
-  setError: Setter<string | null>;
-  uploadMediaLibraryFile: (
-    libraryId: string,
-    file: File,
-    appendTimestampOnConflict?: boolean,
-  ) => Promise<unknown>;
-  uploadMediaLibraryPath: (libraryId: string, path: string) => Promise<unknown>;
-  uploadMediaLibraryUrl: (
-    libraryId: string,
-    url: string,
-    fileName: string,
-  ) => Promise<unknown>;
-  refreshLibraryIndex: (libraryId: string) => Promise<unknown>;
-  refetchCachedLibraryItems: () => unknown;
-  refetchItems: () => unknown;
-}) {
+export function useMediaUploadHandlers() {
+  const store = useMediaViewStore();
   const [uploadDragFeedback, setUploadDragFeedback] =
     createSignal<UploadDragFeedback | null>(null);
   const [usesNativeDragDrop, setUsesNativeDragDrop] = createSignal(false);
@@ -61,7 +42,7 @@ export function useMediaUploadHandlers(params: {
   });
 
   createEffect(() => {
-    if (params.canWriteSelectedLibrary()) {
+    if (store.canWriteSelectedLibrary()) {
       return;
     }
     setUploadDragFeedback(null);
@@ -75,29 +56,29 @@ export function useMediaUploadHandlers(params: {
       currentFileName: null,
     });
     if (isS3Library(library)) {
-      await params.refreshLibraryIndex(library.id);
+      await store.refreshLibraryIndex(library.id);
     }
-    await params.refetchCachedLibraryItems();
-    await params.refetchItems();
+    await store.refetchCachedLibraryItems();
+    await store.refetchItems();
   }
 
   async function handleUploadLibraryFiles(
     files: File[],
     appendTimestampOnConflict = false,
   ) {
-    const library = params.selectedLibrary();
+    const library = store.selectedLibrary();
     if (!library || !libraryIsWritable(library)) {
       throw new Error("selected library is readonly");
     }
     if (files.length === 0) {
       return;
     }
-    if (params.isSubmitting()) {
-      params.setError("media library operation already in progress");
+    if (store.isSubmitting()) {
+      store.setError("media library operation already in progress");
       return;
     }
-    params.setIsSubmitting(true);
-    params.setError(null);
+    store.setIsSubmitting(true);
+    store.setError(null);
     try {
       for (const [index, file] of files.entries()) {
         setUploadProgress({
@@ -106,7 +87,7 @@ export function useMediaUploadHandlers(params: {
           completedFiles: index,
           currentFileName: file.name,
         });
-        await params.uploadMediaLibraryFile(
+        await store.uploadMediaLibraryFile(
           library.id,
           file,
           appendTimestampOnConflict,
@@ -119,32 +100,32 @@ export function useMediaUploadHandlers(params: {
         currentFileName: null,
       });
       if (isS3Library(library)) {
-        await params.refreshLibraryIndex(library.id);
+        await store.refreshLibraryIndex(library.id);
       }
-      await params.refetchCachedLibraryItems();
-      await params.refetchItems();
+      await store.refetchCachedLibraryItems();
+      await store.refetchItems();
     } catch (err) {
-      params.setError(toErrorMessage(err));
+      store.setError(toErrorMessage(err));
     } finally {
       setUploadProgress(null);
-      params.setIsSubmitting(false);
+      store.setIsSubmitting(false);
     }
   }
 
   async function handleUploadLibraryPaths(paths: string[]) {
-    const library = params.selectedLibrary();
+    const library = store.selectedLibrary();
     if (!library || !libraryIsWritable(library)) {
       throw new Error("selected library is readonly");
     }
     if (paths.length === 0) {
       return;
     }
-    if (params.isSubmitting()) {
-      params.setError("media library operation already in progress");
+    if (store.isSubmitting()) {
+      store.setError("media library operation already in progress");
       return;
     }
-    params.setIsSubmitting(true);
-    params.setError(null);
+    store.setIsSubmitting(true);
+    store.setError(null);
     try {
       for (const [index, path] of paths.entries()) {
         setUploadProgress({
@@ -153,7 +134,7 @@ export function useMediaUploadHandlers(params: {
           completedFiles: index,
           currentFileName: path.split(/[/\\\\]/).pop() ?? path,
         });
-        await params.uploadMediaLibraryPath(library.id, path);
+        await store.uploadMediaLibraryPath(library.id, path);
       }
       setUploadProgress({
         phase: "refreshing",
@@ -162,27 +143,27 @@ export function useMediaUploadHandlers(params: {
         currentFileName: null,
       });
       if (isS3Library(library)) {
-        await params.refreshLibraryIndex(library.id);
+        await store.refreshLibraryIndex(library.id);
       }
-      await params.refetchCachedLibraryItems();
-      await params.refetchItems();
+      await store.refetchCachedLibraryItems();
+      await store.refetchItems();
     } catch (err) {
-      params.setError(toErrorMessage(err));
+      store.setError(toErrorMessage(err));
     } finally {
       setUploadProgress(null);
-      params.setIsSubmitting(false);
+      store.setIsSubmitting(false);
     }
   }
 
   async function handleUploadFromUrl(fetchUrl: string, originalUrl: string) {
-    const library = params.selectedLibrary();
+    const library = store.selectedLibrary();
     if (!library || !libraryIsWritable(library)) return;
-    if (params.isSubmitting()) {
-      params.setError("media library operation already in progress");
+    if (store.isSubmitting()) {
+      store.setError("media library operation already in progress");
       return;
     }
-    params.setIsSubmitting(true);
-    params.setError(null);
+    store.setIsSubmitting(true);
+    store.setError(null);
     const fileName = filenameFromUrl(originalUrl);
     setUploadProgress({
       phase: "uploading",
@@ -191,18 +172,18 @@ export function useMediaUploadHandlers(params: {
       currentFileName: fileName,
     });
     try {
-      await params.uploadMediaLibraryUrl(library.id, fetchUrl, fileName);
+      await store.uploadMediaLibraryUrl(library.id, fetchUrl, fileName);
       await refreshAfterUpload(library);
     } catch (error) {
-      params.setError(toErrorMessage(error));
+      store.setError(toErrorMessage(error));
     } finally {
       setUploadProgress(null);
-      params.setIsSubmitting(false);
+      store.setIsSubmitting(false);
     }
   }
 
   function handleUploadDragEnter(event: DragEvent) {
-    if (usesNativeDragDrop() || !params.canWriteSelectedLibrary()) {
+    if (usesNativeDragDrop() || !store.canWriteSelectedLibrary()) {
       return;
     }
     event.preventDefault();
@@ -212,7 +193,7 @@ export function useMediaUploadHandlers(params: {
   }
 
   function handleUploadDragOver(event: DragEvent) {
-    if (usesNativeDragDrop() || !params.canWriteSelectedLibrary()) {
+    if (usesNativeDragDrop() || !store.canWriteSelectedLibrary()) {
       return;
     }
     event.preventDefault();
@@ -226,7 +207,7 @@ export function useMediaUploadHandlers(params: {
 
   function handleUploadDragLeave(event: DragEvent) {
     if (
-      !params.canWriteSelectedLibrary() ||
+      !store.canWriteSelectedLibrary() ||
       usesNativeDragDrop() ||
       (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)
     ) {
@@ -236,21 +217,21 @@ export function useMediaUploadHandlers(params: {
   }
 
   function handleUploadDrop(event: DragEvent) {
-    if (usesNativeDragDrop() || !params.canWriteSelectedLibrary()) {
+    if (usesNativeDragDrop() || !store.canWriteSelectedLibrary()) {
       return;
     }
     event.preventDefault();
     setUploadDragFeedback(null);
     const files = droppedFiles(event.dataTransfer);
     if (files.length === 0) {
-      params.setError("drop did not contain files");
+      store.setError("drop did not contain files");
       return;
     }
     void handleUploadLibraryFiles(files);
   }
 
   function handleUploadPaste(event: ClipboardEvent) {
-    if (!params.canWriteSelectedLibrary() || targetAcceptsTextInput(event.target)) {
+    if (!store.canWriteSelectedLibrary() || targetAcceptsTextInput(event.target)) {
       return;
     }
     let files: File[];
@@ -258,7 +239,7 @@ export function useMediaUploadHandlers(params: {
       files = clipboardImageFiles(event.clipboardData);
     } catch (error) {
       event.preventDefault();
-      params.setError(toErrorMessage(error));
+      store.setError(toErrorMessage(error));
       return;
     }
     if (files.length > 0) {
@@ -279,7 +260,7 @@ export function useMediaUploadHandlers(params: {
     if (isTauriRuntime()) {
       setUsesNativeDragDrop(true);
       void listenNativeDragDrop((payload) => {
-        if (!params.canWriteSelectedLibrary()) {
+        if (!store.canWriteSelectedLibrary()) {
           setUploadDragFeedback(null);
           return;
         }
@@ -299,7 +280,7 @@ export function useMediaUploadHandlers(params: {
         }
         setUploadDragFeedback(null);
         if (payload.paths.length === 0) {
-          params.setError("drop did not contain files");
+          store.setError("drop did not contain files");
           return;
         }
         void handleUploadLibraryPaths(payload.paths);
