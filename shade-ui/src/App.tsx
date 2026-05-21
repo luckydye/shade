@@ -1,6 +1,7 @@
 import { type Component, onMount, Show } from "solid-js";
 import backSvg from "./assets/icons/back.svg?raw";
 import { ActionButton } from "./components/ActionButton";
+import { useCollections } from "./store/collection-membership-store";
 import { CollectionSidebar } from "./components/media-view/CollectionSidebar";
 import { LibrarySelector } from "./components/media-view/LibrarySelector";
 import { MobileMediaSearch } from "./components/media-view/MobileMediaSearch";
@@ -11,6 +12,7 @@ import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { setState, showMediaView, state } from "./store/editor-store";
+import { useCurrentLibrary } from "./utils/use-current-library";
 import { useEdgeSwipe } from "./utils/use-edge-swipe";
 import { useKeybinds } from "./utils/use-keybinds";
 import { useMediaViewModel } from "./utils/use-media-view-model";
@@ -20,14 +22,12 @@ import { Viewport } from "./components/Viewport";
 import { Inspector } from "./components/Inspector";
 import { useEditorActions } from "./utils/use-editor-actions";
 
-type MediaViewModel = ReturnType<typeof useMediaViewModel>;
-
 const MediaLibraryView: Component<{
-  collections: MediaViewModel["collections"];
-  selectedLibrary: MediaViewModel["selectedLibrary"];
+  selectedLibrary: ReturnType<typeof useCurrentLibrary>;
 }> = (props) => {
+  const collections = useCollections();
   const handleMediaEdgeSwipe = useEdgeSwipe({
-    onSwipe: () => props.collections.setMobileSidebarOpen(true),
+    onSwipe: () => collections.setMobileSidebarOpen(true),
   });
 
   return (
@@ -78,7 +78,8 @@ const EditorMediaStrip: Component = () => (
 );
 
 const App: Component = () => {
-  const { collections, selectedLibrary } = useMediaViewModel();
+  useMediaViewModel();
+  const selectedLibrary = useCurrentLibrary();
 
   useNavigationHistory();
   useKeybinds();
@@ -98,12 +99,7 @@ const App: Component = () => {
       <div class="flex min-h-0 flex-1">
         <Show
           when={state.currentView === "editor"}
-          fallback={
-            <MediaLibraryView
-              collections={collections}
-              selectedLibrary={selectedLibrary}
-            />
-          }
+          fallback={<MediaLibraryView selectedLibrary={selectedLibrary} />}
         >
           <EditorMediaStrip />
         </Show>

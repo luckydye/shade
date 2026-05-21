@@ -1,7 +1,8 @@
 import { openMediaItem } from "../components/media-view/media-utils";
-import { useMediaViewStore } from "../components/media-view/media-view-store";
+import { useMediaViewStore } from "../store/media-view-store";
 import { isTauriRuntime } from "../utils";
 import type { MediaItem } from "./use-library-items";
+import { useLayerStack } from "./use-layer-stack";
 import { useMediaLibraryList } from "./use-media-library-list";
 import { useOpenImage } from "./use-open-image";
 
@@ -13,6 +14,7 @@ function toErrorMessage(err: unknown): string {
 
 export function useMediaItemActions() {
   const store = useMediaViewStore();
+  const layerOps = useLayerStack();
   const { pickDirectory } = useMediaLibraryList();
   const selectedItems = () =>
     store
@@ -95,10 +97,10 @@ export function useMediaItemActions() {
               latest_snapshot_id: item.metadata.latestSnapshotId,
             };
             await useOpenImage().openPeer(item.peerId, picture);
-            await store.layerOps.applyPresetSnapshot(name, null);
+            await layerOps.applyPresetSnapshot(name, null);
           } else {
             await useOpenImage().open(item.path);
-            await store.layerOps.applyPresetSnapshot(name, item.path);
+            await layerOps.applyPresetSnapshot(name, item.path);
           }
           store.setMediaActionStatus(
             `Applying ${name}... (${index + 1}/${items.length})`,

@@ -1,4 +1,4 @@
-import type { useCollectionMembership } from "../../utils/use-collection-membership";
+import type { useCollectionMembership } from "../utils/use-collection-membership";
 
 export type CollectionMembershipStore = ReturnType<typeof useCollectionMembership>;
 
@@ -8,7 +8,7 @@ export function provideCollectionMembershipStore(store: CollectionMembershipStor
   collectionMembershipStore = store;
 }
 
-export function useCollectionMembershipStore() {
+export function useCollections() {
   if (!collectionMembershipStore) {
     throw new Error("collection membership store has not been provided");
   }

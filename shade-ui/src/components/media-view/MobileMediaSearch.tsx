@@ -1,5 +1,5 @@
 import type { Component } from "solid-js";
-import { useMediaViewStore } from "./media-view-store";
+import { useMediaViewStore } from "../../store/media-view-store";
 
 export const MobileMediaSearch: Component = () => {
   const store = useMediaViewStore();

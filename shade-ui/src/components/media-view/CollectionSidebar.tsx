@@ -1,8 +1,8 @@
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
 import { Button } from "../Button";
-import { useCollectionMembershipStore } from "./collection-membership-store";
-import { useMediaViewStore } from "./media-view-store";
+import { useCollections } from "../../store/collection-membership-store";
+import { useMediaViewStore } from "../../store/media-view-store";
 
 function formatCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -16,7 +16,7 @@ const SIDEBAR_ITEM_INACTIVE =
   "text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]";
 
 export const CollectionSidebar: Component = () => {
-  const collections = useCollectionMembershipStore();
+  const collections = useCollections();
   const store = useMediaViewStore();
   const [contextMenuId, setContextMenuId] = createSignal<string | null>(null);
   const [contextMenuPos, setContextMenuPos] = createSignal({ x: 0, y: 0 });

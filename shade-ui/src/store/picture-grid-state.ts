@@ -1,9 +1,7 @@
 import { createSignal } from "solid-js";
-import type { MediaGridRow } from "./media-utils";
 
 const PICTURE_GRID_ZOOM_LEVELS = [80, 100, 120, 160, 200, 260, 320] as const;
 const [pictureGridColumns, setPictureGridColumns] = createSignal(1);
-const [pictureGridRows, setPictureGridRows] = createSignal<MediaGridRow[]>([]);
 const [pictureGridZoomIndex, setPictureGridZoomIndex] = createSignal(3);
 
 const zoomPictureGridIn = () =>
@@ -17,10 +15,8 @@ const zoomPictureGridOut = () =>
 export {
   PICTURE_GRID_ZOOM_LEVELS,
   pictureGridColumns,
-  pictureGridRows,
   pictureGridZoomIndex,
   setPictureGridColumns,
-  setPictureGridRows,
   setPictureGridZoomIndex,
   zoomPictureGridIn,
   zoomPictureGridOut,

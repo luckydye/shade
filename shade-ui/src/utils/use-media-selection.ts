@@ -1,10 +1,7 @@
 import { createEffect, createMemo, createSignal } from "solid-js";
-import { type MediaGridRow, mediaItemKey } from "../components/media-view/media-utils";
-import { useMediaViewStore } from "../components/media-view/media-view-store";
-import {
-  pictureGridColumns,
-  pictureGridRows,
-} from "../components/media-view/picture-grid-state";
+import { mediaItemKey } from "../components/media-view/media-utils";
+import { useMediaViewStore } from "../store/media-view-store";
+import { pictureGridColumns } from "../store/picture-grid-state";
 import {
   setMediaViewFocusedItem,
   setMediaViewFocusedItemId,
@@ -52,11 +49,7 @@ export function useMediaSelection() {
 
   const rangeSelectMedia = (itemId: string) => {
     const lastId = lastSelectedMediaItemId();
-    const allIds = pictureGridRows()
-      .filter(
-        (row): row is Extract<MediaGridRow, { kind: "items" }> => row.kind === "items",
-      )
-      .flatMap((row) => row.ids);
+    const allIds = store.flatItemIds();
     const fromIndex = lastId != null ? allIds.indexOf(lastId) : -1;
     const toIndex = allIds.indexOf(itemId);
     if (fromIndex === -1 || toIndex === -1) {

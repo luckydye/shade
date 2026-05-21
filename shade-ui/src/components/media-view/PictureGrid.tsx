@@ -17,20 +17,19 @@ import { useMediaItemActions } from "../../utils/use-media-item-actions";
 import { useMediaLibraryList } from "../../utils/use-media-library-list";
 import { Button } from "../Button";
 import { MediaTile } from "./MediaTile";
-import { useMediaSelectionStore } from "./media-selection-store";
+import { useMediaSelectionStore } from "../../store/media-selection-store";
 import {
   formatModificationMonth,
   type MediaGridRow,
   mediaItemKey,
   modificationMonthKey,
 } from "./media-utils";
-import { useMediaViewStore } from "./media-view-store";
+import { useMediaViewStore } from "../../store/media-view-store";
 import {
   PICTURE_GRID_ZOOM_LEVELS,
   pictureGridZoomIndex,
   setPictureGridColumns,
-  setPictureGridRows,
-} from "./picture-grid-state";
+} from "../../store/picture-grid-state";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;
@@ -388,10 +387,6 @@ export const PictureGrid: Component = () => {
     setPictureGridColumns(columns());
   });
 
-  createEffect(() => {
-    setPictureGridRows(stableGridRows());
-  });
-
   actions.register({
     id: "media.grid.reset-scroll",
     title: "Reset Media Grid Scroll",
@@ -417,7 +412,6 @@ export const PictureGrid: Component = () => {
     }
     thumbnailMemoryBuffer.clear();
     setPictureGridColumns(1);
-    setPictureGridRows([]);
     actions.unregister("media.grid.reset-scroll");
     actions.unregister("media.grid.scroll-focused-into-view");
   });

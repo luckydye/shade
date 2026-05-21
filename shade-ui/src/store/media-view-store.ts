@@ -1,8 +1,8 @@
 import type { Accessor, Setter } from "solid-js";
 import { createRoot, createSignal } from "solid-js";
-import type { PresetInfo } from "../../types";
-import type { MediaItem } from "../../utils/use-library-items";
-import type { LibraryEntry } from "./media-utils";
+import type { PresetInfo } from "../types";
+import type { MediaItem } from "../utils/use-library-items";
+import type { LibraryEntry } from "../components/media-view/media-utils";
 
 type MediaViewSelectionState = {
   selectedMediaItemIds: Accessor<string[]>;
@@ -55,9 +55,6 @@ export type MediaViewStoreInput = {
   ) => Promise<unknown>;
   refreshLibraryIndex: (libraryId: string) => Promise<unknown>;
   refetchItems: () => unknown;
-  layerOps: {
-    applyPresetSnapshot: (name: string, path: string | null) => Promise<unknown>;
-  };
   batchOps: {
     applyPresetSnapshot: (
       items: { path: string; fingerprint: string | null }[],
