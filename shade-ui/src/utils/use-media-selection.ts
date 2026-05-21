@@ -1,15 +1,30 @@
 import { createEffect, createMemo, createSignal } from "solid-js";
 import { mediaItemKey } from "../components/media-view/media-utils";
-import { useMediaViewStore } from "../store/media-view-store";
-import { pictureGridColumns } from "../store/picture-grid-state";
+import { useMediaViewStore } from "./media-view-store";
+import { pictureGridColumns } from "./picture-grid-state";
 import {
   setMediaViewFocusedItem,
   setMediaViewFocusedItemId,
   setMediaViewSelectedBatchItems,
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
-} from "../store/media-view-context";
+} from "./media-view-context";
 import type { MediaItem } from "./use-library-items";
+
+export type MediaSelectionStore = ReturnType<typeof useMediaSelection>;
+
+let mediaSelectionStore: MediaSelectionStore | null = null;
+
+export function provideMediaSelectionStore(store: MediaSelectionStore) {
+  mediaSelectionStore = store;
+}
+
+export function useMediaSelectionStore() {
+  if (!mediaSelectionStore) {
+    throw new Error("media selection store has not been provided");
+  }
+  return mediaSelectionStore;
+}
 
 function mediaItemToBatchItem(item: MediaItem) {
   return item.kind === "peer"

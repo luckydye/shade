@@ -3,6 +3,21 @@ import { createEffect, createMemo, createSignal, on } from "solid-js";
 import { useCollectionItems } from "./use-collection-items";
 import { useCollectionList } from "./use-collection-list";
 
+export type CollectionMembershipStore = ReturnType<typeof useCollectionMembership>;
+
+let collectionMembershipStore: CollectionMembershipStore | null = null;
+
+export function provideCollectionMembershipStore(store: CollectionMembershipStore) {
+  collectionMembershipStore = store;
+}
+
+export function useCollections() {
+  if (!collectionMembershipStore) {
+    throw new Error("collection membership store has not been provided");
+  }
+  return collectionMembershipStore;
+}
+
 export function useCollectionMembership(params: {
   selectedLibraryId: Accessor<string | null>;
 }) {

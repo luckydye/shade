@@ -1,5 +1,5 @@
 import { createEffect, onCleanup, onMount } from "solid-js";
-import { showEditorView, showMediaView, state } from "../store/editor-store";
+import { showEditorView, showMediaView, state } from "./editor-store";
 
 type AppView = "media" | "editor";
 type MobileHistoryState = { shadeView: AppView };

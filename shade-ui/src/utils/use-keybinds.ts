@@ -1,7 +1,7 @@
 import { onCleanup, onMount } from "solid-js";
 import { targetAcceptsTextInput } from "../components/media-view/media-utils";
 import actionShortcuts from "../keybinds.json";
-import { type ActionShortcutMap, actions, buildActionContext } from "../store/actions";
+import { type ActionShortcutMap, actions, buildActionContext } from "./actions";
 
 let actionShortcutsLoaded = false;
 

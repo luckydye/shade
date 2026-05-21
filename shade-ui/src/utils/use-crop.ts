@@ -3,7 +3,7 @@ import {
   normalizeCropRect,
   setState,
   state,
-} from "../store/editor-store";
+} from "./editor-store";
 import { useOpenImage } from "./use-open-image";
 
 function start() {

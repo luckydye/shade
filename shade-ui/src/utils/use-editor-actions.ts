@@ -3,7 +3,7 @@ import { EditorCopy } from "../actions/editor-copy";
 import { EditorPaste } from "../actions/editor-paste";
 import { EditorRedo } from "../actions/editor-redo";
 import { EditorUndo } from "../actions/editor-undo";
-import { actions } from "../store/actions";
+import { actions } from "./actions";
 
 export function useEditorActions() {
   onMount(() => {

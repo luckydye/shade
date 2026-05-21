@@ -10,7 +10,7 @@ import {
   targetAcceptsTextInput,
   type UploadDragFeedback,
 } from "../components/media-view/media-utils";
-import { useMediaViewStore } from "../store/media-view-store";
+import { useMediaViewStore } from "./media-view-store";
 import {
   filenameFromUrl,
   transformImageUrl,

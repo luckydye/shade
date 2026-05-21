@@ -23,7 +23,7 @@ import {
   setCropAspectRatioPreset,
   setIsDrawerOpen,
   state,
-} from "../store/editor-store";
+} from "../utils/editor-store";
 import {
   CROP_ASPECT_RATIO_OPTIONS,
   type CropAspectRatioPreset,

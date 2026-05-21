@@ -9,7 +9,7 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import { state, viewportToneSample } from "../../store/editor-store";
+import { state, viewportToneSample } from "../../utils/editor-store";
 import type { AdjustmentValues } from "../../types";
 import { useOpenImage } from "../../utils/use-open-image";
 import {

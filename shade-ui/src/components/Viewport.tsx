@@ -17,7 +17,7 @@ import {
   setCropAspectRatioPreset,
   setState,
   state,
-} from "../store/editor-store";
+} from "../utils/editor-store";
 import type { MaskParamsInfo } from "../types";
 import {
   CROP_ASPECT_RATIO_OPTIONS,

@@ -2,8 +2,8 @@ import type { Component } from "solid-js";
 import { For, Show } from "solid-js";
 import { useMediaItemActions } from "../../utils/use-media-item-actions";
 import { Button } from "../Button";
-import { useCollections } from "../../store/collection-membership-store";
-import { useMediaViewStore } from "../../store/media-view-store";
+import { useCollections } from "../../utils/use-collection-membership";
+import { useMediaViewStore } from "../../utils/media-view-store";
 
 const buttonClass =
   "h-8 rounded-md border border-[var(--border-medium)] bg-[var(--surface)] px-3 text-[11px] font-semibold uppercase tracking-[0.03em] text-[var(--text-muted)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-active)] disabled:opacity-40";

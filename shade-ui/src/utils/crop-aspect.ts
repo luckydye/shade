@@ -1,5 +1,5 @@
-import type { CropRect } from "../store/editor-store";
-import { clamp } from "../store/editor-store";
+import type { CropRect } from "./editor-store";
+import { clamp } from "./editor-store";
 
 export type CropAspectRatioPreset =
   | "free"

@@ -1,7 +1,7 @@
 import type { Accessor, Setter } from "solid-js";
 import { createRoot, createSignal } from "solid-js";
 import type { PresetInfo } from "../types";
-import type { MediaItem } from "../utils/use-library-items";
+import type { MediaItem } from "./use-library-items";
 import type { LibraryEntry } from "../components/media-view/media-utils";
 
 type MediaViewSelectionState = {

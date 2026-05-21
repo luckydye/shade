@@ -1,6 +1,6 @@
-import type { ActionDef } from "../store/actions";
-import { mediaViewFocusedItem } from "../store/media-view-context";
-import { showToast } from "../store/toast";
+import type { ActionDef } from "../utils/actions";
+import { mediaViewFocusedItem } from "../utils/media-view-context";
+import { showToast } from "../utils/toast";
 import { usePresetList } from "../utils/use-preset-list";
 
 export const EditorCopy = {

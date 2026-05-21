@@ -1,11 +1,11 @@
 import { createEffect, on, onCleanup, onMount } from "solid-js";
-import { useMediaViewStore } from "../store/media-view-store";
+import { useMediaViewStore } from "./media-view-store";
 import {
   zoomPictureGridIn,
   zoomPictureGridOut,
-} from "../store/picture-grid-state";
-import { actions } from "../store/actions";
-import { registerMediaBrowserController } from "../store/media-browser-control";
+} from "./picture-grid-state";
+import { actions } from "./actions";
+import { registerMediaBrowserController } from "./media-browser-control";
 import { useLibrarySyncProgress } from "./use-library-sync-progress";
 
 export function useMediaViewActions(params: {

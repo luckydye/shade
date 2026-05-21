@@ -1,5 +1,5 @@
 import { type Accessor, createSignal } from "solid-js";
-import { state } from "../store/editor-store";
+import { state } from "./editor-store";
 import { useOpenImage } from "./use-open-image";
 
 export function useFileDrop(): {

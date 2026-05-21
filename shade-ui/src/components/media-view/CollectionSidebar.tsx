@@ -1,8 +1,8 @@
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
 import { Button } from "../Button";
-import { useCollections } from "../../store/collection-membership-store";
-import { useMediaViewStore } from "../../store/media-view-store";
+import { useCollections } from "../../utils/use-collection-membership";
+import { useMediaViewStore } from "../../utils/media-view-store";
 
 function formatCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;

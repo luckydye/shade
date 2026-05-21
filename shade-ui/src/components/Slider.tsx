@@ -5,7 +5,7 @@ import {
   isAdjustmentSliderActive,
   setActiveAdjustmentSliderId,
   setIsAdjustmentSliderActive,
-} from "../store/editor-store";
+} from "../utils/editor-store";
 import { useLayerStack } from "../utils/use-layer-stack";
 import { useOpenImage } from "../utils/use-open-image";
 

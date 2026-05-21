@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import { toastMessage } from "../store/toast";
+import { toastMessage } from "../utils/toast";
 
 export function Toast() {
   return (

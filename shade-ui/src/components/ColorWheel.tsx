@@ -6,7 +6,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
-import { clamp } from "../store/editor-store";
+import { clamp } from "../utils/editor-store";
 
 const SCOPE_MARGIN = 2;
 const HUE_RING_WIDTH = 10;

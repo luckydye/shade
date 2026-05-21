@@ -1,14 +1,18 @@
 import { createMemo, createSignal } from "solid-js";
-import { provideCollectionMembershipStore } from "../store/collection-membership-store";
-import { provideMediaSelectionStore } from "../store/media-selection-store";
-import { provideMediaViewStore } from "../store/media-view-store";
+import { provideMediaViewStore } from "./media-view-store";
 import { useBatchOperations } from "./use-batch-operations";
-import { useCollectionMembership } from "./use-collection-membership";
+import {
+  provideCollectionMembershipStore,
+  useCollectionMembership,
+} from "./use-collection-membership";
 import { useLibrarySyncProgress } from "./use-library-sync-progress";
 import { useMediaItemsView } from "./use-media-items-view";
 import { useMediaItemActions } from "./use-media-item-actions";
 import { useMediaLibraryState } from "./use-media-library-state";
-import { useMediaSelection } from "./use-media-selection";
+import {
+  provideMediaSelectionStore,
+  useMediaSelection,
+} from "./use-media-selection";
 import { useMediaViewEffects } from "./use-media-view-effects";
 import { useMediaViewActions } from "./use-media-view-actions";
 import { useMediaViewStatusSync } from "./use-media-view-status-sync";

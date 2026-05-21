@@ -1,5 +1,5 @@
 import { type Component, createMemo, For, Show } from "solid-js";
-import type { LayerInfo } from "../store/editor-store";
+import type { LayerInfo } from "../utils/editor-store";
 import type { TextAlignName, TextStyleValues } from "../types";
 import { useFontList } from "../utils/use-font-list";
 import { useLayerStack } from "../utils/use-layer-stack";

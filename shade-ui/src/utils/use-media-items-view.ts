@@ -4,7 +4,7 @@ import {
   mediaItemKey,
   normalizeFilenameFilter,
 } from "../components/media-view/media-utils";
-import { state } from "../store/editor-store";
+import { state } from "./editor-store";
 import { useLibraryItems } from "./use-library-items";
 
 type CollectionFilter = {
@@ -100,5 +100,3 @@ export function useMediaItemsView(params: {
     uploadMediaLibraryUrl,
   };
 }
-
-export type MediaItemsView = ReturnType<typeof useMediaItemsView>;

@@ -1,7 +1,7 @@
 import { deletePreset, savePresetFromJson } from "#bridge";
-import type { ActionDef } from "../store/actions";
-import { getMediaBrowserController } from "../store/media-browser-control";
-import { showToast } from "../store/toast";
+import type { ActionDef } from "../utils/actions";
+import { getMediaBrowserController } from "../utils/media-browser-control";
+import { showToast } from "../utils/toast";
 import { useLayerStack } from "../utils/use-layer-stack";
 
 const CLIPBOARD_PRESET_NAME = "__clipboard__";

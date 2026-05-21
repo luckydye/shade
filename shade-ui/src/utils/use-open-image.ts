@@ -10,8 +10,8 @@ import {
   setSelectedArtboardPreviewTile,
   setState,
   state,
-} from "../store/editor-store";
-import { resetHistory } from "../store/history";
+} from "./editor-store";
+import { resetHistory } from "./history";
 import { isTauriRuntime } from "../utils";
 import { releaseTileSurface } from "@shade/viewport/compositor";
 import { computeFitScale } from "@shade/viewport/transform";

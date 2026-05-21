@@ -4,8 +4,8 @@ import { ToolbarOpen } from "../actions/toolbar-open";
 import backSvg from "../assets/icons/back.svg?raw";
 import saveSvg from "../assets/icons/save.svg?raw";
 import uploadSvg from "../assets/icons/upload.svg?raw";
-import { actions, buildActionContext } from "../store/actions";
-import { showEditorView, showMediaView, state } from "../store/editor-store";
+import { actions, buildActionContext } from "../utils/actions";
+import { showEditorView, showMediaView, state } from "../utils/editor-store";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 

@@ -1,5 +1,5 @@
-import type { ActionDef } from "../store/actions";
-import { state } from "../store/editor-store";
+import type { ActionDef } from "../utils/actions";
+import { state } from "../utils/editor-store";
 import { useOpenImage } from "../utils/use-open-image";
 
 const MEDIA_FILE_ACCEPT =

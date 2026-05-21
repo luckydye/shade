@@ -1,5 +1,5 @@
-import type { ActionDef } from "../store/actions";
-import { undo } from "../store/history";
+import type { ActionDef } from "../utils/actions";
+import { undo } from "../utils/history";
 
 export const EditorUndo = {
   id: "editor.undo",

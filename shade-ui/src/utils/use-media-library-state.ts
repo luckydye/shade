@@ -7,7 +7,7 @@ import {
   type LibraryEntry,
   libraryIsWritable,
 } from "../components/media-view/media-utils";
-import { state } from "../store/editor-store";
+import { state } from "./editor-store";
 import { useMediaLibraryList } from "./use-media-library-list";
 import { usePeerDiscovery } from "./use-peer-discovery";
 

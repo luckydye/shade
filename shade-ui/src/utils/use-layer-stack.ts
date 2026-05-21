@@ -8,8 +8,8 @@ import {
   resolveSelectedLayerPart,
   setState,
   state,
-} from "../store/editor-store";
-import { onRestore, recordSnapshot } from "../store/history";
+} from "./editor-store";
+import { onRestore, recordSnapshot } from "./history";
 import type {
   CurveControlPoint,
   GradientMaskParams,

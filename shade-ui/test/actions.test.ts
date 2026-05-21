@@ -3,13 +3,13 @@ import {
   type ActionContext,
   ActionsRegistry,
   buildActionContext,
-} from "../src/store/actions";
-import { setState } from "../src/store/editor-store";
+} from "../src/utils/actions";
+import { setState } from "../src/utils/editor-store";
 import {
   setMediaViewFocusedItemId,
   setMediaViewSelectedItemIds,
   setMediaViewSelectedLibraryId,
-} from "../src/store/media-view-context";
+} from "../src/utils/media-view-context";
 
 function makeCtx(overrides: Partial<ActionContext> = {}): ActionContext {
   return {

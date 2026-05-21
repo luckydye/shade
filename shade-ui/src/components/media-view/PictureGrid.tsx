@@ -9,27 +9,27 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import { actions } from "../../store/actions";
-import { state } from "../../store/editor-store";
-import { mediaViewFocusedItemId } from "../../store/media-view-context";
+import { actions } from "../../utils/actions";
+import { state } from "../../utils/editor-store";
+import { mediaViewFocusedItemId } from "../../utils/media-view-context";
 import type { MediaItem } from "../../utils/use-library-items";
 import { useMediaItemActions } from "../../utils/use-media-item-actions";
 import { useMediaLibraryList } from "../../utils/use-media-library-list";
 import { Button } from "../Button";
 import { MediaTile } from "./MediaTile";
-import { useMediaSelectionStore } from "../../store/media-selection-store";
+import { useMediaSelectionStore } from "../../utils/use-media-selection";
 import {
   formatModificationMonth,
   type MediaGridRow,
   mediaItemKey,
   modificationMonthKey,
 } from "./media-utils";
-import { useMediaViewStore } from "../../store/media-view-store";
+import { useMediaViewStore } from "../../utils/media-view-store";
 import {
   PICTURE_GRID_ZOOM_LEVELS,
   pictureGridZoomIndex,
   setPictureGridColumns,
-} from "../../store/picture-grid-state";
+} from "../../utils/picture-grid-state";
 
 const GRID_GAP = 12;
 const TILE_LABEL_HEIGHT = 24;

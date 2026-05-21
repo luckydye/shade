@@ -1,7 +1,7 @@
 import { type Component, onMount, Show } from "solid-js";
 import backSvg from "./assets/icons/back.svg?raw";
 import { ActionButton } from "./components/ActionButton";
-import { useCollections } from "./store/collection-membership-store";
+import { useCollections } from "./utils/use-collection-membership";
 import { CollectionSidebar } from "./components/media-view/CollectionSidebar";
 import { LibrarySelector } from "./components/media-view/LibrarySelector";
 import { MobileMediaSearch } from "./components/media-view/MobileMediaSearch";
@@ -11,7 +11,7 @@ import { UploadDropOverlay } from "./components/media-view/UploadDropOverlay";
 import { StatusPanel } from "./components/StatusPanel";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
-import { setState, showMediaView, state } from "./store/editor-store";
+import { setState, showMediaView, state } from "./utils/editor-store";
 import { useCurrentLibrary } from "./utils/use-current-library";
 import { useEdgeSwipe } from "./utils/use-edge-swipe";
 import { useKeybinds } from "./utils/use-keybinds";

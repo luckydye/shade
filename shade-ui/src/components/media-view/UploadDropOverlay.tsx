@@ -1,7 +1,7 @@
 import type { Component } from "solid-js";
 import { onCleanup, onMount, Show } from "solid-js";
 import { useMediaUploadHandlers } from "../../utils/use-media-upload-handlers";
-import { useMediaViewStore } from "../../store/media-view-store";
+import { useMediaViewStore } from "../../utils/media-view-store";
 
 export const UploadDropOverlay: Component = () => {
   const store = useMediaViewStore();

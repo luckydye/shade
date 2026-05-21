@@ -1,5 +1,5 @@
-import type { ActionDef } from "../store/actions";
-import { redo } from "../store/history";
+import type { ActionDef } from "../utils/actions";
+import { redo } from "../utils/history";
 
 export const EditorRedo = {
   id: "editor.redo",

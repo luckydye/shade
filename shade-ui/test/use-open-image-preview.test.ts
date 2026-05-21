@@ -109,7 +109,7 @@ async function importOpenImageWithMockBridge(bridge: MockBridge) {
   }));
   const [{ useOpenImage }, { state }] = await Promise.all([
     import("../src/utils/use-open-image"),
-    import("../src/store/editor-store"),
+    import("../src/utils/editor-store"),
   ]);
   return { image: useOpenImage(), state };
 }

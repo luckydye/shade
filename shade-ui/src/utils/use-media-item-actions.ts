@@ -1,5 +1,5 @@
 import { openMediaItem } from "../components/media-view/media-utils";
-import { useMediaViewStore } from "../store/media-view-store";
+import { useMediaViewStore } from "./media-view-store";
 import { isTauriRuntime } from "../utils";
 import type { MediaItem } from "./use-library-items";
 import { useLayerStack } from "./use-layer-stack";

@@ -7,7 +7,7 @@ import type {
   SharedPicture,
   TextLayerValues,
 } from "../types";
-import type { CropAspectRatioPreset } from "../utils/crop-aspect";
+import type { CropAspectRatioPreset } from "./crop-aspect";
 import type { RenderedTile } from "@shade/viewport/types";
 
 export interface LayerInfo {

@@ -26,13 +26,13 @@ import {
   moveIdInOrder,
   peerLibraryPeerId,
 } from "./media-utils";
-import { useMediaViewStore } from "../../store/media-view-store";
+import { useMediaViewStore } from "../../utils/media-view-store";
 import {
   PICTURE_GRID_ZOOM_LEVELS,
   pictureGridZoomIndex,
   zoomPictureGridIn,
   zoomPictureGridOut,
-} from "../../store/picture-grid-state";
+} from "../../utils/picture-grid-state";
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

@@ -1,5 +1,5 @@
 import { type Accessor, createSignal } from "solid-js";
-import { type ArtboardState, setState } from "../store/editor-store";
+import { type ArtboardState, setState } from "./editor-store";
 import { useImageBridge } from "./use-image-bridge";
 
 function mediaRatingId(artboard: ArtboardState | null): string | null {

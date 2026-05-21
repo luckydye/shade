@@ -3,8 +3,8 @@ import {
   isCameraLibrary,
   type LibraryEntry,
 } from "../components/media-view/media-utils";
-import { actions, buildActionContext } from "../store/actions";
-import { state } from "../store/editor-store";
+import { actions, buildActionContext } from "./actions";
+import { state } from "./editor-store";
 import type { LibraryData } from "./use-library-items";
 import type { useMediaSelection } from "./use-media-selection";
 
