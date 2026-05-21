@@ -1,0 +1,14 @@
+{
+  "name": "@shade/viewport",
+  "version": "1.0.0",
+  "description": "This is a primitive for infinite canvas rendering and interfaces",
+  "license": "ISC",
+  "author": "",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  }
+}

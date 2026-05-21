@@ -38,14 +38,14 @@ import { useToneSmoothing } from "../utils/use-tone-smoothing";
 import { Button } from "./Button";
 import { MediaRating } from "./MediaRating";
 import { Slider } from "./Slider";
-import { makeBrushCursor } from "./viewport/brush-cursor";
-import { compositeArtboard } from "./viewport/compositor";
+import { makeBrushCursor } from "@shade/viewport/brush-cursor";
+import { compositeArtboard } from "@shade/viewport/compositor";
 import {
   buildTransform,
   screenToWorld,
   type WorldTransform,
   worldToScreen,
-} from "./viewport/transform";
+} from "@shade/viewport/transform";
 
 type CropHandle =
   | "move"

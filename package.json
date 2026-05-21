@@ -3,7 +3,8 @@
     "shade-tauri",
     "shade-web",
     "shade-ui",
-    "shade-wasm"
+    "shade-wasm",
+    "shade-viewport"
   ],
   "dependencies": {
     "@biomejs/biome": "^2.4.7",

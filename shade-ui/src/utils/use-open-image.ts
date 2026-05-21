@@ -13,9 +13,9 @@ import {
 } from "../store/editor-store";
 import { resetHistory } from "../store/history";
 import { isTauriRuntime } from "../utils";
-import { releaseTileSurface } from "../components/viewport/compositor";
-import { computeFitScale } from "../components/viewport/transform";
-import type { FitReference, RenderedTile } from "../components/viewport/types";
+import { releaseTileSurface } from "@shade/viewport/compositor";
+import { computeFitScale } from "@shade/viewport/transform";
+import type { FitReference, RenderedTile } from "@shade/viewport/types";
 import {
   type ArtboardViewport,
   type PreviewFrame,

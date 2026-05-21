@@ -8,7 +8,7 @@ import type {
   TextLayerValues,
 } from "../types";
 import type { CropAspectRatioPreset } from "../utils/crop-aspect";
-import type { RenderedTile } from "../components/viewport/types";
+import type { RenderedTile } from "@shade/viewport/types";
 
 export interface LayerInfo {
   kind: "image" | "adjustment" | "crop" | "text";

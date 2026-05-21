@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@shade/viewport": "workspace:*",
     "@tailwindcss/vite": "^4.2.1",
     "solid-js": "^1.8.0",
     "tailwindcss": "^4",
