@@ -6,6 +6,7 @@ import {
 } from "../components/media-view/picture-grid-state";
 import { actions } from "../store/actions";
 import { registerMediaBrowserController } from "../store/media-browser-control";
+import { useLibrarySyncProgress } from "./use-library-sync-progress";
 
 export function useMediaViewActions(params: {
   toggleMediaSelection: (itemId: string) => void;
@@ -13,6 +14,7 @@ export function useMediaViewActions(params: {
   pasteEdits: (presetName: string) => Promise<void>;
 }) {
   const store = useMediaViewStore();
+  const syncProgress = useLibrarySyncProgress();
   onMount(() => {
     const unregisterMediaBrowserController = registerMediaBrowserController({
       selectLibrary(libraryId) {
@@ -27,7 +29,7 @@ export function useMediaViewActions(params: {
     });
 
     createEffect(
-      on(store.syncProgress, (current, prev) => {
+      on(syncProgress, (current, prev) => {
         if (prev && !current) void store.refetchItems();
       }),
     );

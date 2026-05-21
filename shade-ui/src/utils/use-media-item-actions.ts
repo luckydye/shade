@@ -2,6 +2,7 @@ import { openMediaItem } from "../components/media-view/media-utils";
 import { useMediaViewStore } from "../components/media-view/media-view-store";
 import { isTauriRuntime } from "../utils";
 import type { MediaItem } from "./use-library-items";
+import { useMediaLibraryList } from "./use-media-library-list";
 import { useOpenImage } from "./use-open-image";
 
 type LocalMediaItem = Extract<MediaItem, { kind: "local" }>;
@@ -12,6 +13,7 @@ function toErrorMessage(err: unknown): string {
 
 export function useMediaItemActions() {
   const store = useMediaViewStore();
+  const { pickDirectory } = useMediaLibraryList();
   const selectedItems = () =>
     store
       .selectedMediaItemIds()
@@ -106,7 +108,7 @@ export function useMediaItemActions() {
           `Applied ${name} and saved ${items.length} snapshot${items.length > 1 ? "s" : ""}`,
         );
       }
-      await Promise.all([store.refetchItems(), store.refetchCachedLibraryItems()]);
+      await store.refetchItems();
     } catch (err) {
       store.setError(toErrorMessage(err));
       store.setMediaActionStatus(null);
@@ -142,7 +144,7 @@ export function useMediaItemActions() {
       } else {
         store.setMediaActionStatus("Clear edits is only supported in the native app");
       }
-      await Promise.all([store.refetchItems(), store.refetchCachedLibraryItems()]);
+      await store.refetchItems();
     } catch (err) {
       store.setError(toErrorMessage(err));
       store.setMediaActionStatus(null);
@@ -173,7 +175,6 @@ export function useMediaItemActions() {
         await store.deleteMediaLibraryItem(item.path);
       }
       store.setSelectedMediaItemIds([]);
-      await store.refetchCachedLibraryItems();
       await store.refetchItems();
     } catch (err) {
       store.setError(toErrorMessage(err));
@@ -191,7 +192,7 @@ export function useMediaItemActions() {
     if (itemIds.length === 0) {
       throw new Error("select at least one image to export");
     }
-    const targetDir = await store.pickDirectory();
+    const targetDir = await pickDirectory();
     if (!targetDir || typeof targetDir !== "string") {
       return;
     }

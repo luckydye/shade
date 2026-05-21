@@ -41,9 +41,6 @@ export type MediaViewStoreInput = {
   setError: Setter<string | null>;
   setMediaActionStatus: Setter<string | null>;
   setShowApplyPresetMenu: Setter<boolean>;
-  syncProgress: Accessor<unknown>;
-  pickDirectory: () => Promise<string | null>;
-  addMediaLibrary: (path: string) => Promise<LibraryEntry>;
   deleteMediaLibraryItem: (path: string) => Promise<unknown>;
   uploadMediaLibraryFile: (
     libraryId: string,
@@ -58,7 +55,6 @@ export type MediaViewStoreInput = {
   ) => Promise<unknown>;
   refreshLibraryIndex: (libraryId: string) => Promise<unknown>;
   refetchItems: () => unknown;
-  refetchCachedLibraryItems: () => unknown;
   layerOps: {
     applyPresetSnapshot: (name: string, path: string | null) => Promise<unknown>;
   };

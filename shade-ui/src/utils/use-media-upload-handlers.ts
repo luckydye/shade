@@ -61,7 +61,6 @@ export function useMediaUploadHandlers() {
     if (isS3Library(library)) {
       await store.refreshLibraryIndex(library.id);
     }
-    await store.refetchCachedLibraryItems();
     await store.refetchItems();
   }
 
@@ -101,7 +100,6 @@ export function useMediaUploadHandlers() {
       if (isS3Library(library)) {
         await store.refreshLibraryIndex(library.id);
       }
-      await store.refetchCachedLibraryItems();
       await store.refetchItems();
     } catch (err) {
       store.setError(toErrorMessage(err));
@@ -144,7 +142,6 @@ export function useMediaUploadHandlers() {
       if (isS3Library(library)) {
         await store.refreshLibraryIndex(library.id);
       }
-      await store.refetchCachedLibraryItems();
       await store.refetchItems();
     } catch (err) {
       store.setError(toErrorMessage(err));

@@ -39,10 +39,8 @@ export function useMediaViewModel() {
   const {
     libraries,
     refetch: refetchLibraries,
-    addMediaLibrary,
     refreshLibraryIndex,
     syncLibrary,
-    pickDirectory,
   } = useMediaLibraryList();
   const [selectedLibraryId, setSelectedLibraryId] = createSignal<string | null>(null);
   const {
@@ -55,7 +53,6 @@ export function useMediaViewModel() {
     uploadMediaLibraryUrl,
   } = useLibraryItems(selectedLibraryId);
   const refetchItems = () => refetchLibraryItems();
-  const refetchCachedLibraryItems = () => refetchLibraryItems();
   const { presets, refetch: refetchPresets } = usePresetList();
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [showApplyPresetMenu, setShowApplyPresetMenu] = createSignal(false);
@@ -145,44 +142,56 @@ export function useMediaViewModel() {
     () => state.currentView === "editor" && isS3Library(selectedLibrary()),
   );
 
-  provideMediaViewStore({
+  const libraryStore = {
     selectedLibraryId,
     setSelectedLibraryId,
     selectedLibrary,
     libraryEntries,
     refetchLibraries,
+    hasLibraries,
+    selectedLibraryIsOffline,
+    canWriteSelectedLibrary,
+    shouldDeferEditorStripThumbnails,
+  };
+  const mediaItemsStore = {
     activeFilenameFilter,
     activeMediaItemId,
     availableItemCount: () => availableItems().length,
     displayedItems,
-    filenameFilter,
-    setFilenameFilter,
     flatItemIds,
-    hasLibraries,
     isLibraryScanComplete,
     itemsLoading: () => items.loading,
     itemsById,
-    selectedLibraryIsOffline,
-    shouldDeferEditorStripThumbnails,
-    canWriteSelectedLibrary,
+    refetchItems,
+  };
+  const mediaUiStore = {
+    filenameFilter,
+    setFilenameFilter,
     isSubmitting,
     setIsSubmitting,
-    presets,
-    refetchPresets,
     showApplyPresetMenu,
     setError,
     setMediaActionStatus,
     setShowApplyPresetMenu,
-    syncProgress,
-    pickDirectory,
-    addMediaLibrary,
+  };
+  const presetStore = {
+    presets,
+    refetchPresets,
+  };
+  const mediaLibraryActions = {
     deleteMediaLibraryItem,
     uploadMediaLibraryFile,
     uploadMediaLibraryPath,
     uploadMediaLibraryUrl,
     refreshLibraryIndex,
-    refetchItems,
-    refetchCachedLibraryItems,
+  };
+
+  provideMediaViewStore({
+    ...libraryStore,
+    ...mediaItemsStore,
+    ...mediaUiStore,
+    ...presetStore,
+    ...mediaLibraryActions,
     layerOps,
     batchOps,
   });
@@ -259,7 +268,6 @@ export function useMediaViewModel() {
     if (state.currentView !== "media" || !selectedLibraryId()) {
       return;
     }
-    void refetchCachedLibraryItems();
     void refetchItems();
   });
 

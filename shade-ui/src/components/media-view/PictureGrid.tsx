@@ -14,6 +14,7 @@ import { state } from "../../store/editor-store";
 import { mediaViewFocusedItemId } from "../../store/media-view-context";
 import type { MediaItem } from "../../utils/use-library-items";
 import { useMediaItemActions } from "../../utils/use-media-item-actions";
+import { useMediaLibraryList } from "../../utils/use-media-library-list";
 import { Button } from "../Button";
 import { MediaTile } from "./MediaTile";
 import { useMediaSelectionStore } from "./media-selection-store";
@@ -41,6 +42,7 @@ export const PictureGrid: Component = () => {
   const store = useMediaViewStore();
   const selection = useMediaSelectionStore();
   const itemActions = useMediaItemActions();
+  const { addMediaLibrary, pickDirectory } = useMediaLibraryList();
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [viewportWidth, setViewportWidth] = createSignal(0);
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -307,12 +309,12 @@ export const PictureGrid: Component = () => {
     store.setIsSubmitting(true);
     store.setError(null);
     try {
-      const selectedPath = await store.pickDirectory();
+      const selectedPath = await pickDirectory();
       if (selectedPath === null) return;
-      const library = await store.addMediaLibrary(selectedPath);
+      const library = await addMediaLibrary(selectedPath);
       await store.refetchLibraries();
       store.setSelectedLibraryId(library.id);
-      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+      await store.refetchItems();
     } catch (err) {
       store.setError(err instanceof Error ? err.message : String(err));
     } finally {

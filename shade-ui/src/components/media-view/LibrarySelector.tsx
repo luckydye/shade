@@ -256,7 +256,7 @@ export const LibrarySelector: Component = () => {
       const library = await addMediaLibrary(selectedPath);
       await store.refetchLibraries();
       store.setSelectedLibraryId(library.id);
-      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+      await store.refetchItems();
     });
   }
 
@@ -269,7 +269,7 @@ export const LibrarySelector: Component = () => {
       closeS3Form();
       await store.refetchLibraries();
       store.setSelectedLibraryId(library.id);
-      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+      await store.refetchItems();
     });
   }
 
@@ -282,7 +282,7 @@ export const LibrarySelector: Component = () => {
       }
       await store.refetchLibraries();
       store.setSelectedLibraryId(`peer:${peerId}`);
-      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+      await store.refetchItems();
     });
   }
 
@@ -294,7 +294,7 @@ export const LibrarySelector: Component = () => {
         await removeMediaLibrary(library.id);
         await removePeerLibrary(peerLibraryPeerId(library));
         await store.refetchLibraries();
-        await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+        await store.refetchItems();
         return;
       }
       await removeMediaLibrary(library.id);
@@ -320,7 +320,7 @@ export const LibrarySelector: Component = () => {
     }
     await withSubmitting(async () => {
       await refreshLibraryIndex(library.id);
-      await Promise.all([store.refetchCachedLibraryItems(), store.refetchItems()]);
+      await store.refetchItems();
       syncSelectedLibraryIfNeeded();
     });
   }
